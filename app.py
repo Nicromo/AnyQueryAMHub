@@ -519,7 +519,7 @@ INDEX_HTML = """<!DOCTYPE html>
       </div>
 
       <h4 style="margin:0 0 10px; color:var(--accent);">🤖 Groq API</h4>
-      <p class="help" style="margin-bottom:10px;">Ключ для генерации задач и саммари через <b>llama-3.3-70b-versatile</b>. Получить бесплатно на <a href="https://console.groq.com" target="_blank" style="color:var(--accent);">console.groq.com</a>. Сохраняется в <code>~/.search-checkup-creds.json</code>.</p>
+      <p class="help" style="margin-bottom:10px;">Ключ для генерации задач и саммари через <b>llama-3.3-70b-versatile</b>. Получить бесплатно на <a href="https://console.groq.com" target="_blank" style="color:var(--accent);">console.groq.com</a>.</p>
       <form id="groqKeyForm" onsubmit="return false;" style="margin-bottom:20px;">
         <div class="form-group">
           <label>API key{% if groq_key_set %} <span style="color:#27ae60; font-weight:600;">✓ задан</span>{% else %} <span style="color:#e74c3c; font-weight:600;">не задан</span>{% endif %}</label>
@@ -549,23 +549,8 @@ INDEX_HTML = """<!DOCTYPE html>
         <button type="button" class="btn btn-secondary" id="saveTranscriptionPromptVariantBtn">Сохранить как вариант</button>
       </div>
       <hr style="border:none; border-top:1px solid var(--card-border); margin:20px 0;">
-      <hr style="border:none; border-top:1px solid var(--card-border); margin:16px 0 20px;">
       <h4 style="margin:0 0 10px; color:var(--accent);">🔑 Roadmap API</h4>
-      <p class="help" style="margin-bottom:12px;">Логин и пароль от дашборда. Сохраняются в <code>~/.search-checkup-creds.json</code>{% if creds_login %} — сейчас задан: <b>{{ creds_login }}</b>{% endif %}.</p>
-      <form id="credsFormEdit" onsubmit="return false;">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div class="form-group" style="margin:0;">
-            <label>Логин</label>
-            <input type="text" id="credsEditLogin" value="{{ creds_login or '' }}" autocomplete="username">
-          </div>
-          <div class="form-group" style="margin:0;">
-            <label>Пароль</label>
-            <input type="password" id="credsEditPassword" placeholder="Оставьте пустым, чтобы не менять" autocomplete="current-password">
-          </div>
-        </div>
-        <button type="submit" class="btn btn-primary" style="margin-top:12px;">Сохранить</button>
-        <span id="credsEditMsg" class="help" style="margin-left:10px; display:none;"></span>
-      </form>
+      <p class="help">Вы вошли как: <b>{{ creds_login or '—' }}</b>. Чтобы сменить аккаунт — <a href="/logout" style="color:var(--accent);">выйдите</a> и войдите заново.</p>
     </div>
   </div>
   <script>
@@ -1212,10 +1197,8 @@ def api_save_creds():
         if grok_key:
             username = session.get("mr_login") or None
             save_grok_api_key(grok_key, username=username)
-        if login:
-            save_merchrules_creds(login, password)
-        if not login and not grok_key:
-            return jsonify({"saved": False, "error": "Укажите логин или Grok API key"}), 400
+        if not grok_key:
+            return jsonify({"saved": False, "error": "Укажите Grok API key"}), 400
         return jsonify({"saved": True})
     except Exception as e:
         return jsonify({"saved": False, "error": str(e)}), 500
