@@ -1621,8 +1621,8 @@ def index():
         return render_template_string(INDEX_HTML, **ctx)
 
     import requests
-    session = requests.Session()
-    r = session.post(f"{base_url}/backend-v2/auth/login", json={"username": login, "password": password}, timeout=30)
+    http_session = requests.Session()
+    r = http_session.post(f"{base_url}/backend-v2/auth/login", json={"username": login, "password": password}, timeout=30)
     if r.status_code != 200:
         ctx["msg"] = f"Ошибка авторизации Roadmap API: {r.status_code}\n{r.text[:500]}"
         ctx["msg_class"] = "err"
@@ -1637,7 +1637,7 @@ def index():
 
     files_one = {"file": ("tasks.csv", io.BytesIO(csv_bytes), "text/csv; charset=utf-8")}
     try:
-        r_import = session.post(import_url, data={"site_id": str(first_sid)}, files=files_one, timeout=30)
+        r_import = http_session.post(import_url, data={"site_id": str(first_sid)}, files=files_one, timeout=30)
     except Exception as e:
         ctx["msg"] = f"Ошибка при создании задачи: {e}"
         ctx["msg_class"] = "err"
@@ -1677,7 +1677,7 @@ def index():
     # Если в ответе импорта нет task_id — запрашиваем список задач партнёра и ищем по названию (GET /backend-v2/roadmap)
     if not task_id and len(site_ids_list) > 1:
         list_url = f"{base_url}/backend-v2/roadmap"
-        r_list = session.get(
+        r_list = http_session.get(
             list_url,
             params={
                 "site_id": str(first_sid),
