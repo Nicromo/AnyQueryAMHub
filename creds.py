@@ -40,12 +40,11 @@ def load_merchrules_creds():
     return url, login, password
 
 
-def load_grok_api_key() -> str:
-    """Загрузить Grok API key из ~/.search-checkup-creds.json."""
+def _read_creds_file() -> dict:
+    """Прочитать файл кредсов, вернуть dict (или {})."""
     if not CREDS_PATH.exists():
-        return ""
+        return {}
     raw = CREDS_PATH.read_bytes()
-    data = None
     try:
         from cryptography.fernet import Fernet
         import getpass
@@ -53,42 +52,41 @@ def load_grok_api_key() -> str:
             (str(CREDS_PATH) + getpass.getuser() + "search-checkup-creds-v1").encode()
         ).digest()
         key = base64.urlsafe_b64encode(key_material)
-        f = Fernet(key)
-        dec = f.decrypt(raw)
-        data = json.loads(dec.decode("utf-8"))
+        dec = Fernet(key).decrypt(raw)
+        return json.loads(dec.decode("utf-8"))
     except Exception:
         try:
-            data = json.loads(raw.decode("utf-8"))
+            return json.loads(raw.decode("utf-8"))
         except Exception:
-            return ""
-    return (data or {}).get("grok_api_key") or ""
+            return {}
 
 
-def save_grok_api_key(api_key: str) -> None:
-    """Сохранить Grok API key в ~/.search-checkup-creds.json."""
-    data = {}
-    if CREDS_PATH.exists():
-        try:
-            raw = CREDS_PATH.read_bytes()
-            try:
-                from cryptography.fernet import Fernet
-                import getpass
-                key_material = hashlib.sha256(
-                    (str(CREDS_PATH) + getpass.getuser() + "search-checkup-creds-v1").encode()
-                ).digest()
-                key = base64.urlsafe_b64encode(key_material)
-                f = Fernet(key)
-                dec = f.decrypt(raw)
-                data = json.loads(dec.decode("utf-8"))
-            except Exception:
-                data = json.loads(raw.decode("utf-8"))
-        except Exception:
-            pass
-    if not isinstance(data, dict):
-        data = {}
-    data["grok_api_key"] = (api_key or "").strip()
+def _write_creds_file(data: dict) -> None:
     CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
     CREDS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_grok_api_key(username: str | None = None) -> str:
+    """Загрузить Groq API key. username — конкретный пользователь; None — глобальный ключ."""
+    data = _read_creds_file()
+    if username:
+        return (data.get("grok_keys") or {}).get(username) or data.get("grok_api_key") or ""
+    return data.get("grok_api_key") or ""
+
+
+def save_grok_api_key(api_key: str, username: str | None = None) -> None:
+    """Сохранить Groq API key. username — привязать к конкретному пользователю."""
+    data = _read_creds_file()
+    if not isinstance(data, dict):
+        data = {}
+    key = (api_key or "").strip()
+    if username:
+        if "grok_keys" not in data or not isinstance(data["grok_keys"], dict):
+            data["grok_keys"] = {}
+        data["grok_keys"][username] = key
+    else:
+        data["grok_api_key"] = key
+    _write_creds_file(data)
 
 
 def save_merchrules_creds(login: str, password: str = "") -> None:

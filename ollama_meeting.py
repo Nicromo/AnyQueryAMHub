@@ -20,15 +20,15 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 _cancel_event = threading.Event()
 
 
-def _get_api_key() -> str:
-    """Получить Groq API key: сначала из env (API_GROQ или GROQ_API_KEY), потом из creds-файла."""
+def _get_api_key(username: str | None = None) -> str:
+    """Получить Groq API key: env → per-user creds → global creds."""
     for env_var in ("API_GROQ", "GROQ_API_KEY"):
         key = os.environ.get(env_var, "").strip()
         if key:
             return key
     try:
         from creds import load_grok_api_key
-        return load_grok_api_key() or ""
+        return load_grok_api_key(username=username) or ""
     except Exception:
         return ""
 
@@ -42,9 +42,9 @@ def _reset_cancel() -> None:
     _cancel_event.clear()
 
 
-def grok_available() -> bool:
-    """Проверить, что Groq API key задан."""
-    return bool(_get_api_key())
+def grok_available(username: str | None = None) -> bool:
+    """Проверить, что Groq API key задан (для конкретного пользователя или глобально)."""
+    return bool(_get_api_key(username=username))
 
 
 def get_model_name() -> str:
@@ -122,7 +122,6 @@ TASK_TYPE_BY_CONTEXT = [
     ("метрик", "analytics"),
     ("данн", "analytics"),
     ("исследова", "research"),
-    ("интеграц", "integration"),
 ]
 
 
@@ -135,14 +134,18 @@ Rules for each task:
 - description: 1-2 concrete sentences with details
 - status: "plan" by default
 - priority: "medium" by default
-- team: one of — LINGUISTS (search/ranking/spelling/correction), ANALYTICS (metrics/conversion/data), TRACKING (events/counters), IMPROVE (improvements/доработки), DATASCI (ML/data science/предиктор/выпрямитель/транслитерация), ANYRECS (recommendations), DEV, BACKEND, CS, PRODUCT — or empty string. NEVER use "Int" or "integration" as team.
-- task_type: search_quality, analytics, tracking, integration, research, data_science, merchandising, rnd — or empty string
+- team: ONLY for assignee="any". One of — LINGUISTS, ANALYTICS, TRACKING, IMPROVE, DATASCI, ANYRECS, DEV, BACKEND, CS, PRODUCT — or empty. For partner tasks: team MUST be empty string "". NEVER use "integration" as team or task_type.
+- task_type: ONLY for assignee="any". One of: search_quality, analytics, tracking, research, data_science, merchandising, rnd — or empty. For partner tasks: task_type MUST be empty string "". NEVER use "integration".
+- status rules:
+  * "plan" — task not started yet (default)
+  * "in_progress" — already in progress: "уже начали", "ведётся", "продолжаем", "в процессе", "уже делаем" → in_progress
+  * "discussion" — being discussed, no clear action yet
 - assignee rules (VERY IMPORTANT):
-  * "any" = our company (Diginetica) does it — analysis, search tuning, technical work on our platform
-  * "partner" = partner does it — providing data, checking on their side, clarifying their config, sharing access, verifying their metrics
-  * If the meeting has 4+ tasks, at LEAST 1-2 must be assignee="partner". Do not assign ALL tasks to "any".
-  * Tasks like "уточнить", "предоставить", "поделиться данными", "проверить со стороны партнёра", "согласовать" often go to partner.
-  * Tasks about partner's own analytics/conversion/metrics that partner can check themselves → partner.
+  * "any" = Diginetica does it — analysis, search tuning, our platform technical work
+  * "partner" = partner does it — providing data, checking on their side, clarifying their config, sharing access
+  * With 4+ tasks, at LEAST 1-2 must be assignee="partner". Never assign ALL to "any".
+  * "уточнить", "предоставить", "поделиться данными", "проверить у себя", "согласовать" → partner
+  * Partner analytics/conversion checks that only they can do → partner
 - product, due_date, link: empty string unless explicitly mentioned
 
 Example:
@@ -206,13 +209,17 @@ EXTRACT_FROM_SUMMARY_PROMPT = """По готовому саммари встре
 - description: 1–2 предложения с деталями
 - status: «plan» / «in_progress» / «discussion»
 - priority: «medium»
-- team: LINGUISTS / ANALYTICS / TRACKING / IMPROVE / DATASCI / ANYRECS / DEV / BACKEND / CS / PRODUCT (НИКОГДА не используй "Int" или "integration" как команду)
-- task_type: search_quality / analytics / tracking / integration / research / data_science / merchandising / rnd
+- team: ТОЛЬКО для assignee="any" — LINGUISTS / ANALYTICS / TRACKING / IMPROVE / DATASCI / ANYRECS / DEV / BACKEND / CS / PRODUCT. Для partner: team="" (пусто). НИКОГДА не используй "integration" как team или task_type.
+- task_type: ТОЛЬКО для assignee="any" — search_quality / analytics / tracking / research / data_science / merchandising / rnd. Для partner: task_type="" (пусто). НИКОГДА "integration".
+- status:
+  * "plan" — задача не начата (по умолчанию)
+  * "in_progress" — если из текста понятно, что работа уже началась: "уже ведётся", "в процессе", "продолжаем", "уже начали"
+  * "discussion" — обсуждается, нет конкретного действия
 - assignee (ОЧЕНЬ ВАЖНО):
-  * «any» = делаем мы (Diginetica): анализ, настройка поиска, технические работы на нашей платформе
-  * «partner» = делает партнёр: предоставить данные, проверить у себя, уточнить свои настройки, поделиться доступом
+  * «any» = Diginetica: анализ, настройка поиска, технические работы
+  * «partner» = партнёр: предоставить данные, проверить у себя, уточнить настройки, поделиться доступом
   * Если задач 4+, минимум 1-2 должны быть assignee="partner". НЕ ставь всё на «any».
-  * Задачи типа «уточнить», «предоставить», «поделиться», «согласовать», «проверить со своей стороны» — partner.
+  * «уточнить», «предоставить», «поделиться», «согласовать», «проверить со своей стороны» → partner.
 
 Ответь ТОЛЬКО валидным JSON-объектом, без markdown — только JSON от { до }:
 {"post_meeting_message":"...","tasks":[{"title":"...","description":"...","status":"plan","priority":"medium","team":"ANALYTICS","task_type":"analytics","assignee":"any","product":"","due_date":"","link":""},...]}"""
@@ -262,15 +269,17 @@ def _grok_chat(
     user_message: str,
     format_json: bool = True,
     cancel_event: threading.Event | None = None,
+    api_key: str | None = None,
 ) -> str:
-    """Отправить запрос к Grok API (xAI).
+    """Отправить запрос к Groq API.
 
     format_json: при True просим JSON-ответ; при False — свободный текст (markdown).
-    cancel_event — если установлен и .is_set() до вызова, бросает RuntimeError.
+    api_key: если передан — использовать его, иначе из env/creds-файла.
     """
     if cancel_event and cancel_event.is_set():
         raise RuntimeError("Генерация отменена пользователем")
-    api_key = _get_api_key()
+    if not api_key:
+        api_key = _get_api_key()
     if not api_key:
         raise RuntimeError(
             "Groq API key не задан. Добавьте API_GROQ в env или укажите в настройках."
@@ -356,7 +365,11 @@ def _normalize_task(t: dict) -> dict | None:
     product = (t.get("product") or "").strip()
     due_date = (t.get("due_date") or "").strip()
     link = (t.get("link") or "").strip()
-    if not team or not task_type:
+    # Для задач партнёра — команда не указывается (это их внутренняя структура)
+    if assignee == "partner":
+        team = ""
+        task_type = ""
+    elif not team or not task_type:
         inferred_team, inferred_type = _infer_team_and_type(title, desc)
         if not team:
             team = inferred_team
@@ -381,9 +394,10 @@ def meeting_text_to_tasks(
     model: str | None = None,
     host: str | None = None,
     prompt_prefix: str | None = None,
+    api_key: str | None = None,
 ) -> list[dict]:
     """
-    По тексту итогов встречи сгенерировать список задач через Grok API.
+    По тексту итогов встречи сгенерировать список задач через Groq API.
     Возвращает список словарей в формате полей задачи дашборда.
     """
     text = (text or "").strip()
@@ -396,9 +410,9 @@ def meeting_text_to_tasks(
     logger.info("Groq generate: model=%s text_len=%s", GROQ_MODEL, len(text))
     _reset_cancel()
     try:
-        response = _grok_chat(system, user, format_json=True, cancel_event=_cancel_event)
+        response = _grok_chat(system, user, format_json=True, cancel_event=_cancel_event, api_key=api_key)
     except Exception as e:
-        raise RuntimeError(f"Grok API ошибка: {e}") from e
+        raise RuntimeError(f"Groq API ошибка: {e}") from e
     if _cancel_event.is_set():
         raise RuntimeError("Генерация отменена пользователем")
     tasks_raw = _parse_json_from_response(response)
@@ -833,6 +847,7 @@ def process_transcription(
     model: str | None = None,
     host: str | None = None,
     prompt_prefix: str | None = None,
+    api_key: str | None = None,
 ) -> dict:
     """
     Обработка транскрипции: сначала саммари (структурированный markdown), затем из саммари — постмит и задачи.
@@ -854,7 +869,7 @@ def process_transcription(
     step1_user = "Текст транскрипции:\n\n" + annotated
     logger.info("Groq step1 (summary): model=%s len=%s", GROQ_MODEL, len(annotated))
     try:
-        response1 = _grok_chat(step1_system, step1_user, format_json=False, cancel_event=_cancel_event)
+        response1 = _grok_chat(step1_system, step1_user, format_json=False, cancel_event=_cancel_event, api_key=api_key)
     except Exception as e:
         return {"summary": "", "post_meeting_message": "", "tasks": [], "error": str(e)}
     if _cancel_event.is_set():
@@ -869,7 +884,7 @@ def process_transcription(
     try:
         response2 = _grok_chat(
             EXTRACT_FROM_SUMMARY_PROMPT.strip(), step2_user,
-            format_json=True, cancel_event=_cancel_event,
+            format_json=True, cancel_event=_cancel_event, api_key=api_key,
         )
     except Exception as e:
         return {"summary": summary_markdown, "post_meeting_message": "", "tasks": [], "error": str(e)}

@@ -86,6 +86,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
 <title>Войти — Roadmap Tasks</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -256,6 +257,7 @@ INDEX_HTML = """<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roadmap — создание задач</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
   <style>
     :root {
       --bg: #1a1a1e;
@@ -523,7 +525,7 @@ INDEX_HTML = """<!DOCTYPE html>
           <label>API key{% if groq_key_set %} <span style="color:#27ae60; font-weight:600;">✓ задан</span>{% else %} <span style="color:#e74c3c; font-weight:600;">не задан</span>{% endif %}</label>
           <input type="password" id="groqApiKeyInput" placeholder="gsk_..." autocomplete="off" style="font-family:monospace;">
         </div>
-        <button type="submit" class="btn btn-primary" id="saveGroqKeyBtn">Сохранить ключ</button>
+        <button type="submit" class="btn btn-primary" id="saveGroqKeyBtn" style="margin-top:12px;">Сохранить ключ</button>
         <span id="groqKeyMsg" class="help" style="margin-left:10px; display:none;"></span>
       </form>
 
@@ -1208,7 +1210,8 @@ def api_save_creds():
         password = data.get("password") or ""
         grok_key = (data.get("grok_api_key") or "").strip()
         if grok_key:
-            save_grok_api_key(grok_key)
+            username = session.get("mr_login") or None
+            save_grok_api_key(grok_key, username=username)
         if login:
             save_merchrules_creds(login, password)
         if not login and not grok_key:
@@ -1300,8 +1303,9 @@ def api_transcription_metadata():
 def api_process_transcription():
     if process_transcription is None:
         return jsonify({"error": "Модуль не загружен"}), 500
-    if not grok_available():
-        return jsonify({"error": "Grok API key не задан. Укажите в настройках."}), 503
+    _user = session.get("mr_login")
+    if not grok_available(username=_user):
+        return jsonify({"error": "Groq API key не задан. Укажите в настройках."}), 503
     try:
         data = request.get_json(force=True) or {}
         text = (data.get("text") or "").strip()
@@ -1314,7 +1318,9 @@ def api_process_transcription():
         prompt_prefix = (cfg.get("transcription_prompt") or "").strip()
         if prompt_prefix == (TRANSCRIPTION_PROMPT_TEMPLATE or "").strip():
             prompt_prefix = None
-        result = process_transcription(text, partner_speakers, prompt_prefix=prompt_prefix + "\n\n" if prompt_prefix else None)
+        from creds import load_grok_api_key
+        user_api_key = load_grok_api_key(username=_user) or os.environ.get("API_GROQ", "")
+        result = process_transcription(text, partner_speakers, prompt_prefix=prompt_prefix + "\n\n" if prompt_prefix else None, api_key=user_api_key or None)
         if result.get("error"):
             return jsonify({"error": result["error"]}), 503
         return jsonify(result)
@@ -1342,8 +1348,9 @@ def api_generate_tasks():
     """По тексту итогов встречи сгенерировать список задач через Grok."""
     if meeting_text_to_tasks is None:
         return jsonify({"error": "Модуль ollama_meeting не загружен"}), 500
-    if not grok_available():
-        return jsonify({"error": "Grok API key не задан. Укажите в настройках."}), 503
+    _user = session.get("mr_login")
+    if not grok_available(username=_user):
+        return jsonify({"error": "Groq API key не задан. Укажите в настройках."}), 503
     try:
         data = request.get_json(force=True) or {}
         text = (data.get("text") or "").strip()
@@ -1355,7 +1362,9 @@ def api_generate_tasks():
             prompt_prefix = None
         if prompt_prefix:
             prompt_prefix = prompt_prefix + "\n\n"
-        tasks = meeting_text_to_tasks(text, prompt_prefix=prompt_prefix or None)
+        from creds import load_grok_api_key
+        user_api_key = load_grok_api_key(username=_user) or os.environ.get("API_GROQ", "")
+        tasks = meeting_text_to_tasks(text, prompt_prefix=prompt_prefix or None, api_key=user_api_key or None)
         return jsonify({"tasks": tasks})
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 503
@@ -1554,7 +1563,8 @@ def api_send_tasks():
 def index():
     base_url, login, password = _get_creds()
     creds_ok = bool(base_url and login and password)
-    groq_key_set = bool(grok_available()) if grok_available else False
+    _username = session.get("mr_login")
+    groq_key_set = bool(grok_available(username=_username)) if grok_available else False
 
     ctx = {
         "creds_ok": creds_ok,
