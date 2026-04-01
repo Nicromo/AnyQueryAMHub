@@ -21,7 +21,14 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 from task_defaults import apply_task_defaults
-from creds import load_merchrules_creds, save_merchrules_creds, save_grok_api_key, COPY_API_BASE_URL
+from creds import (
+    load_merchrules_creds,
+    save_merchrules_creds,
+    save_grok_api_key,
+    load_airtable_token,
+    save_airtable_token,
+    COPY_API_BASE_URL,
+)
 
 try:
     from ollama_meeting import (
@@ -54,6 +61,8 @@ app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production-please")
 
 # URL merchrules: env var → production по умолчанию
 PROD_MERCHRULES_BASE_URL = os.environ.get("MERCHRULES_BASE_URL", "https://merchrules.any-platform.ru").rstrip("/")
+AIRTABLE_BASE_ID = "appEAS1rPKpevoIel"
+AIRTABLE_CLIENTS_TABLE_ID = "tblIKAi1gcFayRJTn"
 
 
 def _get_creds():
@@ -335,7 +344,7 @@ INDEX_HTML = """<!DOCTYPE html>
         <p class="sub" style="margin-top:6px;">Одна и та же задача для каждого указанного site_id. Статус/приоритет по умолчанию: plan, medium.</p>
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0;">
-        <button type="button" class="btn btn-secondary" id="promptSettingsBtn" title="Настройки: промпты и Groq API key" style="display:inline-flex; align-items:center; gap:8px;" onclick="var m=document.getElementById('promptModal');if(m)m.style.display='flex';">&#9881; Настройки{% if not groq_key_set %} <span style="background:#e74c3c;color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;">!</span>{% endif %}</button>
+        <button type="button" class="btn btn-secondary" id="promptSettingsBtn" title="Настройки: промпты, Groq API key, Airtable PAT" style="display:inline-flex; align-items:center; gap:8px;" onclick="var m=document.getElementById('promptModal');if(m)m.style.display='flex';">&#9881; Настройки{% if not groq_key_set or not airtable_key_set %} <span style="background:#e74c3c;color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;">!</span>{% endif %}</button>
         <a href="/logout" class="btn btn-secondary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;" title="Выйти">&#x2192; Выйти</a>
       </div>
     </div>
@@ -529,6 +538,17 @@ INDEX_HTML = """<!DOCTYPE html>
         <span id="groqKeyMsg" class="help" style="margin-left:10px; display:none;"></span>
       </form>
 
+      <h4 style="margin:8px 0 10px; color:var(--accent);">🗂 Airtable</h4>
+      <p class="help" style="margin-bottom:10px;">PAT для обновления таблицы <b>Клиенты</b> (комментарий + дата последней коммуникации) после отправки задач/итогов встречи.</p>
+      <form id="airtableKeyForm" onsubmit="return false;" style="margin-bottom:20px;">
+        <div class="form-group">
+          <label>Airtable token{% if airtable_key_set %} <span style="color:#27ae60; font-weight:600;">✓ задан</span>{% else %} <span style="color:#e74c3c; font-weight:600;">не задан</span>{% endif %}</label>
+          <input type="password" id="airtableApiKeyInput" placeholder="pat..." autocomplete="off" style="font-family:monospace;">
+        </div>
+        <button type="submit" class="btn btn-primary" id="saveAirtableKeyBtn" style="margin-top:12px;">Сохранить Airtable token</button>
+        <span id="airtableKeyMsg" class="help" style="margin-left:10px; display:none;"></span>
+      </form>
+
       <hr style="border:none; border-top:1px solid var(--card-border); margin:0 0 20px;">
       <p class="help">Промпты подставляются перед стандартной инструкцией модели. Сохраняются в config.json.</p>
       <label>Промпт: итоги встречи (свободный текст)</label>
@@ -694,6 +714,36 @@ INDEX_HTML = """<!DOCTYPE html>
             if (result.ok && result.data.saved) {
               if (msg) { msg.textContent='Ключ сохранён ✓'; msg.style.color='#27ae60'; }
               document.getElementById('groqApiKeyInput').value = '';
+              setTimeout(function() { location.reload(); }, 800);
+            } else {
+              if (msg) { msg.textContent = result.data.error || 'Ошибка'; msg.style.color='var(--accent)'; }
+              if (btn) btn.disabled = false;
+            }
+          }).catch(function(err) {
+            if (msg) { msg.textContent='Ошибка: '+err.message; msg.style.color='var(--accent)'; }
+            if (btn) btn.disabled = false;
+          });
+      });
+    }
+    var airtableKeyForm = document.getElementById('airtableKeyForm');
+    if (airtableKeyForm) {
+      airtableKeyForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var msg = document.getElementById('airtableKeyMsg');
+        var btn = document.getElementById('saveAirtableKeyBtn');
+        var key = (document.getElementById('airtableApiKeyInput').value || '').trim();
+        if (!key) { if (msg) { msg.style.display='inline'; msg.textContent='Введите token'; msg.style.color='var(--accent)'; } return; }
+        if (btn) btn.disabled = true;
+        if (msg) { msg.style.display='inline'; msg.textContent='Сохранение…'; msg.style.color='var(--muted)'; }
+        fetch('/api/save_creds', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ airtable_token: key })
+        }).then(function(r) { return r.json().then(function(d) { return {ok:r.ok,data:d}; }); })
+          .then(function(result) {
+            if (result.ok && result.data.saved) {
+              if (msg) { msg.textContent='Airtable token сохранён ✓'; msg.style.color='#27ae60'; }
+              document.getElementById('airtableApiKeyInput').value = '';
               setTimeout(function() { location.reload(); }, 800);
             } else {
               if (msg) { msg.textContent = result.data.error || 'Ошибка'; msg.style.color='var(--accent)'; }
@@ -1194,11 +1244,26 @@ def api_save_creds():
         login = (data.get("login") or "").strip()
         password = data.get("password") or ""
         grok_key = (data.get("grok_api_key") or "").strip()
+        airtable_key = (data.get("airtable_token") or "").strip()
+        username = session.get("mr_login") or None
+
+        # Сохранение логина/пароля Roadmap API
+        if login:
+            save_merchrules_creds(login, password)
+            session["mr_login"] = login
+            session["mr_password"] = password
+            session["mr_base_url"] = PROD_MERCHRULES_BASE_URL
+
+        # Сохранение Groq API key
         if grok_key:
-            username = session.get("mr_login") or None
             save_grok_api_key(grok_key, username=username)
-        if not grok_key:
-            return jsonify({"saved": False, "error": "Укажите Grok API key"}), 400
+
+        # Сохранение Airtable PAT
+        if airtable_key:
+            save_airtable_token(airtable_key, username=username)
+
+        if not login and not grok_key and not airtable_key:
+            return jsonify({"saved": False, "error": "Передайте login, grok_api_key или airtable_token"}), 400
         return jsonify({"saved": True})
     except Exception as e:
         return jsonify({"saved": False, "error": str(e)}), 500
@@ -1471,6 +1536,121 @@ def _post_meeting_log(base_url, login, password, site_id, meeting_date_iso, summ
     return False, err_msg
 
 
+def _extract_first_sentence(summary: str, max_len: int = 220) -> str:
+    s = " ".join((summary or "").strip().split())
+    if not s:
+        return ""
+    m = re.split(r"(?<=[.!?])\s+", s, maxsplit=1)
+    first = m[0].strip() if m else s
+    if len(first) > max_len:
+        first = first[: max_len - 1].rstrip() + "…"
+    return first
+
+
+def _build_followup_comment(summary: str, meeting_date: str) -> str:
+    try:
+        if meeting_date and "T" in meeting_date:
+            dt = datetime.fromisoformat(meeting_date.replace("Z", "+00:00"))
+        elif meeting_date:
+            dt = datetime.fromisoformat(meeting_date)
+        else:
+            dt = datetime.now()
+    except Exception:
+        dt = datetime.now()
+    prefix = dt.strftime("%d.%m")
+    line = _extract_first_sentence(summary) or "Созвон с партнером: краткий апдейт без деталей."
+    return f"{prefix} {line}"
+
+
+def _get_airtable_pat() -> str:
+    user = session.get("mr_login") or None
+    token = (load_airtable_token(username=user) or "").strip()
+    if token:
+        return token
+    token = (os.environ.get("AIRTABLE_TOKEN") or "").strip()
+    if token:
+        return token
+    env_example = APP_DIR / ".env.example"
+    if env_example.exists():
+        try:
+            for ln in env_example.read_text(encoding="utf-8").splitlines():
+                if ln.strip().startswith("AIRTABLE_TOKEN="):
+                    return ln.split("=", 1)[1].strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _find_airtable_client_record_id(token: str, site_id: str) -> tuple[str | None, str | None]:
+    import requests
+    sid = str(site_id).strip()
+    if not sid:
+        return None, "site_id пустой"
+    # В поле Site ID может быть "221, 715" — ищем как элемент CSV.
+    formula = f'FIND(",{sid},", "," & SUBSTITUTE({{Site ID}}, " ", "") & ",")'
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_CLIENTS_TABLE_ID}"
+    r = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        params={"filterByFormula": formula, "pageSize": 3},
+        timeout=30,
+    )
+    body = {}
+    try:
+        body = r.json()
+    except Exception:
+        pass
+    if r.status_code != 200:
+        msg = (body.get("error") or {}).get("message") or (body.get("error") or {}).get("type") or r.text[:200]
+        return None, f"Airtable find {r.status_code}: {msg}"
+    recs = body.get("records") or []
+    if not recs:
+        return None, f"партнер с site_id={sid} не найден в таблице Клиенты"
+    return recs[0].get("id"), None
+
+
+def _update_airtable_followup(site_id: str, meeting_summary: str, meeting_date_iso: str) -> tuple[bool, str]:
+    import requests
+    token = _get_airtable_pat()
+    if not token:
+        return False, "Airtable token не задан (Настройки → Airtable PAT)"
+    rec_id, err = _find_airtable_client_record_id(token, site_id)
+    if err or not rec_id:
+        return False, err or "не удалось найти запись клиента"
+    comment_line = _build_followup_comment(meeting_summary, meeting_date_iso)
+    try:
+        if meeting_date_iso and "T" in meeting_date_iso:
+            dt = datetime.fromisoformat(meeting_date_iso.replace("Z", "+00:00"))
+        elif meeting_date_iso:
+            dt = datetime.fromisoformat(meeting_date_iso)
+        else:
+            dt = datetime.now()
+    except Exception:
+        dt = datetime.now()
+    payload = {
+        "fields": {
+            "Комментарий": comment_line,
+            "Дата последней коммуникации": dt.strftime("%Y-%m-%d"),
+        }
+    }
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_CLIENTS_TABLE_ID}/{rec_id}"
+    r = requests.patch(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=30,
+    )
+    body = {}
+    try:
+        body = r.json()
+    except Exception:
+        pass
+    if r.status_code not in (200, 201):
+        msg = (body.get("error") or {}).get("message") or (body.get("error") or {}).get("type") or r.text[:200]
+        return False, f"Airtable update {r.status_code}: {msg}"
+    return True, comment_line
+
+
 @app.route("/api/send_tasks", methods=["POST"])
 def api_send_tasks():
     """Отправить несколько задач (от Квен) в дашборд для указанных site_id."""
@@ -1532,6 +1712,11 @@ def api_send_tasks():
                 all_lines.append(f"Встреча (site_id={sid}): лог сохранён.")
             else:
                 all_lines.append(f"Встреча (site_id={sid}): {err_meeting or 'ошибка'}")
+            ok_air, air_info = _update_airtable_followup(sid, meeting_summary, meeting_date)
+            if ok_air:
+                all_lines.append(f"Airtable (site_id={sid}): обновлено — {air_info}")
+            else:
+                all_lines.append(f"Airtable (site_id={sid}): {air_info}")
         return jsonify({
             "ok": True,
             "total_created": total_created,
@@ -1548,12 +1733,14 @@ def index():
     creds_ok = bool(base_url and login and password)
     _username = session.get("mr_login")
     groq_key_set = bool(grok_available(username=_username)) if grok_available else False
+    airtable_key_set = bool(_get_airtable_pat())
 
     ctx = {
         "creds_ok": creds_ok,
         "creds_url": base_url or "",
         "creds_login": login or "",
         "groq_key_set": groq_key_set,
+        "airtable_key_set": airtable_key_set,
         "status_choices": STATUS_CHOICES,
         "priority_choices": PRIORITY_CHOICES,
         "assignee_choices": ASSIGNEE_CHOICES,

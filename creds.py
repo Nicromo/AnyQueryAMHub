@@ -89,6 +89,29 @@ def save_grok_api_key(api_key: str, username: str | None = None) -> None:
     _write_creds_file(data)
 
 
+def load_airtable_token(username: str | None = None) -> str:
+    """Загрузить Airtable token. username — ключ конкретного пользователя; None — глобальный."""
+    data = _read_creds_file()
+    if username:
+        return (data.get("airtable_tokens") or {}).get(username) or data.get("airtable_token") or ""
+    return data.get("airtable_token") or ""
+
+
+def save_airtable_token(token: str, username: str | None = None) -> None:
+    """Сохранить Airtable token. username — привязать к конкретному пользователю."""
+    data = _read_creds_file()
+    if not isinstance(data, dict):
+        data = {}
+    key = (token or "").strip()
+    if username:
+        if "airtable_tokens" not in data or not isinstance(data["airtable_tokens"], dict):
+            data["airtable_tokens"] = {}
+        data["airtable_tokens"][username] = key
+    else:
+        data["airtable_token"] = key
+    _write_creds_file(data)
+
+
 def save_merchrules_creds(login: str, password: str = "") -> None:
     """Сохранить логин и пароль в ~/.search-checkup-creds.json (URL всегда один).
     Если password пустой и уже есть сохранённый — не перезаписываем."""
