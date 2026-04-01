@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import threading
+import time
 
 import requests as _requests
 
@@ -299,9 +300,19 @@ def _grok_chat(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    resp = _requests.post(GROQ_API_URL, json=payload, headers=headers, timeout=120)
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
+    max_retries = 5
+    for attempt in range(max_retries):
+        if cancel_event and cancel_event.is_set():
+            raise RuntimeError("Генерация отменена пользователем")
+        resp = _requests.post(GROQ_API_URL, json=payload, headers=headers, timeout=120)
+        if resp.status_code == 429:
+            retry_after = float(resp.headers.get("Retry-After") or (2 ** attempt))
+            logger.warning("Groq 429 Too Many Requests, retry in %.1fs (attempt %d/%d)", retry_after, attempt + 1, max_retries)
+            if attempt + 1 < max_retries:
+                time.sleep(retry_after)
+                continue
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
 
 
 def _infer_team_and_type(title: str, description: str) -> tuple[str, str]:
