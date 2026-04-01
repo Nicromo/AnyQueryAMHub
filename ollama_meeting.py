@@ -1297,14 +1297,4 @@ def process_transcription(
     summary = re.sub(r',?\s*приняли решение о созвоне\s*', ' ', summary, flags=re.IGNORECASE).strip()
     summary = re.sub(r'\s{2,}', ' ', summary)
 
-    # Обрезаем summary если модель включила "Дальнейшие шаги" или "Далее" в конец
-    summary = re.sub(r'\s*Дальнейшие шаги:.*$', '', summary, flags=re.DOTALL | re.IGNORECASE).strip()
-    summary = re.sub(r'\s*Далее:.*$', '', summary, flags=re.DOTALL | re.IGNORECASE).strip()
-
-    # Нормализуем summary: если нет нумерации — добавляем
-    if summary and not re.search(r'^\s*1[\.\)]', summary):
-        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', summary) if len(s.strip()) > 10]
-        if len(sentences) > 1:
-            summary = '\n'.join(f"{i+1}. {s}" for i, s in enumerate(sentences))
-
     return {"summary": summary, "post_meeting_message": post_meeting_message, "tasks": tasks}

@@ -365,11 +365,11 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
       </div>
       <div id="transcriptionResultBlock" style="display:none; margin-top:16px;">
-        <label>Саммари</label>
-        <div id="transcriptionSummary" style="padding:10px; background:var(--glass); border-radius:12px; margin-bottom:12px; white-space:pre-wrap;"></div>
-        <label>Постмит-сообщение (для мессенджера)</label>
-        <textarea id="transcriptionPostMessage" rows="4" style="width:100%; margin-top:6px;"></textarea>
-        <button type="button" class="btn btn-secondary" id="transcriptionCopyMsgBtn" style="margin-top:6px;">Скопировать сообщение</button>
+        <label>Итоги встречи (уходит в личный кабинет)</label>
+        <textarea id="transcriptionPostMessage" rows="12" style="width:100%; margin-top:6px; font-family:inherit;"></textarea>
+        <button type="button" class="btn btn-secondary" id="transcriptionCopyMsgBtn" style="margin-top:6px;">Скопировать</button>
+        <label style="margin-top:12px;">Постмит-сообщение (для мессенджера)</label>
+        <div id="transcriptionSummary" style="padding:10px; background:var(--glass); border-radius:12px; margin-bottom:4px; white-space:pre-wrap; font-size:0.93em;"></div>
         <label style="margin-top:16px;">Задачи из транскрипции</label>
         <div id="transcriptionTasksList"></div>
         <label style="margin-top:16px;">Партнёры (site_id)</label>
@@ -1106,8 +1106,8 @@ INDEX_HTML = """<!DOCTYPE html>
             if (statusEl) { statusEl.textContent = result.data.error || 'Ошибка'; statusEl.style.color = 'var(--accent)'; }
             return;
           }
-          document.getElementById('transcriptionSummary').textContent = result.data.summary || '';
-          document.getElementById('transcriptionPostMessage').value = result.data.post_meeting_message || '';
+          document.getElementById('transcriptionPostMessage').value = result.data.summary || '';
+          document.getElementById('transcriptionSummary').textContent = result.data.post_meeting_message || '';
           var list = document.getElementById('transcriptionTasksList');
           list.innerHTML = '';
           (result.data.tasks || []).forEach(function(t, i) {
