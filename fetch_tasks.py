@@ -105,10 +105,12 @@ def main():
                 w.writerows(rows)
             print(f"Записано {len(rows)} задач в {args.out}", file=sys.stderr)
         else:
-            f = sys.stdout
+            import io
+            f = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             w.writeheader()
             w.writerows(rows)
+            f.detach()
         return
 
     # По умолчанию — краткий вывод
