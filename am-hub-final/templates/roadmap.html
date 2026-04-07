@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Создать задачи — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1>🗺️ Создать задачи в Роадмап</h1>
+  <p>Массовое создание задач в Merchrules Dashboard</p>
+</div>
+
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start">
+
+<!-- Форма -->
+<div>
+  <div class="card">
+    <h3 style="font-size:1rem;margin-bottom:16px">📋 Задача</h3>
+
+    <div class="form-group">
+      <label>Название задачи *</label>
+      <input type="text" id="r-title" class="form-control" placeholder="Настроить фильтры по атрибутам" required>
+    </div>
+
+    <div class="form-group">
+      <label>Описание</label>
+      <textarea id="r-desc" class="form-control" rows="3"
+        placeholder="Контекст: зачем нужна задача, какой ожидается результат..."></textarea>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group" style="margin:0">
+        <label>Статус</label>
+        <select id="r-status" class="form-control">
+          <option value="plan">plan</option>
+          <option value="in_progress">in_progress</option>
+          <option value="blocked">blocked</option>
+          <option value="review">review</option>
+          <option value="done">done</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Приоритет</label>
+        <select id="r-priority" class="form-control">
+          <option value="medium" selected>medium</option>
+          <option value="high">high</option>
+          <option value="low">low</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Исполнитель</label>
+        <select id="r-assignee" class="form-control">
+          <option value="any">Диджинетика (any)</option>
+          <option value="partner">Партнёр</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+      <div class="form-group" style="margin:0">
+        <label>Команда</label>
+        <select id="r-team" class="form-control">
+          <option value="">— не указана —</option>
+          {% for t in ['CS','DEV','ANALYTICS','PRODUCT','UXUI','TRACKING','LINGUISTS','FRONTEND','BACKEND','DATASCI','ANYRECS','ANYREVIEWS','Int','IMPROVE'] %}
+          <option>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Тип задачи</label>
+        <select id="r-task-type" class="form-control">
+          <option value="">— не указан —</option>
+          {% for tt in ['tracking','search_quality','analytics','data_science','rnd','integration','marketing','merchandising','research'] %}
+          <option>{{ tt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Продукт</label>
+        <select id="r-product" class="form-control">
+          <option value="any_query_web">any_query_web</option>
+          <option value="any_query_app">any_query_app</option>
+          <option value="any_recs_web">any_recs_web</option>
+          <option value="any_recs_app">any_recs_app</option>
+          <option value="any_reviews">any_reviews</option>
+          <option value="any_images">any_images</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div class="form-group" style="margin:0">
+        <label>Дедлайн</label>
+        <input type="date" id="r-due" class="form-control">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Ссылка</label>
+        <input type="url" id="r-link" class="form-control" placeholder="https://...">
+      </div>
+    </div>
+  </div>
+
+  <!-- Партнёры -->
+  <div class="card">
+    <h3 style="font-size:1rem;margin-bottom:12px">👥 Партнёры (site_id)</h3>
+
+    <!-- Быстрый выбор из списка -->
+    <div style="margin-bottom:12px">
+      <label style="font-size:0.82rem;color:var(--text-muted)">Выбрать из списка клиентов:</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:150px;overflow-y:auto">
+        {% for c in clients %}
+        {% if c.site_ids %}
+        <label style="cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" class="client-check" value="{{ c.site_ids }}" data-name="{{ c.name }}"
+            onchange="updateSiteIds()">
+          <span style="font-size:0.8rem">{{ c.name }}</span>
+          <span class="badge badge-{{ c.segment|lower }}" style="font-size:0.65rem">{{ c.segment }}</span>
+        </label>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Или введи вручную (через запятую)</label>
+      <textarea id="r-site-ids" class="form-control" rows="3"
+        placeholder="8591&#10;2878, 2203&#10;...">{{ prefill_site_ids }}</textarea>
+    </div>
+
+    {% if prefill_client_name %}
+    <div class="alert alert-success" style="font-size:0.85rem">
+      Автозаполнено для: <b>{{ prefill_client_name }}</b>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Кнопка -->
+  <div class="card" style="background:#1a2a1a;border-color:var(--green)">
+    <p style="font-size:0.88rem;margin-bottom:12px;color:var(--text-muted)">
+      Задача создастся у первого партнёра, затем скопируется на остальных через API Merchrules.<br>
+      Лимиты: 5 создания/час, 10 копирований/мин.
+    </p>
+    <button type="button" class="btn btn-primary" onclick="createTasks()" id="create-btn"
+      style="padding:12px 24px;font-size:0.95rem">
+      🚀 Создать задачи в Dashboard
+    </button>
+  </div>
+</div>
+
+<!-- Результат -->
+<div>
+  <div id="result-box" style="display:none" class="card">
+    <h3 style="font-size:1rem;margin-bottom:12px">Результат</h3>
+    <div id="result-content"></div>
+  </div>
+
+  <!-- Быстрая ссылка -->
+  <div class="card" style="margin-top:16px">
+    <h3 style="font-size:0.9rem;margin-bottom:8px;color:var(--text-muted)">Открыть напрямую</h3>
+    <a href="{{ merchrules_url }}/roadmap" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center">
+      🗺️ Открыть Роадмап в ЛК ↗
+    </a>
+    <a href="{{ merchrules_url }}/backend-v2/docs" target="_blank" class="btn btn-ghost"
+       style="width:100%;justify-content:center;margin-top:8px;font-size:0.8rem">
+      📖 API Docs ↗
+    </a>
+  </div>
+</div>
+
+</div>
+
+<script>
+function updateSiteIds() {
+  const checked = [...document.querySelectorAll('.client-check:checked')];
+  const ids = checked.flatMap(cb => cb.value.split(',').map(s => s.trim()));
+  document.getElementById('r-site-ids').value = [...new Set(ids)].join('\n');
+}
+
+async function createTasks() {
+  const title = document.getElementById('r-title').value.trim();
+  if (!title) { alert('Введи название задачи!'); return; }
+
+  const siteIdsRaw = document.getElementById('r-site-ids').value.trim();
+  if (!siteIdsRaw) { alert('Укажи хотя бы один site_id!'); return; }
+
+  const btn = document.getElementById('create-btn');
+  btn.disabled = true; btn.textContent = '⏳ Создаю…';
+
+  const task = {
+    title,
+    description: document.getElementById('r-desc').value,
+    status:      document.getElementById('r-status').value,
+    priority:    document.getElementById('r-priority').value,
+    assignee:    document.getElementById('r-assignee').value,
+    team:        document.getElementById('r-team').value,
+    task_type:   document.getElementById('r-task-type').value,
+    product:     document.getElementById('r-product').value,
+    due_date:    document.getElementById('r-due').value,
+    link:        document.getElementById('r-link').value,
+  };
+
+  try {
+    const resp = await fetch('/api/roadmap/create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ task, site_ids: siteIdsRaw }),
+    });
+    const result = await resp.json();
+
+    const box = document.getElementById('result-box');
+    const content = document.getElementById('result-content');
+    box.style.display = 'block';
+
+    if (result.ok) {
+      content.innerHTML = `<p style="color:var(--green);margin-bottom:8px">✅ Готово!</p>` +
+        (result.created ? `<p style="font-size:0.85rem">Создана у: <b>${result.created}</b></p>` : '') +
+        (result.copied?.length ? `<p style="font-size:0.85rem">Скопировано: <b>${result.copied.join(', ')}</b></p>` : '') +
+        (result.note ? `<p style="color:var(--text-muted);font-size:0.82rem;margin-top:8px">${result.note}</p>` : '');
+    } else {
+      content.innerHTML = `<p style="color:var(--red)">❌ ${result.error || 'Ошибка'}</p>`;
+    }
+  } catch(e) {
+    alert('Ошибка: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '🚀 Создать задачи в Dashboard';
+  }
+}
+</script>
+
+{% endblock %}

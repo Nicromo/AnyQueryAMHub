@@ -176,6 +176,54 @@ def get_client_tasks(client_id: int, status: str = "open"):
     return [dict(r) for r in rows]
 
 
+def get_all_tasks(status: str = "open"):
+    """Все задачи по всем клиентам с именем клиента."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT t.*, c.name as client_name, c.segment,
+                      m.meeting_date
+               FROM tasks t
+               JOIN clients c ON c.id = t.client_id
+               LEFT JOIN meetings m ON m.id = t.meeting_id
+               WHERE t.status = ?
+               ORDER BY COALESCE(t.due_date, '9999-12-31'), c.name""",
+            (status,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_today_overview():
+    """Данные для страницы 'Сегодня': просроченные чекапы + задачи с дедлайном сегодня/завтра."""
+    from datetime import date, timedelta
+    today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    week_end = (date.today() + timedelta(days=7)).isoformat()
+
+    with get_conn() as conn:
+        # Задачи с дедлайном сегодня или просроченные
+        urgent_tasks = conn.execute(
+            """SELECT t.*, c.name as client_name, c.segment, c.id as client_id
+               FROM tasks t JOIN clients c ON c.id = t.client_id
+               WHERE t.status IN ('open','blocked') AND t.due_date <= ?
+               ORDER BY t.due_date, c.name""",
+            (today,)
+        ).fetchall()
+
+        # Задачи с дедлайном на этой неделе
+        week_tasks = conn.execute(
+            """SELECT t.*, c.name as client_name, c.segment, c.id as client_id
+               FROM tasks t JOIN clients c ON c.id = t.client_id
+               WHERE t.status IN ('open','blocked') AND t.due_date > ? AND t.due_date <= ?
+               ORDER BY t.due_date, c.name""",
+            (today, week_end)
+        ).fetchall()
+
+    return {
+        "urgent_tasks": [dict(r) for r in urgent_tasks],
+        "week_tasks": [dict(r) for r in week_tasks],
+    }
+
+
 def create_tasks_bulk(meeting_id: int, client_id: int, tasks: list[dict]):
     """tasks = [{"owner": "anyquery"|"client", "text": "...", "due_date": "YYYY-MM-DD"}]"""
     with get_conn() as conn:

@@ -24,19 +24,29 @@
 
     <!-- Навигация -->
     <div class="nav-section-label">Ежедневное</div>
+    <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
+      <span class="icon">☀️</span> Сегодня
+    </a>
     <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
-      <span class="icon">📊</span> Чекапы
+      <span class="icon">📊</span> Все клиенты
     </a>
     <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50">
       <span class="icon">🏆</span> Top-50
     </a>
+    <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks">
+      <span class="icon">✅</span> Задачи
+      <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.72rem"></span>
+    </a>
 
     <div class="nav-section-label" style="margin-top:8px">Инструменты</div>
-    <a class="nav-link" href="https://merchrules.any-platform.ru/roadmap" target="_blank">
-      <span class="icon">🗺️</span> Роадмап ↗
+    <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
+      <span class="icon">🗺️</span> Роадмап
     </a>
     <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank">
       <span class="icon">📹</span> ktalk ↗
+    </a>
+    <a class="nav-link" href="https://merchrules.any-platform.ru" target="_blank">
+      <span class="icon">🔗</span> Merchrules ↗
     </a>
 
     <!-- Статистика дашборда -->
@@ -108,6 +118,11 @@ document.addEventListener('click', e => {
     document.getElementById('stat-warning').textContent = `🟡 ${s.warning} скоро`;
     document.getElementById('stat-tasks').textContent = `📋 ${s.open_tasks} задач`;
     box.style.display = 'block';
+    // Бейдж на ссылке "Задачи"
+    if (s.open_tasks > 0) {
+      const badge = document.getElementById('nav-tasks-badge');
+      if (badge) { badge.textContent = s.open_tasks; badge.style.display = 'inline'; }
+    }
   } catch(e) {}
 })();
 </script>

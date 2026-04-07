@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Сегодня — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1>☀️ {{ weekday }}, {{ today }}</h1>
+  <p style="color:var(--text-muted)">Ежедневный план CSM</p>
+</div>
+
+<!-- Статус дня -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
+  <div class="card" style="padding:16px;text-align:center;border-color:{% if overdue %}var(--red){% else %}var(--border){% endif %}">
+    <div style="font-size:2rem;margin-bottom:4px">🔴</div>
+    <div style="font-size:1.6rem;font-weight:700;color:{% if overdue %}var(--red){% else %}var(--text-muted){% endif %}">{{ overdue|length }}</div>
+    <div style="font-size:0.82rem;color:var(--text-muted)">Просроченных чекапов</div>
+  </div>
+  <div class="card" style="padding:16px;text-align:center;border-color:{% if warning %}var(--yellow){% else %}var(--border){% endif %}">
+    <div style="font-size:2rem;margin-bottom:4px">🟡</div>
+    <div style="font-size:1.6rem;font-weight:700;color:{% if warning %}var(--yellow){% else %}var(--text-muted){% endif %}">{{ warning|length }}</div>
+    <div style="font-size:0.82rem;color:var(--text-muted)">Скоро просрочится</div>
+  </div>
+  <div class="card" style="padding:16px;text-align:center;border-color:{% if urgent_tasks %}var(--red){% else %}var(--border){% endif %}">
+    <div style="font-size:2rem;margin-bottom:4px">📋</div>
+    <div style="font-size:1.6rem;font-weight:700;color:{% if urgent_tasks %}var(--red){% else %}var(--text-muted){% endif %}">{{ urgent_tasks|length }}</div>
+    <div style="font-size:0.82rem;color:var(--text-muted)">Задач просрочено/сегодня</div>
+  </div>
+  <div class="card" style="padding:16px;text-align:center">
+    <div style="font-size:2rem;margin-bottom:4px">📅</div>
+    <div style="font-size:1.6rem;font-weight:700;color:var(--accent)">{{ week_tasks|length }}</div>
+    <div style="font-size:0.82rem;color:var(--text-muted)">Задач на этой неделе</div>
+  </div>
+</div>
+
+<!-- Просроченные чекапы -->
+{% if overdue %}
+<div class="card" style="border-color:var(--red);margin-bottom:16px">
+  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--red)">🔴 Требуют чекапа прямо сейчас ({{ overdue|length }})</h2>
+  <table class="table">
+    <thead><tr><th>Клиент</th><th>Сегмент</th><th>Статус</th><th>Действие</th></tr></thead>
+    <tbody>
+    {% for c in overdue %}
+    <tr>
+      <td class="client-name">{{ c.name }}</td>
+      <td><span class="badge badge-{{ c.segment|lower }}">{{ c.segment }}</span></td>
+      <td style="color:var(--red)">{{ c.status.label }}</td>
+      <td style="white-space:nowrap">
+        <a href="/prep/{{ c.id }}" class="btn btn-ghost btn-sm">📋 Подготовка</a>
+        <a href="/followup/{{ c.id }}" class="btn btn-primary btn-sm" style="margin-left:4px">✍️ Фолоуап</a>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Скоро -->
+{% if warning %}
+<div class="card" style="border-color:var(--yellow);margin-bottom:16px">
+  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--yellow)">🟡 Скоро истекает ({{ warning|length }})</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:8px">
+    {% for c in warning %}
+    <a href="/prep/{{ c.id }}" style="text-decoration:none">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:0.85rem">
+        <b>{{ c.name }}</b>
+        <span class="badge badge-{{ c.segment|lower }}" style="margin-left:6px">{{ c.segment }}</span>
+        <div style="color:var(--yellow);font-size:0.78rem;margin-top:2px">{{ c.status.label }}</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Задачи просрочены/сегодня -->
+{% if urgent_tasks %}
+<div class="card" style="margin-bottom:16px">
+  <h2 style="font-size:1rem;margin-bottom:14px">📋 Задачи — просрочены или дедлайн сегодня</h2>
+  <table class="table">
+    <thead><tr><th>Клиент</th><th>Задача</th><th>Кто</th><th>Дедлайн</th><th></th></tr></thead>
+    <tbody>
+    {% for t in urgent_tasks %}
+    <tr>
+      <td><a href="/prep/{{ t.client_id }}">{{ t.client_name }}</a>
+        <span class="badge badge-{{ t.segment|lower }}" style="margin-left:4px;font-size:0.7rem">{{ t.segment }}</span>
+      </td>
+      <td>{{ t.text }}</td>
+      <td><span style="color:{% if t.owner == 'anyquery' %}var(--accent){% else %}var(--yellow){% endif %}">
+        {{ 'AnyQuery' if t.owner == 'anyquery' else 'Партнёр' }}</span></td>
+      <td style="color:var(--red)">{{ t.due_date or '—' }}</td>
+      <td>
+        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
+          <button type="submit" class="btn btn-ghost btn-sm">✓ Готово</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Задачи на неделю -->
+{% if week_tasks %}
+<div class="card">
+  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--text-muted)">📅 На этой неделе</h2>
+  <table class="table">
+    <thead><tr><th>Клиент</th><th>Задача</th><th>Кто</th><th>Дедлайн</th></tr></thead>
+    <tbody>
+    {% for t in week_tasks %}
+    <tr>
+      <td><a href="/prep/{{ t.client_id }}">{{ t.client_name }}</a></td>
+      <td>{{ t.text }}</td>
+      <td style="color:{% if t.owner == 'anyquery' %}var(--accent){% else %}var(--yellow){% endif %}">
+        {{ 'AQ' if t.owner == 'anyquery' else 'Партнёр' }}</td>
+      <td>{{ t.due_date or '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if not overdue and not urgent_tasks and not week_tasks %}
+<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
+  <div style="font-size:3rem;margin-bottom:12px">✅</div>
+  <p style="font-size:1.1rem">Всё под контролем — просроченных задач и чекапов нет!</p>
+</div>
+{% endif %}
+
+{% endblock %}
