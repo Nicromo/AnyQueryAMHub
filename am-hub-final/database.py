@@ -99,6 +99,24 @@ def init_db():
 CHECKUP_DAYS = {"ENT": 30, "SME": 60, "SME+": 60, "SME-": 60, "SMB": 90, "SS": 90}
 
 
+def checkup_status(last_checkup: str | None, segment: str) -> dict:
+    """Статус чекапа: days_left, color (red/yellow/green), next_date, label."""
+    days = CHECKUP_DAYS.get(segment, 90)
+    if not last_checkup:
+        return {"days_left": None, "color": "red", "next_date": None, "label": "Нет данных"}
+    last = date.fromisoformat(last_checkup)
+    next_date = last + timedelta(days=days)
+    today = date.today()
+    diff = (next_date - today).days
+    if diff < 0:
+        color, label = "red", f"Просрочен {abs(diff)} дн."
+    elif diff <= 7:
+        color, label = "yellow", f"Через {diff} дн."
+    else:
+        color, label = "green", f"Через {diff} дн."
+    return {"days_left": diff, "color": color, "next_date": next_date.isoformat(), "label": label}
+
+
 def get_all_clients():
     with get_conn() as conn:
         rows = conn.execute("""

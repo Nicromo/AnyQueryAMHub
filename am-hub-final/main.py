@@ -18,6 +18,7 @@ from database import (
     get_today_overview, create_meeting,
     create_tasks_bulk, update_task_status, mark_meeting_tg_sent,
     upsert_client, CHECKUP_DAYS, get_meeting,
+    checkup_status,
     get_checklist, init_checklist, toggle_checklist_item,
     add_checklist_item, clear_checklist,
     create_internal_task, get_internal_tasks,
@@ -75,29 +76,7 @@ async def startup_event():
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────
 
-def checkup_status(last_checkup: str | None, segment: str) -> dict:
-    """Возвращает статус чекапа: days_left, color, next_date."""
-    days = CHECKUP_DAYS.get(segment, 90)
-    if not last_checkup:
-        return {"days_left": None, "color": "red", "next_date": None, "label": "Нет данных"}
-
-    last = date.fromisoformat(last_checkup)
-    next_date = last + timedelta(days=days)
-    today = date.today()
-    diff = (next_date - today).days
-
-    if diff < 0:
-        color = "red"
-        label = f"Просрочен {abs(diff)} дн."
-    elif diff <= 7:
-        color = "yellow"
-        label = f"Через {diff} дн."
-    else:
-        color = "green"
-        label = f"Через {diff} дн."
-
-    return {"days_left": diff, "color": color, "next_date": next_date.isoformat(), "label": label}
-
+# checkup_status теперь живёт в database.py — импортируем оттуда
 
 def get_user_or_redirect(request: Request):
     user = session_mgr.get_user(request)

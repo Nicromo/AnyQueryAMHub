@@ -37,7 +37,7 @@ async def job_morning_plan():
         from tg_bot import send_message, format_morning_plan
 
         # Считаем статусы
-        from main import checkup_status
+        from database import checkup_status
         clients = get_all_clients()
         for c in clients:
             c["status"] = checkup_status(
@@ -61,7 +61,7 @@ async def job_weekly_digest():
     try:
         from database import get_all_clients, get_all_tasks
         from tg_bot import send_message, format_weekly_digest
-        from main import checkup_status
+        from database import checkup_status
 
         clients = get_all_clients()
         for c in clients:

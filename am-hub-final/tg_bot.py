@@ -8,6 +8,7 @@ Telegram Bot — обработчик входящих команд через W
 """
 import os
 import logging
+from datetime import date, timedelta
 from typing import Optional
 
 import httpx
@@ -167,7 +168,7 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
     elif cmd == "/checkups":
         clients = get_clients_fn()
         # Добавляем статус к каждому клиенту
-        from main import checkup_status
+        from database import checkup_status
         for c in clients:
             c["status"] = checkup_status(
                 c.get("last_checkup") or c.get("last_meeting"), c["segment"]
