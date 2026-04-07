@@ -8,28 +8,69 @@
     📋 {{ client.name }}
     <span class="badge badge-{{ client.segment|lower }}" style="font-size:0.8rem;vertical-align:middle">{{ client.segment }}</span>
   </h1>
-  <p>Подготовка к встрече · чекап раз в {{ checkup_days }} дней</p>
+  <p style="color:var(--text-muted)">Чекап раз в {{ checkup_days }} дней · {{ client.segment }}</p>
   <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-    <a href="/checklist/{{ client.id }}" class="btn btn-ghost btn-sm">✅ Чеклист встречи</a>
-    <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm">✍️ Записать фолоуап</a>
-    <a href="/roadmap?client_id={{ client.id }}" class="btn btn-ghost btn-sm">🗺️ Задачи в роадмап</a>
+    <a href="/checklist/{{ client.id }}" class="btn btn-ghost btn-sm">✅ Чеклист</a>
+    <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm">✍️ Фолоуап</a>
+    <a href="/roadmap?client_id={{ client.id }}" class="btn btn-ghost btn-sm">🗺️ Роадмап</a>
+    <a href="/qbr/{{ client.id }}" class="btn btn-ghost btn-sm">📊 QBR</a>
   </div>
 </div>
 
-<!-- Статус чекапа -->
-<div class="card" style="border-left:4px solid {% if status.color == 'red' %}var(--red){% elif status.color == 'yellow' %}var(--yellow){% else %}var(--green){% endif %}">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+<!-- Статус чекапа + БЫСТРОЕ ЗАКРЫТИЕ -->
+<div class="card" style="border-left:4px solid
+  {% if status.color == 'red' %}var(--red){% elif status.color == 'yellow' %}var(--yellow){% else %}var(--green){% endif %}">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
     <div>
-      <div style="font-size:0.85rem;color:var(--text-muted)">Статус чекапа</div>
+      <div style="font-size:0.82rem;color:var(--text-muted)">Статус чекапа</div>
       <div style="font-size:1.1rem;font-weight:600;margin-top:4px;
         color:{% if status.color == 'red' %}var(--red){% elif status.color == 'yellow' %}var(--yellow){% else %}var(--green){% endif %}">
         {{ status.label }}
       </div>
-      {% if status.next_date %}<div style="font-size:0.82rem;color:var(--text-muted);margin-top:2px">Следующий: {{ status.next_date }}</div>{% endif %}
+      {% if status.next_date %}
+      <div style="font-size:0.82rem;color:var(--text-muted);margin-top:2px">Следующий: {{ status.next_date }}</div>
+      {% endif %}
+      {% if client.planned_meeting %}
+      <div style="font-size:0.82rem;color:var(--accent);margin-top:4px">
+        📅 Запланировано: <b>{{ client.planned_meeting }}</b>
+        <button onclick="clearPlanned()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.75rem;margin-left:4px">✕</button>
+      </div>
+      {% endif %}
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a href="/followup/{{ client.id }}" class="btn btn-primary">✍️ Написать фолоуап</a>
-      <a href="/qbr/{{ client.id }}" class="btn btn-ghost">📊 QBR</a>
+
+    <!-- Быстро отметить чекап проведённым -->
+    <div id="quick-checkup-box" style="background:var(--surface2);border-radius:10px;padding:14px;min-width:280px">
+      <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px">⚡ Быстро закрыть чекап</div>
+
+      <!-- Оценка настроения -->
+      <div style="display:flex;gap:6px;margin-bottom:10px" id="mood-btns">
+        <button onclick="setMood('positive')" class="mood-btn" data-mood="positive">🟢 Хорошо</button>
+        <button onclick="setMood('neutral')"  class="mood-btn active" data-mood="neutral">🟡 Нейтрально</button>
+        <button onclick="setMood('risk')"     class="mood-btn" data-mood="risk">🔴 Риск</button>
+      </div>
+
+      <!-- Рейтинг 1-5 -->
+      <div style="display:flex;gap:4px;margin-bottom:10px" id="rating-stars">
+        {% for i in range(1,6) %}
+        <button onclick="setRating({{ i }})" class="star-btn" data-val="{{ i }}">☆</button>
+        {% endfor %}
+      </div>
+
+      <!-- Краткое резюме -->
+      <textarea id="quick-summary" class="form-control" rows="2" style="margin-bottom:10px;font-size:0.82rem"
+        placeholder="Краткое резюме встречи (необязательно)..."></textarea>
+
+      <!-- Планировать следующую -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <label style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap">Следующая:</label>
+        <input type="date" id="next-meeting-date" class="form-control" value="{{ suggested_next }}"
+               style="flex:1;font-size:0.82rem">
+      </div>
+
+      <button onclick="quickCloseCheckup()" class="btn btn-primary" style="width:100%">
+        ✅ Чекап проведён
+      </button>
+      <div id="quick-result" style="margin-top:8px;font-size:0.82rem"></div>
     </div>
   </div>
 </div>
@@ -38,65 +79,183 @@
 
 <!-- Открытые задачи -->
 <div class="card">
-  <h3 style="margin-bottom:14px;font-size:1rem">⚡ Открытые задачи ({{ open_tasks|length }})</h3>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <h3 style="font-size:1rem;margin:0">⚡ Открытые задачи ({{ open_tasks|length }})</h3>
+    <a href="/tasks?status=open" style="font-size:0.78rem;color:var(--accent)">Все задачи →</a>
+  </div>
+
   {% if open_tasks %}
     {% for t in open_tasks %}
-    <div class="task-item">
-      <span class="task-owner {% if t.owner == 'anyquery' %}owner-aq{% else %}owner-cl{% endif %}">
+    <div class="task-item" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span class="task-owner {% if t.owner == 'anyquery' %}owner-aq{% else %}owner-cl{% endif %}"
+            style="font-size:0.7rem;padding:2px 6px;border-radius:4px;flex-shrink:0">
         {{ 'AQ' if t.owner == 'anyquery' else '🤝' }}
       </span>
-      <span class="task-text">{{ t.text }}</span>
-      {% if t.due_date %}<span class="task-due">{{ t.due_date[:10] }}</span>{% endif %}
+      <span class="task-text" style="flex:1;font-size:0.85rem">{{ t.text }}</span>
+      {% if t.due_date %}
+      <span style="font-size:0.75rem;color:{% if t.due_date < today %}var(--red){% else %}var(--text-muted){% endif %}">
+        {{ t.due_date[:10] }}
+      </span>
+      {% endif %}
       <form method="post" action="/api/task/{{ t.id }}/done" style="margin:0">
-        <button type="submit" class="btn btn-ghost btn-sm" title="Закрыть задачу">✓</button>
+        <button type="submit" class="btn btn-ghost btn-sm">✓</button>
       </form>
     </div>
     {% endfor %}
+    <!-- Быстрый пуш задач в MR -->
+    <button onclick="pushTasksToMR()" class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%">
+      🚀 Синхронизировать задачи → Merchrules
+    </button>
+    <div id="mr-tasks-result" style="font-size:0.78rem;margin-top:4px"></div>
   {% else %}
-    <p style="color:var(--text-muted);font-size:0.9rem">Нет открытых задач 🎉</p>
+    <div style="text-align:center;padding:20px;color:var(--text-muted)">
+      <div style="font-size:1.5rem">🎉</div>
+      <p style="margin-top:8px;font-size:0.9rem">Нет открытых задач</p>
+      <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm" style="margin-top:8px">
+        + Добавить после встречи
+      </a>
+    </div>
   {% endif %}
 </div>
 
 <!-- История встреч -->
 <div class="card">
-  <h3 style="margin-bottom:14px;font-size:1rem">🗓 История встреч</h3>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <h3 style="font-size:1rem;margin:0">🗓 История встреч</h3>
+    {% if not meetings %}
+    <span style="font-size:0.78rem;color:var(--text-muted)">Первая встреча?</span>
+    {% endif %}
+  </div>
+
   {% if meetings %}
     {% for m in meetings %}
-    <div class="meeting-item">
-      <div class="meeting-meta">
-        <span class="meeting-date">{{ m.meeting_date[:10] }}</span>
-        <span class="badge" style="background:var(--surface2);color:var(--text-muted)">
-          {{ {'checkup':'Чекап','qbr':'QBR','urgent':'Экстренная'}[m.meeting_type] }}
+    <div class="meeting-item" style="padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-weight:600;font-size:0.85rem">{{ m.meeting_date[:10] }}</span>
+        <span class="badge" style="background:var(--surface2);color:var(--text-muted);font-size:0.7rem">
+          {{ {'checkup':'Чекап','qbr':'QBR','urgent':'Экстренная'}.get(m.meeting_type, m.meeting_type) }}
         </span>
-        {% if m.mood == 'positive' %}<span>🟢</span>{% elif m.mood == 'risk' %}<span>🔴</span>{% else %}<span>🟡</span>{% endif %}
-        {% if m.tg_sent %}<span title="Отправлено в TG" style="font-size:0.8rem">✈️</span>{% endif %}
+        {% if m.mood == 'positive' %}<span title="Позитивно">🟢</span>
+        {% elif m.mood == 'risk' %}<span title="Риск">🔴</span>
+        {% else %}<span title="Нейтрально">🟡</span>{% endif %}
+        {% if m.checkup_rating %}
+        <span style="font-size:0.75rem;color:var(--yellow)">{{ '★' * m.checkup_rating }}{{ '☆' * (5 - m.checkup_rating) }}</span>
+        {% endif %}
+        {% if m.tg_sent %}<span title="Отправлено в TG" style="font-size:0.75rem">✈️</span>{% endif %}
+        {% if m.mr_synced %}<span title="Синхронизировано с Merchrules" style="font-size:0.75rem">🔄</span>{% endif %}
       </div>
       {% if m.summary %}
-      <div class="meeting-summary">{{ m.summary[:200] }}{% if m.summary|length > 200 %}…{% endif %}</div>
+      <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
+        {{ m.summary[:150] }}{% if m.summary|length > 150 %}…{% endif %}
+      </div>
       {% endif %}
     </div>
     {% endfor %}
   {% else %}
-    <p style="color:var(--text-muted);font-size:0.9rem">Встреч ещё не было</p>
+    <div style="text-align:center;padding:24px;color:var(--text-muted)">
+      <div style="font-size:1.5rem">📅</div>
+      <p style="font-size:0.88rem;margin-top:8px">Встреч ещё не было</p>
+      <p style="font-size:0.78rem;margin-top:4px">После встречи — нажми «Фолоуап»</p>
+    </div>
   {% endif %}
 </div>
+
 </div>
 
 <!-- TG канал клиента -->
-<div class="card">
-  <h3 style="margin-bottom:12px;font-size:1rem">✈️ Telegram-канал клиента</h3>
-  <form method="post" action="/api/client/{{ client.id }}/tg" style="display:flex;gap:10px;align-items:flex-end">
-    <div class="form-group" style="flex:1;margin:0">
-      <label>Chat ID или @username канала</label>
-      <input type="text" name="tg_chat_id" class="form-control"
-             value="{{ client.tg_chat_id or '' }}"
-             placeholder="-100123456789 или @channelname">
-    </div>
-    <button type="submit" class="btn btn-tg">💾 Сохранить</button>
-  </form>
-  <p style="font-size:0.8rem;color:var(--text-muted);margin-top:8px">
-    Как узнать Chat ID: добавь <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> в канал и перешли ему сообщение.
-  </p>
+<div class="card" style="margin-top:0">
+  <details>
+    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">✈️ Настройка Telegram-канала</summary>
+    <form method="post" action="/api/client/{{ client.id }}/tg" style="display:flex;gap:10px;align-items:flex-end;margin-top:12px">
+      <div class="form-group" style="flex:1;margin:0">
+        <label>Chat ID или @username канала</label>
+        <input type="text" name="tg_chat_id" class="form-control"
+               value="{{ client.tg_chat_id or '' }}" placeholder="-100123456789 или @channelname">
+      </div>
+      <button type="submit" class="btn btn-ghost">💾</button>
+    </form>
+  </details>
 </div>
 
+<style>
+.mood-btn { background:var(--surface2); border:1px solid var(--border); border-radius:6px;
+            padding:4px 10px; font-size:0.78rem; cursor:pointer; color:var(--text); }
+.mood-btn.active { border-color:var(--accent); background:rgba(99,102,241,.15); }
+.star-btn { background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--yellow);
+            padding:0 2px; transition:transform .1s; }
+.star-btn:hover { transform:scale(1.2); }
+</style>
+
+<script>
+let _mood = 'neutral';
+let _rating = 0;
+
+function setMood(m) {
+  _mood = m;
+  document.querySelectorAll('.mood-btn').forEach(b => b.classList.toggle('active', b.dataset.mood === m));
+}
+
+function setRating(val) {
+  _rating = val;
+  document.querySelectorAll('.star-btn').forEach(b => {
+    b.textContent = parseInt(b.dataset.val) <= val ? '★' : '☆';
+  });
+}
+
+async function quickCloseCheckup() {
+  const summary = document.getElementById('quick-summary').value.trim();
+  const nextDate = document.getElementById('next-meeting-date').value;
+  const res = document.getElementById('quick-result');
+  res.textContent = '⏳ Сохраняем...';
+
+  try {
+    const r = await fetch('/api/client/{{ client.id }}/checkup-done', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ mood: _mood, rating: _rating, summary, next_meeting: nextDate }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      res.innerHTML = '✅ Сохранено' +
+        (d.mr ? ' · MR ✓' : '') +
+        (d.airtable ? ' · Airtable ✓' : '');
+      res.style.color = 'var(--accent)';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      res.textContent = '❌ ' + (d.error || 'Ошибка');
+      res.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    res.textContent = '❌ ' + e.message;
+    res.style.color = 'var(--red)';
+  }
+}
+
+async function pushTasksToMR() {
+  const res = document.getElementById('mr-tasks-result');
+  res.textContent = '⏳ Отправляем в Merchrules...';
+  try {
+    const r = await fetch('/api/client/{{ client.id }}/push-tasks', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = `✅ Загружено в MR: ${d.count} задач`;
+      res.style.color = 'var(--accent)';
+    } else {
+      res.textContent = '⚠️ ' + (d.error || d.note || 'Нет кредов MR');
+      res.style.color = 'var(--yellow)';
+    }
+  } catch(e) {
+    res.textContent = '❌ ' + e.message;
+    res.style.color = 'var(--red)';
+  }
+}
+
+async function clearPlanned() {
+  await fetch('/api/client/{{ client.id }}/planned-meeting', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ date: null }),
+  });
+  location.reload();
+}
+</script>
 {% endblock %}

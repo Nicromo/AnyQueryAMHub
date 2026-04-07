@@ -79,10 +79,13 @@ def init_db():
         """)
         # Миграции (безопасные — добавляют колонки если их нет)
         for col, defn in [
-            ("site_ids", "TEXT DEFAULT ''"),
-            ("mr_synced", "INTEGER DEFAULT 0"),
-            ("is_internal", "INTEGER DEFAULT 0"),
-            ("internal_note", "TEXT DEFAULT ''"),
+            ("site_ids",        "TEXT DEFAULT ''"),
+            ("mr_synced",       "INTEGER DEFAULT 0"),
+            ("is_internal",     "INTEGER DEFAULT 0"),
+            ("internal_note",   "TEXT DEFAULT ''"),
+            ("hours_estimate",  "REAL DEFAULT 0"),
+            ("checkup_rating",  "INTEGER DEFAULT 0"),
+            ("planned_meeting", "DATE"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE clients ADD COLUMN {col} {defn}")
@@ -269,6 +272,47 @@ def create_tasks_bulk(meeting_id: int, client_id: int, tasks: list[dict]):
 def update_task_status(task_id: int, status: str):
     with get_conn() as conn:
         conn.execute("UPDATE tasks SET status=? WHERE id=?", (status, task_id))
+
+
+def set_planned_meeting(client_id: int, planned_date: str):
+    """Сохранить запланированную дату следующей встречи."""
+    with get_conn() as conn:
+        conn.execute("UPDATE clients SET planned_meeting=? WHERE id=?", (planned_date, client_id))
+
+
+def set_checkup_rating(meeting_id: int, rating: int):
+    """Сохранить оценку встречи (1-5)."""
+    with get_conn() as conn:
+        conn.execute("UPDATE meetings SET checkup_rating=? WHERE id=?", (rating, meeting_id))
+
+
+def get_upcoming_meetings(days_ahead: int = 14) -> list[dict]:
+    """Встречи запланированные в ближайшие N дней."""
+    from datetime import date, timedelta
+    cutoff = (date.today() + timedelta(days=days_ahead)).isoformat()
+    today  = date.today().isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT c.id, c.name, c.segment, c.planned_meeting, c.site_ids
+               FROM clients c
+               WHERE c.planned_meeting IS NOT NULL
+                 AND c.planned_meeting >= ? AND c.planned_meeting <= ?
+               ORDER BY c.planned_meeting""",
+            (today, cutoff)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_qbr_calendar() -> list[dict]:
+    """Все QBR-встречи: прошедшие + запланированные."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT m.*, c.name as client_name, c.segment, c.site_ids
+               FROM meetings m JOIN clients c ON c.id = m.client_id
+               WHERE m.meeting_type = 'qbr'
+               ORDER BY m.meeting_date DESC""",
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def create_internal_task(client_id: int, text: str, due_date: str = None,

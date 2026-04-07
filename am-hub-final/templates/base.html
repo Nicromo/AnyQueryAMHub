@@ -42,6 +42,9 @@
     <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
       <span class="icon">📈</span> Аналитика
     </a>
+    <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar">
+      <span class="icon">📆</span> QBR Календарь
+    </a>
     <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
       <span class="icon">🔒</span> Внутренние задачи
     </a>

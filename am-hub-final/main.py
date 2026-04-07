@@ -33,6 +33,10 @@ from ai_followup import process_transcript as ai_process_transcript
 from merchrules_sync import (
     sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate
 )
+from airtable_sync import sync_meeting_to_airtable
+from database import (
+    set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -191,6 +195,9 @@ async def prep_page(request: Request, client_id: int):
     open_tasks = get_client_tasks(client_id, "open")
     status = checkup_status(client.get("last_checkup"), client["segment"])
 
+    days = CHECKUP_DAYS.get(client["segment"], 90)
+    suggested_next = (date.today() + timedelta(days=days)).isoformat()
+
     return templates.TemplateResponse("prep.html", {
         "request": request,
         "user": user,
@@ -199,7 +206,8 @@ async def prep_page(request: Request, client_id: int):
         "open_tasks": open_tasks,
         "status": status,
         "today": date.today().isoformat(),
-        "checkup_days": CHECKUP_DAYS[client["segment"]],
+        "checkup_days": days,
+        "suggested_next": suggested_next,
     })
 
 
@@ -290,6 +298,18 @@ async def followup_submit(
         aq_tasks=aq_tasks_list,
         client_tasks=cl_tasks_list,
     )
+
+    # Синхронизация с Airtable (дата + дописать комментарий)
+    try:
+        await sync_meeting_to_airtable(
+            client_name=client["name"],
+            meeting_date=meeting_date,
+            meeting_type=meeting_type,
+            summary=summary,
+            mood=mood,
+        )
+    except Exception as exc:
+        logging.warning("Airtable sync error (followup): %s", exc)
 
     # Отправка в TG
     tg_ok = False
@@ -972,3 +992,226 @@ async def analytics_page(request: Request):
         "stats": stats,
         "today": date.today().isoformat(),
     })
+
+
+# ── QBR Календарь ────────────────────────────────────────────────────────────
+
+@app.get("/qbr-calendar", response_class=HTMLResponse)
+async def qbr_calendar_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    qbr_meetings = get_qbr_calendar()
+    upcoming = get_upcoming_meetings(days_ahead=30)
+
+    # Клиенты ENT без QBR за последние 90 дней
+    all_clients = get_all_clients()
+    now_iso = date.today().isoformat()
+    cutoff90 = (date.today() - timedelta(days=90)).isoformat()
+    clients_with_recent_qbr = {
+        m["client_id"] for m in qbr_meetings if (m.get("meeting_date") or "") >= cutoff90
+    }
+    ent_no_qbr = [
+        c for c in all_clients
+        if c["segment"] in ("ENT", "SME+") and c["id"] not in clients_with_recent_qbr
+    ]
+
+    return templates.TemplateResponse("qbr_calendar.html", {
+        "request": request,
+        "user": user,
+        "qbr_meetings": qbr_meetings,
+        "upcoming": upcoming,
+        "ent_no_qbr": ent_no_qbr,
+        "today": now_iso,
+    })
+
+
+# ── API: быстро закрыть чекап (с prep страницы) ──────────────────────────────
+
+@app.post("/api/client/{client_id}/checkup-done", response_class=JSONResponse)
+async def api_checkup_done(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    body = await request.json()
+    mood          = body.get("mood", "neutral")
+    rating        = int(body.get("rating", 0))
+    summary       = (body.get("summary") or "").strip()
+    next_meeting  = body.get("next_meeting") or None
+    meeting_date  = date.today().isoformat()
+
+    # Сохраняем встречу
+    meeting_id = create_meeting(
+        client_id=client_id,
+        meeting_date=meeting_date,
+        meeting_type="checkup",
+        summary=summary,
+        mood=mood,
+        next_meeting=next_meeting,
+    )
+
+    # Оценка встречи
+    if rating and 1 <= rating <= 5:
+        set_checkup_rating(meeting_id, rating)
+
+    # Планируем следующую встречу
+    if next_meeting:
+        set_planned_meeting(client_id, next_meeting)
+
+    # Синхронизация с Merchrules
+    mr_ok = False
+    try:
+        mr_result = await sync_meeting_to_merchrules(
+            client_name=client["name"],
+            meeting_date=meeting_date,
+            meeting_type="checkup",
+            summary=summary,
+            mood=mood,
+            next_meeting=next_meeting,
+            aq_tasks=[],
+            client_tasks=[],
+        )
+        mr_ok = mr_result.get("ok", False)
+    except Exception as exc:
+        logging.warning("MR sync error (checkup-done): %s", exc)
+
+    # Синхронизация с Airtable
+    airtable_ok = False
+    try:
+        at_result = await sync_meeting_to_airtable(
+            client_name=client["name"],
+            meeting_date=meeting_date,
+            meeting_type="checkup",
+            summary=summary,
+            mood=mood,
+        )
+        airtable_ok = at_result.get("ok", False)
+    except Exception as exc:
+        logging.warning("Airtable sync error (checkup-done): %s", exc)
+
+    return {
+        "ok": True,
+        "meeting_id": meeting_id,
+        "mr": mr_ok,
+        "airtable": airtable_ok,
+    }
+
+
+# ── API: запланировать дату следующей встречи ─────────────────────────────────
+
+@app.post("/api/client/{client_id}/planned-meeting", response_class=JSONResponse)
+async def api_planned_meeting(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    planned_date = body.get("date") or None  # None — очищаем
+    set_planned_meeting(client_id, planned_date)
+    return {"ok": True}
+
+
+# ── API: пробросить задачи клиента в Merchrules ───────────────────────────────
+
+@app.post("/api/client/{client_id}/push-tasks", response_class=JSONResponse)
+async def api_push_tasks(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    site_ids_raw = client.get("site_ids", "") or ""
+    if not site_ids_raw.strip():
+        return {"ok": False, "error": "У клиента нет site_ids"}
+
+    open_tasks = get_client_tasks(client_id, "open")
+    aq_tasks = [t for t in open_tasks if t["owner"] == "anyquery" and not t.get("is_internal")]
+    if not aq_tasks:
+        return {"ok": True, "count": 0, "note": "Нет открытых задач AnyQuery"}
+
+    mr_login    = os.getenv("MERCHRULES_LOGIN", "")
+    mr_password = os.getenv("MERCHRULES_PASSWORD", "")
+    if not mr_login or not mr_password:
+        return {"ok": False, "error": "Нет кредов MR (MERCHRULES_LOGIN / MERCHRULES_PASSWORD)"}
+
+    import httpx as _httpx, re as _re, io as _io
+    site_ids = [s.strip() for s in _re.split(r"[,\s]+", site_ids_raw) if s.strip()]
+    merchrules_url = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+
+    uploaded = 0
+    errors = []
+    try:
+        async with _httpx.AsyncClient(timeout=30) as hx:
+            auth_resp = await hx.post(
+                f"{merchrules_url}/backend-v2/auth/login",
+                json={"username": mr_login, "password": mr_password},
+            )
+            if auth_resp.status_code != 200:
+                return {"ok": False, "error": f"MR auth failed: {auth_resp.status_code}"}
+
+            token = auth_resp.json().get("token") or auth_resp.json().get("access_token", "")
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+            for site_id in site_ids:
+                for t in aq_tasks:
+                    csv_row = (
+                        "title,description,status,priority,team,task_type,assignee,product,link,due_date\n"
+                        f"{t['text']},,open,medium,,,any,any_query_web,,{t.get('due_date') or ''}"
+                    )
+                    r = await hx.post(
+                        f"{merchrules_url}/backend-v2/import/tasks/csv",
+                        params={"site_id": site_id},
+                        files={"file": ("tasks.csv", _io.BytesIO(csv_row.encode()), "text/csv")},
+                        headers=headers,
+                    )
+                    if r.status_code in (200, 201):
+                        uploaded += 1
+                    else:
+                        errors.append(t["text"][:50])
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    if uploaded:
+        mr_invalidate()
+
+    return {"ok": True, "count": uploaded, "errors": errors}
+
+
+# ── API: добавить комментарий к встрече ───────────────────────────────────────
+
+@app.post("/api/meeting/{meeting_id}/comment", response_class=JSONResponse)
+async def api_meeting_comment(request: Request, meeting_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    comment = (body.get("comment") or "").strip()
+    if not comment:
+        return {"ok": False, "error": "Пустой комментарий"}
+
+    meeting = get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404)
+
+    # Дописываем к существующему summary
+    existing = meeting.get("summary") or ""
+    timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+    new_summary = (existing + f"\n\n[{timestamp}] {comment}").strip()
+
+    import sqlite3 as _sqlite3
+    from pathlib import Path as _Path
+    db_path = _Path("data/am_hub.db")
+    with _sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE meetings SET summary=? WHERE id=?", (new_summary, meeting_id))
+
+    return {"ok": True}
