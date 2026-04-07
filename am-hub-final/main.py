@@ -17,7 +17,11 @@ from database import (
     get_client_meetings, get_client_tasks, get_all_tasks,
     get_today_overview, create_meeting,
     create_tasks_bulk, update_task_status, mark_meeting_tg_sent,
-    upsert_client, CHECKUP_DAYS, get_meeting
+    upsert_client, CHECKUP_DAYS, get_meeting,
+    get_checklist, init_checklist, toggle_checklist_item,
+    add_checklist_item, clear_checklist,
+    create_internal_task, get_internal_tasks,
+    CHECKLIST_TEMPLATES,
 )
 from auth import SessionManager, verify_tg_auth
 from tg import build_followup_message, send_to_tg
@@ -52,7 +56,7 @@ seed_clients()
 
 @app.on_event("startup")
 async def startup_event():
-    """При запуске на Railway автоматически регистрируем webhook."""
+    """При запуске на Railway: регистрируем webhook + стартуем планировщик."""
     if BOT_TOKEN and RAILWAY_DOMAIN:
         webhook_url = f"https://{RAILWAY_DOMAIN}/tg/webhook"
         ok = await tg_bot.set_webhook(webhook_url)
@@ -60,6 +64,13 @@ async def startup_event():
             logging.info("TG webhook registered: %s", webhook_url)
         else:
             logging.warning("TG webhook registration failed")
+
+    # Запускаем планировщик (утренний план, дайджест, MR sync)
+    try:
+        from scheduler import start_scheduler
+        start_scheduler()
+    except Exception as exc:
+        logging.warning("Scheduler start failed: %s", exc)
 
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────
@@ -745,3 +756,240 @@ async def api_ai_upload(request: Request):
         "mr_tasks_count": len(uploaded),
         "tasks_count": len(tasks),
     }
+
+# ── Чеклист встречи ───────────────────────────────────────────────────────────
+
+# AI-подсказки по сегменту для страницы чеклиста
+AI_HINTS_BY_SEGMENT = {
+    "ENT": [
+        "Как изменился GMV за период?",
+        "Есть ли планы на расширение?",
+        "Кто принимает решения о бюджете?",
+        "Как оцениваете ROI от AnyQuery?",
+        "Что мешает масштабироваться?",
+    ],
+    "SME+": [
+        "Какие метрики важнее всего для вас?",
+        "Что из роадмапа самое приоритетное?",
+        "Есть ли конкуренты которых отслеживаете?",
+        "Как ваша команда использует дашборд?",
+    ],
+    "SME-": [
+        "Какие функции используете чаще всего?",
+        "Что было бы полезно добавить?",
+        "Как оцениваете работу поиска у вас?",
+        "Есть ли технические блокеры?",
+    ],
+    "SMB": [
+        "Как идут продажи в целом?",
+        "Влияет ли поиск на конверсию заметно?",
+        "Планируете ли рост ассортимента?",
+        "Нужна ли помощь с настройкой?",
+    ],
+    "SS": [
+        "Всё ли работает как ожидалось?",
+        "Есть ли вопросы по функционалу?",
+        "Планируете ли переход на более высокий план?",
+    ],
+}
+
+
+@app.get("/checklist/{client_id}", response_class=HTMLResponse)
+async def checklist_page(request: Request, client_id: int, meeting_type: str = "checkup"):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    items = get_checklist(client_id)
+    seg = client.get("segment", "SMB")
+    hints = AI_HINTS_BY_SEGMENT.get(seg, AI_HINTS_BY_SEGMENT["SMB"])
+
+    return templates.TemplateResponse("checklist.html", {
+        "request": request,
+        "user": user,
+        "client": client,
+        "items": items,
+        "meeting_type": meeting_type,
+        "today": date.today().isoformat(),
+        "ai_hints": hints,
+    })
+
+
+@app.post("/api/checklist/init", response_class=JSONResponse)
+async def api_checklist_init(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    client_id = int(body.get("client_id", 0))
+    meeting_type = body.get("meeting_type", "checkup")
+    if not client_id:
+        return {"error": "no client_id"}
+
+    open_tasks = get_client_tasks(client_id, "open")
+    items = init_checklist(client_id, meeting_type, open_tasks)
+    return {"items": items}
+
+
+@app.post("/api/checklist/{item_id}/toggle", response_class=JSONResponse)
+async def api_checklist_toggle(request: Request, item_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    toggle_checklist_item(item_id, body.get("checked", False))
+    return {"ok": True}
+
+
+@app.post("/api/checklist/add", response_class=JSONResponse)
+async def api_checklist_add(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    client_id = int(body.get("client_id", 0))
+    text = (body.get("text") or "").strip()
+    if not client_id or not text:
+        return {"error": "missing fields"}
+    add_checklist_item(client_id, text)
+    items = get_checklist(client_id)
+    new_item = next((i for i in reversed(items) if i["text"] == text), None)
+    return {"ok": True, "item": new_item}
+
+
+@app.post("/api/checklist/clear", response_class=JSONResponse)
+async def api_checklist_clear(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    clear_checklist(int(body.get("client_id", 0)))
+    return {"ok": True}
+
+
+# ── Внутренние задачи ─────────────────────────────────────────────────────────
+
+@app.get("/internal-tasks", response_class=HTMLResponse)
+async def internal_tasks_page(request: Request, status: str = "open"):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    tasks = get_internal_tasks(status)
+    clients = get_all_clients()
+
+    return templates.TemplateResponse("internal_tasks.html", {
+        "request": request,
+        "user": user,
+        "tasks": tasks,
+        "clients": clients,
+        "status": status,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/internal-task", response_class=JSONResponse)
+async def api_create_internal_task(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    client_id = int(body.get("client_id", 0))
+    text = (body.get("text") or "").strip()
+    due_date = body.get("due_date") or None
+    note = (body.get("internal_note") or "").strip()
+    if not client_id or not text:
+        return {"ok": False, "error": "client_id and text required"}
+    task_id = create_internal_task(client_id, text, due_date, note)
+    return {"ok": True, "task_id": task_id}
+
+
+# ── Аналитика ─────────────────────────────────────────────────────────────────
+
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    import sqlite3
+    from pathlib import Path
+    db_path = Path("data/am_hub.db")
+
+    stats = {}
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        today = date.today()
+
+        # Встречи по неделям за последние 12 недель
+        meetings_weekly = conn.execute("""
+            SELECT strftime('%Y-W%W', meeting_date) as week,
+                   COUNT(*) as cnt,
+                   SUM(CASE WHEN mood='positive' THEN 1 ELSE 0 END) as positive,
+                   SUM(CASE WHEN mood='risk' THEN 1 ELSE 0 END) as risk
+            FROM meetings
+            WHERE meeting_date >= date('now', '-84 days')
+            GROUP BY week ORDER BY week
+        """).fetchall()
+
+        # Задачи по статусам
+        task_stats = conn.execute("""
+            SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status
+        """).fetchall()
+
+        # Задачи созданные vs закрытые за последние 4 недели
+        task_flow = conn.execute("""
+            SELECT strftime('%Y-W%W', created_at) as week,
+                   COUNT(*) as created,
+                   SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as done
+            FROM tasks
+            WHERE created_at >= date('now', '-28 days')
+            GROUP BY week ORDER BY week
+        """).fetchall()
+
+        # Чекапы: соответствие ритму по сегментам
+        clients_data = conn.execute("""
+            SELECT c.segment,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN c.last_checkup IS NOT NULL
+                       AND julianday('now') - julianday(c.last_checkup) <=
+                       CASE c.segment
+                           WHEN 'ENT' THEN 30 WHEN 'SME+' THEN 60 WHEN 'SME-' THEN 60
+                           WHEN 'SMB' THEN 90 ELSE 90 END
+                       THEN 1 ELSE 0 END) as on_time
+            FROM clients c
+            GROUP BY c.segment ORDER BY c.segment
+        """).fetchall()
+
+        # Топ клиентов по кол-ву встреч за квартал
+        top_active = conn.execute("""
+            SELECT c.name, c.segment, COUNT(m.id) as meetings
+            FROM clients c
+            LEFT JOIN meetings m ON m.client_id = c.id
+              AND m.meeting_date >= date('now', '-90 days')
+            GROUP BY c.id ORDER BY meetings DESC LIMIT 10
+        """).fetchall()
+
+        conn.close()
+
+        stats = {
+            "meetings_weekly": [dict(r) for r in meetings_weekly],
+            "task_stats": {r["status"]: r["cnt"] for r in task_stats},
+            "task_flow": [dict(r) for r in task_flow],
+            "clients_by_segment": [dict(r) for r in clients_data],
+            "top_active": [dict(r) for r in top_active],
+        }
+    except Exception as exc:
+        logging.error("Analytics query error: %s", exc)
+
+    return templates.TemplateResponse("analytics.html", {
+        "request": request,
+        "user": user,
+        "stats": stats,
+        "today": date.today().isoformat(),
+    })

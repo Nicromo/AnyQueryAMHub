@@ -38,6 +38,14 @@
       <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.72rem"></span>
     </a>
 
+    <div class="nav-section-label" style="margin-top:8px">Анализ</div>
+    <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
+      <span class="icon">📈</span> Аналитика
+    </a>
+    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
+      <span class="icon">🔒</span> Внутренние задачи
+    </a>
+
     <div class="nav-section-label" style="margin-top:8px">Инструменты</div>
     <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
       <span class="icon">🗺️</span> Роадмап

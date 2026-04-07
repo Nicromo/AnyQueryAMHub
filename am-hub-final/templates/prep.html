@@ -9,6 +9,11 @@
     <span class="badge badge-{{ client.segment|lower }}" style="font-size:0.8rem;vertical-align:middle">{{ client.segment }}</span>
   </h1>
   <p>Подготовка к встрече · чекап раз в {{ checkup_days }} дней</p>
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+    <a href="/checklist/{{ client.id }}" class="btn btn-ghost btn-sm">✅ Чеклист встречи</a>
+    <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm">✍️ Записать фолоуап</a>
+    <a href="/roadmap?client_id={{ client.id }}" class="btn btn-ghost btn-sm">🗺️ Задачи в роадмап</a>
+  </div>
 </div>
 
 <!-- Статус чекапа -->

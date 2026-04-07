@@ -202,6 +202,100 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
         await send_message(chat_id, f"❓ Неизвестная команда: {cmd}\nНапиши /help")
 
 
+def format_morning_plan(clients: list, urgent_tasks: list, week_tasks: list) -> str:
+    """Утренний план — что делать сегодня."""
+    today = date.today()
+    weekdays = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    day = weekdays[today.weekday()]
+
+    lines = [f"☀️ <b>Доброе утро! {day}, {today.strftime('%d.%m')}</b>", ""]
+
+    overdue = [c for c in clients if c.get("status", {}).get("color") == "red"]
+    warning = [c for c in clients if c.get("status", {}).get("color") == "yellow"]
+
+    if overdue:
+        lines.append(f"🔴 <b>Просрочены чекапы ({len(overdue)}):</b>")
+        for c in overdue[:5]:
+            lines.append(f"  • {c['name']} [{c['segment']}] — {c['status']['label']}")
+        if len(overdue) > 5:
+            lines.append(f"  <i>…и ещё {len(overdue)-5}</i>")
+        lines.append("")
+
+    if warning:
+        lines.append(f"🟡 <b>Скоро нужен чекап ({len(warning)}):</b>")
+        for c in warning[:3]:
+            lines.append(f"  • {c['name']} — {c['status']['label']}")
+        lines.append("")
+
+    if urgent_tasks:
+        lines.append(f"🔥 <b>Горящие задачи ({len(urgent_tasks)}):</b>")
+        for t in urgent_tasks[:5]:
+            due = t.get("due_date", "")
+            lines.append(f"  • {t['client_name']} — {t['text'][:50]}"
+                         + (f" (дедлайн {due})" if due else ""))
+        lines.append("")
+
+    if week_tasks:
+        lines.append(f"📋 <b>Задачи на неделю ({len(week_tasks)}):</b>")
+        for t in week_tasks[:5]:
+            lines.append(f"  • {t['client_name']} — {t['text'][:50]}")
+        lines.append("")
+
+    if not overdue and not urgent_tasks:
+        lines.append("✅ <b>Всё под контролем!</b> Просроченных задач нет.")
+
+    lines.append("<i>AM Hub · /checkups для деталей</i>")
+    return "\n".join(lines)
+
+
+def format_weekly_digest(clients: list, open_tasks: list) -> str:
+    """Еженедельный дайджест — итоги недели по всем клиентам."""
+    today = date.today()
+    week_start = (today - timedelta(days=today.weekday())).strftime("%d.%m")
+
+    lines = [
+        f"📊 <b>Еженедельный дайджест AM Hub</b>",
+        f"<i>Неделя с {week_start}</i>",
+        "",
+    ]
+
+    overdue = [c for c in clients if c.get("status", {}).get("color") == "red"]
+    ok = [c for c in clients if c.get("status", {}).get("color") == "green"]
+    total = len(clients)
+
+    lines.append(f"👥 <b>Клиенты: {total}</b>")
+    lines.append(f"  🔴 Просрочено чекапов: {len(overdue)}")
+    lines.append(f"  ✅ В норме: {len(ok)}")
+    lines.append(f"  📋 Открытых задач: {len(open_tasks)}")
+    lines.append("")
+
+    blocked = [t for t in open_tasks if t.get("status") == "blocked"]
+    if blocked:
+        lines.append(f"🚫 <b>Заблокированных задач: {len(blocked)}</b>")
+        for t in blocked[:5]:
+            lines.append(f"  • {t['client_name']} — {t['text'][:50]}")
+        lines.append("")
+
+    if overdue:
+        lines.append(f"⚠️ <b>Требуют чекапа:</b>")
+        for c in overdue[:8]:
+            lines.append(f"  • {c['name']} [{c['segment']}] — {c['status']['label']}")
+        lines.append("")
+
+    # Клиенты без единой задачи
+    clients_with_tasks = {t["client_id"] for t in open_tasks}
+    ent_no_tasks = [c for c in clients if c["segment"] == "ENT"
+                    and c["id"] not in clients_with_tasks]
+    if ent_no_tasks:
+        lines.append(f"📭 <b>ENT без открытых задач ({len(ent_no_tasks)}):</b>")
+        for c in ent_no_tasks:
+            lines.append(f"  • {c['name']}")
+        lines.append("")
+
+    lines.append("<i>AM Hub · хорошей недели!</i>")
+    return "\n".join(lines)
+
+
 async def set_webhook(webhook_url: str) -> bool:
     """Регистрирует webhook у Telegram."""
     if not BOT_TOKEN:

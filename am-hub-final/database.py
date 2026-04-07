@@ -52,6 +52,8 @@ def init_db():
             text        TEXT NOT NULL,
             due_date    DATE,
             status      TEXT DEFAULT 'open' CHECK(status IN ('open','done','blocked')),
+            is_internal INTEGER DEFAULT 0,  -- 1 = внутренняя задача, не уходит в MR
+            internal_note TEXT DEFAULT '',   -- комментарий/контекст от руководителя
             created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -62,12 +64,25 @@ def init_db():
             last_login  DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
-        -- Миграция: добавить site_ids если не существует (для совместимости)
+        CREATE TABLE IF NOT EXISTS checklist_items (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id   INTEGER NOT NULL REFERENCES clients(id),
+            meeting_id  INTEGER REFERENCES meetings(id),
+            item_type   TEXT DEFAULT 'template', -- template | task | custom
+            text        TEXT NOT NULL,
+            hint        TEXT DEFAULT '',         -- подсказка для ИИ / что спросить
+            checked     INTEGER DEFAULT 0,
+            task_id     INTEGER,
+            sort_order  INTEGER DEFAULT 0,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
         """)
         # Миграции (безопасные — добавляют колонки если их нет)
         for col, defn in [
             ("site_ids", "TEXT DEFAULT ''"),
             ("mr_synced", "INTEGER DEFAULT 0"),
+            ("is_internal", "INTEGER DEFAULT 0"),
+            ("internal_note", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE clients ADD COLUMN {col} {defn}")
@@ -238,6 +253,31 @@ def update_task_status(task_id: int, status: str):
         conn.execute("UPDATE tasks SET status=? WHERE id=?", (status, task_id))
 
 
+def create_internal_task(client_id: int, text: str, due_date: str = None,
+                          internal_note: str = "") -> int:
+    """Внутренняя задача — только в AM Hub, не синхронизируется с Merchrules."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO tasks (client_id, owner, text, due_date, is_internal, internal_note)
+               VALUES (?,?,?,?,1,?) RETURNING id""",
+            (client_id, "anyquery", text, due_date or None, internal_note)
+        )
+        return cur.fetchone()[0]
+
+
+def get_internal_tasks(status: str = "open") -> list[dict]:
+    """Все внутренние задачи."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT t.*, c.name as client_name, c.segment
+               FROM tasks t JOIN clients c ON c.id = t.client_id
+               WHERE t.is_internal = 1 AND t.status = ?
+               ORDER BY COALESCE(t.due_date, '9999-12-31'), c.name""",
+            (status,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ── Seed data — твои клиенты ─────────────────────────────────────────────────
 
 # Формат: (name, segment, site_ids)
@@ -285,6 +325,121 @@ SEED_CLIENTS = [
     ("swankystamping",        "SS",   "3081"),
     ("teremoot",              "SS",   "5535"),
 ]
+
+
+# ── Checklist templates ───────────────────────────────────────────────────────
+
+CHECKLIST_TEMPLATES = {
+    "checkup": [
+        ("Как прошёл предыдущий период?", "Попросить оценить по шкале 1-10, уточнить что порадовало"),
+        ("Закрытые задачи с прошлой встречи", "Пройтись по списку ниже — что реально закрыто?"),
+        ("Блокеры по открытым задачам", "Есть ли задачи которые застряли? Почему?"),
+        ("Новые потребности и хотелки", "Что мешает росту прямо сейчас? Что хотят добавить?"),
+        ("Результаты/метрики за период", "Конверсия, GMV, CTR поиска — есть ли динамика?"),
+        ("Договориться о следующей встрече", "Предложить дату через N дней согласно сегменту"),
+    ],
+    "qbr": [
+        ("Итоги квартала — ключевые цифры", "GMV, конверсия, задачи выполнено/в работе"),
+        ("Что получилось хорошо", "2-3 конкретных успеха, желательно с цифрами"),
+        ("Что не получилось / что тормозило", "Честный разбор блокеров"),
+        ("Приоритеты на следующий квартал", "3-5 главных задач, договориться об ответственных"),
+        ("Roadmap — что запланировано от AnyQuery", "Показать что мы несём клиенту"),
+        ("Риски и как закрываем", "Что может пойти не так? Чей риск?"),
+        ("NPS / отношение к продукту", "Насколько довольны? Что бы изменили?"),
+    ],
+    "urgent": [
+        ("Описать проблему точно", "Что именно сломалось? С какого момента?"),
+        ("Оценить срочность (P1/P2/P3)", "P1 = стоп-бизнес, P2 = сильно мешает, P3 = неудобно"),
+        ("Кто ответственный с нашей стороны", "Назначить команду/человека прямо на встрече"),
+        ("Дедлайн — когда должно быть готово", "Договориться на конкретную дату"),
+        ("Следующее обновление — когда", "Когда мы даём апдейт партнёру"),
+    ],
+    "onboarding": [
+        ("Познакомиться с командой партнёра", "Узнать кто принимает решения, кто технический"),
+        ("Рассказать про процессы AnyQuery", "Как работаем, как создаём задачи, как общаемся"),
+        ("Доступ к дашборду — проверить", "Зайти в ЛК вместе, убедиться что всё ок"),
+        ("Согласовать первые 3 задачи", "Что делаем в первые 2 недели?"),
+        ("Договориться о ритме встреч", "Как часто, в каком формате, кто участвует"),
+        ("Настроить TG-канал для коммуникации", "Пригласить в чат, объяснить формат"),
+    ],
+}
+
+
+def get_checklist(client_id: int) -> list[dict]:
+    """Получить текущий чеклист клиента (не закрытые + последние закрытые)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM checklist_items
+               WHERE client_id = ?
+               ORDER BY checked ASC, sort_order ASC, id ASC""",
+            (client_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def init_checklist(client_id: int, meeting_type: str, open_tasks: list[dict],
+                   meeting_id: int = None) -> list[dict]:
+    """
+    Создать чеклист для встречи:
+    - Удаляем старый незакрытый чеклист
+    - Добавляем шаблонные пункты
+    - Добавляем открытые задачи клиента
+    """
+    templates = CHECKLIST_TEMPLATES.get(meeting_type, CHECKLIST_TEMPLATES["checkup"])
+
+    with get_conn() as conn:
+        # Удаляем незакрытые пункты предыдущего чеклиста
+        conn.execute(
+            "DELETE FROM checklist_items WHERE client_id = ? AND checked = 0",
+            (client_id,)
+        )
+
+        # Добавляем шаблонные пункты
+        for i, (text, hint) in enumerate(templates):
+            conn.execute(
+                """INSERT INTO checklist_items
+                   (client_id, meeting_id, item_type, text, hint, sort_order)
+                   VALUES (?,?,?,?,?,?)""",
+                (client_id, meeting_id, "template", text, hint, i)
+            )
+
+        # Добавляем открытые задачи
+        for i, task in enumerate(open_tasks):
+            conn.execute(
+                """INSERT INTO checklist_items
+                   (client_id, meeting_id, item_type, text, task_id, sort_order)
+                   VALUES (?,?,?,?,?,?)""",
+                (client_id, meeting_id, "task",
+                 f"[Задача] {task['text']}", task.get("id"), 100 + i)
+            )
+
+    return get_checklist(client_id)
+
+
+def toggle_checklist_item(item_id: int, checked: bool):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE checklist_items SET checked = ? WHERE id = ?",
+            (1 if checked else 0, item_id)
+        )
+
+
+def add_checklist_item(client_id: int, text: str, meeting_id: int = None):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO checklist_items (client_id, meeting_id, item_type, text, sort_order)
+               VALUES (?,?,?,?,?)""",
+            (client_id, meeting_id, "custom", text, 999)
+        )
+
+
+def clear_checklist(client_id: int):
+    """Удалить все выполненные пункты чеклиста."""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM checklist_items WHERE client_id = ? AND checked = 1",
+            (client_id,)
+        )
 
 
 def seed_clients():

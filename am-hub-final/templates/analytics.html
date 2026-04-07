@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Аналитика — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1>📈 Аналитика</h1>
+    <p style="color:var(--text-muted)">Сводка: встречи, задачи, чекапы</p>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button onclick="setRange('week')"  class="tab-btn active" id="range-week">Неделя</button>
+    <button onclick="setRange('month')" class="tab-btn" id="range-month">Месяц</button>
+    <button onclick="setRange('quarter')" class="tab-btn" id="range-quarter">Квартал</button>
+  </div>
+</div>
+
+<!-- KPI-карточки -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+  {% set open = stats.task_stats.get('open', 0) %}
+  {% set done = stats.task_stats.get('done', 0) %}
+  {% set blocked = stats.task_stats.get('blocked', 0) %}
+  {% set total_tasks = open + done + blocked %}
+
+  <div class="kpi-card">
+    <div class="kpi-val">{{ stats.meetings_weekly | sum(attribute='cnt') }}</div>
+    <div class="kpi-label">Встреч за 12 нед.</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val" style="color:var(--yellow)">{{ open }}</div>
+    <div class="kpi-label">Открытых задач</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val" style="color:var(--red)">{{ blocked }}</div>
+    <div class="kpi-label">Заблокировано</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val" style="color:var(--accent)">
+      {% if total_tasks > 0 %}{{ (done / total_tasks * 100)|int }}%{% else %}—{% endif %}
+    </div>
+    <div class="kpi-label">Выполнено (всего)</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+  <!-- Встречи по неделям -->
+  <div class="card">
+    <h2 style="font-size:.95rem;margin-bottom:14px">📅 Встречи по неделям</h2>
+    {% if stats.meetings_weekly %}
+    <div style="display:flex;align-items:flex-end;gap:4px;height:120px">
+      {% set max_cnt = stats.meetings_weekly | map(attribute='cnt') | max %}
+      {% for w in stats.meetings_weekly[-8:] %}
+      {% set h = (w.cnt / max_cnt * 100)|int if max_cnt > 0 else 0 %}
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+        <span style="font-size:.65rem;color:var(--text-muted)">{{ w.cnt }}</span>
+        <div style="width:100%;background:var(--accent);opacity:.8;border-radius:3px 3px 0 0;height:{{ h }}%"></div>
+        <span style="font-size:.6rem;color:var(--text-muted);writing-mode:vertical-rl;transform:rotate(180deg)">
+          {{ w.week[-2:] }}н
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--text-muted);text-align:center;padding:20px">Нет данных</p>
+    {% endif %}
+  </div>
+
+  <!-- Чекапы по сегментам -->
+  <div class="card">
+    <h2 style="font-size:.95rem;margin-bottom:14px">🎯 Соответствие ритму чекапов</h2>
+    {% for row in stats.clients_by_segment %}
+    {% set pct = (row.on_time / row.total * 100)|int if row.total > 0 else 0 %}
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
+        <span><span class="badge badge-{{ row.segment|lower }}">{{ row.segment }}</span></span>
+        <span style="color:{% if pct >= 80 %}var(--accent){% elif pct >= 50 %}var(--yellow){% else %}var(--red){% endif %}">
+          {{ row.on_time }}/{{ row.total }} ({{ pct }}%)
+        </span>
+      </div>
+      <div style="background:var(--border);border-radius:4px;height:5px">
+        <div style="background:{% if pct >= 80 %}var(--accent){% elif pct >= 50 %}var(--yellow){% else %}var(--red){% endif %};
+                    width:{{ pct }}%;height:5px;border-radius:4px"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Статус задач -->
+  <div class="card">
+    <h2 style="font-size:.95rem;margin-bottom:14px">✅ Задачи по статусам</h2>
+    {% set total = stats.task_stats.values() | sum %}
+    {% for status, color, label in [('open','var(--yellow)','Открытые'),('done','var(--accent)','Выполненные'),('blocked','var(--red)','Заблокированные')] %}
+    {% set cnt = stats.task_stats.get(status, 0) %}
+    {% set pct = (cnt / total * 100)|int if total > 0 else 0 %}
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="width:90px;font-size:.82rem;color:{{ color }}">{{ label }}</span>
+      <div style="flex:1;background:var(--border);border-radius:4px;height:8px">
+        <div style="background:{{ color }};width:{{ pct }}%;height:8px;border-radius:4px"></div>
+      </div>
+      <span style="font-size:.82rem;font-weight:600;width:30px;text-align:right">{{ cnt }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Топ активных клиентов -->
+  <div class="card">
+    <h2 style="font-size:.95rem;margin-bottom:14px">🏆 Активные клиенты (квартал)</h2>
+    {% if stats.top_active %}
+    <div>
+      {% for row in stats.top_active %}
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:.75rem;color:var(--text-muted);width:20px;text-align:right">{{ loop.index }}</span>
+        <span style="flex:1;font-size:.85rem">{{ row.name }}</span>
+        <span class="badge badge-{{ row.segment|lower }}" style="font-size:.65rem">{{ row.segment }}</span>
+        <span style="font-size:.82rem;font-weight:600;color:var(--accent)">{{ row.meetings }} встреч</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--text-muted);text-align:center;padding:20px">Нет данных</p>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+.kpi-val   { font-size: 2rem; font-weight: 700; line-height: 1; }
+.kpi-label { font-size: .78rem; color: var(--text-muted); margin-top: 4px; }
+</style>
+
+<script>
+function setRange(r) {
+  ['week','month','quarter'].forEach(x => {
+    document.getElementById('range-'+x)?.classList.toggle('active', x === r);
+  });
+  // TODO: reload with range param
+  window.location.href = '/analytics?range=' + r;
+}
+</script>
+{% endblock %}
