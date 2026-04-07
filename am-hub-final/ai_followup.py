@@ -208,3 +208,295 @@ async def process_transcript(
         "postmit_client": "", "postmit_internal": "",
         "tasks": [], "health": "yellow", "mood": "neutral",
     }
+
+
+async def _call_groq(system_prompt: str, user_prompt: str, max_tokens: int = 2048) -> str:
+    """Универсальный вызов Groq API, возвращает строку ответа."""
+    if not GROQ_API_KEY:
+        return ""
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.4,
+        "max_tokens": max_tokens,
+    }
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(GROQ_URL, headers=headers, json=payload)
+            if resp.status_code == 429:
+                import asyncio
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if resp.status_code != 200:
+                logger.error("Groq error %s: %s", resp.status_code, resp.text[:200])
+                return ""
+            return resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception as exc:
+            logger.error("Groq call error (attempt %d): %s", attempt, exc)
+    return ""
+
+
+async def generate_pre_meeting_brief(
+    client: dict,
+    meetings: list[dict],
+    open_tasks: list[dict],
+    health: dict,
+) -> str:
+    """
+    Генерирует краткий AI-бриф перед встречей.
+    Возвращает отформатированный текст для Telegram.
+    """
+    system = (
+        "Ты — ассистент аккаунт-менеджера. Твоя задача — подготовить краткий брифинг "
+        "перед встречей с клиентом. Пиши по-русски, кратко, структурированно. "
+        "Используй эмодзи для читаемости. Не придумывай факты — только то что есть в данных."
+    )
+
+    last_meeting = meetings[0] if meetings else None
+    overdue_tasks = [t for t in open_tasks if t.get("due_date") and t["due_date"] < __import__("datetime").date.today().isoformat()]
+    blocked_tasks = [t for t in open_tasks if t.get("status") == "blocked"]
+
+    user_prompt = f"""Клиент: {client['name']} (сегмент {client['segment']})
+Health Score: {health.get('score', '?')}/100 ({health.get('color', 'yellow')})
+
+Последняя встреча: {last_meeting['meeting_date'] if last_meeting else 'нет данных'}
+Тип: {last_meeting['meeting_type'] if last_meeting else '-'}
+Настроение: {last_meeting['mood'] if last_meeting else '-'}
+Итог прошлой встречи: {(last_meeting.get('summary') or '')[:500] if last_meeting else 'нет данных'}
+
+Открытых задач: {len(open_tasks)}
+Просроченных: {len(overdue_tasks)}
+Заблокированных: {len(blocked_tasks)}
+
+Список задач:
+{chr(10).join(f"- [{t.get('status','open')}] {t['text'][:80]} (дедлайн: {t.get('due_date','-')})" for t in open_tasks[:10])}
+
+Составь брифинг:
+1. Короткий статус клиента (1-2 предложения)
+2. Что сделано с прошлой встречи (из задач)
+3. Что зависло / заблокировано
+4. 3 ключевых вопроса которые стоит задать сегодня
+"""
+    result = await _call_groq(system, user_prompt, max_tokens=1024)
+    return result or "Не удалось сгенерировать бриф. Проверь GROQ_API_KEY."
+
+
+async def generate_followup_draft(
+    client: dict,
+    meeting: dict,
+    aq_tasks: list[dict],
+    cl_tasks: list[dict],
+    next_meeting: str = "",
+) -> str:
+    """Генерирует черновик фолоуап-сообщения клиенту."""
+    system = (
+        "Ты — аккаунт-менеджер компании AnyQuery. Пишешь фолоуап клиенту после встречи. "
+        "Тон: дружелюбный, профессиональный. Используй структуру с эмодзи. "
+        "Пиши от первого лица как AM. Не добавляй лишнего."
+    )
+    aq_list = "\n".join(f"• {t['text']}" + (f" (до {t.get('due_date', '?')})" if t.get("due_date") else "") for t in aq_tasks) or "—"
+    cl_list = "\n".join(f"• {t['text']}" + (f" (до {t.get('due_date', '?')})" if t.get("due_date") else "") for t in cl_tasks) or "—"
+
+    user_prompt = f"""Встреча с клиентом {client['name']} прошла {meeting.get('meeting_date', '')}.
+Тип: {meeting.get('meeting_type', 'checkup')}
+Краткий итог: {(meeting.get('summary') or '')[:400]}
+Настроение встречи: {meeting.get('mood', 'neutral')}
+
+Задачи AnyQuery:
+{aq_list}
+
+Задачи клиента:
+{cl_list}
+
+Следующая встреча: {next_meeting or 'не назначена'}
+
+Напиши фолоуап-сообщение клиенту в TG. Структура:
+- Короткое приветствие
+- Благодарность за встречу
+- Задачи AnyQuery (что мы берём)
+- Задачи клиента (что нужно от них)
+- Дата следующей встречи
+- Закрытие
+"""
+    result = await _call_groq(system, user_prompt, max_tokens=800)
+    return result or "Не удалось сгенерировать черновик."
+
+
+async def extract_tasks_from_chat(text: str, client_name: str) -> list[dict]:
+    """
+    Извлекает договорённости и задачи из текста переписки.
+    Возвращает список задач для создания.
+    """
+    system = (
+        "Ты — помощник аккаунт-менеджера. Анализируешь текст переписки с клиентом "
+        "и извлекаешь конкретные договорённости и задачи. "
+        "Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+    user_prompt = f"""Клиент: {client_name}
+
+Текст переписки:
+{text[:3000]}
+
+Извлеки все договорённости и задачи. Для каждой укажи:
+- owner: "anyquery" (мы делаем) или "client" (клиент делает)
+- text: текст задачи (кратко, конкретно)
+- due_date: дата если упоминается (YYYY-MM-DD или пусто)
+
+Верни JSON:
+{{"tasks": [{{"owner": "anyquery", "text": "...", "due_date": ""}}, ...]}}
+
+Если договорённостей нет — верни {{"tasks": []}}
+"""
+    raw = await _call_groq(system, user_prompt, max_tokens=1024)
+    if not raw:
+        return []
+    try:
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
+        return data.get("tasks", [])
+    except Exception as e:
+        logger.error("extract_tasks_from_chat JSON error: %s", e)
+        return []
+
+
+async def generate_client_recommendations(
+    client: dict,
+    meetings: list[dict],
+    open_tasks: list[dict],
+    knowledge_base: list[dict],
+) -> list[dict]:
+    """
+    AI-рекомендации что улучшить у конкретного клиента.
+    Возвращает список рекомендаций.
+    """
+    system = (
+        "Ты — эксперт по e-commerce поиску компании AnyQuery. "
+        "Анализируешь данные клиента и предлагаешь конкретные улучшения. "
+        "Опирайся на базу знаний — что уже сработало у похожих клиентов. "
+        "Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+
+    kb_text = "\n".join(
+        f"- [{item['category']}] {item['title']}: {item['metric_result']}"
+        for item in knowledge_base[:20]
+    ) or "База знаний пуста"
+
+    tasks_text = "\n".join(f"- {t['text']}" for t in open_tasks[:10]) or "нет"
+    meetings_summary = f"Всего встреч: {len(meetings)}"
+    if meetings:
+        moods = [m.get("mood", "neutral") for m in meetings[:3]]
+        meetings_summary += f", последние настроения: {', '.join(moods)}"
+
+    user_prompt = f"""Клиент: {client['name']} (сегмент {client['segment']})
+{meetings_summary}
+Открытых задач: {len(open_tasks)}
+Текущие задачи:
+{tasks_text}
+
+База знаний (что работало у других):
+{kb_text}
+
+Предложи 3-5 конкретных улучшений для этого клиента.
+Для каждого укажи:
+- title: короткое название улучшения
+- reason: почему именно это (на основе данных клиента)
+- expected_result: ожидаемый результат
+- priority: high/medium/low
+
+Верни JSON:
+{{"recommendations": [{{"title": "...", "reason": "...", "expected_result": "...", "priority": "medium"}}]}}
+"""
+    raw = await _call_groq(system, user_prompt, max_tokens=1200)
+    if not raw:
+        return []
+    try:
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
+        return data.get("recommendations", [])
+    except Exception as e:
+        logger.error("generate_recommendations JSON error: %s", e)
+        return []
+
+
+async def generate_qbr_report(
+    client: dict,
+    meetings: list[dict],
+    done_tasks: list[dict],
+    open_tasks: list[dict],
+    quarter: str,
+) -> dict:
+    """
+    Генерирует черновик QBR-отчёта.
+    Возвращает структурированный dict с секциями.
+    """
+    system = (
+        "Ты — аккаунт-менеджер AnyQuery. Составляешь QBR-отчёт за квартал. "
+        "Пиши по-русски, структурированно, с конкретными данными. "
+        "Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+
+    done_list = "\n".join(f"- {t['text']}" for t in done_tasks[:20]) or "нет закрытых задач"
+    open_list = "\n".join(f"- [{t.get('status','open')}] {t['text']}" for t in open_tasks[:15]) or "нет открытых задач"
+    meetings_info = "\n".join(
+        f"- {m['meeting_date']} ({m['meeting_type']}): mood={m.get('mood','neutral')}"
+        for m in meetings
+    ) or "нет встреч"
+
+    user_prompt = f"""Клиент: {client['name']} (сегмент {client['segment']})
+Квартал: {quarter}
+
+Встречи за квартал:
+{meetings_info}
+
+Выполненные задачи ({len(done_tasks)}):
+{done_list}
+
+Открытые задачи ({len(open_tasks)}):
+{open_list}
+
+Составь QBR-отчёт. Верни JSON:
+{{
+  "summary": "2-3 предложения об итогах квартала",
+  "achievements": ["достижение 1", "достижение 2", "достижение 3"],
+  "not_done": ["что не успели и почему"],
+  "q_next_priorities": ["приоритет 1 на следующий квартал", "приоритет 2", "приоритет 3"],
+  "risks": ["риск 1 если есть"],
+  "health_trend": "улучшение / без изменений / ухудшение"
+}}
+"""
+    raw = await _call_groq(system, user_prompt, max_tokens=1500)
+    if not raw:
+        return {
+            "error": "Не удалось сгенерировать QBR. Проверь GROQ_API_KEY.",
+            "summary": "", "achievements": [], "not_done": [],
+            "q_next_priorities": [], "risks": [], "health_trend": "—",
+        }
+    try:
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
+        data["error"] = None
+        return data
+    except Exception as e:
+        logger.error("generate_qbr_report JSON error: %s", e)
+        return {
+            "error": f"Ошибка разбора ответа AI: {e}",
+            "summary": raw[:500], "achievements": [], "not_done": [],
+            "q_next_priorities": [], "risks": [], "health_trend": "—",
+        }

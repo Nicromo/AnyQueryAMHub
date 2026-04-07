@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Шаблоны сообщений — AM Hub{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div>
+      <h1>💌 Шаблоны сообщений</h1>
+      <p class="text-muted">Готовые тексты для коммуникации с клиентами</p>
+    </div>
+    <button class="btn btn-primary" onclick="toggleAddForm()">+ Добавить</button>
+  </div>
+</div>
+
+<!-- Фильтр -->
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+  <a href="/message-templates" class="btn {% if not request.query_params.get('cat') %}btn-primary{% else %}btn-ghost{% endif %} btn-sm">Все</a>
+  {% for cat in categories %}
+  <a href="?cat={{ cat }}" class="btn btn-ghost btn-sm">{{ cat }}</a>
+  {% endfor %}
+</div>
+
+<!-- Форма добавления -->
+<div id="add-form" class="card" style="display:none;margin-bottom:16px">
+  <h3 style="margin-bottom:12px">Новый шаблон</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div>
+      <label class="form-label">Название *</label>
+      <input type="text" id="tmpl-name" class="form-control" placeholder="Статус задачи">
+    </div>
+    <div>
+      <label class="form-label">Категория</label>
+      <select id="tmpl-category" class="form-control">
+        <option value="status">Статус</option>
+        <option value="done">Готово</option>
+        <option value="request">Запрос инфо</option>
+        <option value="meeting">Встреча</option>
+        <option value="followup">Фолоуап</option>
+        <option value="issue">Проблема</option>
+        <option value="improvement">Улучшение</option>
+        <option value="general">Общий</option>
+      </select>
+    </div>
+  </div>
+  <label class="form-label">Текст шаблона *</label>
+  <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px">
+    Доступные переменные: {client_name}, {task}, {team}, {date}, {time}, {topic}, {result}
+  </p>
+  <textarea id="tmpl-text" class="form-control" rows="5" placeholder="Привет! Задача «{task}» выполнена. {result}"></textarea>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="btn btn-primary" onclick="saveTemplate()">💾 Сохранить</button>
+    <button class="btn btn-ghost" onclick="toggleAddForm()">Отмена</button>
+  </div>
+</div>
+
+<!-- Список шаблонов -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
+  {% for tmpl in msg_templates %}
+  <div class="card tmpl-card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+      <div>
+        <span class="cat-badge">{{ tmpl.category }}</span>
+        <strong style="display:block;margin-top:4px">{{ tmpl.name }}</strong>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="deleteTemplate({{ tmpl.id }}, this)">🗑</button>
+    </div>
+    <div class="tmpl-preview">{{ tmpl.template_text[:200] }}</div>
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <button class="btn btn-sm btn-secondary" onclick="copyTemplate(`{{ tmpl.template_text | replace('`', '\\`') | replace('\n', '\\n') }}`)">📋 Копировать</button>
+      <button class="btn btn-sm btn-primary" onclick="useTemplate({{ tmpl.id }})">✏️ Использовать</button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Модалка использования шаблона -->
+<div id="use-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeUse()">
+  <div class="modal-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3>✏️ Использовать шаблон</h3>
+      <button class="btn btn-ghost" onclick="closeUse()">✕</button>
+    </div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px">Замени переменные в фигурных скобках на конкретные значения</p>
+    <textarea id="use-text" class="form-control" rows="8" style="font-size:0.9rem"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="copyUse()">📋 Копировать</button>
+      <button class="btn btn-ghost" onclick="closeUse()">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.cat-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:0.72rem; font-weight:600; background:rgba(108,99,255,0.15); color:var(--accent); }
+.tmpl-preview { font-size:0.82rem; color:var(--text-muted); line-height:1.5; white-space:pre-wrap; background:var(--surface2); border-radius:6px; padding:10px; max-height:100px; overflow:hidden; }
+.tmpl-card:hover { box-shadow:0 2px 16px rgba(108,99,255,0.15); }
+.modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center; }
+.modal-box { background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:min(600px,95vw); }
+</style>
+
+<script>
+// Данные шаблонов
+const _templates = {
+  {% for t in msg_templates %}
+  {{ t.id }}: `{{ t.template_text | replace('`', '\\`') }}`,
+  {% endfor %}
+};
+
+function toggleAddForm() {
+  const f = document.getElementById('add-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveTemplate() {
+  const name = document.getElementById('tmpl-name').value.trim();
+  const text = document.getElementById('tmpl-text').value.trim();
+  if (!name || !text) { alert('Заполни название и текст'); return; }
+  const r = await fetch('/api/message-templates', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, category: document.getElementById('tmpl-category').value, template_text: text})
+  });
+  if ((await r.json()).ok) location.reload();
+}
+
+async function deleteTemplate(id, btn) {
+  if (!confirm('Удалить?')) return;
+  await fetch(`/api/message-templates/${id}`, {method:'DELETE'});
+  btn.closest('.tmpl-card').remove();
+}
+
+function copyTemplate(text) {
+  navigator.clipboard.writeText(text).then(() => alert('Скопировано!'));
+}
+
+function useTemplate(id) {
+  document.getElementById('use-text').value = _templates[id] || '';
+  document.getElementById('use-modal').style.display = 'flex';
+}
+
+function closeUse() { document.getElementById('use-modal').style.display = 'none'; }
+
+function copyUse() {
+  const text = document.getElementById('use-text').value;
+  navigator.clipboard.writeText(text).then(() => alert('Скопировано!'));
+}
+</script>
+{% endblock %}

@@ -4,7 +4,7 @@
 """
 import sqlite3
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "am_hub.db"
@@ -110,6 +110,113 @@ def init_db():
                 PRIMARY KEY (tg_id, client_id)
             )
         """)
+
+        # ── Новые таблицы ──────────────────────────────────────────────────────
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS health_history (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id    INTEGER NOT NULL REFERENCES clients(id),
+                snapshot_date DATE NOT NULL,
+                health_score  INTEGER DEFAULT 0,
+                color         TEXT DEFAULT 'yellow',
+                notes         TEXT DEFAULT '',
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS message_templates (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                name          TEXT NOT NULL,
+                category      TEXT DEFAULT 'general',
+                template_text TEXT NOT NULL,
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_base (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                category      TEXT DEFAULT 'search',
+                title         TEXT NOT NULL,
+                description   TEXT DEFAULT '',
+                metric_name   TEXT DEFAULT '',
+                metric_result TEXT DEFAULT '',
+                applies_to    TEXT DEFAULT '',
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS task_templates (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                category   TEXT DEFAULT 'general',
+                tasks_json TEXT DEFAULT '[]',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_activity (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id  INTEGER NOT NULL REFERENCES clients(id),
+                direction  TEXT DEFAULT 'am',  -- 'am' = AM написал, 'client' = клиент написал
+                note       TEXT DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS improvements (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id    INTEGER NOT NULL REFERENCES clients(id),
+                task_id      INTEGER REFERENCES tasks(id),
+                title        TEXT NOT NULL,
+                metric_name  TEXT DEFAULT '',
+                metric_before TEXT DEFAULT '',
+                metric_after  TEXT DEFAULT '',
+                launched_at  DATE,
+                result_at    DATE,
+                status       TEXT DEFAULT 'running',  -- running | success | no_impact
+                notes        TEXT DEFAULT '',
+                created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ── Миграции новых колонок ─────────────────────────────────────────────
+        new_cols = [
+            ("meetings",  "followup_sent",    "INTEGER DEFAULT 0"),
+            ("meetings",  "followup_sent_at", "DATETIME"),
+            ("meetings",  "postmit_sent",     "INTEGER DEFAULT 0"),
+            ("meetings",  "postmit_sent_at",  "DATETIME"),
+            ("meetings",  "qbr_score",        "INTEGER DEFAULT 0"),
+            ("meetings",  "meeting_time",     "TEXT DEFAULT ''"),
+            ("clients",   "health_score",     "INTEGER DEFAULT 0"),
+            ("clients",   "last_chat_at",     "DATE"),
+            ("clients",   "last_chat_note",   "TEXT DEFAULT ''"),
+            ("tasks",     "recurring",        "INTEGER DEFAULT 0"),
+            ("tasks",     "recurring_days",   "INTEGER DEFAULT 0"),
+            ("tasks",     "metric_name",      "TEXT DEFAULT ''"),
+            ("tasks",     "metric_before",    "TEXT DEFAULT ''"),
+            ("tasks",     "metric_after",     "TEXT DEFAULT ''"),
+        ]
+        for table, col, defn in new_cols:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
+
+        # ── Seed шаблонов сообщений ───────────────────────────────────────────
+        seed_count = conn.execute("SELECT COUNT(*) FROM message_templates").fetchone()[0]
+        if seed_count == 0:
+            _seed_message_templates(conn)
+
+        # ── Seed шаблонов задач ───────────────────────────────────────────────
+        tmpl_count = conn.execute("SELECT COUNT(*) FROM task_templates").fetchone()[0]
+        if tmpl_count == 0:
+            _seed_task_templates(conn)
 
 
 # ── Clients ──────────────────────────────────────────────────────────────────
@@ -574,3 +681,506 @@ def seed_clients():
     # Всегда обновляем site_ids даже если клиенты уже есть
     for name, segment, site_ids in SEED_CLIENTS:
         upsert_client(name, segment, site_ids=site_ids)
+
+
+# ── Followup ─────────────────────────────────────────────────────────────────
+
+def get_followup_pending(days_back: int = 14) -> list[dict]:
+    """Встречи за последние N дней без отправленного фолоуапа."""
+    cutoff = (date.today() - timedelta(days=days_back)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT m.*, c.name as client_name, c.segment, c.tg_chat_id
+            FROM meetings m
+            JOIN clients c ON c.id = m.client_id
+            WHERE m.meeting_date >= ?
+              AND m.followup_sent = 0
+            ORDER BY m.meeting_date DESC
+        """, (cutoff,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_followups(days_back: int = 30) -> list[dict]:
+    """Все встречи за последние N дней с флагом фолоуапа."""
+    cutoff = (date.today() - timedelta(days=days_back)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT m.*, c.name as client_name, c.segment, c.tg_chat_id
+            FROM meetings m
+            JOIN clients c ON c.id = m.client_id
+            WHERE m.meeting_date >= ?
+            ORDER BY m.meeting_date DESC
+        """, (cutoff,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_followup_sent(meeting_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE meetings SET followup_sent=1, followup_sent_at=? WHERE id=?",
+            (datetime.now().isoformat(), meeting_id)
+        )
+
+
+def mark_postmit_sent(meeting_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE meetings SET postmit_sent=1, postmit_sent_at=? WHERE id=?",
+            (datetime.now().isoformat(), meeting_id)
+        )
+
+
+def set_qbr_score(meeting_id: int, score: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE meetings SET qbr_score=? WHERE id=?", (score, meeting_id))
+
+
+def set_meeting_time(meeting_id: int, meeting_time: str):
+    """Установить время встречи (HH:MM)."""
+    with get_conn() as conn:
+        conn.execute("UPDATE meetings SET meeting_time=? WHERE id=?", (meeting_time, meeting_id))
+
+
+# ── Health Score ──────────────────────────────────────────────────────────────
+
+def calculate_health_score(client_id: int) -> dict:
+    """
+    Вычисляет Health Score клиента (0–100).
+    Критерии:
+      - Частота встреч по нормативу сегмента (25 баллов)
+      - Просроченные задачи (25 баллов)
+      - Mood последних 3 встреч (25 баллов)
+      - Чекапы в срок (25 баллов)
+    """
+    client = get_client(client_id)
+    if not client:
+        return {"score": 0, "color": "red"}
+
+    score = 0
+    segment = client.get("segment", "SMB")
+    days_norm = CHECKUP_DAYS.get(segment, 90)
+
+    # 1. Частота встреч (25 баллов)
+    last_checkup = client.get("last_checkup") or client.get("last_meeting")
+    if last_checkup:
+        last_date = date.fromisoformat(last_checkup)
+        days_since = (date.today() - last_date).days
+        ratio = days_since / days_norm
+        if ratio <= 0.8:
+            score += 25
+        elif ratio <= 1.0:
+            score += 15
+        elif ratio <= 1.5:
+            score += 5
+        # > 1.5 нормы → 0 баллов
+
+    # 2. Просроченные задачи (25 баллов)
+    open_tasks = get_client_tasks(client_id, "open")
+    today_str = date.today().isoformat()
+    overdue = [t for t in open_tasks if t.get("due_date") and t["due_date"] < today_str]
+    blocked = [t for t in open_tasks if t.get("status") == "blocked"]
+    deductions = len(overdue) * 5 + len(blocked) * 3
+    score += max(0, 25 - deductions)
+
+    # 3. Mood последних 3 встреч (25 баллов)
+    meetings = get_client_meetings(client_id, limit=3)
+    if meetings:
+        mood_scores = {"positive": 25, "neutral": 15, "risk": 0}
+        avg_mood = sum(mood_scores.get(m.get("mood", "neutral"), 15) for m in meetings) / len(meetings)
+        score += avg_mood
+    else:
+        score += 10  # нейтральный если нет встреч
+
+    # 4. Чеклист/подготовленность (25 баллов) — если > 2 встреч в историии
+    total_meetings = get_client_meetings(client_id, limit=20)
+    if len(total_meetings) >= 3:
+        score += 25
+    elif len(total_meetings) >= 1:
+        score += 15
+
+    score = min(100, max(0, int(score)))
+    if score >= 70:
+        color = "green"
+    elif score >= 40:
+        color = "yellow"
+    else:
+        color = "red"
+
+    return {"score": score, "color": color}
+
+
+def update_client_health_score(client_id: int) -> dict:
+    """Пересчитывает и сохраняет health score клиента."""
+    result = calculate_health_score(client_id)
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE clients SET health_score=? WHERE id=?",
+            (result["score"], client_id)
+        )
+    return result
+
+
+def save_health_snapshot(client_id: int, score: int, color: str, notes: str = ""):
+    """Сохранить снапшот health score для трекинга тренда."""
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        # Обновляем если снапшот за сегодня уже есть
+        existing = conn.execute(
+            "SELECT id FROM health_history WHERE client_id=? AND snapshot_date=?",
+            (client_id, today)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE health_history SET health_score=?, color=?, notes=? WHERE id=?",
+                (score, color, notes, existing["id"])
+            )
+        else:
+            conn.execute(
+                "INSERT INTO health_history (client_id, snapshot_date, health_score, color, notes) VALUES (?,?,?,?,?)",
+                (client_id, today, score, color, notes)
+            )
+
+
+def get_health_history(client_id: int, months: int = 6) -> list[dict]:
+    """История health score клиента за N месяцев."""
+    cutoff = (date.today() - timedelta(days=months * 30)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM health_history WHERE client_id=? AND snapshot_date>=? ORDER BY snapshot_date ASC",
+            (client_id, cutoff)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Message Templates ─────────────────────────────────────────────────────────
+
+def _seed_message_templates(conn):
+    """Заполнить стартовые шаблоны сообщений."""
+    templates = [
+        ("Статус задачи", "status",
+         "Привет! Обновляем статус по задаче «{task}»: сейчас в работе у команды {team}, ожидаем готовность до {date}. Если появятся вопросы — напишите!"),
+        ("Задача выполнена", "done",
+         "Готово! Задача «{task}» выполнена. {result} Если хотите что-то скорректировать — пишите, разберём."),
+        ("Нужна информация", "request",
+         "Привет! Для продолжения работы нам нужна информация от вас: {what}. Подскажите, до {date} получим?"),
+        ("Приглашение на встречу", "meeting",
+         "Привет! Предлагаю встретиться {date} в {time} — обсудим {topic}. Удобно? Если нет — предложите другое время."),
+        ("Фолоуап после встречи", "followup",
+         "Привет! Спасибо за встречу {date}. Фиксируем договорённости:\n\n✅ AnyQuery берёт:\n{aq_tasks}\n\n📋 От вас нужно:\n{cl_tasks}\n\nСледующая встреча: {next_meeting}"),
+        ("Ответ на проблему", "issue",
+         "Понял, разбираемся! Передал задачу команде {team}. Дадим апдейт до {date}. Если срочно — пишите сразу."),
+        ("Предложение улучшения", "improvement",
+         "Привет! Подготовили предложение для {client}: {improvement}. По нашим данным у похожих клиентов это дало {result}. Когда можем обсудить?"),
+    ]
+    conn.executemany(
+        "INSERT INTO message_templates (name, category, template_text) VALUES (?,?,?)",
+        templates
+    )
+
+
+def get_message_templates(category: str = None) -> list[dict]:
+    with get_conn() as conn:
+        if category:
+            rows = conn.execute(
+                "SELECT * FROM message_templates WHERE category=? ORDER BY name",
+                (category,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM message_templates ORDER BY category, name").fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_message_template(name: str, category: str, template_text: str) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO message_templates (name, category, template_text) VALUES (?,?,?) RETURNING id",
+            (name, category, template_text)
+        )
+        return cur.fetchone()[0]
+
+
+def delete_message_template(template_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM message_templates WHERE id=?", (template_id,))
+
+
+# ── Task Templates ────────────────────────────────────────────────────────────
+
+def _seed_task_templates(conn):
+    """Заполнить стартовые шаблоны наборов задач."""
+    templates = [
+        ("Онбординг ENT", "onboarding", json.dumps([
+            {"text": "Познакомиться с командой клиента: кто принимает решения, кто технический", "owner": "anyquery", "days": 3},
+            {"text": "Настроить TG-канал для коммуникации, объяснить формат", "owner": "anyquery", "days": 3},
+            {"text": "Провести аудит текущих настроек поиска: нулевые результаты, стоп-слова, синонимы", "owner": "anyquery", "days": 7},
+            {"text": "Настроить синонимы для топ-категорий по запросам", "owner": "anyquery", "days": 14},
+            {"text": "Настроить стоп-слова на основе аудита", "owner": "anyquery", "days": 14},
+            {"text": "Подключить бустинг для ключевых категорий/брендов", "owner": "anyquery", "days": 21},
+            {"text": "Провести первый чекап: замерить метрики после настроек", "owner": "anyquery", "days": 30},
+            {"text": "Предоставить доступ к личному кабинету / консоли", "owner": "client", "days": 5},
+        ], ensure_ascii=False)),
+        ("После QBR", "qbr", json.dumps([
+            {"text": "Отправить постмит клиенту с итогами квартала", "owner": "anyquery", "days": 1},
+            {"text": "Создать задачи на следующий квартал в Merchrules", "owner": "anyquery", "days": 3},
+            {"text": "Обновить приоритеты roadmap по итогам обсуждения", "owner": "anyquery", "days": 3},
+            {"text": "Согласовать KPI-цели на квартал с клиентом", "owner": "anyquery", "days": 7},
+            {"text": "Подтвердить ответственных по каждому приоритету со стороны клиента", "owner": "client", "days": 5},
+        ], ensure_ascii=False)),
+        ("Аудит поиска", "audit", json.dumps([
+            {"text": "Проверить нулевые результаты: скачать топ-100 запросов без результатов", "owner": "anyquery", "days": 3},
+            {"text": "Проверить стоп-слова: актуальны ли все записи", "owner": "anyquery", "days": 3},
+            {"text": "Проверить синонимы: покрывают ли топ-запросы", "owner": "anyquery", "days": 5},
+            {"text": "Проверить бустинг: правила актуальны для текущего ассортимента", "owner": "anyquery", "days": 5},
+            {"text": "Замерить конверсию поиска: текущая vs 30 дней назад", "owner": "anyquery", "days": 7},
+            {"text": "Подготовить отчёт с рекомендациями", "owner": "anyquery", "days": 10},
+        ], ensure_ascii=False)),
+        ("Проблема с поиском", "issue", json.dumps([
+            {"text": "Описать проблему точно: что именно, с какого момента, на каких запросах", "owner": "anyquery", "days": 1},
+            {"text": "Диагностика: проверить индекс, настройки, логи", "owner": "anyquery", "days": 2},
+            {"text": "Передать в DEV с описанием проблемы и ожидаемым поведением", "owner": "anyquery", "days": 2},
+            {"text": "Дать апдейт клиенту: что нашли, когда починим", "owner": "anyquery", "days": 2},
+            {"text": "Проверить результат после фикса", "owner": "anyquery", "days": 5},
+        ], ensure_ascii=False)),
+    ]
+    conn.executemany(
+        "INSERT INTO task_templates (name, category, tasks_json) VALUES (?,?,?)",
+        templates
+    )
+
+
+def get_task_templates() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM task_templates ORDER BY category, name").fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["tasks"] = json.loads(d.get("tasks_json", "[]"))
+        except Exception:
+            d["tasks"] = []
+        result.append(d)
+    return result
+
+
+def add_task_template(name: str, category: str, tasks: list[dict]) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO task_templates (name, category, tasks_json) VALUES (?,?,?) RETURNING id",
+            (name, category, json.dumps(tasks, ensure_ascii=False))
+        )
+        return cur.fetchone()[0]
+
+
+def delete_task_template(template_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM task_templates WHERE id=?", (template_id,))
+
+
+# ── Knowledge Base ────────────────────────────────────────────────────────────
+
+def get_knowledge_base(category: str = None) -> list[dict]:
+    with get_conn() as conn:
+        if category:
+            rows = conn.execute(
+                "SELECT * FROM knowledge_base WHERE category=? ORDER BY created_at DESC",
+                (category,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM knowledge_base ORDER BY category, created_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_knowledge_item(category: str, title: str, description: str,
+                       metric_name: str = "", metric_result: str = "",
+                       applies_to: str = "") -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO knowledge_base (category, title, description, metric_name, metric_result, applies_to)
+               VALUES (?,?,?,?,?,?) RETURNING id""",
+            (category, title, description, metric_name, metric_result, applies_to)
+        )
+        return cur.fetchone()[0]
+
+
+def delete_knowledge_item(item_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM knowledge_base WHERE id=?", (item_id,))
+
+
+# ── Chat Activity ─────────────────────────────────────────────────────────────
+
+CHAT_NORM_DAYS = {"ENT": 7, "SME+": 14, "SME": 14, "SME-": 14, "SMB": 30, "SS": 30}
+
+
+def log_chat_activity(client_id: int, direction: str = "am", note: str = "") -> int:
+    """Записать факт коммуникации с клиентом."""
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO chat_activity (client_id, direction, note) VALUES (?,?,?) RETURNING id",
+            (client_id, direction, note)
+        )
+        record_id = cur.fetchone()[0]
+        # Обновляем дату последней коммуникации
+        conn.execute(
+            "UPDATE clients SET last_chat_at=?, last_chat_note=? WHERE id=?",
+            (today, note[:200] if note else "", client_id)
+        )
+    return record_id
+
+
+def get_chat_activity(client_id: int, limit: int = 20) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM chat_activity WHERE client_id=? ORDER BY created_at DESC LIMIT ?",
+            (client_id, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_clients_without_recent_chat(days_threshold: int = None) -> list[dict]:
+    """Клиенты у которых нет активности в чате дольше нормативного срока."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT c.*, MAX(ca.created_at) as last_activity
+            FROM clients c
+            LEFT JOIN chat_activity ca ON ca.client_id = c.id
+            GROUP BY c.id
+        """).fetchall()
+
+    result = []
+    today = date.today()
+    for row in rows:
+        r = dict(row)
+        segment = r.get("segment", "SMB")
+        norm = days_threshold or CHAT_NORM_DAYS.get(segment, 30)
+        last = r.get("last_activity")
+        if last:
+            try:
+                last_date = datetime.fromisoformat(last).date()
+                days_ago = (today - last_date).days
+            except Exception:
+                days_ago = 9999
+        else:
+            days_ago = 9999
+
+        r["days_since_chat"] = days_ago
+        r["chat_norm_days"] = norm
+        r["chat_overdue"] = days_ago > norm
+        result.append(r)
+
+    return sorted(result, key=lambda x: -x["days_since_chat"])
+
+
+# ── Improvements / A-B tracker ────────────────────────────────────────────────
+
+def get_improvements(client_id: int = None) -> list[dict]:
+    with get_conn() as conn:
+        if client_id:
+            rows = conn.execute(
+                """SELECT i.*, c.name as client_name, c.segment
+                   FROM improvements i JOIN clients c ON c.id = i.client_id
+                   WHERE i.client_id=? ORDER BY i.created_at DESC""",
+                (client_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT i.*, c.name as client_name, c.segment
+                   FROM improvements i JOIN clients c ON c.id = i.client_id
+                   ORDER BY i.created_at DESC"""
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_improvement(client_id: int, title: str, metric_name: str = "",
+                    metric_before: str = "", launched_at: str = None,
+                    notes: str = "", task_id: int = None) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO improvements
+               (client_id, task_id, title, metric_name, metric_before, launched_at, notes)
+               VALUES (?,?,?,?,?,?,?) RETURNING id""",
+            (client_id, task_id, title, metric_name, metric_before,
+             launched_at or date.today().isoformat(), notes)
+        )
+        return cur.fetchone()[0]
+
+
+def update_improvement_result(improvement_id: int, metric_after: str,
+                               result_at: str = None, status: str = "success",
+                               notes: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE improvements SET metric_after=?, result_at=?, status=?, notes=?
+               WHERE id=?""",
+            (metric_after, result_at or date.today().isoformat(), status, notes, improvement_id)
+        )
+
+
+def delete_improvement(improvement_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM improvements WHERE id=?", (improvement_id,))
+
+
+# ── Recurring tasks ───────────────────────────────────────────────────────────
+
+def get_recurring_tasks_to_create() -> list[dict]:
+    """Повторяющиеся задачи которые нужно создать сегодня (все завершены и прошло recurring_days)."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT t.*, c.name as client_name
+            FROM tasks t JOIN clients c ON c.id = t.client_id
+            WHERE t.recurring = 1 AND t.status = 'done' AND t.recurring_days > 0
+        """).fetchall()
+
+    result = []
+    today = date.today()
+    for row in rows:
+        r = dict(row)
+        # Проверяем нет ли уже активной копии
+        with get_conn() as conn:
+            active = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE client_id=? AND text=? AND status='open' AND recurring=1",
+                (r["client_id"], r["text"])
+            ).fetchone()[0]
+        if active:
+            continue
+        # Проверяем когда была закрыта задача
+        closed_date_str = r.get("due_date") or r.get("created_at", "")[:10]
+        try:
+            closed_date = date.fromisoformat(closed_date_str)
+            if (today - closed_date).days >= r["recurring_days"]:
+                result.append(r)
+        except Exception:
+            pass
+    return result
+
+
+def create_recurring_copy(task: dict) -> int:
+    """Создать новую копию повторяющейся задачи."""
+    days = task.get("recurring_days", 30)
+    new_due = (date.today() + timedelta(days=days)).isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO tasks (client_id, owner, text, due_date, recurring, recurring_days, is_internal)
+               VALUES (?,?,?,?,1,?,?) RETURNING id""",
+            (task["client_id"], task["owner"], task["text"], new_due,
+             task["recurring_days"], task.get("is_internal", 0))
+        )
+        return cur.fetchone()[0]
+
+
+# ── Manager TG IDs для персональных уведомлений ──────────────────────────────
+
+def get_all_manager_tg_ids() -> list[int]:
+    """Все TG ID менеджеров у которых есть свой список клиентов."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT DISTINCT tg_id FROM manager_clients").fetchall()
+    return [r["tg_id"] for r in rows]
+
+
+def get_manager_info(tg_id: int) -> dict | None:
+    """Получить данные менеджера по tg_id."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+    return dict(row) if row else None

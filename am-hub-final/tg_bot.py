@@ -159,11 +159,101 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
         await send_message(chat_id, (
             "👋 <b>AM Hub Bot</b>\n\n"
             "Доступные команды:\n"
+            "/today — мои задачи на сегодня\n"
             "/checkups — просроченные чекапы\n"
-            "/top50 — Top-50 клиентов (еженедельный)\n"
-            "/top50m — Top-50 клиентов (ежемесячный)\n"
+            "/client cdek — досье клиента\n"
+            "/done 42 — закрыть задачу по ID\n"
+            "/task cdek Настроить фильтры — создать задачу\n"
+            "/top50 — Top-50 (еженедельный)\n"
+            "/top50m — Top-50 (ежемесячный)\n"
             "/help — эта справка"
         ))
+
+    elif cmd == "/today":
+        from database import get_all_clients_for_manager, get_client_tasks, checkup_status
+        clients = get_clients_fn()
+        today_str = date.today().isoformat()
+        lines = [f"☀️ <b>Твои задачи на сегодня, {today_str}</b>\n"]
+        found = False
+        for c in clients:
+            tasks = get_client_tasks(c["id"], "open")
+            today_tasks = [t for t in tasks if t.get("due_date") == today_str]
+            overdue = [t for t in tasks if t.get("due_date") and t["due_date"] < today_str]
+            if today_tasks or overdue:
+                found = True
+                lines.append(f"\n<b>{c['name']}</b> [{c['segment']}]")
+                for t in overdue[:3]:
+                    lines.append(f"  🔴 #{t['id']} {t['text'][:60]} (просрочена {t['due_date']})")
+                for t in today_tasks[:3]:
+                    lines.append(f"  🔥 #{t['id']} {t['text'][:60]}")
+        if not found:
+            lines.append("✅ Нет задач на сегодня. Всё под контролем!")
+        lines.append("\n<i>/done ID — закрыть задачу</i>")
+        await send_message(chat_id, "\n".join(lines))
+
+    elif cmd == "/client":
+        args = text.split(maxsplit=1)
+        if len(args) < 2:
+            await send_message(chat_id, "❓ Укажи имя клиента: /client cdek")
+            return
+        query = args[1].lower()
+        from database import get_all_clients, get_client_tasks, get_client_meetings, checkup_status, calculate_health_score
+        all_clients = get_all_clients()
+        found = [c for c in all_clients if query in c["name"].lower()]
+        if not found:
+            await send_message(chat_id, f"❓ Клиент «{query}» не найден.")
+            return
+        c = found[0]
+        status = checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])
+        health = calculate_health_score(c["id"])
+        tasks = get_client_tasks(c["id"], "open")
+        meetings = get_client_meetings(c["id"], limit=1)
+        color_map = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
+        lines = [
+            f"📋 <b>{c['name']}</b> [{c['segment']}]",
+            f"",
+            f"Health Score: {color_map.get(health['color'],'❓')} {health['score']}/100",
+            f"Чекап: {color_map.get(status['color'],'❓')} {status['label']}",
+            f"Открытых задач: {len(tasks)}",
+            f"Последняя встреча: {meetings[0]['meeting_date'] if meetings else 'нет'}",
+        ]
+        overdue = [t for t in tasks if t.get("due_date") and t["due_date"] < date.today().isoformat()]
+        if overdue:
+            lines.append(f"\n🔴 Просроченных задач: {len(overdue)}")
+            for t in overdue[:3]:
+                lines.append(f"  #{t['id']} {t['text'][:60]}")
+        await send_message(chat_id, "\n".join(lines))
+
+    elif cmd == "/done":
+        args = text.split()
+        if len(args) < 2 or not args[1].isdigit():
+            await send_message(chat_id, "❓ Укажи ID задачи: /done 42")
+            return
+        task_id = int(args[1])
+        from database import update_task_status, get_all_tasks
+        update_task_status(task_id, "done")
+        await send_message(chat_id, f"✅ Задача #{task_id} закрыта!")
+
+    elif cmd == "/task":
+        args = text.split(maxsplit=2)
+        if len(args) < 3:
+            await send_message(chat_id, "❓ Формат: /task cdek Настроить фильтры")
+            return
+        client_query = args[1].lower()
+        task_text = args[2]
+        from database import get_all_clients, create_internal_task
+        all_clients = get_all_clients()
+        found = [c for c in all_clients if client_query in c["name"].lower()]
+        if not found:
+            await send_message(chat_id, f"❓ Клиент «{client_query}» не найден.")
+            return
+        c = found[0]
+        task_id = create_internal_task(
+            client_id=c["id"],
+            text=task_text,
+            internal_note=f"Создана через TG-бот пользователем {user_id}"
+        )
+        await send_message(chat_id, f"✅ Задача #{task_id} создана для {c['name']}:\n{task_text}")
 
     elif cmd == "/checkups":
         clients = get_clients_fn()

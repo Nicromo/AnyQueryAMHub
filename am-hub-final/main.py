@@ -24,13 +24,32 @@ from database import (
     create_internal_task, get_internal_tasks,
     CHECKLIST_TEMPLATES,
     get_manager_client_ids, set_manager_clients, get_all_clients_for_manager,
+    # Новые функции
+    mark_followup_sent, mark_postmit_sent, set_qbr_score, set_meeting_time,
+    get_all_followups, get_followup_pending,
+    calculate_health_score, update_client_health_score,
+    save_health_snapshot, get_health_history,
+    get_message_templates, add_message_template, delete_message_template,
+    get_task_templates, add_task_template, delete_task_template,
+    get_knowledge_base, add_knowledge_item, delete_knowledge_item,
+    log_chat_activity, get_chat_activity, get_clients_without_recent_chat,
+    get_improvements, add_improvement, update_improvement_result, delete_improvement,
+    get_recurring_tasks_to_create, create_recurring_copy,
+    CHAT_NORM_DAYS,
 )
 from auth import SessionManager, verify_tg_auth
 from tg import build_followup_message, send_to_tg
 from merchrules import sync_meeting_to_merchrules
 from sheets import get_top50_data, SHEETS_SPREADSHEET_ID, SHEETS_TOP50_GID
 import tg_bot
-from ai_followup import process_transcript as ai_process_transcript
+from ai_followup import (
+    process_transcript as ai_process_transcript,
+    generate_pre_meeting_brief,
+    generate_followup_draft,
+    extract_tasks_from_chat,
+    generate_client_recommendations,
+    generate_qbr_report,
+)
 from merchrules_sync import (
     sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate
 )
@@ -332,6 +351,14 @@ async def followup_submit(
         tg_ok = await send_to_tg(BOT_TOKEN, client["tg_chat_id"], msg)
         if tg_ok:
             mark_meeting_tg_sent(meeting_id)
+
+    # ── Авто-планирование следующей встречи (фича #4) ────────────────────────
+    if not next_meeting:
+        days_norm = CHECKUP_DAYS.get(client["segment"], 90)
+        auto_next = (date.fromisoformat(meeting_date) + timedelta(days=days_norm)).isoformat()
+        set_planned_meeting(client_id, auto_next)
+    else:
+        set_planned_meeting(client_id, next_meeting)
 
     return RedirectResponse(f"/prep/{client_id}?saved=1&tg={'ok' if tg_ok else 'skip'}", status_code=303)
 
@@ -1391,4 +1418,661 @@ async def api_meeting_comment(request: Request, meeting_id: int):
     with _sqlite3.connect(db_path) as conn:
         conn.execute("UPDATE meetings SET summary=? WHERE id=?", (new_summary, meeting_id))
 
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# НОВЫЕ МАРШРУТЫ — Фичи #1–30
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── #3: Отправка постмита в TG-канал клиента ────────────────────────────────
+
+@app.post("/api/meeting/{meeting_id}/send-postmit", response_class=JSONResponse)
+async def api_send_postmit(request: Request, meeting_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    meeting = get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404)
+
+    client = get_client(meeting["client_id"])
+    if not client:
+        raise HTTPException(404)
+
+    tg_chat_id = client.get("tg_chat_id", "")
+    if not tg_chat_id:
+        return {"ok": False, "error": "У клиента не указан tg_chat_id. Добавь его в карточке клиента."}
+
+    postmit = (meeting.get("summary") or "").strip()
+    if not postmit:
+        return {"ok": False, "error": "Постмит пустой. Сначала заполни итоги встречи."}
+
+    from tg import send_to_tg
+    ok = await send_to_tg(BOT_TOKEN, tg_chat_id, postmit)
+    if ok:
+        mark_postmit_sent(meeting_id)
+    return {"ok": ok, "error": None if ok else "Ошибка отправки в Telegram"}
+
+
+# ── #11/#12: Трекер фолоуапов ────────────────────────────────────────────────
+
+@app.get("/followups", response_class=HTMLResponse)
+async def followups_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    followups = get_all_followups(days_back=30)
+    pending = get_followup_pending(days_back=14)
+
+    return templates.TemplateResponse("followups.html", {
+        "request": request,
+        "user": user,
+        "followups": followups,
+        "pending_count": len(pending),
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/meeting/{meeting_id}/mark-followup", response_class=JSONResponse)
+async def api_mark_followup(request: Request, meeting_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    mark_followup_sent(meeting_id)
+    return {"ok": True}
+
+
+# ── #13: AI-черновик фолоуапа ────────────────────────────────────────────────
+
+@app.get("/api/meeting/{meeting_id}/followup-draft", response_class=JSONResponse)
+async def api_followup_draft(request: Request, meeting_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    meeting = get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404)
+
+    client = get_client(meeting["client_id"])
+    if not client:
+        raise HTTPException(404)
+
+    aq_tasks = get_client_tasks(client["id"], "open")
+    aq_tasks = [t for t in aq_tasks if t["owner"] == "anyquery" and t.get("meeting_id") == meeting_id]
+    cl_tasks = [t for t in get_client_tasks(client["id"], "open") if t["owner"] == "client" and t.get("meeting_id") == meeting_id]
+
+    next_meeting = client.get("planned_meeting") or ""
+    draft = await generate_followup_draft(client, meeting, aq_tasks, cl_tasks, next_meeting)
+    return {"ok": True, "draft": draft}
+
+
+# ── #10: Kanban-доска задач ──────────────────────────────────────────────────
+
+@app.get("/tasks/kanban", response_class=HTMLResponse)
+async def kanban_page(request: Request, client_id: int = 0, segment: str = ""):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    clients = get_all_clients()
+    all_statuses = ["open", "done", "blocked"]
+
+    columns = {}
+    for status in ["open", "blocked", "done"]:
+        tasks = get_all_tasks(status)
+        if client_id:
+            tasks = [t for t in tasks if t["client_id"] == client_id]
+        if segment:
+            tasks = [t for t in tasks if t.get("segment") == segment]
+        columns[status] = tasks
+
+    filter_client = get_client(client_id) if client_id else None
+
+    return templates.TemplateResponse("kanban.html", {
+        "request": request,
+        "user": user,
+        "columns": columns,
+        "clients": clients,
+        "filter_client": filter_client,
+        "filter_segment": segment,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/task/{task_id}/status", response_class=JSONResponse)
+async def api_task_status(request: Request, task_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    status = body.get("status", "open")
+    if status not in ("open", "done", "blocked"):
+        return {"ok": False, "error": "Invalid status"}
+    update_task_status(task_id, status)
+    return {"ok": True}
+
+
+@app.post("/api/task/{task_id}/recurring", response_class=JSONResponse)
+async def api_task_recurring(request: Request, task_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    days = int(body.get("days", 0))
+    import sqlite3 as _sq
+    from pathlib import Path as _P
+    with _sq.connect(_P("data/am_hub.db")) as conn:
+        conn.execute(
+            "UPDATE tasks SET recurring=?, recurring_days=? WHERE id=?",
+            (1 if days > 0 else 0, days, task_id)
+        )
+    return {"ok": True}
+
+
+# ── #8: Шаблоны наборов задач ────────────────────────────────────────────────
+
+@app.get("/task-templates", response_class=HTMLResponse)
+async def task_templates_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    templates_list = get_task_templates()
+    clients = get_all_clients()
+
+    return templates.TemplateResponse("task_templates.html", {
+        "request": request,
+        "user": user,
+        "task_templates": templates_list,
+        "clients": clients,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/task-templates", response_class=JSONResponse)
+async def api_add_task_template(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    category = body.get("category", "general")
+    tasks = body.get("tasks", [])
+    if not name or not tasks:
+        return {"ok": False, "error": "name and tasks required"}
+    template_id = add_task_template(name, category, tasks)
+    return {"ok": True, "id": template_id}
+
+
+@app.delete("/api/task-templates/{template_id}", response_class=JSONResponse)
+async def api_delete_task_template(request: Request, template_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    delete_task_template(template_id)
+    return {"ok": True}
+
+
+@app.post("/api/client/{client_id}/apply-template/{template_id}", response_class=JSONResponse)
+async def api_apply_template(request: Request, client_id: int, template_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    templates_list = get_task_templates()
+    tmpl = next((t for t in templates_list if t["id"] == template_id), None)
+    if not tmpl:
+        raise HTTPException(404, "Шаблон не найден")
+
+    today = date.today()
+    tasks_to_create = []
+    for t in tmpl.get("tasks", []):
+        days = int(t.get("days", 7))
+        due = (today + timedelta(days=days)).isoformat()
+        tasks_to_create.append({
+            "owner": t.get("owner", "anyquery"),
+            "text": t.get("text", ""),
+            "due_date": due,
+        })
+
+    if tasks_to_create:
+        create_tasks_bulk(None, client_id, tasks_to_create)
+
+    return {"ok": True, "created": len(tasks_to_create)}
+
+
+# ── #22: Шаблоны сообщений ───────────────────────────────────────────────────
+
+@app.get("/message-templates", response_class=HTMLResponse)
+async def message_templates_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    msg_templates = get_message_templates()
+    categories = sorted(set(t["category"] for t in msg_templates))
+
+    return templates.TemplateResponse("message_templates.html", {
+        "request": request,
+        "user": user,
+        "msg_templates": msg_templates,
+        "categories": categories,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/message-templates", response_class=JSONResponse)
+async def api_add_message_template(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    category = body.get("category", "general")
+    template_text = (body.get("template_text") or "").strip()
+    if not name or not template_text:
+        return {"ok": False, "error": "name and template_text required"}
+    tmpl_id = add_message_template(name, category, template_text)
+    return {"ok": True, "id": tmpl_id}
+
+
+@app.delete("/api/message-templates/{tmpl_id}", response_class=JSONResponse)
+async def api_delete_message_template(request: Request, tmpl_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    delete_message_template(tmpl_id)
+    return {"ok": True}
+
+
+# ── #23: База знаний ─────────────────────────────────────────────────────────
+
+@app.get("/knowledge-base", response_class=HTMLResponse)
+async def knowledge_base_page(request: Request, category: str = ""):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    items = get_knowledge_base(category or None)
+    categories = sorted(set(i["category"] for i in get_knowledge_base()))
+
+    return templates.TemplateResponse("knowledge_base.html", {
+        "request": request,
+        "user": user,
+        "items": items,
+        "categories": categories,
+        "filter_category": category,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/knowledge-base", response_class=JSONResponse)
+async def api_add_knowledge(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "title required"}
+    item_id = add_knowledge_item(
+        category=body.get("category", "search"),
+        title=title,
+        description=body.get("description", ""),
+        metric_name=body.get("metric_name", ""),
+        metric_result=body.get("metric_result", ""),
+        applies_to=body.get("applies_to", ""),
+    )
+    return {"ok": True, "id": item_id}
+
+
+@app.delete("/api/knowledge-base/{item_id}", response_class=JSONResponse)
+async def api_delete_knowledge(request: Request, item_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    delete_knowledge_item(item_id)
+    return {"ok": True}
+
+
+# ── #24: AI-рекомендации клиенту ─────────────────────────────────────────────
+
+@app.get("/api/client/{client_id}/recommendations", response_class=JSONResponse)
+async def api_client_recommendations(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    meetings = get_client_meetings(client_id, limit=10)
+    open_tasks = get_client_tasks(client_id, "open")
+    kb = get_knowledge_base()
+
+    recs = await generate_client_recommendations(client, meetings, open_tasks, kb)
+    return {"ok": True, "recommendations": recs}
+
+
+# ── #19: Health Score история ─────────────────────────────────────────────────
+
+@app.get("/api/client/{client_id}/health-history", response_class=JSONResponse)
+async def api_health_history(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    history = get_health_history(client_id, months=6)
+    current = calculate_health_score(client_id)
+    return {"ok": True, "history": history, "current": current}
+
+
+# ── #25: Трекер A/B улучшений ────────────────────────────────────────────────
+
+@app.get("/improvements", response_class=HTMLResponse)
+async def improvements_page(request: Request, client_id: int = 0):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    items = get_improvements(client_id or None)
+    clients = get_all_clients()
+    filter_client = get_client(client_id) if client_id else None
+
+    return templates.TemplateResponse("improvements.html", {
+        "request": request,
+        "user": user,
+        "items": items,
+        "clients": clients,
+        "filter_client": filter_client,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/improvements", response_class=JSONResponse)
+async def api_add_improvement(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    client_id = int(body.get("client_id", 0))
+    title = (body.get("title") or "").strip()
+    if not client_id or not title:
+        return {"ok": False, "error": "client_id and title required"}
+    item_id = add_improvement(
+        client_id=client_id,
+        title=title,
+        metric_name=body.get("metric_name", ""),
+        metric_before=body.get("metric_before", ""),
+        launched_at=body.get("launched_at") or None,
+        notes=body.get("notes", ""),
+        task_id=body.get("task_id") or None,
+    )
+    return {"ok": True, "id": item_id}
+
+
+@app.post("/api/improvements/{item_id}/result", response_class=JSONResponse)
+async def api_improvement_result(request: Request, item_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    update_improvement_result(
+        improvement_id=item_id,
+        metric_after=body.get("metric_after", ""),
+        result_at=body.get("result_at") or None,
+        status=body.get("status", "success"),
+        notes=body.get("notes", ""),
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/improvements/{item_id}", response_class=JSONResponse)
+async def api_delete_improvement(request: Request, item_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    delete_improvement(item_id)
+    return {"ok": True}
+
+
+# ── #26/#27: Генерация QBR + QBR Score ──────────────────────────────────────
+
+@app.get("/api/qbr/{client_id}/generate", response_class=JSONResponse)
+async def api_qbr_generate(request: Request, client_id: int, quarter: str = ""):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    if not quarter:
+        d = date.today()
+        quarter = f"Q{(d.month - 1) // 3 + 1} {d.year}"
+
+    # Встречи за квартал (примерно 90 дней)
+    all_meetings = get_client_meetings(client_id, limit=20)
+    cutoff = (date.today() - timedelta(days=95)).isoformat()
+    quarter_meetings = [m for m in all_meetings if (m.get("meeting_date") or "") >= cutoff]
+
+    done_tasks = get_client_tasks(client_id, "done")
+    open_tasks = get_client_tasks(client_id, "open")
+
+    result = await generate_qbr_report(client, quarter_meetings, done_tasks, open_tasks, quarter)
+    return result
+
+
+@app.post("/api/meeting/{meeting_id}/qbr-score", response_class=JSONResponse)
+async def api_qbr_score(request: Request, meeting_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    score = int(body.get("score", 0))
+    if not 1 <= score <= 5:
+        return {"ok": False, "error": "Score must be 1-5"}
+    set_qbr_score(meeting_id, score)
+    return {"ok": True}
+
+
+# ── #20: Трекер активности в чатах ───────────────────────────────────────────
+
+@app.get("/chat-activity", response_class=HTMLResponse)
+async def chat_activity_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    clients = get_clients_without_recent_chat()
+    overdue = [c for c in clients if c.get("chat_overdue")]
+    ok_clients = [c for c in clients if not c.get("chat_overdue")]
+
+    return templates.TemplateResponse("chat_activity.html", {
+        "request": request,
+        "user": user,
+        "overdue": overdue,
+        "ok_clients": ok_clients,
+        "today": date.today().isoformat(),
+        "chat_norm": CHAT_NORM_DAYS,
+    })
+
+
+@app.post("/api/client/{client_id}/chat-log", response_class=JSONResponse)
+async def api_chat_log(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    direction = body.get("direction", "am")
+    note = (body.get("note") or "").strip()
+    record_id = log_chat_activity(client_id, direction, note)
+    return {"ok": True, "id": record_id}
+
+
+@app.get("/api/client/{client_id}/chat-log", response_class=JSONResponse)
+async def api_get_chat_log(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    activity = get_chat_activity(client_id, limit=20)
+    return {"ok": True, "activity": activity}
+
+
+# ── #21: Извлечение задач из переписки ───────────────────────────────────────
+
+@app.post("/api/extract-tasks", response_class=JSONResponse)
+async def api_extract_tasks(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    client_id = int(body.get("client_id", 0))
+    client_name = body.get("client_name", "")
+
+    if not text:
+        return {"ok": False, "error": "Текст переписки пустой"}
+
+    if client_id and not client_name:
+        c = get_client(client_id)
+        if c:
+            client_name = c["name"]
+
+    tasks = await extract_tasks_from_chat(text, client_name)
+    return {"ok": True, "tasks": tasks}
+
+
+@app.post("/api/client/{client_id}/create-from-chat", response_class=JSONResponse)
+async def api_create_from_chat(request: Request, client_id: int):
+    """Создать задачи извлечённые из переписки."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    tasks = body.get("tasks", [])
+    if not tasks:
+        return {"ok": False, "error": "Нет задач"}
+    create_tasks_bulk(None, client_id, tasks)
+    return {"ok": True, "created": len(tasks)}
+
+
+# ── #16: Health Score API ─────────────────────────────────────────────────────
+
+@app.post("/api/client/{client_id}/recalc-health", response_class=JSONResponse)
+async def api_recalc_health(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    result = update_client_health_score(client_id)
+    save_health_snapshot(client_id, result["score"], result["color"])
+    return {"ok": True, "score": result["score"], "color": result["color"]}
+
+
+# ── #18: Чеклист здоровья платформы ─────────────────────────────────────────
+
+PRODUCT_HEALTH_CHECKLIST = {
+    "search": [
+        {"id": "s1", "text": "Нулевые результаты < 3%?", "hint": "Скачать топ-100 запросов без результатов"},
+        {"id": "s2", "text": "Синонимы настроены для топ-категорий?", "hint": "Проверить покрытие по частотным запросам"},
+        {"id": "s3", "text": "Стоп-слова актуальны?", "hint": "Проверить нет ли лишних / устаревших"},
+        {"id": "s4", "text": "Бустинг настроен для сезонных товаров?", "hint": "Учесть текущие акции и сезон"},
+        {"id": "s5", "text": "Конверсия поиска в норме (vs. прошлый период)?", "hint": "Сравнить с прошлым месяцем"},
+        {"id": "s6", "text": "CTR поисковой выдачи в норме?", "hint": "Норма: > 30% для ENT"},
+    ],
+    "recommendations": [
+        {"id": "r1", "text": "CTR блока рекомендаций 7–10%?", "hint": "Проверить в дашборде Merchrules"},
+        {"id": "r2", "text": "Алгоритм ротации настроен правильно?", "hint": "Проверить приоритеты и весовые коэффициенты"},
+        {"id": "r3", "text": "Нет устаревших / снятых с продажи товаров в выдаче?", "hint": "Проверить топ-10 рекомендуемых"},
+    ],
+    "reviews": [
+        {"id": "rv1", "text": "Средний рейтинг > 4.0?", "hint": "Посмотреть общий рейтинг за период"},
+        {"id": "rv2", "text": "Все негативные отзывы получили ответ?", "hint": "Проверить отзывы 1-2 звезды"},
+        {"id": "rv3", "text": "Количество отзывов за период растёт?", "hint": "Сравнить с прошлым периодом"},
+    ],
+}
+
+
+@app.get("/api/product-health-checklist", response_class=JSONResponse)
+async def api_product_health_checklist(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    return {"ok": True, "checklist": PRODUCT_HEALTH_CHECKLIST}
+
+
+# ── #1: Ручной запуск AI-брифа ───────────────────────────────────────────────
+
+@app.get("/api/client/{client_id}/pre-meeting-brief", response_class=JSONResponse)
+async def api_pre_meeting_brief(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    meetings = get_client_meetings(client_id, limit=3)
+    open_tasks = get_client_tasks(client_id, "open")
+    health = calculate_health_score(client_id)
+
+    brief = await generate_pre_meeting_brief(client, meetings, open_tasks, health)
+    return {"ok": True, "brief": brief, "health": health}
+
+
+# ── Обновить планирование в api_checkup_done (авто) ─────────────────────────
+
+# api_checkup_done уже есть выше, просто добавляем авто-планирование через patch
+
+@app.get("/qbr/{client_id}/generate", response_class=HTMLResponse)
+async def qbr_generate_page(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    d = date.today()
+    quarter = f"Q{(d.month - 1) // 3 + 1} {d.year}"
+    cutoff = (d - timedelta(days=95)).isoformat()
+    all_meetings = get_client_meetings(client_id, limit=20)
+    quarter_meetings = [m for m in all_meetings if (m.get("meeting_date") or "") >= cutoff]
+    done_tasks = get_client_tasks(client_id, "done")
+    open_tasks = get_client_tasks(client_id, "open")
+    health = calculate_health_score(client_id)
+    client["health_score"] = health["score"]
+
+    return templates.TemplateResponse("qbr_generate.html", {
+        "request": request,
+        "user": user,
+        "client": client,
+        "quarter": quarter,
+        "quarter_meetings": quarter_meetings,
+        "done_tasks": done_tasks,
+        "open_tasks": open_tasks,
+        "today": d.isoformat(),
+    })
+
+
+@app.post("/api/meeting/{meeting_id}/set-time", response_class=JSONResponse)
+async def api_meeting_set_time(request: Request, meeting_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    meeting_time = (body.get("time") or "").strip()
+    set_meeting_time(meeting_id, meeting_time)
     return {"ok": True}

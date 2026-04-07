@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Шаблоны задач — AM Hub{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div>
+      <h1>📋 Шаблоны задач</h1>
+      <p class="text-muted">Готовые наборы задач для типовых ситуаций</p>
+    </div>
+    <button class="btn btn-primary" onclick="toggleNewForm()">+ Новый шаблон</button>
+  </div>
+</div>
+
+<!-- Применить шаблон к клиенту -->
+<div class="card" style="margin-bottom:16px">
+  <h3 style="margin-bottom:12px">⚡ Применить шаблон к клиенту</h3>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div style="flex:1;min-width:200px">
+      <label class="form-label">Клиент</label>
+      <select id="apply-client" class="form-control">
+        <option value="">— выбрать —</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}">{{ c.name }} [{{ c.segment }}]</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="flex:1;min-width:200px">
+      <label class="form-label">Шаблон</label>
+      <select id="apply-template" class="form-control">
+        <option value="">— выбрать —</option>
+        {% for t in task_templates %}
+        <option value="{{ t.id }}">{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="applyTemplate()">Применить ✅</button>
+  </div>
+  <div id="apply-result" style="margin-top:8px;font-size:0.85rem"></div>
+</div>
+
+<!-- Форма нового шаблона -->
+<div id="new-form" class="card" style="display:none;margin-bottom:16px">
+  <h3 style="margin-bottom:12px">Новый шаблон</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div>
+      <label class="form-label">Название *</label>
+      <input type="text" id="tmpl-name" class="form-control" placeholder="Онбординг SME+">
+    </div>
+    <div>
+      <label class="form-label">Категория</label>
+      <select id="tmpl-category" class="form-control">
+        <option value="onboarding">Онбординг</option>
+        <option value="qbr">QBR</option>
+        <option value="audit">Аудит</option>
+        <option value="issue">Проблема</option>
+        <option value="general">Общий</option>
+      </select>
+    </div>
+  </div>
+  <div id="tmpl-tasks-list">
+    <div class="tmpl-task-row" style="display:flex;gap:8px;margin-bottom:8px">
+      <input type="text" class="form-control task-text" placeholder="Текст задачи" style="flex:1">
+      <select class="form-control task-owner" style="width:120px">
+        <option value="anyquery">AnyQuery</option>
+        <option value="client">Клиент</option>
+      </select>
+      <input type="number" class="form-control task-days" placeholder="Дни" style="width:80px" value="7">
+      <button class="btn btn-ghost" onclick="removeTaskRow(this)">✕</button>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button class="btn btn-secondary" onclick="addTaskRow()">+ Добавить задачу</button>
+    <button class="btn btn-primary" onclick="saveTemplate()">💾 Сохранить</button>
+    <button class="btn btn-ghost" onclick="toggleNewForm()">Отмена</button>
+  </div>
+</div>
+
+<!-- Список шаблонов -->
+{% for tmpl in task_templates %}
+<div class="card" style="margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div>
+      <strong>{{ tmpl.name }}</strong>
+      <span class="badge badge-sme" style="margin-left:8px">{{ tmpl.category }}</span>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="deleteTemplate({{ tmpl.id }}, this)" title="Удалить">🗑</button>
+  </div>
+  <table class="table" style="font-size:0.85rem">
+    <thead><tr><th>#</th><th>Задача</th><th>Ответственный</th><th>Срок (дни)</th></tr></thead>
+    <tbody>
+      {% for t in tmpl.tasks %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ t.text }}</td>
+        <td><span class="owner-badge {% if t.owner == 'anyquery' %}owner-aq{% else %}owner-cl{% endif %}">{{ 'AnyQuery' if t.owner == 'anyquery' else 'Клиент' }}</span></td>
+        <td>+{{ t.days }} дн.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:32px;color:var(--text-muted)">
+  Шаблоны ещё не созданы. Нажми «+ Новый шаблон».
+</div>
+{% endfor %}
+
+<style>
+.owner-badge { padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:600; }
+.owner-aq { background:rgba(108,99,255,0.2); color:var(--accent); }
+.owner-cl { background:rgba(62,207,142,0.2); color:var(--green); }
+</style>
+
+<script>
+function toggleNewForm() {
+  const f = document.getElementById('new-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+function addTaskRow() {
+  const row = document.createElement('div');
+  row.className = 'tmpl-task-row';
+  row.style.cssText = 'display:flex;gap:8px;margin-bottom:8px';
+  row.innerHTML = `
+    <input type="text" class="form-control task-text" placeholder="Текст задачи" style="flex:1">
+    <select class="form-control task-owner" style="width:120px">
+      <option value="anyquery">AnyQuery</option><option value="client">Клиент</option>
+    </select>
+    <input type="number" class="form-control task-days" placeholder="Дни" style="width:80px" value="7">
+    <button class="btn btn-ghost" onclick="removeTaskRow(this)">✕</button>`;
+  document.getElementById('tmpl-tasks-list').appendChild(row);
+}
+
+function removeTaskRow(btn) { btn.closest('.tmpl-task-row').remove(); }
+
+async function saveTemplate() {
+  const name = document.getElementById('tmpl-name').value.trim();
+  const category = document.getElementById('tmpl-category').value;
+  if (!name) { alert('Введи название шаблона'); return; }
+
+  const rows = document.querySelectorAll('.tmpl-task-row');
+  const tasks = [];
+  rows.forEach(row => {
+    const text = row.querySelector('.task-text').value.trim();
+    const owner = row.querySelector('.task-owner').value;
+    const days = parseInt(row.querySelector('.task-days').value) || 7;
+    if (text) tasks.push({text, owner, days});
+  });
+  if (!tasks.length) { alert('Добавь хотя бы одну задачу'); return; }
+
+  const r = await fetch('/api/task-templates', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name, category, tasks})
+  });
+  if ((await r.json()).ok) location.reload();
+}
+
+async function deleteTemplate(id, btn) {
+  if (!confirm('Удалить шаблон?')) return;
+  await fetch(`/api/task-templates/${id}`, {method:'DELETE'});
+  btn.closest('.card').remove();
+}
+
+async function applyTemplate() {
+  const clientId = document.getElementById('apply-client').value;
+  const templateId = document.getElementById('apply-template').value;
+  if (!clientId || !templateId) { alert('Выбери клиента и шаблон'); return; }
+
+  const r = await fetch(`/api/client/${clientId}/apply-template/${templateId}`, {method:'POST'});
+  const d = await r.json();
+  const el = document.getElementById('apply-result');
+  if (d.ok) {
+    el.innerHTML = `<span style="color:var(--green)">✅ Создано ${d.created} задач!</span>`;
+  } else {
+    el.innerHTML = `<span style="color:var(--red)">❌ ${d.error}</span>`;
+  }
+}
+</script>
+{% endblock %}

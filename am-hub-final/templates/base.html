@@ -38,6 +38,20 @@
       <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.72rem"></span>
     </a>
 
+    <div class="nav-section-label" style="margin-top:8px">Задачи</div>
+    <a class="nav-link {% if request.url.path == '/tasks/kanban' %}active{% endif %}" href="/tasks/kanban">
+      <span class="icon">🗂️</span> Kanban
+    </a>
+    <a class="nav-link {% if request.url.path == '/followups' %}active{% endif %}" href="/followups">
+      <span class="icon">📨</span> Фолоуапы
+    </a>
+    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
+      <span class="icon">🔒</span> Внутренние задачи
+    </a>
+    <a class="nav-link {% if request.url.path == '/task-templates' %}active{% endif %}" href="/task-templates">
+      <span class="icon">📋</span> Шаблоны задач
+    </a>
+
     <div class="nav-section-label" style="margin-top:8px">Анализ</div>
     <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
       <span class="icon">📈</span> Аналитика
@@ -45,11 +59,20 @@
     <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar">
       <span class="icon">📆</span> QBR Календарь
     </a>
-    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
-      <span class="icon">🔒</span> Внутренние задачи
+    <a class="nav-link {% if request.url.path == '/improvements' %}active{% endif %}" href="/improvements">
+      <span class="icon">🧪</span> A/B Улучшения
     </a>
 
     <div class="nav-section-label" style="margin-top:8px">Инструменты</div>
+    <a class="nav-link {% if request.url.path == '/knowledge-base' %}active{% endif %}" href="/knowledge-base">
+      <span class="icon">💡</span> База знаний
+    </a>
+    <a class="nav-link {% if request.url.path == '/chat-activity' %}active{% endif %}" href="/chat-activity">
+      <span class="icon">💬</span> Чаты
+    </a>
+    <a class="nav-link {% if request.url.path == '/message-templates' %}active{% endif %}" href="/message-templates">
+      <span class="icon">💌</span> Шаблоны писем
+    </a>
     <a class="nav-link {% if request.url.path == '/settings/my-clients' %}active{% endif %}" href="/settings/my-clients">
       <span class="icon">👤</span> Мои клиенты
     </a>

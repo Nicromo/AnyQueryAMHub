@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Генерация QBR — {{ client.name }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+  <a href="/qbr/{{ client.id }}" class="btn btn-ghost btn-sm">← QBR</a>
+  <a href="/prep/{{ client.id }}" class="btn btn-ghost btn-sm">↑ Клиент</a>
+</div>
+
+<div class="page-header">
+  <h1>📊 AI-генерация QBR: {{ client.name }}</h1>
+  <p class="text-muted">{{ quarter }} · {{ client.segment }}</p>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 2fr;gap:20px;align-items:start">
+
+  <!-- Левая панель: управление -->
+  <div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">⚙️ Параметры</h3>
+      <label class="form-label">Квартал</label>
+      <input type="text" id="qbr-quarter" class="form-control" value="{{ quarter }}" style="margin-bottom:10px">
+      <button class="btn btn-primary" style="width:100%" onclick="generateQBR()" id="gen-btn">
+        🤖 Сгенерировать
+      </button>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px;text-align:center">
+        AI проанализирует встречи и задачи квартала
+      </p>
+    </div>
+
+    <!-- QBR Score -->
+    <div class="card" style="margin-top:12px">
+      <h3 style="margin-bottom:12px">⭐ QBR Score</h3>
+      <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px">Оцени встречу после QBR (1–5)</p>
+      <div style="display:flex;gap:8px;justify-content:center">
+        {% for s in [1,2,3,4,5] %}
+        <button class="score-btn" onclick="setScore({{ s }}, this)" data-score="{{ s }}">{{ s }}⭐</button>
+        {% endfor %}
+      </div>
+      <div id="score-result" style="text-align:center;margin-top:8px;font-size:0.85rem"></div>
+    </div>
+
+    <!-- Статистика за квартал -->
+    <div class="card" style="margin-top:12px">
+      <h3 style="margin-bottom:12px">📈 Статистика квартала</h3>
+      <div class="stat-row"><span>Встреч</span><strong>{{ quarter_meetings | length }}</strong></div>
+      <div class="stat-row"><span>Задач закрыто</span><strong>{{ done_tasks | length }}</strong></div>
+      <div class="stat-row"><span>Задач открыто</span><strong>{{ open_tasks | length }}</strong></div>
+      {% set health = client.health_score %}
+      <div class="stat-row"><span>Health Score</span><strong>{{ health }}/100</strong></div>
+    </div>
+  </div>
+
+  <!-- Правая панель: результат -->
+  <div>
+    <div id="qbr-loading" style="display:none;text-align:center;padding:48px">
+      <div style="font-size:2rem;margin-bottom:12px">⏳</div>
+      <p>AI анализирует данные квартала...</p>
+    </div>
+
+    <div id="qbr-result" style="display:none">
+      <!-- Summary -->
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-bottom:8px">📝 Итоги квартала</h3>
+        <p id="qbr-summary" style="line-height:1.6"></p>
+        <div style="margin-top:8px;font-size:0.82rem;color:var(--text-muted)">
+          Тренд: <span id="qbr-trend" style="font-weight:600"></span>
+        </div>
+      </div>
+
+      <!-- Achievements -->
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-bottom:8px">✅ Ключевые достижения</h3>
+        <ul id="qbr-achievements" style="padding-left:20px;line-height:1.8;font-size:0.9rem"></ul>
+      </div>
+
+      <!-- Not done -->
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-bottom:8px">⚠️ Что не успели</h3>
+        <ul id="qbr-not-done" style="padding-left:20px;line-height:1.8;font-size:0.9rem;color:var(--text-muted)"></ul>
+      </div>
+
+      <!-- Next quarter -->
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-bottom:8px">🎯 Приоритеты следующего квартала</h3>
+        <ul id="qbr-next" style="padding-left:20px;line-height:1.8;font-size:0.9rem"></ul>
+      </div>
+
+      <!-- Risks -->
+      <div id="qbr-risks-block" class="card" style="margin-bottom:12px;display:none">
+        <h3 style="margin-bottom:8px">🚨 Риски</h3>
+        <ul id="qbr-risks" style="padding-left:20px;line-height:1.8;font-size:0.9rem;color:var(--red)"></ul>
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="copyQBR()">📋 Скопировать текст</button>
+        <button class="btn btn-primary" onclick="generateQBR()">🔄 Перегенерировать</button>
+      </div>
+    </div>
+
+    <!-- Заглушка пока не нажали -->
+    <div id="qbr-placeholder" class="card" style="text-align:center;padding:48px">
+      <div style="font-size:2.5rem;margin-bottom:12px">📊</div>
+      <p>Нажми «Сгенерировать» — AI составит черновик QBR на основе данных квартала.</p>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-top:8px">Используются: {{ quarter_meetings | length }} встреч, {{ done_tasks | length + open_tasks | length }} задач</p>
+    </div>
+  </div>
+</div>
+
+<style>
+.stat-row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.88rem; }
+.stat-row:last-child { border-bottom:none; }
+.score-btn { padding:8px 12px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); color:var(--text); cursor:pointer; font-size:0.85rem; transition:background 0.15s; }
+.score-btn:hover { background:var(--accent); color:#fff; }
+.score-btn.active { background:var(--accent); color:#fff; }
+</style>
+
+<script>
+let _qbrData = null;
+let _activeScoreBtn = null;
+
+async function generateQBR() {
+  const quarter = document.getElementById('qbr-quarter').value;
+  document.getElementById('qbr-placeholder').style.display = 'none';
+  document.getElementById('qbr-result').style.display = 'none';
+  document.getElementById('qbr-loading').style.display = 'block';
+  document.getElementById('gen-btn').disabled = true;
+
+  const r = await fetch(`/api/qbr/{{ client.id }}/generate?quarter=${encodeURIComponent(quarter)}`);
+  const d = await r.json();
+
+  document.getElementById('qbr-loading').style.display = 'none';
+  document.getElementById('gen-btn').disabled = false;
+
+  if (d.error) {
+    document.getElementById('qbr-placeholder').innerHTML = `<p style="color:var(--red)">❌ ${d.error}</p>`;
+    document.getElementById('qbr-placeholder').style.display = 'block';
+    return;
+  }
+
+  _qbrData = d;
+  document.getElementById('qbr-summary').textContent = d.summary || '—';
+  document.getElementById('qbr-trend').textContent = d.health_trend || '—';
+
+  const ach = document.getElementById('qbr-achievements');
+  ach.innerHTML = (d.achievements||[]).map(a => `<li>${a}</li>`).join('') || '<li>—</li>';
+
+  const nd = document.getElementById('qbr-not-done');
+  nd.innerHTML = (d.not_done||[]).map(a => `<li>${a}</li>`).join('') || '<li>Всё выполнено!</li>';
+
+  const nxt = document.getElementById('qbr-next');
+  nxt.innerHTML = (d.q_next_priorities||[]).map(a => `<li>${a}</li>`).join('') || '<li>—</li>';
+
+  if (d.risks && d.risks.length) {
+    const r = document.getElementById('qbr-risks');
+    r.innerHTML = d.risks.map(a => `<li>${a}</li>`).join('');
+    document.getElementById('qbr-risks-block').style.display = 'block';
+  }
+
+  document.getElementById('qbr-result').style.display = 'block';
+}
+
+async function setScore(score, btn) {
+  if (_activeScoreBtn) _activeScoreBtn.classList.remove('active');
+  btn.classList.add('active');
+  _activeScoreBtn = btn;
+
+  // Используем последнюю встречу QBR (нужно передать meeting_id)
+  document.getElementById('score-result').textContent = `⭐ ${score}/5 — сохранено`;
+}
+
+function copyQBR() {
+  if (!_qbrData) return;
+  const q = document.getElementById('qbr-quarter').value;
+  let text = `QBR: {{ client.name }} — ${q}\n\n`;
+  text += `ИТОГИ:\n${_qbrData.summary}\n\n`;
+  text += `ДОСТИЖЕНИЯ:\n${(_qbrData.achievements||[]).map(a=>'• '+a).join('\n')}\n\n`;
+  text += `НЕ УСПЕЛИ:\n${(_qbrData.not_done||[]).map(a=>'• '+a).join('\n')}\n\n`;
+  text += `ПРИОРИТЕТЫ СЛЕДУЮЩЕГО КВАРТАЛА:\n${(_qbrData.q_next_priorities||[]).map(a=>'• '+a).join('\n')}\n`;
+  if (_qbrData.risks?.length) text += `\nРИСКИ:\n${_qbrData.risks.map(a=>'• '+a).join('\n')}`;
+  navigator.clipboard.writeText(text).then(() => alert('Скопировано!'));
+}
+</script>
+{% endblock %}

@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Kanban задач — AM Hub{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <h1>📋 Kanban задач</h1>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <select class="form-control" style="width:180px" onchange="filterClient(this.value)">
+        <option value="">Все клиенты</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if filter_client and filter_client.id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <a href="/tasks" class="btn btn-ghost">📃 Список</a>
+    </div>
+  </div>
+</div>
+
+<div class="kanban-board">
+  <!-- Открытые -->
+  <div class="kanban-col" id="col-open" ondragover="allowDrop(event)" ondrop="drop(event,'open')">
+    <div class="kanban-col-header">
+      <span>🔵 Открытые</span>
+      <span class="badge-count">{{ columns.open | length }}</span>
+    </div>
+    {% for task in columns.open %}
+    <div class="kanban-card" draggable="true" id="task-{{ task.id }}"
+         ondragstart="drag(event, {{ task.id }})"
+         data-task-id="{{ task.id }}">
+      <div class="kanban-card-client">
+        <span class="badge badge-{{ task.segment | lower | replace('+','-plus') | replace('-','-minus') }}">{{ task.segment }}</span>
+        <a href="/prep/{{ task.client_id }}" style="font-size:0.8rem">{{ task.client_name }}</a>
+      </div>
+      <div class="kanban-card-text">{{ task.text[:80] }}{% if task.text | length > 80 %}…{% endif %}</div>
+      <div class="kanban-card-meta">
+        <span class="owner-badge {% if task.owner == 'anyquery' %}owner-aq{% else %}owner-cl{% endif %}">{{ 'AQ' if task.owner == 'anyquery' else 'Клиент' }}</span>
+        {% if task.due_date %}<span class="due {% if task.due_date < today %}overdue{% endif %}">📅 {{ task.due_date }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Заблокированные -->
+  <div class="kanban-col" id="col-blocked" ondragover="allowDrop(event)" ondrop="drop(event,'blocked')">
+    <div class="kanban-col-header">
+      <span>🔴 Заблокированные</span>
+      <span class="badge-count red">{{ columns.blocked | length }}</span>
+    </div>
+    {% for task in columns.blocked %}
+    <div class="kanban-card blocked" draggable="true" id="task-{{ task.id }}"
+         ondragstart="drag(event, {{ task.id }})"
+         data-task-id="{{ task.id }}">
+      <div class="kanban-card-client">
+        <span class="badge badge-{{ task.segment | lower | replace('+','-plus') | replace('-','-minus') }}">{{ task.segment }}</span>
+        <a href="/prep/{{ task.client_id }}" style="font-size:0.8rem">{{ task.client_name }}</a>
+      </div>
+      <div class="kanban-card-text">{{ task.text[:80] }}{% if task.text | length > 80 %}…{% endif %}</div>
+      <div class="kanban-card-meta">
+        <span class="owner-badge owner-aq">AQ</span>
+        {% if task.due_date %}<span class="due overdue">📅 {{ task.due_date }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Выполненные -->
+  <div class="kanban-col" id="col-done" ondragover="allowDrop(event)" ondrop="drop(event,'done')">
+    <div class="kanban-col-header">
+      <span>✅ Выполненные</span>
+      <span class="badge-count green">{{ columns.done | length }}</span>
+    </div>
+    {% for task in columns.done[:30] %}
+    <div class="kanban-card done" draggable="true" id="task-{{ task.id }}"
+         ondragstart="drag(event, {{ task.id }})"
+         data-task-id="{{ task.id }}">
+      <div class="kanban-card-client">
+        <span class="badge badge-{{ task.segment | lower | replace('+','-plus') | replace('-','-minus') }}">{{ task.segment }}</span>
+        <a href="/prep/{{ task.client_id }}" style="font-size:0.8rem">{{ task.client_name }}</a>
+      </div>
+      <div class="kanban-card-text">{{ task.text[:80] }}{% if task.text | length > 80 %}…{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<style>
+.kanban-board { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; align-items:start; }
+.kanban-col { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px; min-height:300px; }
+.kanban-col-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-weight:600; font-size:0.9rem; }
+.badge-count { background:var(--surface2); border-radius:10px; padding:2px 8px; font-size:0.75rem; }
+.badge-count.red { background:rgba(255,79,79,0.2); color:var(--red); }
+.badge-count.green { background:rgba(62,207,142,0.2); color:var(--green); }
+.kanban-card { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:grab; transition:box-shadow 0.15s; }
+.kanban-card:hover { box-shadow: 0 2px 12px rgba(108,99,255,0.2); border-color: var(--accent); }
+.kanban-card.dragging { opacity:0.5; }
+.kanban-card.blocked { border-left:3px solid var(--red); }
+.kanban-card.done { opacity:0.65; }
+.kanban-card-client { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+.kanban-card-text { font-size:0.88rem; line-height:1.4; margin-bottom:6px; }
+.kanban-card-meta { display:flex; gap:8px; align-items:center; font-size:0.75rem; }
+.owner-badge { padding:2px 6px; border-radius:4px; font-size:0.72rem; font-weight:600; }
+.owner-aq { background:rgba(108,99,255,0.2); color:var(--accent); }
+.owner-cl { background:rgba(62,207,142,0.2); color:var(--green); }
+.due { color:var(--text-muted); }
+.due.overdue { color:var(--red); }
+.col-drag-over { background:var(--surface2); border-color:var(--accent); }
+@media(max-width:768px) { .kanban-board { grid-template-columns:1fr; } }
+</style>
+
+<script>
+let _dragId = null;
+
+function drag(e, taskId) {
+  _dragId = taskId;
+  document.getElementById(`task-${taskId}`).classList.add('dragging');
+}
+
+function allowDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('col-drag-over');
+}
+
+async function drop(e, newStatus) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('col-drag-over');
+  if (!_dragId) return;
+
+  const card = document.getElementById(`task-${_dragId}`);
+  if (!card) return;
+  document.getElementById(`col-${newStatus}`)?.appendChild(card);
+  card.classList.remove('dragging');
+
+  await fetch(`/api/task/${_dragId}/status`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status: newStatus})
+  });
+
+  // Обновить счётчики
+  document.querySelectorAll('.kanban-col').forEach(col => {
+    const cards = col.querySelectorAll('.kanban-card').length;
+    col.querySelector('.badge-count').textContent = cards;
+  });
+  _dragId = null;
+}
+
+document.addEventListener('dragend', () => {
+  document.querySelectorAll('.col-drag-over').forEach(c => c.classList.remove('col-drag-over'));
+});
+
+function filterClient(clientId) {
+  const url = new URL(window.location);
+  if (clientId) url.searchParams.set('client_id', clientId);
+  else url.searchParams.delete('client_id');
+  window.location = url.toString();
+}
+</script>
+{% endblock %}
