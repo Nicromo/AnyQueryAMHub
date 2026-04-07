@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Risk Dashboard — AM Hub{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div>
+      <h1>🚨 Risk Dashboard</h1>
+      <p class="text-muted">Мониторинг риска оттока клиентов · {{ today }}</p>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="recalcAll()">🔄 Пересчитать всё</button>
+  </div>
+</div>
+
+<!-- Сводка -->
+{% set critical = risk_data | selectattr('risk.level', 'equalto', 'critical') | list %}
+{% set medium = risk_data | selectattr('risk.level', 'equalto', 'medium') | list %}
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+  <div class="card" style="flex:1;min-width:140px;text-align:center;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.05)">
+    <div style="font-size:2rem;font-weight:700;color:var(--red)">{{ critical|length }}</div>
+    <div style="font-size:0.8rem;color:var(--text-muted)">🔴 Критический риск</div>
+  </div>
+  <div class="card" style="flex:1;min-width:140px;text-align:center;border-color:rgba(245,166,35,.4);background:rgba(245,166,35,.04)">
+    <div style="font-size:2rem;font-weight:700;color:var(--yellow)">{{ medium|length }}</div>
+    <div style="font-size:0.8rem;color:var(--text-muted)">🟡 Средний риск</div>
+  </div>
+  <div class="card" style="flex:1;min-width:140px;text-align:center">
+    <div style="font-size:2rem;font-weight:700">{{ risk_data|length }}</div>
+    <div style="font-size:0.8rem;color:var(--text-muted)">Всего в зоне риска</div>
+  </div>
+</div>
+
+<!-- Список клиентов по риску -->
+<div class="card">
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:10px 8px;font-size:0.8rem;color:var(--text-muted);font-weight:500">Клиент</th>
+        <th style="text-align:left;padding:10px 8px;font-size:0.8rem;color:var(--text-muted);font-weight:500">Сегмент</th>
+        <th style="text-align:center;padding:10px 8px;font-size:0.8rem;color:var(--text-muted);font-weight:500">Risk Score</th>
+        <th style="text-align:left;padding:10px 8px;font-size:0.8rem;color:var(--text-muted);font-weight:500">Причины</th>
+        <th style="text-align:right;padding:10px 8px;font-size:0.8rem;color:var(--text-muted);font-weight:500">Действия</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in risk_data %}
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:12px 8px">
+        <a href="/prep/{{ c.id }}" style="font-weight:600;color:var(--text)">{{ c.name }}</a>
+      </td>
+      <td style="padding:12px 8px">
+        <span class="badge badge-{{ c.segment|lower }}">{{ c.segment }}</span>
+      </td>
+      <td style="padding:12px 8px;text-align:center">
+        <div style="display:inline-flex;align-items:center;gap:6px">
+          <div style="width:48px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+            <div style="width:{{ c.risk.score }}%;height:100%;border-radius:3px;background:{% if c.risk.level == 'critical' %}var(--red){% elif c.risk.level == 'medium' %}var(--yellow){% else %}var(--green){% endif %}"></div>
+          </div>
+          <span style="font-weight:700;font-size:0.9rem;color:{% if c.risk.level == 'critical' %}var(--red){% elif c.risk.level == 'medium' %}var(--yellow){% else %}var(--green){% endif %}">
+            {{ c.risk.score }}
+          </span>
+        </div>
+      </td>
+      <td style="padding:12px 8px;font-size:0.8rem;color:var(--text-muted)">
+        {{ c.risk.reasons | join(' • ') if c.risk.reasons else '—' }}
+      </td>
+      <td style="padding:12px 8px;text-align:right">
+        <div style="display:flex;gap:6px;justify-content:flex-end">
+          <a href="/prep/{{ c.id }}" class="btn btn-ghost btn-sm">📋</a>
+          <a href="/followup/{{ c.id }}" class="btn btn-primary btn-sm">✍️ Фолоуап</a>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not risk_data %}
+    <tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">✅ Нет клиентов в зоне риска</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+async function recalcAll() {
+  const btn = event.target;
+  btn.textContent = '⏳ Пересчёт...';
+  btn.disabled = true;
+  // Перезагружаем страницу после небольшой задержки
+  await fetch('/api/risk-dashboard');
+  setTimeout(() => location.reload(), 500);
+}
+</script>
+{% endblock %}

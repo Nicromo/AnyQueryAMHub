@@ -500,3 +500,215 @@ async def generate_qbr_report(
             "summary": raw[:500], "achievements": [], "not_done": [],
             "q_next_priorities": [], "risks": [], "health_trend": "—",
         }
+
+
+async def generate_client_transfer_brief(
+    client: dict,
+    meetings: list[dict],
+    open_tasks: list[dict],
+    done_tasks: list[dict],
+    health: dict,
+) -> str:
+    """
+    Генерирует досье-передачу клиента новому AM.
+    Возвращает структурированный текст для Telegram и распечатки.
+    """
+    system = (
+        "Ты — старший аккаунт-менеджер AnyQuery. Готовишь досье-передачу клиента "
+        "новому AM. Пиши по-русски, структурированно, без воды. "
+        "Включи всё что нужно знать с первого дня работы с клиентом."
+    )
+
+    meetings_text = "\n".join(
+        f"- {m['meeting_date']} ({m['meeting_type']}): mood={m.get('mood','neutral')}, {(m.get('summary') or '')[:100]}"
+        for m in meetings[:10]
+    ) or "нет встреч"
+
+    open_list = "\n".join(f"- [{t.get('status','open')}] {t['text'][:80]}" for t in open_tasks[:10]) or "нет"
+    done_list = "\n".join(f"- {t['text'][:80]}" for t in done_tasks[:5]) or "нет"
+
+    user_prompt = f"""Клиент: {client['name']} (сегмент {client['segment']})
+Health Score: {health.get('score', '?')}/100 ({health.get('color', 'yellow')})
+TG чат: {client.get('tg_chat_id', 'не указан')}
+Примечания: {(client.get('notes') or 'нет')[:300]}
+
+История встреч:
+{meetings_text}
+
+Открытые задачи ({len(open_tasks)}):
+{open_list}
+
+Недавно закрытые ({len(done_tasks)}):
+{done_list}
+
+Составь досье-передачу нового AM. Включи разделы:
+1. 📋 Краткий профиль клиента
+2. 🎯 Текущие приоритеты и задачи
+3. ⚠️ Риски и болевые точки
+4. 💡 Что работает, что нет
+5. 📅 Что нужно сделать в первые 2 недели
+6. 💬 Особенности коммуникации (тон, формат, предпочтения)
+"""
+    result = await _call_groq(system, user_prompt, max_tokens=1500)
+    return result or "Не удалось сгенерировать досье. Проверь GROQ_API_KEY."
+
+
+async def generate_benchmark_report(
+    client: dict,
+    health: dict,
+    segment_median: int,
+    segment_name: str,
+) -> str:
+    """
+    Генерирует квартальный бенчмарк клиента vs медиана сегмента.
+    Возвращает текст для отправки клиенту в TG.
+    """
+    system = (
+        "Ты — аккаунт-менеджер AnyQuery. Пишешь клиенту квартальный бенчмарк-отчёт. "
+        "Тон: позитивный, мотивирующий. Используй конкретные цифры. "
+        "Пиши от первого лица (мы / команда AnyQuery)."
+    )
+    client_score = health.get("score", 0)
+    diff = client_score - segment_median
+    comparison = "выше медианы" if diff > 0 else ("ниже медианы" if diff < 0 else "на уровне медианы")
+
+    user_prompt = f"""Клиент: {client['name']} (сегмент {segment_name})
+Health Score клиента: {client_score}/100
+Медиана сегмента {segment_name}: {segment_median}/100
+Разница: {diff:+d} ({comparison})
+
+Составь короткое сообщение клиенту (в TG) о его позиции среди похожих магазинов.
+Включи:
+- Позицию (лучше/хуже/наравне с другими)
+- 1-2 позитивных момента
+- 1-2 области для роста
+- Призыв к действию (следующая встреча, конкретный шаг)
+
+Не раскрывай имена других клиентов. Говори о "магазинах вашего сегмента"."""
+    result = await _call_groq(system, user_prompt, max_tokens=600)
+    return result or "Не удалось сгенерировать бенчмарк."
+
+
+async def generate_platform_audit_tasks(
+    client: dict,
+    site_id: str,
+    metrics_summary: str,
+) -> list[dict]:
+    """
+    По данным аудита платформы генерирует список задач для исправления проблем.
+    Возвращает список задач для создания в AM Hub.
+    """
+    system = (
+        "Ты — аналитик платформы AnyQuery. Анализируешь данные аудита и формируешь "
+        "конкретные задачи для улучшения качества поиска. "
+        "Отвечай ТОЛЬКО валидным JSON без markdown."
+    )
+    user_prompt = f"""Клиент: {client['name']} (сегмент {client['segment']})
+Site ID: {site_id}
+
+Результаты аудита:
+{metrics_summary}
+
+Сформируй список задач для исправления проблем.
+Верни JSON:
+{{"tasks": [
+    {{"text": "конкретная задача", "priority": "high/medium/low", "team": "CS/DEV/ANALYTICS", "reason": "почему важно"}}
+]}}
+
+Создавай только задачи для реальных проблем. Не придумывай."""
+    raw = await _call_groq(system, user_prompt, max_tokens=1000)
+    if not raw:
+        return []
+    try:
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
+        return data.get("tasks", [])
+    except Exception as e:
+        logger.error("generate_platform_audit_tasks JSON error: %s", e)
+        return []
+
+
+async def transcribe_audio(audio_url: str) -> str:
+    """
+    Транскрибирует аудио через OpenAI Whisper API.
+    audio_url — URL публичного аудиофайла.
+    Возвращает текст транскрипции.
+    """
+    import os
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if not openai_key:
+        return ""
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            # Скачиваем аудио
+            audio_resp = await client.get(audio_url)
+            audio_data = audio_resp.content
+
+            # Отправляем в Whisper
+            resp = await client.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {openai_key}"},
+                files={"file": ("audio.mp3", audio_data, "audio/mpeg")},
+                data={"model": "whisper-1", "language": "ru"},
+            )
+            if resp.status_code == 200:
+                return resp.json().get("text", "")
+            else:
+                logger.error("Whisper API error %s: %s", resp.status_code, resp.text[:200])
+                return ""
+    except Exception as exc:
+        logger.error("transcribe_audio error: %s", exc)
+        return ""
+
+
+async def run_post_meeting_pipeline(
+    client: dict,
+    meeting: dict,
+    audio_url: str = "",
+    transcript: str = "",
+) -> dict:
+    """
+    Д1: Полный пайплайн после встречи.
+    1. Транскрибация аудио (если есть URL)
+    2. AI анализ транскрипта → постмит + задачи
+    3. Возвращает результат для подтверждения AM
+
+    Возвращает:
+    {
+        "transcript": "...",
+        "postmit_client": "...",
+        "postmit_internal": "...",
+        "tasks": [...],
+        "health": "green|yellow|red",
+        "mood": "positive|neutral|risk",
+        "error": null
+    }
+    """
+    # Шаг 1: Транскрипция если нет готового текста
+    if not transcript and audio_url:
+        logger.info("Transcribing audio for meeting %d", meeting.get("id", 0))
+        transcript = await transcribe_audio(audio_url)
+
+    if not transcript:
+        return {
+            "transcript": "",
+            "postmit_client": "",
+            "postmit_internal": "",
+            "tasks": [],
+            "health": "yellow",
+            "mood": "neutral",
+            "error": "Нет транскрипта и не удалось транскрибировать аудио",
+        }
+
+    # Шаг 2: AI анализ транскрипта
+    result = await process_transcript(
+        transcript,
+        client["name"],
+        meeting.get("meeting_date", ""),
+    )
+    result["transcript"] = transcript
+    return result

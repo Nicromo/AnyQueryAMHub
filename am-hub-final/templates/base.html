@@ -11,8 +11,12 @@
 </head>
 <body>
 {% block body %}
+<!-- Мобильный бургер-менеджер -->
+<button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Меню">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
 <div class="layout">
-  <nav class="sidebar">
+  <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo">AM <span>Hub</span></div>
 
     <!-- Быстрый поиск клиента -->
@@ -61,6 +65,9 @@
     </a>
     <a class="nav-link {% if request.url.path == '/improvements' %}active{% endif %}" href="/improvements">
       <span class="icon">🧪</span> A/B Улучшения
+    </a>
+    <a class="nav-link {% if request.url.path == '/risk' %}active{% endif %}" href="/risk">
+      <span class="icon">🚨</span> Risk Dashboard
     </a>
 
     <div class="nav-section-label" style="margin-top:8px">Инструменты</div>
@@ -144,6 +151,30 @@ function sidebarSearch(q) {
 document.addEventListener('click', e => {
   if (!e.target.closest('.search-wrap'))
     document.getElementById('search-results').style.display = 'none';
+});
+
+// ── Мобильное меню ────────────────────────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  const isOpen = sb.classList.contains('open');
+  if (isOpen) {
+    sb.classList.remove('open');
+    ov.classList.remove('open');
+  } else {
+    sb.classList.add('open');
+    ov.classList.add('open');
+  }
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+}
+// Закрывать sidebar при клике на nav-link (мобиле)
+document.querySelectorAll('.nav-link').forEach(link => {
+  link.addEventListener('click', () => {
+    if (window.innerWidth <= 768) closeSidebar();
+  });
 });
 
 // ── Загрузка статистики ───────────────────────────────────────────────────

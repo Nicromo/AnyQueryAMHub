@@ -504,6 +504,372 @@ async def job_recurring_tasks():
         logger.error("job_recurring_tasks error: %s", exc)
 
 
+# ── Новые задачи автоматизации ────────────────────────────────────────────────
+
+async def job_meeting_day_client_reminder():
+    """
+    Б3: Каждый день в 09:00 — отправляем напоминание клиенту в TG
+    о запланированной сегодня встрече.
+    """
+    try:
+        from database import get_clients_with_meeting_today
+        from tg_bot import send_message
+
+        clients_today = get_clients_with_meeting_today()
+        if not clients_today:
+            return
+
+        for c in clients_today:
+            tg_chat = c.get("tg_chat_id", "").strip()
+            if not tg_chat:
+                continue  # Нет TG-канала клиента
+
+            meeting_time = c.get("meeting_time", "")
+            time_str = f" в {meeting_time}" if meeting_time else ""
+
+            msg = (
+                f"👋 Привет!\n\n"
+                f"Напоминаю: сегодня{time_str} у нас запланирована встреча.\n"
+                f"Мы всё подготовили — ждём вас! 🚀\n\n"
+                f"<i>С уважением, команда AnyQuery</i>"
+            )
+            await send_message(tg_chat, msg)
+            logger.info("Meeting day reminder sent to client %s (chat %s)", c["name"], tg_chat)
+
+    except Exception as exc:
+        logger.error("job_meeting_day_client_reminder error: %s", exc)
+
+
+async def job_risk_score_update():
+    """
+    В2: Каждый день в 06:00 — пересчёт Risk Score всех клиентов.
+    При Risk Score > 70 — эскалация: задача + уведомление в TG.
+    """
+    try:
+        from database import get_all_clients, update_client_risk_score, create_internal_task
+        from tg_bot import send_message
+
+        chat_id = get_notify_chat_id()
+        clients = get_all_clients()
+        escalations = []
+
+        for c in clients:
+            result = update_client_risk_score(c["id"])
+            if result["score"] >= 70:
+                # Создаём задачу если ещё нет
+                from database import get_client_tasks
+                open_tasks = get_client_tasks(c["id"], "open")
+                has_risk_task = any(
+                    "риск оттока" in t["text"].lower() or "risk score" in t["text"].lower()
+                    for t in open_tasks
+                )
+                if not has_risk_task:
+                    reasons_text = " | ".join(result.get("reasons", []))
+                    create_internal_task(
+                        client_id=c["id"],
+                        text=f"🚨 Высокий Risk Score: {result['score']}/100 — {c['segment']}",
+                        internal_note=f"Автозадача. Причины: {reasons_text}. Провести внеплановый контакт!"
+                    )
+
+                escalations.append({
+                    "name": c["name"],
+                    "segment": c["segment"],
+                    "score": result["score"],
+                    "level": result["level"],
+                    "reasons": result.get("reasons", []),
+                })
+
+        if escalations and chat_id:
+            lines = [f"🚨 <b>Высокий риск оттока ({len(escalations)} клиентов)</b>\n"]
+            for e in escalations[:10]:
+                reasons = " • " + " • ".join(e["reasons"][:2]) if e["reasons"] else ""
+                lines.append(f"• <b>{e['name']}</b> [{e['segment']}] Risk={e['score']}/100{reasons}")
+            lines.append("\n👉 AM Hub → карточка клиента → Risk Score")
+            await send_message(chat_id, "\n".join(lines))
+
+        logger.info("Risk score updated: %d escalations", len(escalations))
+
+    except Exception as exc:
+        logger.error("job_risk_score_update error: %s", exc)
+
+
+async def job_platform_audit():
+    """
+    А3: 1-е число каждого месяца — аудит платформы всех ENT/SME+ клиентов.
+    Проверяет конфиг поиска через Merchrules API → создаёт задачи для проблем.
+    """
+    try:
+        from database import get_all_clients, create_internal_task, log_platform_audit
+        from ai_followup import generate_platform_audit_tasks
+        from tg_bot import send_message
+
+        chat_id = get_notify_chat_id()
+        clients = get_all_clients()
+        audit_clients = [c for c in clients if c["segment"] in ("ENT", "SME+", "SME")]
+        total_tasks = 0
+
+        for c in audit_clients:
+            site_ids = c.get("site_ids", "").strip()
+            if not site_ids:
+                continue
+
+            # Простой аудит на основе доступных данных
+            issues = []
+            metrics_lines = []
+
+            # Проверяем количество встреч за последние 90 дней
+            from database import get_client_meetings
+            meetings = get_client_meetings(c["id"], limit=10)
+            from datetime import datetime as dt2
+            recent_meetings = [
+                m for m in meetings
+                if m.get("meeting_date", "") >= (date.today() - timedelta(days=90)).isoformat()
+            ]
+
+            # Анализируем задачи
+            from database import get_client_tasks
+            open_tasks = get_client_tasks(c["id"], "open")
+            blocked_tasks = [t for t in open_tasks if t.get("status") == "blocked"]
+            overdue_tasks = [t for t in open_tasks if t.get("due_date", "") < date.today().isoformat()]
+
+            if not recent_meetings:
+                issues.append({"type": "no_meetings", "severity": "high",
+                               "description": "Нет встреч за 90 дней"})
+                metrics_lines.append("• Нет встреч за 90 дней")
+
+            if len(blocked_tasks) > 2:
+                issues.append({"type": "many_blocked", "severity": "medium",
+                               "description": f"{len(blocked_tasks)} заблокированных задач"})
+                metrics_lines.append(f"• {len(blocked_tasks)} заблокированных задач")
+
+            if len(overdue_tasks) > 3:
+                issues.append({"type": "many_overdue", "severity": "high",
+                               "description": f"{len(overdue_tasks)} просроченных задач"})
+                metrics_lines.append(f"• {len(overdue_tasks)} просроченных задач")
+
+            if not issues:
+                continue
+
+            # Сохраняем аудит
+            log_platform_audit(c["id"], issues)
+
+            # AI генерация задач
+            metrics_summary = "\n".join(metrics_lines)
+            ai_tasks = await generate_platform_audit_tasks(c, site_ids.split(",")[0], metrics_summary)
+
+            # Создаём задачи
+            for task_data in ai_tasks[:5]:
+                create_internal_task(
+                    client_id=c["id"],
+                    text=f"🔍 [Аудит] {task_data['text'][:200]}",
+                    internal_note=f"Автоаудит. Причина: {task_data.get('reason', '')}. Команда: {task_data.get('team', 'CS')}"
+                )
+                total_tasks += 1
+
+        if total_tasks and chat_id:
+            await send_message(
+                chat_id,
+                f"🔍 <b>Ежемесячный аудит платформы завершён</b>\n\n"
+                f"Проверено клиентов: {len(audit_clients)}\n"
+                f"Создано задач: {total_tasks}\n\n"
+                f"👉 AM Hub → Внутренние задачи"
+            )
+
+        logger.info("Platform audit done: %d tasks created", total_tasks)
+
+    except Exception as exc:
+        logger.error("job_platform_audit error: %s", exc)
+
+
+async def job_nightly_problem_detection():
+    """
+    В1: Ночной детектор проблем (01:00).
+    Анализирует деградацию метрик и Health Score.
+    Создаёт задачи и отправляет алёрт AM.
+    """
+    try:
+        from database import get_all_clients, get_health_history, create_internal_task, get_client_tasks
+        from tg_bot import send_message
+        from datetime import datetime as dt2
+
+        chat_id = get_notify_chat_id()
+        clients = get_all_clients()
+        problems = []
+
+        for c in clients:
+            client_problems = []
+
+            # Проверяем резкое падение Health Score за 3 дня
+            history = get_health_history(c["id"], months=1)
+            if len(history) >= 2:
+                latest = history[-1]
+                three_days_ago = next(
+                    (h for h in reversed(history[:-1])
+                     if h["snapshot_date"] <= (date.today() - timedelta(days=3)).isoformat()),
+                    None
+                )
+                if three_days_ago:
+                    drop = three_days_ago["health_score"] - latest["health_score"]
+                    if drop >= 15:
+                        client_problems.append(
+                            f"Health Score: {three_days_ago['health_score']} → {latest['health_score']} (-{drop} за 3 дня)"
+                        )
+
+            # Проверяем много заблокированных задач (появились новые)
+            open_tasks = get_client_tasks(c["id"], "open")
+            new_blocked = [
+                t for t in open_tasks
+                if t.get("status") == "blocked"
+                and t.get("created_at", "")[:10] == date.today().isoformat()
+            ]
+            if len(new_blocked) > 0:
+                client_problems.append(f"Новые заблокированные задачи: {len(new_blocked)}")
+
+            if client_problems:
+                problems.append({
+                    "name": c["name"],
+                    "segment": c["segment"],
+                    "id": c["id"],
+                    "issues": client_problems,
+                })
+                # Создаём задачу
+                for issue in client_problems:
+                    create_internal_task(
+                        client_id=c["id"],
+                        text=f"⚠️ [Ночной детектор] {issue[:150]}",
+                        internal_note="Автообнаружение проблемы. Проверить и принять меры."
+                    )
+
+        if problems and chat_id:
+            lines = [f"🌙 <b>Ночной детектор: {len(problems)} проблем</b>\n"]
+            for p in problems[:8]:
+                lines.append(f"• <b>{p['name']}</b> [{p['segment']}]:")
+                for issue in p["issues"]:
+                    lines.append(f"  — {issue}")
+            lines.append("\n👉 AM Hub → Внутренние задачи")
+            await send_message(chat_id, "\n".join(lines))
+
+        logger.info("Nightly problem detection: %d problems found", len(problems))
+
+    except Exception as exc:
+        logger.error("job_nightly_problem_detection error: %s", exc)
+
+
+async def job_quarterly_benchmark():
+    """
+    Е2: 1-е число квартала — сравнение клиентов с медианой сегмента.
+    Отправляет каждому клиенту (у кого есть TG) бенчмарк-сообщение.
+    """
+    try:
+        from database import get_all_clients, calculate_health_score, get_segment_health_median
+        from ai_followup import generate_benchmark_report
+        from tg_bot import send_message
+
+        # Пересчёт медиан сначала
+        clients = get_all_clients()
+        for c in clients:
+            from database import update_client_health_score
+            update_client_health_score(c["id"])
+
+        medians = get_segment_health_median()
+        chat_id = get_notify_chat_id()
+        sent = 0
+
+        for c in clients:
+            tg_chat = c.get("tg_chat_id", "").strip()
+            if not tg_chat:
+                continue  # Нет TG-канала клиента
+
+            health = calculate_health_score(c["id"])
+            segment = c["segment"]
+            median = medians.get(segment, 50)
+
+            report = await generate_benchmark_report(c, health, median, segment)
+            if report:
+                header = f"📊 <b>Квартальный бенчмарк: {c['name']}</b>\n\n"
+                await send_message(tg_chat, header + report)
+                sent += 1
+
+        if chat_id and sent:
+            await send_message(
+                chat_id,
+                f"📊 <b>Квартальный бенчмарк отправлен</b>\n"
+                f"Клиентов получили отчёт: {sent}\n"
+                f"Медианы по сегментам: {medians}"
+            )
+
+        logger.info("Quarterly benchmark sent to %d clients", sent)
+
+    except Exception as exc:
+        logger.error("job_quarterly_benchmark error: %s", exc)
+
+
+async def job_mr_task_done_notify():
+    """
+    Б2: При синхронизации MR — уведомляем клиента в TG о закрытых задачах.
+    Запускается каждый час вместе с MR sync.
+    """
+    try:
+        from database import get_all_clients, get_client_tasks, update_task_status, get_client
+        from tg_bot import send_message
+        from merchrules_sync import sync_clients_from_merchrules, invalidate_cache
+
+        invalidate_cache()
+        clients = get_all_clients()
+        mr_data = await sync_clients_from_merchrules(clients)
+
+        if not mr_data:
+            return
+
+        open_tasks = get_client_tasks.__module__  # just to import
+
+        from database import get_all_tasks
+        all_open = get_all_tasks("open")
+
+        notified_clients = set()
+
+        for site_id, data in mr_data.items():
+            mr_tasks = {t["title"].lower(): t["status"]
+                        for t in data.get("tasks", []) if t.get("title")}
+
+            for task in all_open:
+                key = task["text"].lower()
+                if key not in mr_tasks:
+                    continue
+                new_status = mr_tasks[key]
+                if new_status not in ("done", "completed"):
+                    continue
+
+                # Задача закрыта — обновляем статус
+                update_task_status(task["id"], "done")
+
+                # Уведомляем клиента (один раз за сессию)
+                client_id = task["client_id"]
+                if client_id in notified_clients:
+                    continue
+
+                client = get_client(client_id)
+                if not client:
+                    continue
+
+                tg_chat = client.get("tg_chat_id", "").strip()
+                if not tg_chat:
+                    continue
+
+                task_text = task["text"][:100]
+                msg = (
+                    f"✅ <b>Задача выполнена!</b>\n\n"
+                    f"«{task_text}»\n\n"
+                    f"Задача закрыта в системе. Если есть вопросы — напишите нам!"
+                )
+                await send_message(tg_chat, msg)
+                notified_clients.add(client_id)
+                logger.info("Task done notification sent to client %s", client["name"])
+
+    except Exception as exc:
+        logger.error("job_mr_task_done_notify error: %s", exc)
+
+
 def _split_message(text: str, max_len: int = 3800) -> list[str]:
     if len(text) <= max_len:
         return [text]
@@ -606,9 +972,53 @@ def start_scheduler():
         id="followup_reminder",
         replace_existing=True,
     )
+    # Б3: Напоминание клиенту о встрече сегодня — 09:00
+    scheduler.add_job(
+        job_meeting_day_client_reminder,
+        CronTrigger(hour=9, minute=0),
+        id="meeting_day_client_reminder",
+        replace_existing=True,
+    )
+    # В2: Обновление Risk Score — 06:00
+    scheduler.add_job(
+        job_risk_score_update,
+        CronTrigger(hour=6, minute=0),
+        id="risk_score_update",
+        replace_existing=True,
+    )
+    # А3: Ежемесячный аудит платформы — 1-е число в 02:00
+    scheduler.add_job(
+        job_platform_audit,
+        CronTrigger(day=1, hour=2, minute=0),
+        id="platform_audit",
+        replace_existing=True,
+    )
+    # В1: Ночной детектор проблем — 01:00
+    scheduler.add_job(
+        job_nightly_problem_detection,
+        CronTrigger(hour=1, minute=0),
+        id="nightly_problem_detection",
+        replace_existing=True,
+    )
+    # Е2: Квартальный бенчмарк — 1 янв/апр/июл/окт в 09:00
+    scheduler.add_job(
+        job_quarterly_benchmark,
+        CronTrigger(month="1,4,7,10", day=1, hour=9, minute=0),
+        id="quarterly_benchmark",
+        replace_existing=True,
+    )
+    # Б2: MR задача закрыта → уведомить клиента — каждый час в :15
+    scheduler.add_job(
+        job_mr_task_done_notify,
+        CronTrigger(minute=15),
+        id="mr_task_done_notify",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
-        "Scheduler started: 9 jobs active — morning_plan, weekly_digest, mr_sync, "
+        "Scheduler started: 19 jobs active — morning_plan, weekly_digest, mr_sync, "
         "auto_checkup, health_score, metrics_degradation, qbr_cycle, personal_digest, "
-        "chat_reminder, recurring_tasks, pre_meeting_brief, followup_reminder"
+        "chat_reminder, recurring_tasks, pre_meeting_brief, followup_reminder, "
+        "meeting_day_client_reminder, risk_score_update, platform_audit, "
+        "nightly_problem_detection, quarterly_benchmark, mr_task_done_notify"
     )

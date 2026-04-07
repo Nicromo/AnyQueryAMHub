@@ -49,13 +49,18 @@ from ai_followup import (
     extract_tasks_from_chat,
     generate_client_recommendations,
     generate_qbr_report,
+    generate_client_transfer_brief,
+    generate_benchmark_report,
+    run_post_meeting_pipeline,
 )
 from merchrules_sync import (
     sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate
 )
 from airtable_sync import sync_meeting_to_airtable
 from database import (
-    set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings
+    set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings,
+    calculate_risk_score, update_client_risk_score, get_clients_high_risk,
+    get_clients_with_meeting_today, get_segment_health_median, log_platform_audit,
 )
 
 load_dotenv()
@@ -2076,3 +2081,321 @@ async def api_meeting_set_time(request: Request, meeting_id: int):
     meeting_time = (body.get("time") or "").strip()
     set_meeting_time(meeting_id, meeting_time)
     return {"ok": True}
+
+
+# ── В2: Risk Score страница ──────────────────────────────────────────────────
+
+@app.get("/risk", response_class=HTMLResponse)
+async def risk_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    clients = get_all_clients()
+    risk_data = []
+    for c in clients:
+        r = calculate_risk_score(c["id"])
+        if r["score"] >= 20:
+            risk_data.append({**c, "risk": r})
+
+    risk_data.sort(key=lambda x: -x["risk"]["score"])
+
+    return templates.TemplateResponse("risk_dashboard.html", {
+        "request": request,
+        "user": user,
+        "risk_data": risk_data,
+        "today": date.today().isoformat(),
+    })
+
+
+# ── В2: Risk Score ────────────────────────────────────────────────────────────
+
+@app.get("/api/client/{client_id}/risk-score", response_class=JSONResponse)
+async def api_client_risk_score(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import calculate_risk_score, update_client_risk_score
+    result = update_client_risk_score(client_id)
+    return {"ok": True, **result}
+
+
+@app.get("/api/risk-dashboard", response_class=JSONResponse)
+async def api_risk_dashboard(request: Request):
+    """Дашборд рисков: все клиенты с Risk Score > 40."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import get_all_clients, calculate_risk_score
+    clients = get_all_clients()
+    risky = []
+    for c in clients:
+        r = calculate_risk_score(c["id"])
+        if r["score"] >= 40:
+            risky.append({
+                "id": c["id"],
+                "name": c["name"],
+                "segment": c["segment"],
+                **r,
+            })
+    risky.sort(key=lambda x: -x["score"])
+    return {"ok": True, "clients": risky}
+
+
+# ── Г2: Передача клиента новому AM ───────────────────────────────────────────
+
+@app.get("/api/client/{client_id}/transfer-brief", response_class=JSONResponse)
+async def api_client_transfer_brief(request: Request, client_id: int):
+    """Генерирует досье-передачу для нового AM."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    from ai_followup import generate_client_transfer_brief
+    meetings = get_client_meetings(client_id, limit=10)
+    open_tasks = get_client_tasks(client_id, "open")
+    done_tasks = get_client_tasks(client_id, "done")
+    health = calculate_health_score(client_id)
+
+    brief = await generate_client_transfer_brief(client, meetings, open_tasks, done_tasks, health)
+    return {"ok": True, "brief": brief, "client": client["name"]}
+
+
+@app.post("/api/client/{client_id}/transfer", response_class=JSONResponse)
+async def api_client_transfer(request: Request, client_id: int):
+    """
+    Инициирует передачу клиента:
+    1. Генерирует досье
+    2. Отправляет AM в TG
+    3. Создаёт внутреннюю задачу
+    """
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    new_am_name = (body.get("new_am_name") or "").strip()
+    new_am_tg_id = body.get("new_am_tg_id", "").strip()
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    from ai_followup import generate_client_transfer_brief
+    from database import create_internal_task, update_client_risk_score
+
+    meetings = get_client_meetings(client_id, limit=10)
+    open_tasks = get_client_tasks(client_id, "open")
+    done_tasks = get_client_tasks(client_id, "done")
+    health = calculate_health_score(client_id)
+
+    brief = await generate_client_transfer_brief(client, meetings, open_tasks, done_tasks, health)
+
+    # Создаём внутреннюю задачу на передачу
+    task_text = f"📦 Передача клиента {client['name']} → {new_am_name or 'новый AM'}"
+    create_internal_task(
+        client_id=client_id,
+        text=task_text,
+        internal_note=f"Досье:\n\n{brief[:500]}..."
+    )
+
+    # Отправляем досье новому AM
+    if new_am_tg_id:
+        try:
+            from tg_bot import send_message
+            header = f"📦 <b>Передача клиента: {client['name']}</b>\n\n"
+            await send_message(new_am_tg_id, header + brief[:3500])
+        except Exception as e:
+            logging.warning("Failed to send transfer brief via TG: %s", e)
+
+    return {"ok": True, "brief": brief}
+
+
+# ── Д1: Страница Zero-Touch Pipeline ──────────────────────────────────────────
+
+@app.get("/meeting/{meeting_id}/pipeline", response_class=HTMLResponse)
+async def meeting_pipeline_page(request: Request, meeting_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    meeting = get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404)
+
+    client = get_client(meeting["client_id"])
+    if not client:
+        raise HTTPException(404)
+
+    return templates.TemplateResponse("meeting_pipeline.html", {
+        "request": request,
+        "user": user,
+        "meeting": meeting,
+        "client": client,
+        "today": date.today().isoformat(),
+    })
+
+
+# ── Д1: Загрузка записи встречи и zero-touch pipeline ────────────────────────
+
+@app.post("/api/meeting/{meeting_id}/upload-recording", response_class=JSONResponse)
+async def api_upload_meeting_recording(request: Request, meeting_id: int):
+    """
+    Д1: Загружает URL записи встречи и запускает zero-touch pipeline:
+    1. Транскрипция (Whisper)
+    2. AI анализ → постмит + задачи
+    3. Возвращает результат для подтверждения AM
+    """
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    audio_url = (body.get("audio_url") or "").strip()
+    transcript_text = (body.get("transcript") or "").strip()
+
+    meeting = get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404)
+
+    client = get_client(meeting["client_id"])
+    if not client:
+        raise HTTPException(404)
+
+    from ai_followup import run_post_meeting_pipeline
+    result = await run_post_meeting_pipeline(
+        client=client,
+        meeting=meeting,
+        audio_url=audio_url,
+        transcript=transcript_text,
+    )
+    return result
+
+
+@app.post("/api/meeting/{meeting_id}/pipeline-confirm", response_class=JSONResponse)
+async def api_pipeline_confirm(request: Request, meeting_id: int):
+    """
+    AM подтверждает результат пайплайна:
+    - Сохраняет задачи
+    - Отправляет постмит клиенту
+    - Синхронизирует с Merchrules
+    """
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    tasks = body.get("tasks", [])
+    postmit_text = body.get("postmit_client", "")
+    mood = body.get("mood", "neutral")
+    health = body.get("health", "yellow")
+
+    meeting = get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404)
+
+    client_id = meeting["client_id"]
+    client = get_client(client_id)
+
+    # Сохраняем задачи
+    if tasks:
+        create_tasks_bulk(meeting_id, client_id, [
+            {"owner": t.get("assignee", "anyquery"), "text": t.get("title", ""), "due_date": t.get("due_date")}
+            for t in tasks if t.get("title")
+        ])
+
+    # Обновляем настроение встречи
+    from database import get_conn
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE meetings SET mood=? WHERE id=?",
+            (mood, meeting_id)
+        )
+
+    # Отправляем постмит клиенту
+    sent_tg = False
+    if postmit_text and client and client.get("tg_chat_id"):
+        try:
+            from tg_bot import send_message
+            await send_message(client["tg_chat_id"], postmit_text)
+            mark_postmit_sent(meeting_id)
+            sent_tg = True
+        except Exception as e:
+            logging.warning("Pipeline postmit TG send failed: %s", e)
+
+    return {
+        "ok": True,
+        "tasks_created": len(tasks),
+        "postmit_sent": sent_tg,
+    }
+
+
+# ── Е2: Квартальный бенчмарк ─────────────────────────────────────────────────
+
+@app.get("/api/benchmark", response_class=JSONResponse)
+async def api_benchmark(request: Request):
+    """Данные бенчмарка: health score по сегментам vs медиана."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    from database import get_segment_health_median, get_all_clients, calculate_health_score
+    medians = get_segment_health_median()
+    clients = get_all_clients()
+
+    result = []
+    for c in clients:
+        health = calculate_health_score(c["id"])
+        median = medians.get(c["segment"], 50)
+        result.append({
+            "id": c["id"],
+            "name": c["name"],
+            "segment": c["segment"],
+            "health_score": health["score"],
+            "health_color": health["color"],
+            "segment_median": median,
+            "vs_median": health["score"] - median,
+        })
+
+    return {
+        "ok": True,
+        "medians": medians,
+        "clients": sorted(result, key=lambda x: -x["vs_median"]),
+    }
+
+
+@app.post("/api/client/{client_id}/send-benchmark", response_class=JSONResponse)
+async def api_send_benchmark(request: Request, client_id: int):
+    """Отправить бенчмарк конкретному клиенту в TG."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    tg_chat = client.get("tg_chat_id", "").strip()
+    if not tg_chat:
+        return {"ok": False, "error": "TG чат клиента не настроен"}
+
+    from database import get_segment_health_median, calculate_health_score
+    from ai_followup import generate_benchmark_report
+
+    health = calculate_health_score(client_id)
+    medians = get_segment_health_median()
+    median = medians.get(client["segment"], 50)
+
+    report = await generate_benchmark_report(client, health, median, client["segment"])
+    if not report:
+        return {"ok": False, "error": "Не удалось сгенерировать бенчмарк"}
+
+    from tg_bot import send_message
+    header = f"📊 <b>Квартальный бенчмарк: {client['name']}</b>\n\n"
+    await send_message(tg_chat, header + report)
+
+    return {"ok": True, "report": report}

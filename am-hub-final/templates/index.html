@@ -96,6 +96,20 @@
   </div>
   {% endif %}
 
+  <!-- Health Score + мини-график -->
+  <div class="cc-health-row">
+    <div class="cc-health-score" id="hs-{{ c.id }}">
+      <span class="cc-hs-label">Health</span>
+      <div class="cc-hs-bar-wrap">
+        <div class="cc-hs-bar {{ c.status.color }}" style="width:{{ c.health_score or 0 }}%"></div>
+      </div>
+      <span class="cc-hs-val {% if (c.health_score or 0) >= 70 %}text-green{% elif (c.health_score or 0) >= 40 %}text-yellow{% else %}text-red{% endif %}">{{ c.health_score or '—' }}</span>
+    </div>
+    <svg class="cc-sparkline" id="spark-{{ c.id }}" width="80" height="28" viewBox="0 0 80 28">
+      <text x="0" y="20" font-size="9" fill="var(--text-muted)">…</text>
+    </svg>
+  </div>
+
   <!-- Метрики -->
   <div class="cc-metrics">
     <div class="cc-metric">
@@ -167,6 +181,19 @@
 .text-red   { color:var(--red) !important; }
 .text-yellow{ color:var(--yellow) !important; }
 .cc-actions { display:flex; gap:6px; margin-top:2px; }
+
+/* Health Score + sparkline */
+.cc-health-row { display:flex; align-items:center; gap:8px; }
+.cc-health-score { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
+.cc-hs-label { font-size:.68rem; color:var(--text-muted); white-space:nowrap; }
+.cc-hs-bar-wrap { flex:1; height:6px; background:var(--surface2); border-radius:4px; overflow:hidden; }
+.cc-hs-bar { height:100%; border-radius:4px; transition:width .3s; }
+.cc-hs-bar.green  { background:var(--green); }
+.cc-hs-bar.yellow { background:var(--yellow); }
+.cc-hs-bar.red    { background:var(--red); }
+.cc-hs-val { font-size:.75rem; font-weight:600; white-space:nowrap; }
+.text-green { color:var(--green) !important; }
+.cc-sparkline { flex-shrink:0; }
 </style>
 
 <script>
@@ -212,5 +239,62 @@ async function refreshMR() {
 
 // Автозагрузка при открытии страницы
 loadMRData();
+
+// ── Мини-графики Health Score (sparklines) ───────────────────────────────────
+async function loadSparklines() {
+  // Собираем все client_id с карточек
+  const cards = document.querySelectorAll('[id^="spark-"]');
+  const clientIds = Array.from(cards).map(el => el.id.replace('spark-', ''));
+
+  for (const cid of clientIds) {
+    try {
+      const r = await fetch(`/api/client/${cid}/health-history`);
+      if (!r.ok) continue;
+      const data = await r.json();
+      const history = data.history || [];
+      if (history.length < 2) continue;
+
+      // Берём последние 6 точек
+      const points = history.slice(-6);
+      const scores = points.map(p => p.health_score || 0);
+      const maxScore = Math.max(...scores, 1);
+
+      // SVG sparkline
+      const svgEl = document.getElementById(`spark-${cid}`);
+      if (!svgEl) continue;
+
+      const W = 80, H = 28, pad = 2;
+      const step = (W - pad * 2) / (scores.length - 1);
+
+      const pts = scores.map((s, i) => {
+        const x = pad + i * step;
+        const y = H - pad - (s / 100) * (H - pad * 2);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+
+      // Цвет линии по последнему значению
+      const last = scores[scores.length - 1];
+      const lineColor = last >= 70 ? 'var(--green)' : last >= 40 ? 'var(--yellow)' : 'var(--red)';
+
+      // Площадь под графиком
+      const areaPoints = `${pad},${H - pad} ` + pts.join(' ') + ` ${pad + (scores.length-1)*step},${H - pad}`;
+
+      svgEl.innerHTML = `
+        <defs>
+          <linearGradient id="sg-${cid}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <polygon points="${areaPoints}" fill="url(#sg-${cid})"/>
+        <polyline points="${pts.join(' ')}" fill="none" stroke="${lineColor}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${pts[pts.length-1].split(',')[0]}" cy="${pts[pts.length-1].split(',')[1]}" r="2" fill="${lineColor}"/>
+      `;
+    } catch(e) { /* ignore */ }
+  }
+}
+
+// Загружаем спарклайны с небольшой задержкой чтобы не блокировать основной рендер
+setTimeout(loadSparklines, 800);
 </script>
 {% endblock %}

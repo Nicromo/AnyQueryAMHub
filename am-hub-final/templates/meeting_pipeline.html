@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}AI Пайплайн встречи — {{ client.name }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+  <a href="/prep/{{ client.id }}" class="btn btn-ghost btn-sm">← {{ client.name }}</a>
+</div>
+
+<div class="page-header">
+  <h1>🎙️ Zero-Touch Пайплайн встречи</h1>
+  <p class="text-muted">{{ client.name }} · Встреча {{ meeting.meeting_date }}</p>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 2fr;gap:20px;align-items:start">
+
+  <!-- Левая панель: ввод -->
+  <div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">📥 Источник</h3>
+
+      <div style="margin-bottom:14px">
+        <label class="form-label">URL записи (Zoom/Meet)</label>
+        <input type="url" id="audio-url" class="form-control" placeholder="https://…">
+        <p style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Публичная ссылка на аудио/видеозапись</p>
+      </div>
+
+      <div style="text-align:center;color:var(--text-muted);font-size:0.8rem;margin:8px 0">— или —</div>
+
+      <div style="margin-bottom:14px">
+        <label class="form-label">Вставить транскрипт вручную</label>
+        <textarea id="transcript-manual" class="form-control" rows="6" placeholder="Вставь текст транскрипта встречи…"></textarea>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%" onclick="runPipeline()" id="pipeline-btn">
+        🤖 Запустить пайплайн
+      </button>
+      <p style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;text-align:center">
+        AI: транскрипция → постмит → задачи
+      </p>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h3 style="margin-bottom:8px">📋 Статус встречи</h3>
+      <div style="font-size:0.85rem">
+        <div style="display:flex;justify-content:space-between;padding:4px 0">
+          <span class="text-muted">Дата</span>
+          <strong>{{ meeting.meeting_date }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0">
+          <span class="text-muted">Тип</span>
+          <strong>{{ meeting.meeting_type }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0">
+          <span class="text-muted">Настроение</span>
+          <strong>{{ meeting.mood or '—' }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0">
+          <span class="text-muted">Постмит</span>
+          <strong>{% if meeting.postmit_sent %}✅ отправлен{% else %}⏳ не отправлен{% endif %}</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Правая панель: результат -->
+  <div>
+    <div id="pipeline-loading" style="display:none;text-align:center;padding:60px">
+      <div style="font-size:2.5rem;margin-bottom:12px">⏳</div>
+      <p style="font-size:1rem">AI обрабатывает встречу...</p>
+      <p class="text-muted" style="font-size:0.85rem;margin-top:8px">Транскрипция → Анализ → Формирование задач</p>
+    </div>
+
+    <div id="pipeline-result" style="display:none">
+
+      <!-- Постмит для клиента -->
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>📤 Постмит для клиента</h3>
+          <span id="health-badge" style="font-size:0.8rem;padding:3px 10px;border-radius:8px"></span>
+        </div>
+        <textarea id="postmit-client" class="form-control" rows="8" style="font-size:0.88rem"></textarea>
+      </div>
+
+      <!-- Задачи -->
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin-bottom:10px">📋 Задачи (<span id="tasks-count">0</span>)</h3>
+        <div id="tasks-list"></div>
+      </div>
+
+      <!-- Кнопки подтверждения -->
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="confirmPipeline()">✅ Подтвердить и отправить</button>
+        <button class="btn btn-secondary" onclick="copyPostmit()">📋 Скопировать постмит</button>
+        <button class="btn btn-ghost" onclick="resetPipeline()">🔄 Заново</button>
+      </div>
+      <p style="font-size:0.75rem;color:var(--text-muted);margin-top:8px">
+        При подтверждении: задачи сохраняются, постмит отправляется клиенту в TG
+      </p>
+    </div>
+
+    <div id="pipeline-placeholder" class="card" style="text-align:center;padding:60px">
+      <div style="font-size:3rem;margin-bottom:12px">🎙️</div>
+      <p>Вставь транскрипт или URL записи и нажми «Запустить»</p>
+      <p class="text-muted" style="margin-top:8px;font-size:0.85rem">
+        AI автоматически составит постмит и нарежет задачи
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+let _pipelineResult = null;
+
+async function runPipeline() {
+  const audioUrl = document.getElementById('audio-url').value.trim();
+  const transcript = document.getElementById('transcript-manual').value.trim();
+
+  if (!audioUrl && !transcript) {
+    alert('Вставь URL записи или текст транскрипта');
+    return;
+  }
+
+  document.getElementById('pipeline-placeholder').style.display = 'none';
+  document.getElementById('pipeline-result').style.display = 'none';
+  document.getElementById('pipeline-loading').style.display = 'block';
+  document.getElementById('pipeline-btn').disabled = true;
+
+  try {
+    const r = await fetch(`/api/meeting/{{ meeting.id }}/upload-recording`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({audio_url: audioUrl, transcript: transcript})
+    });
+    const d = await r.json();
+
+    document.getElementById('pipeline-loading').style.display = 'none';
+    document.getElementById('pipeline-btn').disabled = false;
+
+    if (d.error) {
+      document.getElementById('pipeline-placeholder').innerHTML =
+        `<p style="color:var(--red)">❌ ${d.error}</p>`;
+      document.getElementById('pipeline-placeholder').style.display = 'block';
+      return;
+    }
+
+    _pipelineResult = d;
+
+    // Постмит
+    document.getElementById('postmit-client').value = d.postmit_client || '';
+
+    // Health badge
+    const badge = document.getElementById('health-badge');
+    const healthColors = {green: 'var(--green)', yellow: 'var(--yellow)', red: 'var(--red)'};
+    badge.style.background = `rgba(${d.health === 'green' ? '62,207,142' : d.health === 'yellow' ? '245,166,35' : '239,68,68'},.15)`;
+    badge.style.color = healthColors[d.health] || 'var(--text-muted)';
+    badge.textContent = `${d.health === 'green' ? '🟢' : d.health === 'yellow' ? '🟡' : '🔴'} ${d.mood || 'neutral'}`;
+
+    // Задачи
+    const tasks = d.tasks || [];
+    document.getElementById('tasks-count').textContent = tasks.length;
+    const tasksList = document.getElementById('tasks-list');
+    if (tasks.length === 0) {
+      tasksList.innerHTML = '<p class="text-muted">Задачи не найдены</p>';
+    } else {
+      tasksList.innerHTML = tasks.map((t, i) => `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+          <input type="checkbox" id="task-${i}" checked style="margin-top:3px">
+          <div style="flex:1">
+            <div style="font-weight:500;font-size:0.88rem">${t.title || ''}</div>
+            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px">${t.description || ''}</div>
+            <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
+              <span style="font-size:0.72rem;background:var(--surface2);padding:2px 6px;border-radius:4px">${t.assignee || 'anyquery'}</span>
+              <span style="font-size:0.72rem;background:var(--surface2);padding:2px 6px;border-radius:4px">${t.status || 'plan'}</span>
+              <span style="font-size:0.72rem;background:var(--surface2);padding:2px 6px;border-radius:4px">${t.team || 'CS'}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('pipeline-result').style.display = 'block';
+
+  } catch(e) {
+    document.getElementById('pipeline-loading').style.display = 'none';
+    document.getElementById('pipeline-btn').disabled = false;
+    document.getElementById('pipeline-placeholder').innerHTML =
+      `<p style="color:var(--red)">❌ Ошибка: ${e.message}</p>`;
+    document.getElementById('pipeline-placeholder').style.display = 'block';
+  }
+}
+
+async function confirmPipeline() {
+  if (!_pipelineResult) return;
+
+  const tasks = (_pipelineResult.tasks || []).filter((t, i) => {
+    const cb = document.getElementById(`task-${i}`);
+    return cb && cb.checked;
+  });
+
+  const postmit = document.getElementById('postmit-client').value;
+
+  const r = await fetch(`/api/meeting/{{ meeting.id }}/pipeline-confirm`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      tasks: tasks,
+      postmit_client: postmit,
+      mood: _pipelineResult.mood,
+      health: _pipelineResult.health,
+    })
+  });
+  const d = await r.json();
+
+  if (d.ok) {
+    const sent = d.postmit_sent ? '✅ Постмит отправлен клиенту' : '⚠️ Постмит не отправлен (нет TG)';
+    alert(`✅ Сохранено!\n${d.tasks_created} задач создано\n${sent}`);
+    window.location.href = '/prep/{{ client.id }}';
+  } else {
+    alert('Ошибка при сохранении. Попробуй ещё раз.');
+  }
+}
+
+function copyPostmit() {
+  const text = document.getElementById('postmit-client').value;
+  navigator.clipboard.writeText(text).then(() => alert('Скопировано!'));
+}
+
+function resetPipeline() {
+  _pipelineResult = null;
+  document.getElementById('pipeline-result').style.display = 'none';
+  document.getElementById('pipeline-placeholder').style.display = 'block';
+  document.getElementById('audio-url').value = '';
+  document.getElementById('transcript-manual').value = '';
+}
+</script>
+{% endblock %}

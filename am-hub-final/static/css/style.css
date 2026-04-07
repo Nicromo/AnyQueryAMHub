@@ -284,3 +284,132 @@ textarea.form-control { resize: vertical; min-height: 90px; }
 .checklist-product-item:last-child { border-bottom: none; }
 .checklist-product-item input[type=checkbox] { margin-top: 2px; }
 .checklist-hint { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+
+/* ── Мобильная версия ─────────────────────────────────────────────────────── */
+
+/* Бургер-кнопка (скрыта на десктопе) */
+.mobile-menu-btn {
+  display: none;
+  position: fixed; top: 12px; left: 12px; z-index: 200;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px;
+  font-size: 1.2rem; cursor: pointer; color: var(--text);
+  line-height: 1;
+}
+
+/* Оверлей при открытом sidebar */
+.sidebar-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  z-index: 150;
+}
+.sidebar-overlay.open { display: block; }
+
+@media (max-width: 768px) {
+  /* Layout */
+  .layout { flex-direction: column; }
+
+  /* Sidebar — скрытый, выезжает слева */
+  .sidebar {
+    position: fixed; left: -260px; top: 0; bottom: 0;
+    width: 240px; z-index: 160;
+    transition: left 0.25s ease;
+    overflow-y: auto;
+    padding-top: 56px;
+  }
+  .sidebar.open { left: 0; }
+
+  .mobile-menu-btn { display: flex; align-items: center; justify-content: center; }
+
+  /* Main — полная ширина, отступ сверху для бургер-кнопки */
+  .main {
+    padding: 56px 16px 24px;
+    max-width: 100%;
+  }
+
+  /* Page header */
+  .page-header h1 { font-size: 1.3rem; }
+  .page-header { margin-bottom: 16px; }
+
+  /* Client grid — одна колонка */
+  .clients-grid { grid-template-columns: 1fr !important; }
+
+  /* Filter tabs — горизонтальный скролл */
+  .filter-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+  .filter-tabs::-webkit-scrollbar { display: none; }
+
+  /* Cards — меньше padding */
+  .card { padding: 14px 14px; }
+  .client-card { padding: 12px 14px; }
+
+  /* Кнопки в карточке — стек */
+  .cc-actions { flex-wrap: wrap; }
+  .cc-actions .btn { flex: 1; text-align: center; min-width: 0; }
+
+  /* Таблицы — горизонтальный скролл */
+  .table-wrap, table { overflow-x: auto; display: block; }
+
+  /* Kanban — стек колонок вертикально */
+  .kanban-board {
+    flex-direction: column !important;
+    gap: 16px;
+  }
+  .kanban-col { min-width: unset !important; width: 100% !important; }
+
+  /* Формы — полная ширина */
+  .form-grid-2, .form-grid-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Roadmap — мобильный вид */
+  .roadmap-grid { grid-template-columns: 1fr !important; }
+
+  /* QBR страница */
+  .qbr-grid { grid-template-columns: 1fr !important; }
+
+  /* Аналитика */
+  .analytics-grid { grid-template-columns: 1fr 1fr !important; }
+
+  /* Модальные окна */
+  .modal-box { width: 95vw !important; padding: 16px !important; }
+
+  /* Top-50 */
+  .top50-grid { grid-template-columns: 1fr !important; }
+
+  /* Чеклист */
+  .checklist-row { flex-direction: column; gap: 4px; }
+
+  /* Бейджи сегментов */
+  .badge { font-size: 0.65rem; }
+
+  /* Today overview */
+  .today-grid { grid-template-columns: 1fr !important; }
+
+  /* Кнопки управления */
+  .btn-group { flex-wrap: wrap; }
+  .btn-group .btn { flex: 1; }
+
+  /* Stat items sidebar скрыть */
+  .sidebar-stats { display: none !important; }
+
+  /* Nav section labels на мобиле */
+  .nav-section-label { font-size: 0.68rem; margin-top: 4px; }
+
+  /* Followup / kanban actions */
+  .followup-actions { flex-direction: column; gap: 6px; }
+
+  /* Поиск в sidebar */
+  .search-wrap input { font-size: 0.85rem; }
+}
+
+/* Дополнительные улучшения для планшетов */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .sidebar { width: 200px; }
+  .main { padding: 24px 20px; }
+  .clients-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}

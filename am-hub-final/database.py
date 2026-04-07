@@ -201,6 +201,8 @@ def init_db():
             ("tasks",     "metric_name",      "TEXT DEFAULT ''"),
             ("tasks",     "metric_before",    "TEXT DEFAULT ''"),
             ("tasks",     "metric_after",     "TEXT DEFAULT ''"),
+            ("clients",   "risk_score",       "INTEGER DEFAULT 0"),
+            ("clients",   "am_name",          "TEXT DEFAULT ''"),
         ]
         for table, col, defn in new_cols:
             try:
@@ -1184,3 +1186,186 @@ def get_manager_info(tg_id: int) -> dict | None:
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()
     return dict(row) if row else None
+
+
+# ── Risk Score ────────────────────────────────────────────────────────────────
+
+def calculate_risk_score(client_id: int) -> dict:
+    """
+    Вычисляет Risk Score (вероятность оттока) 0–100.
+    Чем выше — тем выше риск потери клиента.
+    Компоненты:
+      - Частота встреч (0-30 баллов риска)
+      - Mood последних встреч (0-30 баллов риска)
+      - Просроченные задачи (0-25 баллов риска)
+      - Отсутствие коммуникации в чате (0-15 баллов риска)
+    """
+    client = get_client(client_id)
+    if not client:
+        return {"score": 0, "level": "low", "reasons": []}
+
+    risk = 0
+    reasons = []
+    segment = client.get("segment", "SMB")
+    days_norm = CHECKUP_DAYS.get(segment, 90)
+
+    # 1. Частота встреч (30 баллов)
+    last_checkup = client.get("last_checkup") or client.get("last_meeting")
+    if not last_checkup:
+        risk += 30
+        reasons.append("Встреч не проводилось")
+    else:
+        last_date = date.fromisoformat(last_checkup)
+        days_since = (date.today() - last_date).days
+        ratio = days_since / days_norm
+        if ratio > 2.0:
+            risk += 30
+            reasons.append(f"Нет встречи {days_since} дней (норма {days_norm})")
+        elif ratio > 1.5:
+            risk += 20
+            reasons.append(f"Встреча просрочена на {days_since - days_norm} дней")
+        elif ratio > 1.0:
+            risk += 10
+
+    # 2. Mood последних встреч (30 баллов)
+    meetings = get_client_meetings(client_id, limit=5)
+    if not meetings:
+        risk += 15
+    else:
+        risk_meetings = sum(1 for m in meetings if m.get("mood") == "risk")
+        neutral_meetings = sum(1 for m in meetings if m.get("mood") == "neutral")
+        if risk_meetings >= 2:
+            risk += 30
+            reasons.append(f"{risk_meetings} встречи с негативным настроением")
+        elif risk_meetings == 1:
+            risk += 15
+            if risk_meetings:
+                reasons.append("1 встреча с негативным настроением")
+        elif neutral_meetings >= 3:
+            risk += 8
+
+    # 3. Просроченные задачи (25 баллов)
+    open_tasks = get_client_tasks(client_id, "open")
+    today_str = date.today().isoformat()
+    overdue = [t for t in open_tasks if t.get("due_date") and t["due_date"] < today_str]
+    blocked = [t for t in open_tasks if t.get("status") == "blocked"]
+    task_risk = len(overdue) * 4 + len(blocked) * 3
+    task_risk = min(25, task_risk)
+    if task_risk > 0:
+        risk += task_risk
+        if overdue:
+            reasons.append(f"{len(overdue)} просроченных задач")
+        if blocked:
+            reasons.append(f"{len(blocked)} заблокированных задач")
+
+    # 4. Коммуникация в чате (15 баллов)
+    chat_norm = CHAT_NORM_DAYS.get(segment, 30)
+    last_chat = client.get("last_chat_at")
+    if not last_chat:
+        risk += 15
+        reasons.append("Нет активности в чате")
+    else:
+        try:
+            chat_date = date.fromisoformat(last_chat)
+            days_chat = (date.today() - chat_date).days
+            if days_chat > chat_norm * 2:
+                risk += 15
+                reasons.append(f"Нет чата {days_chat} дней")
+            elif days_chat > chat_norm:
+                risk += 7
+        except Exception:
+            pass
+
+    score = min(100, max(0, risk))
+    if score >= 70:
+        level = "critical"
+    elif score >= 40:
+        level = "medium"
+    else:
+        level = "low"
+
+    return {"score": score, "level": level, "reasons": reasons}
+
+
+def update_client_risk_score(client_id: int) -> dict:
+    """Пересчитывает и сохраняет risk score клиента."""
+    result = calculate_risk_score(client_id)
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE clients SET risk_score=? WHERE id=?",
+            (result["score"], client_id)
+        )
+    return result
+
+
+def get_clients_high_risk(threshold: int = 70) -> list[dict]:
+    """Клиенты с высоким риском оттока."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT c.*, MAX(m.meeting_date) as last_meeting
+               FROM clients c
+               LEFT JOIN meetings m ON m.client_id = c.id
+               WHERE c.risk_score >= ?
+               GROUP BY c.id
+               ORDER BY c.risk_score DESC""",
+            (threshold,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_clients_with_meeting_today() -> list[dict]:
+    """Клиенты у которых запланирована встреча на сегодня."""
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM clients
+               WHERE planned_meeting = ?
+               ORDER BY name""",
+            (today,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_segment_health_median() -> dict:
+    """Медианный health_score по каждому сегменту."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT segment, health_score FROM clients
+            WHERE health_score > 0
+            ORDER BY segment, health_score
+        """).fetchall()
+
+    by_segment = {}
+    for row in rows:
+        seg = row["segment"]
+        by_segment.setdefault(seg, []).append(row["health_score"])
+
+    result = {}
+    for seg, scores in by_segment.items():
+        n = len(scores)
+        if n == 0:
+            result[seg] = 0
+        elif n % 2 == 1:
+            result[seg] = scores[n // 2]
+        else:
+            result[seg] = (scores[n // 2 - 1] + scores[n // 2]) // 2
+
+    return result
+
+
+def log_platform_audit(client_id: int, issues: list[dict]):
+    """Сохранить результаты аудита платформы."""
+    with get_conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS platform_audits (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id   INTEGER NOT NULL REFERENCES clients(id),
+                audit_date  DATE NOT NULL,
+                issues_json TEXT DEFAULT '[]',
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            "INSERT INTO platform_audits (client_id, audit_date, issues_json) VALUES (?,?,?)",
+            (client_id, date.today().isoformat(), json.dumps(issues, ensure_ascii=False))
+        )
