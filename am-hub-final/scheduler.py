@@ -121,6 +121,59 @@ async def job_mr_status_sync():
         logger.error("job_mr_status_sync error: %s", exc)
 
 
+async def job_auto_checkup_tasks():
+    """
+    Ежедневно в 08:00: создаём задачу-напоминание на чекап,
+    если клиент просрочен и задачи ещё нет.
+    ENT — 1 раз в 30 дней, SME/SME+/SME- — 60 дней, SMB/SS — 90 дней.
+    """
+    try:
+        from database import get_all_clients, get_client_tasks, create_internal_task, checkup_status, CHECKUP_DAYS
+        clients = get_all_clients()
+        created = 0
+
+        for c in clients:
+            status = checkup_status(
+                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
+            )
+            # Только просроченные (red) или предупреждения (yellow)
+            if status["color"] not in ("red", "yellow"):
+                continue
+
+            # Проверяем, нет ли уже открытой задачи-напоминания
+            open_tasks = get_client_tasks(c["id"], "open")
+            has_reminder = any(
+                "чекап" in t["text"].lower() and t.get("is_internal")
+                for t in open_tasks
+            )
+            if has_reminder:
+                continue
+
+            # Получаем нужный интервал
+            days = CHECKUP_DAYS.get(c["segment"], 90)
+
+            # Создаём внутреннюю задачу
+            create_internal_task(
+                client_id=c["id"],
+                text=f"🔔 Провести чекап ({c['segment']}, раз в {days} дней)",
+                due_date=date.today().isoformat(),
+                internal_note=f"Автозадача: последний чекап — {c.get('last_checkup') or 'не проводился'}. Статус: {status['label']}",
+            )
+            created += 1
+
+        if created:
+            logger.info("Auto-checkup tasks created: %d", created)
+
+            # Уведомляем в TG если есть просрочки
+            chat_id = get_notify_chat_id()
+            if chat_id and created > 0:
+                from tg_bot import send_message
+                await send_message(chat_id, f"🔔 Создано {created} задач на чекап. Открой AM Hub → Внутренние задачи.")
+
+    except Exception as exc:
+        logger.error("job_auto_checkup_tasks error: %s", exc)
+
+
 def _split_message(text: str, max_len: int = 3800) -> list[str]:
     if len(text) <= max_len:
         return [text]
@@ -160,5 +213,12 @@ def start_scheduler():
         id="mr_sync",
         replace_existing=True,
     )
+    # Автозадачи на чекап — каждый день в 08:00
+    scheduler.add_job(
+        job_auto_checkup_tasks,
+        CronTrigger(hour=8, minute=0),
+        id="auto_checkup_tasks",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started: morning_plan (9:00 пн-пт), weekly_digest (пт 17:00), mr_sync (каждый час)")
+    logger.info("Scheduler started: morning_plan (9:00 пн-пт), weekly_digest (пт 17:00), mr_sync (каждый час), auto_checkup_tasks (08:00)")

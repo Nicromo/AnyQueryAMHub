@@ -96,6 +96,21 @@ def init_db():
             except Exception:
                 pass
 
+        # Колонка менеджера для персонализации дашборда
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN manager_tg_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+        # Таблица для хранения назначений менеджер → клиенты (персональный список)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS manager_clients (
+                tg_id      INTEGER NOT NULL,
+                client_id  INTEGER NOT NULL REFERENCES clients(id),
+                PRIMARY KEY (tg_id, client_id)
+            )
+        """)
+
 
 # ── Clients ──────────────────────────────────────────────────────────────────
 
@@ -338,6 +353,54 @@ def get_internal_tasks(status: str = "open") -> list[dict]:
             (status,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Manager персонализация ─────────────────────────────────────────────────────
+
+def get_manager_client_ids(tg_id: int) -> list[int]:
+    """Список client_id, привязанных к менеджеру."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT client_id FROM manager_clients WHERE tg_id=?", (tg_id,)
+        ).fetchall()
+    return [r["client_id"] for r in rows]
+
+
+def set_manager_clients(tg_id: int, client_ids: list[int]):
+    """Заменяет список клиентов менеджера целиком."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM manager_clients WHERE tg_id=?", (tg_id,))
+        conn.executemany(
+            "INSERT OR IGNORE INTO manager_clients (tg_id, client_id) VALUES (?,?)",
+            [(tg_id, cid) for cid in client_ids],
+        )
+
+
+def get_all_clients_for_manager(tg_id: int | None = None) -> list[dict]:
+    """
+    Если tg_id передан и у него есть свой список — возвращает только его клиентов.
+    Иначе — всех.
+    """
+    if tg_id:
+        ids = get_manager_client_ids(tg_id)
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            with get_conn() as conn:
+                rows = conn.execute(f"""
+                    SELECT c.*,
+                           MAX(m.meeting_date) as last_meeting,
+                           COUNT(t.id) as open_tasks
+                    FROM clients c
+                    LEFT JOIN meetings m ON m.client_id = c.id
+                    LEFT JOIN tasks t ON t.client_id = c.id AND t.status = 'open'
+                    WHERE c.id IN ({placeholders})
+                    GROUP BY c.id
+                    ORDER BY CASE c.segment WHEN 'ENT' THEN 1 WHEN 'SME+' THEN 2
+                             WHEN 'SME' THEN 3 WHEN 'SME-' THEN 4
+                             WHEN 'SMB' THEN 5 ELSE 6 END, c.name
+                """, ids).fetchall()
+            return [dict(r) for r in rows]
+    return get_all_clients()
 
 
 # ── Seed data — твои клиенты ─────────────────────────────────────────────────

@@ -162,6 +162,44 @@
 
 </div>
 
+<!-- Запланировать регулярную встречу с буфером -->
+<div class="card" style="margin-top:0">
+  <details>
+    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">📅 Запланировать встречу (+30 мин буфер)</summary>
+    <div style="margin-top:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div>
+          <label style="font-size:0.8rem;color:var(--text-muted)">Дата и время встречи</label>
+          <input type="datetime-local" id="plan-dt" class="form-control" style="margin-top:4px"
+                 value="{{ today }}T10:00">
+        </div>
+        <div>
+          <label style="font-size:0.8rem;color:var(--text-muted)">Длительность (мин)</label>
+          <select id="plan-dur" class="form-control" style="margin-top:4px">
+            <option value="30">30 мин</option>
+            <option value="45">45 мин</option>
+            <option value="60" selected>60 мин</option>
+            <option value="90">90 мин</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="plan-preview" style="background:var(--surface2);border-radius:8px;padding:12px;font-size:0.82rem;margin-bottom:10px;display:none">
+        <div style="color:var(--text-muted);margin-bottom:6px">Расписание с буфером 30 мин:</div>
+        <div>🟡 <span id="buf-before-time"></span> — Подготовка (30 мин)</div>
+        <div>🟢 <span id="meeting-time-range"></span> — Встреча с {{ client.name }}</div>
+        <div>🟡 <span id="buf-after-time"></span> — Фолоуап (30 мин)</div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="calcBuffer()" class="btn btn-ghost btn-sm">🔍 Рассчитать</button>
+        <button onclick="saveAndGoogleCal()" class="btn btn-primary btn-sm">📅 Добавить в Google Calendar</button>
+        <button onclick="savePlannedDate()" class="btn btn-ghost btn-sm">💾 Сохранить дату</button>
+      </div>
+    </div>
+  </details>
+</div>
+
 <!-- TG канал клиента -->
 <div class="card" style="margin-top:0">
   <details>
@@ -256,6 +294,59 @@ async function clearPlanned() {
     body: JSON.stringify({ date: null }),
   });
   location.reload();
+}
+
+function calcBuffer() {
+  const dt = document.getElementById('plan-dt').value;
+  const dur = parseInt(document.getElementById('plan-dur').value);
+  if (!dt) return;
+
+  const start = new Date(dt);
+  const bufBefore = new Date(start.getTime() - 30 * 60000);
+  const meetingEnd = new Date(start.getTime() + dur * 60000);
+  const bufAfter = new Date(meetingEnd.getTime() + 30 * 60000);
+
+  const fmt = d => d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+  const fmtFull = d => d.toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+
+  document.getElementById('buf-before-time').textContent = `${fmtFull(bufBefore)} – ${fmt(start)}`;
+  document.getElementById('meeting-time-range').textContent = `${fmt(start)} – ${fmt(meetingEnd)}`;
+  document.getElementById('buf-after-time').textContent = `${fmt(meetingEnd)} – ${fmt(bufAfter)}`;
+  document.getElementById('plan-preview').style.display = 'block';
+}
+
+function saveAndGoogleCal() {
+  const dt = document.getElementById('plan-dt').value;
+  const dur = parseInt(document.getElementById('plan-dur').value);
+  if (!dt) { alert('Выбери дату и время'); return; }
+
+  const start = new Date(dt);
+  const end = new Date(start.getTime() + dur * 60000);
+  const fmt = d => d.toISOString().replace(/[-:]/g,'').replace('.000','');
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `Чекап — {{ client.name }}`,
+    dates: `${fmt(start)}/${fmt(end)}`,
+    details: `Клиент: {{ client.name }} ({{ client.segment }})\nПодготовка за 30 мин до. Фолоуап 30 мин после.`,
+    sf: 'true',
+  });
+  window.open('https://calendar.google.com/calendar/r/eventedit?' + params.toString(), '_blank');
+
+  // Также сохраняем дату в AM Hub
+  savePlannedDate();
+}
+
+async function savePlannedDate() {
+  const dt = document.getElementById('plan-dt').value;
+  if (!dt) return;
+  const dateOnly = dt.split('T')[0];
+  const r = await fetch('/api/client/{{ client.id }}/planned-meeting', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ date: dateOnly }),
+  });
+  const d = await r.json();
+  if (d.ok) location.reload();
 }
 </script>
 {% endblock %}

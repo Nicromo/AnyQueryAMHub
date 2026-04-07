@@ -4,8 +4,16 @@
 
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
   <div>
-    <h1>👥 Все клиенты</h1>
-    <p style="color:var(--text-muted)">{{ today }} · {{ clients|length }} клиентов</p>
+    <h1>{% if has_personal_list %}👤 Мои клиенты{% else %}👥 Все клиенты{% endif %}</h1>
+    <p style="color:var(--text-muted)">
+      {{ today }} · {{ clients|length }} клиентов
+      {% if has_personal_list and total_all %}
+        <span style="color:var(--text-muted);font-size:0.8rem">из {{ total_all }}</span>
+        · <a href="/settings/my-clients" style="color:var(--accent);font-size:0.8rem">изменить</a>
+      {% else %}
+        · <a href="/settings/my-clients" style="color:var(--text-muted);font-size:0.8rem">выбрать своих</a>
+      {% endif %}
+    </p>
   </div>
   <div style="display:flex;gap:8px;align-items:center">
     <button onclick="refreshMR()" class="btn btn-ghost btn-sm" id="mr-refresh-btn" title="Обновить данные из Merchrules">

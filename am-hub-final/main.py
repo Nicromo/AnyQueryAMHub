@@ -23,6 +23,7 @@ from database import (
     add_checklist_item, clear_checklist,
     create_internal_task, get_internal_tasks,
     CHECKLIST_TEMPLATES,
+    get_manager_client_ids, set_manager_clients, get_all_clients_for_manager,
 )
 from auth import SessionManager, verify_tg_auth
 from tg import build_followup_message, send_to_tg
@@ -135,7 +136,9 @@ async def index(request: Request, segment: str = "", sort: str = ""):
     if not user:
         return RedirectResponse("/login")
 
-    clients = get_all_clients()
+    # Загружаем клиентов: если у менеджера есть свой список — только его
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    clients = get_all_clients_for_manager(tg_id)
 
     # Добавляем статус чекапа и дополнительные поля к каждому клиенту
     for c in clients:
@@ -164,8 +167,8 @@ async def index(request: Request, segment: str = "", sort: str = ""):
     clients.sort(key=attention_score)
 
     segments = ["ENT", "SME+", "SME-", "SME", "SMB", "SS"]
-    all_for_count = get_all_clients()
-    counts = {s: sum(1 for c in all_for_count if c["segment"] == s) for s in segments}
+    counts = {s: sum(1 for c in clients if c["segment"] == s) for s in segments}
+    has_personal_list = bool(tg_id and get_manager_client_ids(tg_id))
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -176,6 +179,8 @@ async def index(request: Request, segment: str = "", sort: str = ""):
         "segments": segments,
         "counts": counts,
         "today": date.today().isoformat(),
+        "has_personal_list": has_personal_list,
+        "total_all": len(get_all_clients()),
     })
 
 
@@ -362,6 +367,43 @@ async def qbr_page(request: Request, client_id: int):
     })
 
 
+# ── Настройки менеджера: мой список клиентов ─────────────────────────────────
+
+@app.get("/settings/my-clients", response_class=HTMLResponse)
+async def my_clients_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    all_clients = get_all_clients()
+    my_ids = set(get_manager_client_ids(tg_id or 0))
+
+    return templates.TemplateResponse("my_clients.html", {
+        "request": request,
+        "user": user,
+        "all_clients": all_clients,
+        "my_ids": my_ids,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/settings/my-clients", response_class=JSONResponse)
+async def save_my_clients(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not tg_id:
+        raise HTTPException(400, "No tg_id")
+
+    body = await request.json()
+    client_ids = [int(x) for x in body.get("client_ids", []) if str(x).isdigit()]
+    set_manager_clients(tg_id, client_ids)
+    return {"ok": True, "count": len(client_ids)}
+
+
 # ── API — обновить TG chat_id клиента ────────────────────────────────────────
 
 @app.post("/api/client/{client_id}/tg")
@@ -390,33 +432,152 @@ async def close_task(request: Request, task_id: int):
 
 # ── Top-50 — веб-страница ────────────────────────────────────────────────────
 
+def _load_metrics_for_month(year_month: str) -> Optional[dict]:
+    """Загружает сохранённые метрики из data/metrics_{year_month}.json."""
+    from pathlib import Path as _P
+    import json as _json
+    p = _P("data") / f"metrics_{year_month}.json"
+    if not p.exists():
+        return None
+    try:
+        return _json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 @app.get("/top50", response_class=HTMLResponse)
 async def top50_page(request: Request, mode: str = "weekly"):
     user = get_user_or_redirect(request)
     if not user:
         return RedirectResponse("/login")
 
-    # Получаем список имён клиентов из нашей БД
-    all_clients = get_all_clients()
-    my_client_names = [c["name"] for c in all_clients]
+    month_name_ru = ["Январь","Февраль","Март","Апрель","Май","Июнь",
+                     "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
+    now = date.today()
+    month_name = month_name_ru[now.month - 1]
+    year_month = now.strftime("%Y-%m")
 
-    data = await get_top50_data(
-        my_clients=my_client_names,
-        spreadsheet_id=SHEETS_SPREADSHEET_ID,
-        gid=SHEETS_TOP50_GID,
-    )
+    metrics = None
+    data = {}
+
+    if mode == "metrics":
+        metrics = _load_metrics_for_month(year_month)
+    else:
+        all_clients = get_all_clients()
+        my_client_names = [c["name"] for c in all_clients]
+        data = await get_top50_data(
+            my_clients=my_client_names,
+            spreadsheet_id=SHEETS_SPREADSHEET_ID,
+            gid=SHEETS_TOP50_GID,
+        )
 
     return templates.TemplateResponse("top50.html", {
         "request": request,
         "user": user,
         "data": data,
         "mode": mode,
-        "today": date.today().isoformat(),
+        "metrics": metrics,
+        "month_name": month_name,
+        "today": now.isoformat(),
         "sheet_url": (
             f"https://docs.google.com/spreadsheets/d/{SHEETS_SPREADSHEET_ID}"
             f"/edit#gid={SHEETS_TOP50_GID}"
         ),
     })
+
+
+# ── API: загрузить файл метрик (CSV / XLSX) ───────────────────────────────────
+
+@app.post("/api/metrics/upload", response_class=JSONResponse)
+async def api_metrics_upload(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    from fastapi import UploadFile, File
+    import json as _json
+    from pathlib import Path as _P
+
+    form = await request.form()
+    file: UploadFile = form.get("file")
+    if not file:
+        return {"ok": False, "error": "Файл не найден"}
+
+    filename = file.filename or "metrics"
+    content = await file.read()
+
+    headers = []
+    rows = []
+
+    try:
+        if filename.lower().endswith(".csv"):
+            import io as _io
+            import csv as _csv
+            text = content.decode("utf-8-sig", errors="replace")
+            reader = _csv.reader(_io.StringIO(text))
+            all_rows = list(reader)
+            if all_rows:
+                headers = all_rows[0]
+                rows = [list(r) for r in all_rows[1:] if any(c.strip() for c in r)]
+
+        elif filename.lower().endswith((".xlsx", ".xls")):
+            import openpyxl as _xl
+            import io as _io
+            wb = _xl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
+            ws = wb.active
+            all_rows = [[str(cell.value) if cell.value is not None else "" for cell in row] for row in ws.iter_rows()]
+            wb.close()
+            if all_rows:
+                headers = all_rows[0]
+                rows = [r for r in all_rows[1:] if any(c.strip() for c in r)]
+        else:
+            return {"ok": False, "error": "Поддерживаются только CSV и XLSX"}
+
+    except Exception as exc:
+        return {"ok": False, "error": f"Ошибка разбора файла: {exc}"}
+
+    if not headers or not rows:
+        return {"ok": False, "error": "Файл пустой или не содержит данных"}
+
+    # Вычисляем KPI-карточки: числовые колонки → сумма / среднее
+    kpis = []
+    for i, h in enumerate(headers):
+        vals = []
+        for r in rows:
+            if i < len(r):
+                try:
+                    vals.append(float(str(r[i]).replace(",", ".").replace(" ", "")))
+                except Exception:
+                    pass
+        if vals and len(vals) >= len(rows) * 0.5:  # >50% числовые
+            total = sum(vals)
+            avg = total / len(vals)
+            label_lower = h.lower()
+            if any(w in label_lower for w in ("gmv","выручка","оборот","сумма","руб")):
+                kpis.append({"label": h, "value": f"{total:,.0f} ₽".replace(",", " ")})
+            elif any(w in label_lower for w in ("заказ","order","cnt","кол-во","количество")):
+                kpis.append({"label": h, "value": f"{int(total):,}".replace(",", " ")})
+            elif "конвер" in label_lower or "%" in h:
+                kpis.append({"label": h, "value": f"{avg:.1f}%"})
+            elif len(kpis) < 6:
+                kpis.append({"label": h, "value": f"{total:,.0f}".replace(",", " ")})
+        if len(kpis) >= 6:
+            break
+
+    # Сохраняем
+    now = date.today()
+    year_month = now.strftime("%Y-%m")
+    _P("data").mkdir(exist_ok=True)
+    out_path = _P("data") / f"metrics_{year_month}.json"
+    out_path.write_text(_json.dumps({
+        "filename": filename,
+        "uploaded_at": now.isoformat(),
+        "headers": headers,
+        "rows": rows,
+        "kpis": kpis,
+    }, ensure_ascii=False), encoding="utf-8")
+
+    return {"ok": True, "rows": len(rows), "cols": len(headers)}
 
 
 # ── API — статистика дашборда ────────────────────────────────────────────────
@@ -992,6 +1153,22 @@ async def analytics_page(request: Request):
         "stats": stats,
         "today": date.today().isoformat(),
     })
+
+
+# ── API: обновить оценку времени задачи ──────────────────────────────────────
+
+@app.post("/api/task/{task_id}/hours", response_class=JSONResponse)
+async def api_task_hours(request: Request, task_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    hours = float(body.get("hours", 0))
+    import sqlite3 as _sq
+    from pathlib import Path as _P
+    with _sq.connect(_P("data/am_hub.db")) as conn:
+        conn.execute("UPDATE tasks SET hours_estimate=? WHERE id=?", (hours, task_id))
+    return {"ok": True}
 
 
 # ── QBR Календарь ────────────────────────────────────────────────────────────

@@ -6,18 +6,110 @@
   <div>
     <h1>🏆 Top-50 клиентов</h1>
     <p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px">
-      Данные из Google Sheets · обновлено {{ data.fetched_at }}
-      {% if data.filtered_rows is defined and data.rows %}
-        · <b style="color:var(--accent)">{{ data.filtered_rows|length }}</b> моих из {{ data.rows|length }} строк
+      {% if mode != 'metrics' %}
+        Данные из Google Sheets · обновлено {{ data.fetched_at }}
+        {% if data.filtered_rows is defined and data.rows %}
+          · <b style="color:var(--accent)">{{ data.filtered_rows|length }}</b> моих из {{ data.rows|length }} строк
+        {% endif %}
+      {% else %}
+        Метрики {{ month_name }} · загрузи файл CSV или XLSX
       {% endif %}
     </p>
   </div>
   <div style="display:flex;gap:8px;align-items:center">
     <a href="/top50?mode=weekly"  class="btn btn-sm {% if mode == 'weekly'  %}btn-primary{% else %}btn-ghost{% endif %}">📋 Еженедельный</a>
     <a href="/top50?mode=monthly" class="btn btn-sm {% if mode == 'monthly' %}btn-primary{% else %}btn-ghost{% endif %}">📅 Ежемесячный</a>
+    <a href="/top50?mode=metrics" class="btn btn-sm {% if mode == 'metrics' %}btn-primary{% else %}btn-ghost{% endif %}">📊 Метрики {{ month_name }}</a>
+    {% if mode != 'metrics' %}
     <a href="{{ sheet_url }}" target="_blank" class="btn btn-ghost btn-sm">↗ Таблица</a>
+    {% endif %}
   </div>
 </div>
+
+<!-- ─── МЕТРИКИ ─────────────────────────────────────────────────────────────── -->
+{% if mode == 'metrics' %}
+
+<div class="card" style="padding:20px 24px">
+  <h3 style="font-size:1rem;margin:0 0 14px">📤 Загрузить файл метрик (CSV или XLSX)</h3>
+  <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px">
+    Файл должен содержать данные по клиентам: GMV, заказы, поиски, конверсия и т.д.
+    Первая строка — заголовки. Загруженный файл заменяет предыдущий для {{ month_name }}.
+  </p>
+
+  <div id="upload-zone"
+       style="border:2px dashed var(--border);border-radius:10px;padding:30px;text-align:center;cursor:pointer;transition:border-color .2s"
+       onclick="document.getElementById('metrics-file').click()"
+       ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+       ondragleave="this.style.borderColor='var(--border)'"
+       ondrop="handleDrop(event)">
+    <div style="font-size:2rem;margin-bottom:8px">📁</div>
+    <p style="color:var(--text-muted);font-size:0.88rem">Перетащи файл сюда или <b style="color:var(--accent)">кликни</b> для выбора</p>
+    <p style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">CSV, XLSX, XLS — до 10 МБ</p>
+  </div>
+  <input type="file" id="metrics-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="uploadMetrics(this.files[0])">
+
+  <div id="upload-progress" style="display:none;margin-top:14px">
+    <div style="background:var(--surface2);border-radius:8px;height:4px;overflow:hidden">
+      <div id="progress-bar" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div>
+    </div>
+    <p id="upload-status" style="font-size:0.82rem;color:var(--text-muted);margin-top:6px">Загружаем...</p>
+  </div>
+</div>
+
+{% if metrics %}
+<!-- KPI карточки -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
+  {% for kpi in metrics.kpis %}
+  <div class="card" style="padding:14px 18px;text-align:center">
+    <div style="font-size:1.4rem;font-weight:700;color:var(--accent)">{{ kpi.value }}</div>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px">{{ kpi.label }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Таблица метрик -->
+<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
+  <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div>
+      <b>{{ metrics.filename }}</b>
+      <span style="color:var(--text-muted);font-size:0.8rem;margin-left:8px">· {{ metrics.rows|length }} строк · загружено {{ metrics.uploaded_at }}</span>
+    </div>
+    <input type="text" id="metrics-search" placeholder="🔍 Поиск…"
+      class="form-control" style="width:200px;padding:5px 10px;font-size:0.83rem"
+      oninput="filterMetrics(this.value)">
+  </div>
+  <table class="table" id="metrics-table">
+    <thead>
+      <tr>
+        {% for h in metrics.headers %}
+        <th style="white-space:nowrap">{{ h }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in metrics.rows %}
+    <tr class="metrics-row" data-search="{{ row | join(' ') | lower }}">
+      {% for cell in row %}
+      <td style="{% if cell is number and cell < 0 %}color:var(--red){% elif loop.first %}font-weight:600{% endif %}">
+        {{ cell if cell is not none else '—' }}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
+<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
+  <div style="font-size:2.5rem;margin-bottom:12px">📊</div>
+  <p style="font-size:0.95rem">Для {{ month_name }} ещё не загружен файл метрик</p>
+  <p style="font-size:0.82rem;margin-top:6px">Загрузи CSV или XLSX с данными выше</p>
+</div>
+{% endif %}
+
+<!-- ─── TOP-50 ОБЫЧНЫЕ ВКЛАДКИ ───────────────────────────────────────────────── -->
+{% else %}
 
 {% if data.error %}
 <div class="card" style="border-color:#5a2a2a;background:#2a1515;padding:20px 24px">
@@ -34,7 +126,6 @@
 </div>
 {% else %}
 
-<!-- Режим: описание -->
 {% if mode == 'weekly' %}
 <div class="card" style="background:#1a2030;border-color:#2e3a50;padding:14px 20px;margin-bottom:20px">
   <p style="font-size:0.88rem;color:var(--text-muted)">
@@ -53,7 +144,6 @@
 </div>
 {% endif %}
 
-<!-- Фильтр: мои / все -->
 <div class="filter-tabs" style="margin-bottom:16px">
   <button onclick="showAll(false)" id="btn-mine" class="tab-btn active">
     ⭐ Мои клиенты ({{ data.filtered_rows|length }})
@@ -66,7 +156,6 @@
     oninput="filterRows(this.value)">
 </div>
 
-<!-- Таблица -->
 <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
   <table class="table" id="top50-table">
     <thead>
@@ -102,29 +191,82 @@
 </p>
 
 {% endif %}
+{% endif %}
 
 <script>
-  let _showAll = false;
+// ─── TOP-50 фильтры ──────────────────────────────────────────────────────────
+let _showAll = false;
 
-  function showAll(all) {
-    _showAll = all;
-    document.getElementById('btn-mine').classList.toggle('active', !all);
-    document.getElementById('btn-all').classList.toggle('active', all);
-    filterRows(document.getElementById('top50-search').value);
+function showAll(all) {
+  _showAll = all;
+  document.getElementById('btn-mine')?.classList.toggle('active', !all);
+  document.getElementById('btn-all')?.classList.toggle('active', all);
+  filterRows(document.getElementById('top50-search')?.value || '');
+}
+
+function filterRows(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('.top50-row').forEach(tr => {
+    const isMine = tr.classList.contains('mine');
+    const matchesMine = _showAll || isMine;
+    const matchesSearch = !q || tr.dataset.search.includes(q);
+    tr.style.display = (matchesMine && matchesSearch) ? '' : 'none';
+  });
+}
+
+if (document.getElementById('btn-mine')) showAll(false);
+
+// ─── Метрики: поиск ──────────────────────────────────────────────────────────
+function filterMetrics(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.metrics-row').forEach(tr => {
+    tr.style.display = (!q || tr.dataset.search.includes(q)) ? '' : 'none';
+  });
+}
+
+// ─── Метрики: загрузка файла ─────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-zone').style.borderColor = 'var(--border)';
+  const file = e.dataTransfer.files[0];
+  if (file) uploadMetrics(file);
+}
+
+async function uploadMetrics(file) {
+  if (!file) return;
+  const zone = document.getElementById('upload-zone');
+  const prog = document.getElementById('upload-progress');
+  const bar  = document.getElementById('progress-bar');
+  const status = document.getElementById('upload-status');
+
+  zone.style.display = 'none';
+  prog.style.display = 'block';
+  status.textContent = `Загружаем ${file.name}...`;
+  bar.style.width = '30%';
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    bar.style.width = '70%';
+    const r = await fetch('/api/metrics/upload', { method: 'POST', body: form });
+    const d = await r.json();
+    bar.style.width = '100%';
+    if (d.ok) {
+      status.textContent = `✅ Загружено: ${d.rows} строк, ${d.cols} колонок`;
+      status.style.color = 'var(--accent)';
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      status.textContent = '❌ ' + (d.error || 'Ошибка загрузки');
+      status.style.color = 'var(--red)';
+      zone.style.display = 'block';
+    }
+  } catch(e) {
+    status.textContent = '❌ ' + e.message;
+    status.style.color = 'var(--red)';
+    zone.style.display = 'block';
   }
-
-  function filterRows(query) {
-    const q = query.toLowerCase().trim();
-    document.querySelectorAll('.top50-row').forEach(tr => {
-      const isMine = tr.classList.contains('mine');
-      const matchesMine = _showAll || isMine;
-      const matchesSearch = !q || tr.dataset.search.includes(q);
-      tr.style.display = (matchesMine && matchesSearch) ? '' : 'none';
-    });
-  }
-
-  // По умолчанию — только мои клиенты
-  showAll(false);
+}
 </script>
 
 {% endblock %}

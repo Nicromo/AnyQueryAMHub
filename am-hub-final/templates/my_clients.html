@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Мои клиенты — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <p><a href="/">← Все клиенты</a></p>
+  <h1>⚙️ Мой список клиентов</h1>
+  <p style="color:var(--text-muted);font-size:0.85rem;margin-top:6px">
+    Выбери своих клиентов — на главной будут показаны только они.
+    Если ничего не выбрано — отображаются все клиенты.
+  </p>
+</div>
+
+<!-- Поиск + статистика -->
+<div class="card" style="padding:14px 18px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <input type="text" id="client-search" placeholder="🔍 Поиск клиента…"
+      class="form-control" style="max-width:300px;padding:7px 12px"
+      oninput="filterClients(this.value)">
+    <span id="selected-count" style="font-size:0.85rem;color:var(--accent)">
+      Выбрано: <b>{{ my_ids|length }}</b>
+    </span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="selectAll()" class="btn btn-ghost btn-sm">Все</button>
+      <button onclick="selectNone()" class="btn btn-ghost btn-sm">Очистить</button>
+      <button onclick="saveSelection()" class="btn btn-primary" id="save-btn">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Фильтр по сегменту -->
+<div class="filter-tabs">
+  <button class="tab-btn active" onclick="filterSeg('')">Все</button>
+  {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
+  <button class="tab-btn" onclick="filterSeg('{{ seg }}')">{{ seg }}</button>
+  {% endfor %}
+</div>
+
+<!-- Список клиентов -->
+<div class="card" style="padding:0;overflow:hidden">
+  <div id="clients-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0">
+    {% for c in all_clients %}
+    <label class="client-pick-item {% if c.id in my_ids %}selected{% endif %}"
+           data-name="{{ c.name|lower }}" data-seg="{{ c.segment }}"
+           style="display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;
+                  border-bottom:1px solid var(--border);border-right:1px solid var(--border);
+                  transition:background .15s;user-select:none">
+      <input type="checkbox" name="client_ids" value="{{ c.id }}"
+             {% if c.id in my_ids %}checked{% endif %}
+             style="width:16px;height:16px;accent-color:var(--accent);flex-shrink:0"
+             onchange="updateCount()">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          {{ c.name }}
+        </div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:1px">
+          <span class="badge badge-{{ c.segment|lower }}" style="font-size:0.68rem">{{ c.segment }}</span>
+          {% if c.last_checkup %}
+            <span style="margin-left:4px">📅 {{ c.last_checkup[:10] }}</span>
+          {% else %}
+            <span style="margin-left:4px;color:var(--red)">нет чекапа</span>
+          {% endif %}
+          {% if c.open_tasks %}
+            <span style="margin-left:4px">• {{ c.open_tasks }} задач</span>
+          {% endif %}
+        </div>
+      </div>
+    </label>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="save-result" style="margin-top:10px;font-size:0.85rem;text-align:center"></div>
+
+<style>
+.client-pick-item:hover { background: var(--surface2); }
+.client-pick-item.selected { background: rgba(99,102,241,.08); }
+.client-pick-item.hidden { display:none !important; }
+</style>
+
+<script>
+let _activeSeg = '';
+
+function filterClients(q) {
+  q = q.toLowerCase().trim();
+  document.querySelectorAll('.client-pick-item').forEach(el => {
+    const nameMatch = !q || el.dataset.name.includes(q);
+    const segMatch = !_activeSeg || el.dataset.seg === _activeSeg;
+    el.classList.toggle('hidden', !nameMatch || !segMatch);
+  });
+}
+
+function filterSeg(seg) {
+  _activeSeg = seg;
+  document.querySelectorAll('.filter-tabs .tab-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent.trim() === (seg || 'Все'));
+  });
+  filterClients(document.getElementById('client-search').value);
+}
+
+function updateCount() {
+  const n = document.querySelectorAll('input[name=client_ids]:checked').length;
+  document.querySelector('#selected-count b').textContent = n;
+  document.querySelectorAll('.client-pick-item').forEach(el => {
+    el.classList.toggle('selected', el.querySelector('input').checked);
+  });
+}
+
+function selectAll() {
+  document.querySelectorAll('input[name=client_ids]').forEach(cb => {
+    if (!cb.closest('.hidden')) cb.checked = true;
+  });
+  updateCount();
+}
+
+function selectNone() {
+  document.querySelectorAll('input[name=client_ids]').forEach(cb => cb.checked = false);
+  updateCount();
+}
+
+async function saveSelection() {
+  const ids = Array.from(document.querySelectorAll('input[name=client_ids]:checked'))
+    .map(cb => parseInt(cb.value));
+  const btn = document.getElementById('save-btn');
+  const res = document.getElementById('save-result');
+  btn.disabled = true;
+  btn.textContent = '⏳ Сохраняем…';
+
+  try {
+    const r = await fetch('/api/settings/my-clients', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ client_ids: ids }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = `✅ Сохранено: ${d.count} клиентов`;
+      res.style.color = 'var(--accent)';
+      setTimeout(() => { window.location.href = '/'; }, 1000);
+    } else {
+      res.textContent = '❌ Ошибка';
+      res.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    res.textContent = '❌ ' + e.message;
+    res.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Сохранить';
+  }
+}
+</script>
+
+{% endblock %}
