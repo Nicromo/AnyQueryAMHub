@@ -1,9 +1,24 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .env
+.env.*
+!.env.example
 config.json
 *.csv
 *.xlsx
 .DS_Store
 *.command
+.venv/
+venv/
+node_modules/
+
+# База данных (локальная)
+am-hub-final/data/*.db
+am-hub-final/data/*.db-wal
+am-hub-final/data/*.db-shm
+
+# Файл кредов
+~/.search-checkup-creds.json
+*.credentials.json

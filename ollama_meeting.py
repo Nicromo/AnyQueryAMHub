@@ -872,6 +872,12 @@ def process_transcription(
     annotated = annotate_transcription(lines, partner_speakers)
     _reset_cancel()
 
+    # Если транскрипция слишком большая — сжимаем до 60k символов (≈20k токенов)
+    MAX_TRANSCRIPT_CHARS = 60_000
+    if len(annotated) > MAX_TRANSCRIPT_CHARS:
+        logger.warning("Transcript too large (%d chars), compressing to %d", len(annotated), MAX_TRANSCRIPT_CHARS)
+        annotated = smart_compress_transcript(annotated, max_chars=MAX_TRANSCRIPT_CHARS)
+
     # Шаг 1: саммаризация транскрипции в markdown-саммари (product-менеджер стиль)
     step1_system = (prompt_prefix or "").strip()
     if step1_system:
