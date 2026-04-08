@@ -35,7 +35,7 @@ from ai_followup import process_transcript as ai_process_transcript
 from merchrules_sync import (
     sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate
 )
-from airtable_sync import sync_meeting_to_airtable
+from airtable_sync import sync_meeting_to_airtable, import_clients_from_airtable
 from database import (
     set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings
 )
@@ -508,6 +508,40 @@ async def save_my_clients(request: Request):
     client_ids = [int(x) for x in body.get("client_ids", []) if str(x).isdigit()]
     set_manager_clients(tg_id, client_ids)
     return {"ok": True, "count": len(client_ids)}
+
+
+# ── Импорт клиентов из Airtable CS ALL ───────────────────────────────────────
+
+@app.post("/api/admin/import-airtable", response_class=JSONResponse)
+async def api_import_airtable(request: Request):
+    """
+    Запускает импорт всех клиентов из Airtable CS ALL view.
+    Авто-определяет поля, upsert клиентов, привязывает к менеджерам.
+    Только для авторизованных пользователей.
+    """
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    # Можно передать свой токен и view_id через body
+    token = body.get("token") if isinstance(body, dict) else None
+    view_id = body.get("view_id") if isinstance(body, dict) else None
+
+    import_kwargs: dict = {}
+    if token:
+        import_kwargs["token"] = token
+    if view_id:
+        import_kwargs["view_id"] = view_id
+
+    try:
+        result = await import_clients_from_airtable(**import_kwargs)
+        # unmatched_managers — set, нужно сериализовать
+        if isinstance(result.get("unmatched_managers"), set):
+            result["unmatched_managers"] = list(result["unmatched_managers"])
+        return result
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 # ── API — обновить TG chat_id клиента ────────────────────────────────────────

@@ -120,6 +120,23 @@
   <div id="save-result" style="font-size:0.85rem"></div>
 </div>
 
+<!-- Импорт клиентов из Airtable -->
+<div class="card" style="margin-top:24px;border:1px solid var(--blue,#3b82f6)20">
+  <h3 style="font-size:1rem;margin:0 0 6px">📥 Импорт клиентов из Airtable</h3>
+  <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px">
+    Загружает всех клиентов из <b>CS ALL</b> view, авто-определяет поля (имя, сегмент, менеджер, site_id)
+    и добавляет их в базу. Клиенты автоматически привязываются к менеджерам по имени из профиля.
+    Повторный запуск безопасен — существующие клиенты обновляются, дублей не будет.
+  </p>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button onclick="importAirtable()" class="btn btn-primary" id="import-btn">
+      🔄 Импортировать из Airtable
+    </button>
+    <div id="import-status" style="font-size:0.85rem"></div>
+  </div>
+  <div id="import-result" style="margin-top:12px;font-size:0.82rem;display:none"></div>
+</div>
+
 <!-- Другие менеджеры (только если есть) -->
 {% if other_managers %}
 <div class="card" style="margin-top:24px">
@@ -182,6 +199,81 @@ async function testMR() {
   } catch (e) {
     res.textContent = '❌ ' + e.message;
     res.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function importAirtable() {
+  const btn    = document.getElementById('import-btn');
+  const status = document.getElementById('import-status');
+  const result = document.getElementById('import-result');
+
+  btn.disabled = true;
+  status.textContent = '⏳ Загружаем клиентов из Airtable...';
+  status.style.color = 'var(--text-muted)';
+  result.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/admin/import-airtable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      status.textContent = `✅ Готово: ${d.created} клиентов импортировано`;
+      status.style.color = 'var(--green)';
+
+      let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px">`;
+      html += `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px"><div style="font-size:1.2rem;font-weight:600">${d.created}</div><div style="font-size:0.75rem;color:var(--text-muted)">Добавлено / обновлено</div></div>`;
+      html += `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px"><div style="font-size:1.2rem;font-weight:600">${d.managers_linked}</div><div style="font-size:0.75rem;color:var(--text-muted)">Привязано к менеджерам</div></div>`;
+      html += `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px"><div style="font-size:1.2rem;font-weight:600">${d.skipped}</div><div style="font-size:0.75rem;color:var(--text-muted)">Пропущено</div></div>`;
+      html += `</div>`;
+
+      // Определённые поля
+      if (d.field_map) {
+        html += `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px">`;
+        html += `Определены поля: `;
+        const fm = d.field_map;
+        const parts = [];
+        if (fm.name)    parts.push(`<b>имя</b> → ${fm.name}`);
+        if (fm.segment) parts.push(`<b>сегмент</b> → ${fm.segment}`);
+        if (fm.manager) parts.push(`<b>менеджер</b> → ${fm.manager}`);
+        if (fm.site_id) parts.push(`<b>site_id</b> → ${fm.site_id}`);
+        if (fm.checkup) parts.push(`<b>дата встречи</b> → ${fm.checkup}`);
+        html += parts.join(' · ') || '—';
+        html += `</div>`;
+      }
+
+      // Непривязанные менеджеры
+      const unmatched = d.unmatched_managers;
+      if (unmatched && Object.keys(unmatched).length) {
+        html += `<div style="background:var(--yellow-bg,#fef9c3);border:1px solid var(--yellow,#ca8a04)30;border-radius:6px;padding:10px 12px;font-size:0.8rem">`;
+        html += `⚠️ Менеджеры из Airtable не найдены в профилях AM Hub — клиенты добавлены без привязки:<br>`;
+        html += Object.entries(unmatched).map(([name, cnt]) => `<b>${name}</b> (${cnt} кл.)`).join(', ');
+        html += `<br><span style="color:var(--text-muted)">Попроси их войти и заполнить Имя в профиле, затем нажми «Импортировать» снова.</span></div>`;
+      }
+
+      if (d.errors && d.errors.length) {
+        html += `<div style="color:var(--red);font-size:0.78rem;margin-top:8px">Ошибки: ${d.errors.slice(0,5).join('; ')}</div>`;
+      }
+
+      result.innerHTML = html;
+      result.style.display = 'block';
+
+    } else {
+      status.textContent = '❌ ' + (d.error || 'Ошибка импорта');
+      status.style.color = 'var(--red)';
+      if (d.available_fields) {
+        result.innerHTML = `<div style="font-size:0.78rem;color:var(--text-muted)">Доступные поля в таблице: ${d.available_fields.join(', ')}</div>`;
+        result.style.display = 'block';
+      }
+    }
+  } catch (e) {
+    status.textContent = '❌ ' + e.message;
+    status.style.color = 'var(--red)';
   } finally {
     btn.disabled = false;
   }
