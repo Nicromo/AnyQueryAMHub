@@ -6,7 +6,7 @@
   <title>{% block title %}AM Hub{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -15,14 +15,13 @@
   <nav class="sidebar">
     <div class="sidebar-logo">AM <span>Hub</span></div>
 
-    <!-- Быстрый поиск клиента -->
+    <!-- Быстрый поиск -->
     <div class="search-wrap">
-      <input type="text" id="sidebar-search" placeholder="🔍 Найти клиента…"
+      <input type="text" id="sidebar-search" placeholder="Найти клиента…"
              autocomplete="off" oninput="sidebarSearch(this.value)">
       <div id="search-results" class="search-dropdown" style="display:none"></div>
     </div>
 
-    <!-- Навигация -->
     <div class="nav-section-label">Ежедневное</div>
     <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
       <span class="icon">☀️</span> Сегодня
@@ -35,10 +34,10 @@
     </a>
     <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks">
       <span class="icon">✅</span> Задачи
-      <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.72rem"></span>
+      <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.7rem;font-weight:600"></span>
     </a>
 
-    <div class="nav-section-label" style="margin-top:8px">Анализ</div>
+    <div class="nav-section-label">Анализ</div>
     <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
       <span class="icon">📈</span> Аналитика
     </a>
@@ -49,7 +48,7 @@
       <span class="icon">🔒</span> Внутренние задачи
     </a>
 
-    <div class="nav-section-label" style="margin-top:8px">Инструменты</div>
+    <div class="nav-section-label">Инструменты</div>
     <a class="nav-link {% if request.url.path == '/settings/my-clients' %}active{% endif %}" href="/settings/my-clients">
       <span class="icon">👤</span> Мои клиенты
     </a>
@@ -57,23 +56,23 @@
       <span class="icon">🗺️</span> Роадмап
     </a>
     <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank">
-      <span class="icon">📹</span> ktalk ↗
+      <span class="icon">📹</span> ktalk <span style="font-size:0.7rem;opacity:.5">↗</span>
     </a>
     <a class="nav-link" href="https://merchrules.any-platform.ru" target="_blank">
-      <span class="icon">🔗</span> Merchrules ↗
+      <span class="icon">🔗</span> Merchrules <span style="font-size:0.7rem;opacity:.5">↗</span>
     </a>
 
-    <!-- Статистика дашборда -->
+    <!-- Статистика -->
     <div id="sidebar-stats" class="sidebar-stats" style="display:none">
-      <div class="stat-item red"  id="stat-overdue">—</div>
+      <div class="stat-item red"    id="stat-overdue">—</div>
       <div class="stat-item yellow" id="stat-warning">—</div>
-      <div class="stat-item" id="stat-tasks">—</div>
+      <div class="stat-item"        id="stat-tasks">—</div>
     </div>
 
     <div class="sidebar-bottom">
       {% if user %}
-        <span style="color:var(--text-muted);font-size:0.78rem">👤 {{ user.name }}</span><br>
-        <a href="/logout" style="color:var(--text-muted);font-size:0.78rem">Выйти</a>
+        <span>👤 {{ user.name }}</span>
+        <a href="/logout">Выйти</a>
       {% endif %}
     </div>
   </nav>
@@ -84,7 +83,7 @@
 </div>
 {% endblock %}
 
-<!-- Toast уведомление -->
+<!-- Toast -->
 {% if request.query_params.get('saved') %}
 <div class="toast success" id="toast">
   ✅ Фолоуап сохранён
@@ -95,7 +94,7 @@
 {% endif %}
 
 <script>
-// ── Быстрый поиск клиента ─────────────────────────────────────────────────
+// ── Быстрый поиск ─────────────────────────────────────────────────────────
 let _searchTimer = null;
 function sidebarSearch(q) {
   clearTimeout(_searchTimer);
@@ -114,25 +113,22 @@ function sidebarSearch(q) {
       ).join('');
       drop.style.display = 'block';
     } catch(e) { drop.style.display = 'none'; }
-  }, 220);
+  }, 200);
 }
-
-// Закрыть дропдаун при клике вне
 document.addEventListener('click', e => {
   if (!e.target.closest('.search-wrap'))
     document.getElementById('search-results').style.display = 'none';
 });
 
-// ── Загрузка статистики ───────────────────────────────────────────────────
+// ── Статистика ────────────────────────────────────────────────────────────
 (async function loadStats() {
   try {
     const s = await fetch('/api/stats').then(r => r.json());
     const box = document.getElementById('sidebar-stats');
     document.getElementById('stat-overdue').textContent = `🔴 ${s.overdue} просроч.`;
     document.getElementById('stat-warning').textContent = `🟡 ${s.warning} скоро`;
-    document.getElementById('stat-tasks').textContent = `📋 ${s.open_tasks} задач`;
-    box.style.display = 'block';
-    // Бейдж на ссылке "Задачи"
+    document.getElementById('stat-tasks').textContent   = `📋 ${s.open_tasks} задач`;
+    box.style.display = 'flex';
     if (s.open_tasks > 0) {
       const badge = document.getElementById('nav-tasks-badge');
       if (badge) { badge.textContent = s.open_tasks; badge.style.display = 'inline'; }
