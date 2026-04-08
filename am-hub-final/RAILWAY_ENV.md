@@ -1,22 +1,51 @@
 # Переменные окружения для Railway
 
-Задай их в Railway → твой проект → Variables:
+Задай в Railway → проект → **Variables**.
+
+## Обязательные
+
+| Переменная | Описание | Пример |
+|---|---|---|
+| `TG_BOT_TOKEN` | Токен Telegram-бота | `8238040247:AAE...` |
+| `TG_BOT_USERNAME` | Username бота (без @) | `Nicromo` |
+| `SECRET_KEY` | Любая случайная строка для сессий | `some-random-string-32chars` |
+| `MERCHRULES_API_URL` | URL Merchrules | `https://merchrules.any-platform.ru` |
+
+## Доступ (кто может войти)
+
+| Переменная | Описание |
+|---|---|
+| `ALLOWED_TG_IDS` | Через запятую Telegram ID тех, кому разрешён вход. Если пусто — разрешён всем. |
+
+Пример для команды из 3 человек:
+```
+ALLOWED_TG_IDS=124902915,987654321,111222333
+```
+
+> **Каждый менеджер сам вводит свои логин/пароль Merchrules в разделе Профиль после входа.**
+> Кредсы хранятся в БД (SQLite на Railway Volume), привязаны к Telegram ID менеджера.
+
+## Опциональные (глобальный fallback)
+
+Если менеджер НЕ заполнил свой профиль — используются эти:
+
+| Переменная | Описание |
+|---|---|
+| `MERCHRULES_LOGIN` | Логин Merchrules по умолчанию |
+| `MERCHRULES_PASSWORD` | Пароль Merchrules по умолчанию |
+| `TG_NOTIFY_CHAT_ID` | Chat ID для уведомлений по умолчанию |
+
+## Google Sheets (Top-50)
 
 | Переменная | Значение |
 |---|---|
-| `TG_BOT_TOKEN` | `8238040247:AAEAR-9ayQPfS3WspoZ56lS3HclRbfdj1C8` |
-| `TG_BOT_USERNAME` | `Nicromo` |
-| `ALLOWED_TG_IDS` | `124902915` |
-| `SECRET_KEY` | `aq-am-hub-prod-k9x2mZ7vQpLr4nJw` |
-| `MERCHRULES_API_URL` | `https://merchrules.any-platform.ru` |
-| `MERCHRULES_API_KEY` | _(получить у команды anyquery)_ |
-
-> ⚠️ Этот файл НЕ пушится в git (добавь в .gitignore если надо).
-> Храни токены только в Railway Variables, не в коде.
+| `SHEETS_SPREADSHEET_ID` | ID таблицы Google Sheets |
+| `SHEETS_TOP50_GID` | ID листа (gid в URL) |
 
 ## После деплоя
 
-Обязательно зарегистрируй домен в Telegram Login Widget:
 1. Открой @BotFather → `/setdomain`
 2. Выбери своего бота
 3. Вставь домен Railway (например `am-hub-production.up.railway.app`)
+
+Это нужно для работы кнопки «Войти через Telegram» на странице логина.

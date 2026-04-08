@@ -111,6 +111,20 @@ def init_db():
             )
         """)
 
+        # Профили менеджеров: кредсы Merchrules, имя, уведомления
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS manager_profiles (
+                tg_id           INTEGER PRIMARY KEY,
+                display_name    TEXT DEFAULT '',
+                mr_login        TEXT DEFAULT '',
+                mr_password     TEXT DEFAULT '',
+                tg_notify_chat  TEXT DEFAULT '',
+                airtable_token  TEXT DEFAULT '',
+                created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
 
 # ── Clients ──────────────────────────────────────────────────────────────────
 
@@ -401,6 +415,50 @@ def get_all_clients_for_manager(tg_id: int | None = None) -> list[dict]:
                 """, ids).fetchall()
             return [dict(r) for r in rows]
     return get_all_clients()
+
+
+# ── Manager profiles ─────────────────────────────────────────────────────────
+
+def get_manager_profile(tg_id: int) -> dict:
+    """Возвращает профиль менеджера или пустой словарь с дефолтами."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM manager_profiles WHERE tg_id=?", (tg_id,)
+        ).fetchone()
+    if row:
+        return dict(row)
+    return {
+        "tg_id": tg_id, "display_name": "", "mr_login": "",
+        "mr_password": "", "tg_notify_chat": "", "airtable_token": "",
+    }
+
+
+def save_manager_profile(tg_id: int, display_name: str = "", mr_login: str = "",
+                          mr_password: str = "", tg_notify_chat: str = "",
+                          airtable_token: str = ""):
+    """Создаёт или обновляет профиль менеджера."""
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO manager_profiles (tg_id, display_name, mr_login, mr_password,
+                                          tg_notify_chat, airtable_token, updated_at)
+            VALUES (?,?,?,?,?,?, CURRENT_TIMESTAMP)
+            ON CONFLICT(tg_id) DO UPDATE SET
+                display_name   = excluded.display_name,
+                mr_login       = excluded.mr_login,
+                mr_password    = excluded.mr_password,
+                tg_notify_chat = excluded.tg_notify_chat,
+                airtable_token = excluded.airtable_token,
+                updated_at     = CURRENT_TIMESTAMP
+        """, (tg_id, display_name, mr_login, mr_password, tg_notify_chat, airtable_token))
+
+
+def get_all_manager_profiles() -> list[dict]:
+    """Все зарегистрированные менеджеры с их профилями."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM manager_profiles ORDER BY display_name"
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── Seed data — твои клиенты ─────────────────────────────────────────────────

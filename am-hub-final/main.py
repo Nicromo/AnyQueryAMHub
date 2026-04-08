@@ -24,6 +24,7 @@ from database import (
     create_internal_task, get_internal_tasks,
     CHECKLIST_TEMPLATES,
     get_manager_client_ids, set_manager_clients, get_all_clients_for_manager,
+    get_manager_profile, save_manager_profile, get_all_manager_profiles,
 )
 from auth import SessionManager, verify_tg_auth
 from tg import build_followup_message, send_to_tg
@@ -88,6 +89,27 @@ def get_user_or_redirect(request: Request):
     if not user:
         return None
     return user
+
+
+def get_tg_id(user) -> Optional[int]:
+    """Извлекает tg_id из объекта сессии."""
+    if isinstance(user, dict):
+        return user.get("id")
+    return getattr(user, "id", None)
+
+
+def get_user_mr_creds(user) -> tuple[str, str]:
+    """
+    Возвращает (mr_login, mr_password) для текущего пользователя.
+    Приоритет: профиль в БД → env-переменные.
+    """
+    tg_id = get_tg_id(user)
+    if tg_id:
+        profile = get_manager_profile(tg_id)
+        if profile.get("mr_login") and profile.get("mr_password"):
+            return profile["mr_login"], profile["mr_password"]
+    # Fallback — глобальные переменные окружения
+    return os.getenv("MERCHRULES_LOGIN", ""), os.getenv("MERCHRULES_PASSWORD", "")
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -290,9 +312,10 @@ async def followup_submit(
     if tasks:
         create_tasks_bulk(meeting_id, client_id, tasks)
 
-    # Синхронизация с MerchRules
+    # Синхронизация с MerchRules (кредсы из профиля пользователя)
     aq_tasks_list = [t for t in tasks if t["owner"] == "anyquery"]
     cl_tasks_list = [t for t in tasks if t["owner"] == "client"]
+    mr_login, mr_password = get_user_mr_creds(user)
     await sync_meeting_to_merchrules(
         client_name=client["name"],
         meeting_date=meeting_date,
@@ -302,6 +325,9 @@ async def followup_submit(
         next_meeting=next_meeting or None,
         aq_tasks=aq_tasks_list,
         client_tasks=cl_tasks_list,
+        site_ids=client.get("site_ids") or "",
+        login=mr_login,
+        password=mr_password,
     )
 
     # Синхронизация с Airtable (дата + дописать комментарий)
@@ -365,6 +391,86 @@ async def qbr_page(request: Request, client_id: int):
         "today": date.today().isoformat(),
         "quarter": f"Q{(date.today().month - 1) // 3 + 1} {date.today().year}",
     })
+
+
+# ── Профиль менеджера ────────────────────────────────────────────────────────
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request, saved: str = ""):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    tg_id = get_tg_id(user)
+    profile = get_manager_profile(tg_id or 0)
+    all_managers = get_all_manager_profiles()
+    other_managers = [m for m in all_managers if m["tg_id"] != tg_id]
+
+    from airtable_sync import AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_ID
+
+    return templates.TemplateResponse("profile.html", {
+        "request": request,
+        "user": user,
+        "profile": profile,
+        "saved": bool(saved),
+        "other_managers": other_managers,
+        "default_airtable_token": AIRTABLE_TOKEN,
+        "airtable_base": AIRTABLE_BASE_ID,
+        "airtable_table": AIRTABLE_TABLE_ID,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/profile/save", response_class=JSONResponse)
+async def api_profile_save(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    tg_id = get_tg_id(user)
+    if not tg_id:
+        raise HTTPException(400, "No tg_id in session")
+
+    body = await request.json()
+    save_manager_profile(
+        tg_id=tg_id,
+        display_name=body.get("display_name", ""),
+        mr_login=body.get("mr_login", ""),
+        mr_password=body.get("mr_password", ""),
+        tg_notify_chat=body.get("tg_notify_chat", ""),
+        airtable_token=body.get("airtable_token", ""),
+    )
+    return {"ok": True}
+
+
+@app.post("/api/profile/test-mr", response_class=JSONResponse)
+async def api_test_mr(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    login    = (body.get("login") or "").strip()
+    password = (body.get("password") or "").strip()
+    if not login or not password:
+        return {"ok": False, "error": "Введи логин и пароль"}
+
+    import httpx as _httpx
+    mr_url = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+    try:
+        async with _httpx.AsyncClient(timeout=10) as hx:
+            r = await hx.post(
+                f"{mr_url}/backend-v2/auth/login",
+                json={"username": login, "password": password},
+            )
+        if r.status_code == 200:
+            data = r.json()
+            email = data.get("email") or data.get("user", {}).get("email", "")
+            return {"ok": True, "email": email}
+        else:
+            return {"ok": False, "error": f"Ошибка {r.status_code}: {r.text[:100]}"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 # ── Настройки менеджера: мой список клиентов ─────────────────────────────────
@@ -749,24 +855,29 @@ async def mr_sync(request: Request):
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
-    mr_invalidate()
-    clients = get_all_clients()
-    data = await sync_clients_from_merchrules(clients)
+    mr_login, mr_password = get_user_mr_creds(user)
+    mr_invalidate(mr_login)
+    clients = get_all_clients_for_manager(get_tg_id(user))
+    data = await sync_clients_from_merchrules(clients, login=mr_login, password=mr_password)
     return {"ok": True, "synced_sites": len(data)}
 
 
 @app.get("/api/mr/clients", response_class=JSONResponse)
 async def mr_clients(request: Request):
     """
-    Возвращает агрегированные MR-данные по всем клиентам.
+    Возвращает агрегированные MR-данные по клиентам менеджера.
     Формат: { client_id: { open_tasks, blocked_tasks, overdue_tasks, last_meeting } }
     """
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
 
-    clients = get_all_clients()
-    mr_data = await sync_clients_from_merchrules(clients)
+    mr_login, mr_password = get_user_mr_creds(user)
+    if not mr_login:
+        return {}  # нет кредов — отдаём пустой ответ
+
+    clients = get_all_clients_for_manager(get_tg_id(user))
+    mr_data = await sync_clients_from_merchrules(clients, login=mr_login, password=mr_password)
 
     result = {}
     for c in clients:
@@ -839,13 +950,12 @@ async def api_ai_upload(request: Request):
             if db_tasks:
                 create_tasks_bulk(meeting_id, client_id, db_tasks)
 
-    # Пробуем загрузить в Merchrules через существующую сессию клиента
+    # Пробуем загрузить в Merchrules через кредсы текущего пользователя
     import re as _re
     site_ids = [s.strip() for s in _re.split(r"[,\s]+", site_ids_raw) if s.strip()]
 
     merchrules_url = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
-    mr_login = os.getenv("MERCHRULES_LOGIN", "")
-    mr_password = os.getenv("MERCHRULES_PASSWORD", "")
+    mr_login, mr_password = get_user_mr_creds(user)
 
     uploaded = []
     errors = []
@@ -899,7 +1009,7 @@ async def api_ai_upload(request: Request):
             "errors": [],
             "note": (
                 "Встреча и задачи сохранены в AM Hub. "
-                "Для загрузки в Merchrules добавь MERCHRULES_LOGIN и MERCHRULES_PASSWORD в Railway Variables."
+                "Для загрузки в Merchrules укажи логин и пароль в разделе Профиль."
             ),
         }
 
@@ -1241,9 +1351,10 @@ async def api_checkup_done(request: Request, client_id: int):
     if next_meeting:
         set_planned_meeting(client_id, next_meeting)
 
-    # Синхронизация с Merchrules
+    # Синхронизация с Merchrules (кредсы из профиля)
     mr_ok = False
     try:
+        mr_login, mr_password = get_user_mr_creds(user)
         mr_result = await sync_meeting_to_merchrules(
             client_name=client["name"],
             meeting_date=meeting_date,
@@ -1253,6 +1364,9 @@ async def api_checkup_done(request: Request, client_id: int):
             next_meeting=next_meeting,
             aq_tasks=[],
             client_tasks=[],
+            site_ids=client.get("site_ids") or "",
+            login=mr_login,
+            password=mr_password,
         )
         mr_ok = mr_result.get("ok", False)
     except Exception as exc:
@@ -1315,10 +1429,9 @@ async def api_push_tasks(request: Request, client_id: int):
     if not aq_tasks:
         return {"ok": True, "count": 0, "note": "Нет открытых задач AnyQuery"}
 
-    mr_login    = os.getenv("MERCHRULES_LOGIN", "")
-    mr_password = os.getenv("MERCHRULES_PASSWORD", "")
+    mr_login, mr_password = get_user_mr_creds(user)
     if not mr_login or not mr_password:
-        return {"ok": False, "error": "Нет кредов MR (MERCHRULES_LOGIN / MERCHRULES_PASSWORD)"}
+        return {"ok": False, "error": "Укажи логин и пароль Merchrules в разделе Профиль"}
 
     import httpx as _httpx, re as _re, io as _io
     site_ids = [s.strip() for s in _re.split(r"[,\s]+", site_ids_raw) if s.strip()]

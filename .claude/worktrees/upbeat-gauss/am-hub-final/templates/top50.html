@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Top-50 клиентов — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1>🏆 Top-50 клиентов</h1>
+    <p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px">
+      Данные из Google Sheets · обновлено {{ data.fetched_at }}
+      {% if data.filtered_rows is defined and data.rows %}
+        · <b style="color:var(--accent)">{{ data.filtered_rows|length }}</b> моих из {{ data.rows|length }} строк
+      {% endif %}
+    </p>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <a href="/top50?mode=weekly"  class="btn btn-sm {% if mode == 'weekly'  %}btn-primary{% else %}btn-ghost{% endif %}">📋 Еженедельный</a>
+    <a href="/top50?mode=monthly" class="btn btn-sm {% if mode == 'monthly' %}btn-primary{% else %}btn-ghost{% endif %}">📅 Ежемесячный</a>
+    <a href="{{ sheet_url }}" target="_blank" class="btn btn-ghost btn-sm">↗ Таблица</a>
+  </div>
+</div>
+
+{% if data.error %}
+<div class="card" style="border-color:#5a2a2a;background:#2a1515;padding:20px 24px">
+  <p style="color:var(--red)">❌ {{ data.error }}</p>
+  <p style="color:var(--text-muted);font-size:0.85rem;margin-top:8px">
+    Проверьте, что таблица открыта по ссылке (Общий доступ → «Просматривать могут все»).
+  </p>
+</div>
+{% elif not data.rows %}
+<div class="card" style="padding:32px;text-align:center;color:var(--text-muted)">
+  <div style="font-size:2rem;margin-bottom:12px">📭</div>
+  <p>Таблица пустая или не содержит строк с данными.</p>
+  <a href="{{ sheet_url }}" target="_blank" class="btn btn-ghost" style="margin-top:16px">Открыть таблицу</a>
+</div>
+{% else %}
+
+<!-- Режим: описание -->
+{% if mode == 'weekly' %}
+<div class="card" style="background:#1a2030;border-color:#2e3a50;padding:14px 20px;margin-bottom:20px">
+  <p style="font-size:0.88rem;color:var(--text-muted)">
+    🔍 <b style="color:var(--text)">Еженедельный:</b>
+    проблемы и пробелы клиентов, которые не удаётся закрыть со стороны CSM.
+    Используй для подготовки к еженедельному собранию Top-50.
+  </p>
+</div>
+{% else %}
+<div class="card" style="background:#1a2030;border-color:#2e3a50;padding:14px 20px;margin-bottom:20px">
+  <p style="font-size:0.88rem;color:var(--text-muted)">
+    📅 <b style="color:var(--text)">Ежемесячный:</b>
+    полный анализ клиентских данных из роадмапа за месяц.
+    Используй для Monthly Top-50 встречи.
+  </p>
+</div>
+{% endif %}
+
+<!-- Фильтр: мои / все -->
+<div class="filter-tabs" style="margin-bottom:16px">
+  <button onclick="showAll(false)" id="btn-mine" class="tab-btn active">
+    ⭐ Мои клиенты ({{ data.filtered_rows|length }})
+  </button>
+  <button onclick="showAll(true)"  id="btn-all"  class="tab-btn">
+    🌐 Все ({{ data.rows|length }})
+  </button>
+  <input type="text" id="top50-search" placeholder="🔍 Поиск по строке…"
+    class="form-control" style="display:inline-block;width:220px;padding:6px 12px;font-size:0.85rem"
+    oninput="filterRows(this.value)">
+</div>
+
+<!-- Таблица -->
+<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
+  <table class="table" id="top50-table">
+    <thead>
+      <tr>
+        <th style="width:32px">#</th>
+        {% for h in data.headers %}
+        <th>{{ h }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody id="top50-body">
+      {% set my_names = data.filtered_rows | map(attribute=data.client_col) | list if data.client_col else [] %}
+      {% for row in data.rows %}
+      {% set is_mine = (data.client_col and row[data.client_col] in my_names) %}
+      <tr class="top50-row {% if is_mine %}mine{% endif %}"
+          data-search="{{ row.values() | join(' ') | lower }}">
+        <td style="color:var(--text-muted);font-size:0.8rem">{{ loop.index }}</td>
+        {% for h in data.headers %}
+        <td {% if h == data.client_col %}class="client-name"{% endif %}
+            {% if h in data.problem_cols %}style="color:var(--red)"{% endif %}>
+          {{ row[h] or '—' }}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p style="color:var(--text-muted);font-size:0.8rem;margin-top:8px">
+  Колонка клиента: <b>{{ data.client_col or '—' }}</b>
+  {% if data.problem_cols %} · Проблемные колонки: <b>{{ data.problem_cols | join(', ') }}</b>{% endif %}
+</p>
+
+{% endif %}
+
+<script>
+  let _showAll = false;
+
+  function showAll(all) {
+    _showAll = all;
+    document.getElementById('btn-mine').classList.toggle('active', !all);
+    document.getElementById('btn-all').classList.toggle('active', all);
+    filterRows(document.getElementById('top50-search').value);
+  }
+
+  function filterRows(query) {
+    const q = query.toLowerCase().trim();
+    document.querySelectorAll('.top50-row').forEach(tr => {
+      const isMine = tr.classList.contains('mine');
+      const matchesMine = _showAll || isMine;
+      const matchesSearch = !q || tr.dataset.search.includes(q);
+      tr.style.display = (matchesMine && matchesSearch) ? '' : 'none';
+    });
+  }
+
+  // По умолчанию — только мои клиенты
+  showAll(false);
+</script>
+
+{% endblock %}

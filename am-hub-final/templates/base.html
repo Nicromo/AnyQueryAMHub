@@ -71,7 +71,7 @@
 
     <div class="sidebar-bottom">
       {% if user %}
-        <span>👤 {{ user.name }}</span>
+        <a href="/profile" style="font-weight:500;color:var(--text)">👤 {{ user.name }}</a>
         <a href="/logout">Выйти</a>
       {% endif %}
     </div>

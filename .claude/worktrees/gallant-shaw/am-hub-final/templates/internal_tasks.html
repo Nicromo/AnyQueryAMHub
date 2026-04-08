@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Внутренние задачи — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1>🔒 Внутренние задачи</h1>
+    <p style="color:var(--text-muted)">Только внутри AM Hub · не уходят в Merchrules</p>
+  </div>
+  <button onclick="document.getElementById('add-modal').style.display='flex'" class="btn btn-primary">
+    + Новая задача
+  </button>
+</div>
+
+<div class="filter-tabs">
+  <a href="/internal-tasks?status=open"   class="tab-btn {% if status=='open'   %}active{% endif %}">🔵 Открытые ({{ tasks|length if status=='open' else '' }})</a>
+  <a href="/internal-tasks?status=done"   class="tab-btn {% if status=='done'   %}active{% endif %}">✅ Выполненные</a>
+  <a href="/internal-tasks?status=blocked" class="tab-btn {% if status=='blocked' %}active{% endif %}">🔴 Заблокированные</a>
+</div>
+
+{% if not tasks %}
+<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
+  <div style="font-size:2rem;margin-bottom:8px">🔒</div>
+  <p>Внутренних задач нет</p>
+</div>
+{% else %}
+<div class="card" style="padding:0;overflow:hidden">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Клиент</th>
+        <th>Задача</th>
+        <th>Заметка</th>
+        <th>Дедлайн</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in tasks %}
+    <tr>
+      <td>
+        <a href="/prep/{{ t.client_id }}" style="font-weight:600">{{ t.client_name }}</a>
+        <span class="badge badge-{{ t.segment|lower }}" style="font-size:.7rem;margin-left:4px">{{ t.segment }}</span>
+      </td>
+      <td>{{ t.text }}</td>
+      <td style="font-size:.82rem;color:var(--text-muted);max-width:200px">{{ t.internal_note or '—' }}</td>
+      <td style="{% if t.due_date and t.due_date < today %}color:var(--red);font-weight:600{% endif %}">
+        {{ t.due_date or '—' }}
+      </td>
+      <td>
+        {% if status == 'open' %}
+        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
+          <button type="submit" class="btn btn-ghost btn-sm" title="Выполнено">✓</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Модалка добавления -->
+<div id="add-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;align-items:center;justify-content:center">
+  <div class="card" style="width:460px;max-width:95vw">
+    <h2 style="font-size:1rem;margin-bottom:16px">🔒 Новая внутренняя задача</h2>
+
+    <div style="margin-bottom:12px">
+      <label class="form-label">Клиент</label>
+      <select id="it-client" class="form-control">
+        <option value="">— выберите клиента —</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}">{{ c.name }} ({{ c.segment }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="form-label">Задача</label>
+      <input id="it-text" class="form-control" type="text" placeholder="Что нужно сделать...">
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="form-label">Заметка / контекст</label>
+      <textarea id="it-note" class="form-control" rows="2" placeholder="Дополнительный контекст от руководителя..."></textarea>
+    </div>
+    <div style="margin-bottom:16px">
+      <label class="form-label">Дедлайн</label>
+      <input id="it-due" class="form-control" type="date" value="{{ today }}">
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('add-modal').style.display='none'" class="btn btn-ghost">Отмена</button>
+      <button onclick="createInternalTask()" class="btn btn-primary">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+async function createInternalTask() {
+  const client_id = parseInt(document.getElementById('it-client').value);
+  const text = document.getElementById('it-text').value.trim();
+  if (!client_id || !text) { alert('Выберите клиента и введите задачу'); return; }
+
+  const r = await fetch('/api/internal-task', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      client_id,
+      text,
+      internal_note: document.getElementById('it-note').value,
+      due_date: document.getElementById('it-due').value || null,
+    }),
+  });
+  const d = await r.json();
+  if (d.ok) window.location.reload();
+  else alert('Ошибка: ' + d.error);
+}
+
+// Закрытие по клику вне модалки
+document.getElementById('add-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+});
+</script>
+{% endblock %}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>AM Hub — Вход</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <h1>AM <span style="color:var(--accent)">Hub</span></h1>
+    <p>Рабочий центр аккаунт-менеджера<br>anyquery</p>
+
+    {% if bot_username %}
+    <!-- Telegram Login Widget -->
+    <script async src="https://telegram.org/js/telegram-widget.js?22"
+            data-telegram-login="{{ bot_username }}"
+            data-size="large"
+            data-auth-url="/auth/telegram"
+            data-request-access="write">
+    </script>
+    {% else %}
+    <!-- Dev mode без бота — прямой вход -->
+    <a href="/auth/telegram?id=0&first_name=Dev&auth_date=9999999999&hash=dev" class="btn btn-primary" style="margin-top:16px">
+      🚀 Войти (dev mode)
+    </a>
+    <p style="margin-top:12px;font-size:0.8rem;color:var(--text-muted)">
+      Задай TG_BOT_USERNAME в .env для полной авторизации
+    </p>
+    {% endif %}
+  </div>
+</div>
+</body>
+</html>

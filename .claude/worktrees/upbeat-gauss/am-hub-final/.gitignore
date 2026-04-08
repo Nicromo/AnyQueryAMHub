@@ -1,0 +1,19 @@
+# Секреты — никогда не пушим
+.env
+
+# БД и кэш
+data/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+
+# venv
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.DS_Store

@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Профиль — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <p><a href="/">← Назад</a></p>
+  <h1>⚙️ Профиль менеджера</h1>
+  <p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px">
+    Здесь храним твои личные кредсы — Merchrules, Airtable, Telegram.
+    Данные привязаны к твоему Telegram-аккаунту и не видны другим.
+  </p>
+</div>
+
+{% if saved %}
+<div class="alert alert-success">✅ Профиль сохранён</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+<!-- Основное -->
+<div class="card">
+  <h3 style="font-size:1rem;margin:0 0 16px">👤 Основное</h3>
+  <div class="form-group">
+    <label>Telegram ID</label>
+    <input class="form-control" value="{{ user.id }}" disabled style="opacity:.5">
+  </div>
+  <div class="form-group">
+    <label>Имя</label>
+    <input class="form-control" id="f-name" value="{{ profile.display_name or user.name }}"
+           placeholder="Как тебя называть в уведомлениях">
+  </div>
+  <div class="form-group">
+    <label>Telegram Chat ID для уведомлений</label>
+    <input class="form-control" id="f-notify" value="{{ profile.tg_notify_chat }}"
+           placeholder="Твой личный chat_id или -100… канала">
+    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">
+      Сюда придут утренний план и автозадачи по чекапам.
+      Узнать свой ID: <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>
+    </div>
+  </div>
+</div>
+
+<!-- Merchrules -->
+<div class="card">
+  <h3 style="font-size:1rem;margin:0 0 4px">🔗 Merchrules</h3>
+  <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px">
+    Логин и пароль от твоего аккаунта на merchrules.any-platform.ru.
+    Используются для синхронизации задач и встреч.
+  </p>
+  <div class="form-group">
+    <label>Логин (email)</label>
+    <input class="form-control" id="f-mr-login" type="email"
+           value="{{ profile.mr_login }}" placeholder="your@email.com"
+           autocomplete="username">
+  </div>
+  <div class="form-group">
+    <label>Пароль</label>
+    <div style="position:relative">
+      <input class="form-control" id="f-mr-pass" type="password"
+             value="{{ profile.mr_password }}" placeholder="••••••••"
+             autocomplete="current-password"
+             style="padding-right:44px">
+      <button onclick="togglePass('f-mr-pass', this)"
+              style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem">
+        👁
+      </button>
+    </div>
+  </div>
+  <button onclick="testMR()" class="btn btn-ghost btn-sm" id="mr-test-btn">
+    🔌 Проверить подключение
+  </button>
+  <div id="mr-test-result" style="font-size:0.8rem;margin-top:8px"></div>
+</div>
+
+</div>
+
+<!-- Airtable -->
+<div class="card">
+  <h3 style="font-size:1rem;margin:0 0 4px">📋 Airtable</h3>
+  <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px">
+    Используется для автоматического обновления даты встречи и дозаписи комментариев в базе клиентов.
+    Токен и ID базы уже преднастроены — меняй только если у тебя своя база.
+  </p>
+  <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+    <div class="form-group" style="margin:0">
+      <label>Personal Access Token</label>
+      <div style="position:relative">
+        <input class="form-control" id="f-at-token" type="password"
+               value="{{ profile.airtable_token or default_airtable_token }}"
+               placeholder="patXXX..."
+               style="padding-right:44px">
+        <button onclick="togglePass('f-at-token', this)"
+                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem">
+          👁
+        </button>
+      </div>
+    </div>
+    <div class="form-group" style="margin:0">
+      <label>Base ID</label>
+      <input class="form-control" id="f-at-base" value="{{ airtable_base }}"
+             placeholder="appXXX" disabled style="opacity:.6">
+    </div>
+    <div class="form-group" style="margin:0">
+      <label>Table ID</label>
+      <input class="form-control" id="f-at-table" value="{{ airtable_table }}"
+             placeholder="tblXXX" disabled style="opacity:.6">
+    </div>
+  </div>
+  <div style="font-size:0.75rem;color:var(--text-muted);margin-top:8px">
+    Base и Table менять не нужно — они общие для всей команды.
+    Если нужна другая база — обратись к администратору.
+  </div>
+</div>
+
+<!-- Сохранить -->
+<div style="display:flex;gap:10px;align-items:center">
+  <button onclick="saveProfile()" class="btn btn-primary" id="save-btn">
+    💾 Сохранить профиль
+  </button>
+  <div id="save-result" style="font-size:0.85rem"></div>
+</div>
+
+<!-- Другие менеджеры (только если есть) -->
+{% if other_managers %}
+<div class="card" style="margin-top:24px">
+  <h3 style="font-size:1rem;margin:0 0 12px">👥 Команда ({{ other_managers|length + 1 }} менеджеров)</h3>
+  <div style="display:flex;flex-wrap:wrap;gap:10px">
+    <div style="background:var(--accent-glow);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;font-size:0.85rem">
+      👤 <b>{{ profile.display_name or user.name }}</b> <span style="color:var(--text-muted);font-size:0.75rem">(ты)</span>
+    </div>
+    {% for m in other_managers %}
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:0.85rem;color:var(--text-muted)">
+      👤 {{ m.display_name or '—' }}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<style>
+.form-group { margin-bottom: 14px; }
+</style>
+
+<script>
+function togglePass(id, btn) {
+  const el = document.getElementById(id);
+  const show = el.type === 'password';
+  el.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁';
+}
+
+async function testMR() {
+  const login = document.getElementById('f-mr-login').value.trim();
+  const pass  = document.getElementById('f-mr-pass').value.trim();
+  const res   = document.getElementById('mr-test-result');
+  const btn   = document.getElementById('mr-test-btn');
+
+  if (!login || !pass) {
+    res.textContent = '⚠️ Введи логин и пароль';
+    res.style.color = 'var(--yellow)';
+    return;
+  }
+
+  btn.disabled = true;
+  res.textContent = '⏳ Проверяем...';
+  res.style.color = 'var(--text-muted)';
+
+  try {
+    const r = await fetch('/api/profile/test-mr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login, password: pass }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = '✅ Подключение успешно' + (d.email ? ` · ${d.email}` : '');
+      res.style.color = 'var(--green)';
+    } else {
+      res.textContent = '❌ ' + (d.error || 'Ошибка авторизации');
+      res.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    res.textContent = '❌ ' + e.message;
+    res.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function saveProfile() {
+  const btn = document.getElementById('save-btn');
+  const res = document.getElementById('save-result');
+  btn.disabled = true;
+  res.textContent = '⏳ Сохраняем...';
+
+  try {
+    const r = await fetch('/api/profile/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        display_name:    document.getElementById('f-name').value.trim(),
+        mr_login:        document.getElementById('f-mr-login').value.trim(),
+        mr_password:     document.getElementById('f-mr-pass').value.trim(),
+        tg_notify_chat:  document.getElementById('f-notify').value.trim(),
+        airtable_token:  document.getElementById('f-at-token').value.trim(),
+      }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = '✅ Сохранено';
+      res.style.color = 'var(--green)';
+    } else {
+      res.textContent = '❌ ' + (d.error || 'Ошибка');
+      res.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    res.textContent = '❌ ' + e.message;
+    res.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AM Hub{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+{% block body %}
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-logo">AM <span>Hub</span></div>
+
+    <!-- Быстрый поиск клиента -->
+    <div class="search-wrap">
+      <input type="text" id="sidebar-search" placeholder="🔍 Найти клиента…"
+             autocomplete="off" oninput="sidebarSearch(this.value)">
+      <div id="search-results" class="search-dropdown" style="display:none"></div>
+    </div>
+
+    <!-- Навигация -->
+    <div class="nav-section-label">Ежедневное</div>
+    <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
+      <span class="icon">☀️</span> Сегодня
+    </a>
+    <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
+      <span class="icon">📊</span> Все клиенты
+    </a>
+    <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50">
+      <span class="icon">🏆</span> Top-50
+    </a>
+    <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks">
+      <span class="icon">✅</span> Задачи
+      <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.72rem"></span>
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px">Анализ</div>
+    <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
+      <span class="icon">📈</span> Аналитика
+    </a>
+    <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar">
+      <span class="icon">📆</span> QBR Календарь
+    </a>
+    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
+      <span class="icon">🔒</span> Внутренние задачи
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px">Инструменты</div>
+    <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
+      <span class="icon">🗺️</span> Роадмап
+    </a>
+    <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank">
+      <span class="icon">📹</span> ktalk ↗
+    </a>
+    <a class="nav-link" href="https://merchrules.any-platform.ru" target="_blank">
+      <span class="icon">🔗</span> Merchrules ↗
+    </a>
+
+    <!-- Статистика дашборда -->
+    <div id="sidebar-stats" class="sidebar-stats" style="display:none">
+      <div class="stat-item red"  id="stat-overdue">—</div>
+      <div class="stat-item yellow" id="stat-warning">—</div>
+      <div class="stat-item" id="stat-tasks">—</div>
+    </div>
+
+    <div class="sidebar-bottom">
+      {% if user %}
+        <span style="color:var(--text-muted);font-size:0.78rem">👤 {{ user.name }}</span><br>
+        <a href="/logout" style="color:var(--text-muted);font-size:0.78rem">Выйти</a>
+      {% endif %}
+    </div>
+  </nav>
+
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
+
+<!-- Toast уведомление -->
+{% if request.query_params.get('saved') %}
+<div class="toast success" id="toast">
+  ✅ Фолоуап сохранён
+  {% if request.query_params.get('tg') == 'ok' %} · отправлен в TG{% endif %}
+  {% if request.query_params.get('mr') == 'ok' %} · синхронизирован с Merchrules{% endif %}
+</div>
+<script>setTimeout(()=>document.getElementById('toast')?.remove(), 4000)</script>
+{% endif %}
+
+<script>
+// ── Быстрый поиск клиента ─────────────────────────────────────────────────
+let _searchTimer = null;
+function sidebarSearch(q) {
+  clearTimeout(_searchTimer);
+  const drop = document.getElementById('search-results');
+  if (!q.trim()) { drop.style.display = 'none'; return; }
+  _searchTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (!data.length) { drop.style.display = 'none'; return; }
+      drop.innerHTML = data.map(c =>
+        `<a href="/prep/${c.id}" class="search-item">
+          <span class="badge badge-${c.segment.toLowerCase().replace('+','-plus').replace('-','-minus')}">${c.segment}</span>
+          ${c.name}
+        </a>`
+      ).join('');
+      drop.style.display = 'block';
+    } catch(e) { drop.style.display = 'none'; }
+  }, 220);
+}
+
+// Закрыть дропдаун при клике вне
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap'))
+    document.getElementById('search-results').style.display = 'none';
+});
+
+// ── Загрузка статистики ───────────────────────────────────────────────────
+(async function loadStats() {
+  try {
+    const s = await fetch('/api/stats').then(r => r.json());
+    const box = document.getElementById('sidebar-stats');
+    document.getElementById('stat-overdue').textContent = `🔴 ${s.overdue} просроч.`;
+    document.getElementById('stat-warning').textContent = `🟡 ${s.warning} скоро`;
+    document.getElementById('stat-tasks').textContent = `📋 ${s.open_tasks} задач`;
+    box.style.display = 'block';
+    // Бейдж на ссылке "Задачи"
+    if (s.open_tasks > 0) {
+      const badge = document.getElementById('nav-tasks-badge');
+      if (badge) { badge.textContent = s.open_tasks; badge.style.display = 'inline'; }
+    }
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

@@ -16,52 +16,49 @@ logger = logging.getLogger(__name__)
 # ── Настройки ─────────────────────────────────────────────────────────────────
 
 MERCHRULES_URL = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
-MR_LOGIN = os.getenv("MERCHRULES_LOGIN", "")
-MR_PASSWORD = os.getenv("MERCHRULES_PASSWORD", "")
-
-# Кэш токена авторизации
-_auth_cache: dict = {"token": None, "expires_at": None}
-
-# Кэш данных по клиентам
-_data_cache: dict = {"data": None, "updated_at": None}
 CACHE_TTL_MINUTES = 30
+
+# Кэши: ключ = login (чтобы разные менеджеры не мешали друг другу)
+_auth_cache:  dict[str, dict] = {}  # login → {token, expires_at}
+_data_cache:  dict[str, dict] = {}  # login → {data, updated_at}
+
+
+def _default_creds() -> tuple[str, str]:
+    return os.getenv("MERCHRULES_LOGIN", ""), os.getenv("MERCHRULES_PASSWORD", "")
 
 
 # ── Авторизация ────────────────────────────────────────────────────────────────
 
-async def get_auth_token(client: httpx.AsyncClient) -> Optional[str]:
-    """Получаем/обновляем токен авторизации."""
-    now = datetime.now()
-
-    # Используем кэш если не истёк
-    if (
-        _auth_cache["token"]
-        and _auth_cache["expires_at"]
-        and now < _auth_cache["expires_at"]
-    ):
-        return _auth_cache["token"]
-
-    if not MR_LOGIN or not MR_PASSWORD:
-        logger.debug("MERCHRULES_LOGIN/PASSWORD not set — skipping MR sync")
+async def get_auth_token(client: httpx.AsyncClient,
+                          login: str = "", password: str = "") -> Optional[str]:
+    """Получаем/обновляем токен авторизации для конкретного пользователя."""
+    if not login:
+        login, password = _default_creds()
+    if not login or not password:
+        logger.debug("MR creds not set — skipping sync")
         return None
+
+    now = datetime.now()
+    cached = _auth_cache.get(login, {})
+    if cached.get("token") and cached.get("expires_at") and now < cached["expires_at"]:
+        return cached["token"]
 
     try:
         resp = await client.post(
             f"{MERCHRULES_URL}/backend-v2/auth/login",
-            json={"username": MR_LOGIN, "password": MR_PASSWORD},
+            json={"username": login, "password": password},
             timeout=10,
         )
         if resp.status_code == 200:
             body = resp.json()
             token = body.get("token") or body.get("access_token") or body.get("accessToken")
             if token:
-                _auth_cache["token"] = token
-                _auth_cache["expires_at"] = now + timedelta(hours=1)
-                logger.info("Merchrules auth OK")
+                _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
+                logger.info("Merchrules auth OK for %s", login)
                 return token
-        logger.warning("Merchrules auth failed: %s %s", resp.status_code, resp.text[:200])
+        logger.warning("Merchrules auth failed (%s): %s %s", login, resp.status_code, resp.text[:150])
     except Exception as exc:
-        logger.warning("Merchrules auth error: %s", exc)
+        logger.warning("Merchrules auth error (%s): %s", login, exc)
 
     return None
 
@@ -142,36 +139,37 @@ async def fetch_site_meetings(
 
 # ── Публичный API ─────────────────────────────────────────────────────────────
 
-async def sync_clients_from_merchrules(clients: list[dict]) -> dict:
+async def sync_clients_from_merchrules(clients: list[dict],
+                                       login: str = "", password: str = "") -> dict:
     """
     Получаем данные из Merchrules для всех клиентов.
-
-    Возвращает dict: { site_id: { open_tasks, blocked_tasks, overdue_tasks, last_meeting, ... } }
-    Кэшируется на CACHE_TTL_MINUTES минут.
+    login/password — кредсы конкретного менеджера (или env-fallback).
+    Кэшируется на CACHE_TTL_MINUTES минут per-manager.
     """
-    now = datetime.now()
-
-    # Возвращаем кэш если свежий
-    if (
-        _data_cache["data"] is not None
-        and _data_cache["updated_at"] is not None
-        and now - _data_cache["updated_at"] < timedelta(minutes=CACHE_TTL_MINUTES)
-    ):
-        return _data_cache["data"]
-
-    if not MR_LOGIN or not MR_PASSWORD:
+    if not login:
+        login, password = _default_creds()
+    if not login or not password:
         return {}
+
+    now = datetime.now()
+    cached = _data_cache.get(login, {})
+    if (
+        cached.get("data") is not None
+        and cached.get("updated_at") is not None
+        and now - cached["updated_at"] < timedelta(minutes=CACHE_TTL_MINUTES)
+    ):
+        return cached["data"]
 
     result = {}
 
     async with httpx.AsyncClient(timeout=30) as hx:
-        token = await get_auth_token(hx)
+        token = await get_auth_token(hx, login, password)
         if not token:
             return {}
 
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Собираем все уникальные site_ids
+        # Собираем все уникальные site_ids из переданных клиентов
         site_ids = set()
         for c in clients:
             raw = c.get("site_ids") or ""
@@ -183,14 +181,12 @@ async def sync_clients_from_merchrules(clients: list[dict]) -> dict:
         if not site_ids:
             return {}
 
-        # Параллельно запрашиваем задачи и встречи по каждому site_id
         async def fetch_one(site_id: str):
-            tasks_data = await fetch_site_tasks(hx, headers, site_id)
+            tasks_data    = await fetch_site_tasks(hx, headers, site_id)
             meetings_data = await fetch_site_meetings(hx, headers, site_id)
             return site_id, {**tasks_data, **meetings_data}
 
-        fetch_tasks = [fetch_one(sid) for sid in site_ids]
-        done = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        done = await asyncio.gather(*[fetch_one(sid) for sid in site_ids], return_exceptions=True)
 
         for item in done:
             if isinstance(item, Exception):
@@ -199,10 +195,8 @@ async def sync_clients_from_merchrules(clients: list[dict]) -> dict:
             site_id, data = item
             result[site_id] = data
 
-    _data_cache["data"] = result
-    _data_cache["updated_at"] = now
-    logger.info("Merchrules sync done: %d sites", len(result))
-
+    _data_cache[login] = {"data": result, "updated_at": now}
+    logger.info("MR sync done for %s: %d sites", login, len(result))
     return result
 
 
@@ -234,9 +228,11 @@ def get_client_mr_data(mr_data: dict, site_ids_raw: str) -> dict:
     return total
 
 
-def invalidate_cache():
-    """Сбрасываем кэш принудительно (например после загрузки задач)."""
-    _data_cache["data"] = None
-    _data_cache["updated_at"] = None
-    _auth_cache["token"] = None
-    _auth_cache["expires_at"] = None
+def invalidate_cache(login: str = ""):
+    """Сбрасываем кэш принудительно. Если login — только для него, иначе всё."""
+    if login:
+        _data_cache.pop(login, None)
+        _auth_cache.pop(login, None)
+    else:
+        _data_cache.clear()
+        _auth_cache.clear()
