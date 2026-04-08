@@ -4,7 +4,7 @@
 """
 import sqlite3
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "am_hub.db"
