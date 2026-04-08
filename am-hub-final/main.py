@@ -39,6 +39,7 @@ from airtable_sync import sync_meeting_to_airtable, import_clients_from_airtable
 from database import (
     set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings
 )
+from ktalk import send_ktalk_notification, send_ktalk_followup, test_ktalk_connection
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -359,6 +360,27 @@ async def followup_submit(
         if tg_ok:
             mark_meeting_tg_sent(meeting_id)
 
+    # K.Talk уведомление (параллельно TG, в канал менеджера)
+    try:
+        tg_id = get_tg_id(user)
+        ktalk_url = None
+        if tg_id:
+            profile = get_manager_profile(tg_id)
+            ktalk_url = profile.get("ktalk_webhook") or os.getenv("KTALK_WEBHOOK_URL", "")
+        if ktalk_url:
+            await send_ktalk_followup(
+                client_name=client["name"],
+                meeting_date=meeting_date,
+                meeting_type=meeting_type,
+                summary=summary,
+                mood=mood,
+                aq_tasks=aq_tasks_list,
+                next_meeting=next_meeting or None,
+                webhook_url=ktalk_url,
+            )
+    except Exception as exc:
+        logging.warning("K.Talk followup error: %s", exc)
+
     return RedirectResponse(f"/prep/{client_id}?saved=1&tg={'ok' if tg_ok else 'skip'}", status_code=303)
 
 
@@ -439,6 +461,7 @@ async def api_profile_save(request: Request):
         mr_password=body.get("mr_password", ""),
         tg_notify_chat=body.get("tg_notify_chat", ""),
         airtable_token=body.get("airtable_token", ""),
+        ktalk_webhook=body.get("ktalk_webhook", ""),
     )
     return {"ok": True}
 
@@ -540,6 +563,286 @@ async def api_import_airtable(request: Request):
         if isinstance(result.get("unmatched_managers"), set):
             result["unmatched_managers"] = list(result["unmatched_managers"])
         return result
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ── Webhook от Merchrules ─────────────────────────────────────────────────────
+
+@app.post("/webhook/merchrules", response_class=JSONResponse)
+async def webhook_merchrules(request: Request):
+    """
+    Принимает события от Merchrules (задачи, статусы, комментарии).
+    Секрет: заголовок X-MR-Secret или query ?secret=... должен совпадать с MR_WEBHOOK_SECRET.
+    Если секрет не задан — принимаем всё (не рекомендуется в проде).
+
+    Merchrules должен слать POST с JSON:
+    {
+      "event": "task.updated" | "task.created" | "task.done",
+      "site_id": "1234",
+      "task": { "title": "...", "status": "done", "id": 999 }
+    }
+    """
+    mr_secret = os.getenv("MR_WEBHOOK_SECRET", "")
+    if mr_secret:
+        incoming = (
+            request.headers.get("X-MR-Secret", "")
+            or request.query_params.get("secret", "")
+        )
+        if incoming != mr_secret:
+            raise HTTPException(403, "Invalid webhook secret")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+
+    event   = body.get("event", "")
+    site_id = str(body.get("site_id", ""))
+    task    = body.get("task", {})
+
+    logging.info("MR Webhook: event=%s site_id=%s task=%s", event, site_id, task.get("title", "?"))
+
+    if not event or not site_id:
+        return {"ok": True, "note": "no action needed"}
+
+    # Находим клиента по site_id
+    try:
+        from database import get_all_clients, update_task_status, get_all_tasks, create_tasks_bulk
+        all_clients = get_all_clients()
+        matched_client = None
+        for c in all_clients:
+            ids = [s.strip() for s in (c.get("site_ids") or "").split(",") if s.strip()]
+            if site_id in ids:
+                matched_client = c
+                break
+
+        if not matched_client:
+            return {"ok": True, "note": f"client with site_id={site_id} not found"}
+
+        client_id = matched_client["id"]
+
+        if event in ("task.done", "task.completed"):
+            # Закрываем задачу в БД по совпадению заголовка
+            title = (task.get("title") or "").lower().strip()
+            if title:
+                open_tasks = get_all_tasks("open")
+                for t in open_tasks:
+                    if t["client_id"] == client_id and title in t["text"].lower():
+                        update_task_status(t["id"], "done")
+                        logging.info("MR webhook: closed task '%s' for client %s", t["text"], matched_client["name"])
+
+        elif event == "task.created":
+            # Создаём задачу в AM Hub если её нет
+            title = task.get("title", "").strip()
+            if title:
+                existing = get_all_tasks()
+                exists = any(
+                    t["client_id"] == client_id and title.lower() in t["text"].lower()
+                    for t in existing
+                )
+                if not exists:
+                    create_tasks_bulk(
+                        meeting_id=None,
+                        client_id=client_id,
+                        tasks=[{"owner": "anyquery", "text": title, "due_date": task.get("due_date")}]
+                    )
+                    logging.info("MR webhook: created task '%s' for %s", title, matched_client["name"])
+
+        return {"ok": True, "client": matched_client["name"], "event": event}
+
+    except Exception as exc:
+        logging.error("webhook_merchrules processing error: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+# ── K.Talk API ────────────────────────────────────────────────────────────────
+
+@app.post("/api/profile/test-ktalk", response_class=JSONResponse)
+async def api_test_ktalk(request: Request):
+    """Проверить K.Talk webhook подключение."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    body = await request.json()
+    webhook_url = body.get("webhook_url", "").strip()
+    if not webhook_url:
+        return {"ok": False, "error": "Webhook URL не указан"}
+
+    result = await test_ktalk_connection(webhook_url)
+    return result
+
+
+# ── /hub — Командный центр ───────────────────────────────────────────────────
+
+@app.get("/hub", response_class=HTMLResponse)
+async def hub_page(request: Request):
+    """Единый Командный центр — статус всех инструментов, быстрые действия, лог активности."""
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    tg_id = get_tg_id(user)
+
+    from database import (
+        get_all_clients, get_all_tasks, get_all_manager_profiles,
+        checkup_status, get_conn
+    )
+
+    # Общая статистика
+    all_clients  = get_all_clients()
+    all_tasks    = get_all_tasks("open")
+    managers     = get_all_manager_profiles()
+
+    overdue = sum(1 for c in all_clients
+                  if checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])["color"] == "red")
+    warning = sum(1 for c in all_clients
+                  if checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])["color"] == "yellow")
+
+    # Ближайшие встречи (planned_meeting в ближайшие 7 дней)
+    from datetime import date, timedelta
+    today = date.today()
+    upcoming = []
+    for c in all_clients:
+        pm = c.get("planned_meeting")
+        if pm:
+            try:
+                pm_date = date.fromisoformat(pm)
+                days = (pm_date - today).days
+                if 0 <= days <= 7:
+                    upcoming.append({**c, "days_until": days, "pm_date": pm})
+            except ValueError:
+                pass
+    upcoming.sort(key=lambda x: x["days_until"])
+
+    # Последняя активность (последние 10 встреч)
+    with get_conn() as conn:
+        recent_meetings = conn.execute("""
+            SELECT m.id, m.meeting_date, m.meeting_type, m.mood,
+                   c.name as client_name, c.segment
+            FROM meetings m
+            JOIN clients c ON c.id = m.client_id
+            ORDER BY m.created_at DESC LIMIT 10
+        """).fetchall()
+
+    # Статус инструментов
+    airtable_token = os.getenv("AIRTABLE_TOKEN", "")
+    mr_login, mr_password = get_user_mr_creds(user)
+    bot_token = BOT_TOKEN
+
+    profile = get_manager_profile(tg_id) if tg_id else {}
+    ktalk_url = profile.get("ktalk_webhook") or os.getenv("KTALK_WEBHOOK_URL", "")
+
+    tools_status = [
+        {
+            "name": "Airtable",
+            "icon": "📋",
+            "connected": bool(airtable_token),
+            "detail": "Авто-синхронизация клиентов каждый час" if airtable_token else "Токен не задан",
+            "url": "https://airtable.com/appEAS1rPKpevoIel",
+            "action_url": None,
+        },
+        {
+            "name": "Merchrules",
+            "icon": "🔗",
+            "connected": bool(mr_login),
+            "detail": f"Аккаунт: {mr_login}" if mr_login else "Войди в Профиль и добавь кредсы",
+            "url": "https://merchrules.any-platform.ru",
+            "action_url": "/profile",
+        },
+        {
+            "name": "Telegram Bot",
+            "icon": "🤖",
+            "connected": bool(bot_token),
+            "detail": f"@{os.getenv('TG_BOT_USERNAME', '?')}" if bot_token else "TG_BOT_TOKEN не задан",
+            "url": f"https://t.me/{os.getenv('TG_BOT_USERNAME', '')}" if os.getenv("TG_BOT_USERNAME") else "#",
+            "action_url": None,
+        },
+        {
+            "name": "K.Talk",
+            "icon": "📹",
+            "connected": bool(ktalk_url),
+            "detail": "Webhook настроен" if ktalk_url else "Webhook не настроен — добавь в профиле",
+            "url": "https://tbank.ktalk.ru/",
+            "action_url": "/profile#ktalk",
+        },
+        {
+            "name": "Google Calendar",
+            "icon": "📅",
+            "connected": True,  # Всегда — через URL-ссылки без OAuth
+            "detail": "Создание событий через умные ссылки (без OAuth)",
+            "url": "https://calendar.google.com",
+            "action_url": None,
+        },
+    ]
+
+    # Расписание планировщика
+    scheduler_jobs = [
+        {"name": "Утренний план",       "schedule": "09:00 пн-пт",       "icon": "☀️"},
+        {"name": "Еженедельный дайджест","schedule": "пт 17:00",          "icon": "📊"},
+        {"name": "Синхронизация MR",    "schedule": "каждый час в :00",   "icon": "🔗"},
+        {"name": "Синхронизация Airtable","schedule": "каждый час в :30", "icon": "📋"},
+        {"name": "Напоминания о встречах","schedule": "каждые 30 мин",    "icon": "📆"},
+        {"name": "Авто-чекап задачи",   "schedule": "08:00 ежедневно",    "icon": "🔔"},
+    ]
+
+    return templates.TemplateResponse("hub.html", {
+        "request": request,
+        "user": user,
+        "total_clients": len(all_clients),
+        "open_tasks": len(all_tasks),
+        "overdue": overdue,
+        "warning": warning,
+        "managers_count": len(managers),
+        "upcoming": upcoming[:5],
+        "recent_meetings": [dict(r) for r in recent_meetings],
+        "tools_status": tools_status,
+        "scheduler_jobs": scheduler_jobs,
+        "today": today.isoformat(),
+    })
+
+
+# ── Admin API: ручной запуск scheduler jobs ───────────────────────────────────
+
+@app.post("/api/admin/sync-mr", response_class=JSONResponse)
+async def api_admin_sync_mr(request: Request):
+    """Ручной запуск синхронизации статусов из Merchrules."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    try:
+        from scheduler import job_mr_status_sync
+        await job_mr_status_sync()
+        return {"ok": True, "message": "Синхронизация MR запущена"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/admin/run-morning-plan", response_class=JSONResponse)
+async def api_admin_morning_plan(request: Request):
+    """Ручной запуск утреннего плана в TG."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    try:
+        from scheduler import job_morning_plan
+        await job_morning_plan()
+        return {"ok": True, "message": "Утренний план отправлен"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/admin/run-digest", response_class=JSONResponse)
+async def api_admin_run_digest(request: Request):
+    """Ручной запуск еженедельного дайджеста."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    try:
+        from scheduler import job_weekly_digest
+        await job_weekly_digest()
+        return {"ok": True, "message": "Дайджест отправлен"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 

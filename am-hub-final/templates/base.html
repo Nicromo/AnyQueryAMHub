@@ -22,6 +22,11 @@
       <div id="search-results" class="search-dropdown" style="display:none"></div>
     </div>
 
+    <a class="nav-link {% if request.url.path == '/hub' %}active{% endif %}" href="/hub"
+       style="background:var(--accent-glow,rgba(59,130,246,.08));border-left:2px solid var(--accent,#3b82f6);margin-bottom:6px">
+      <span class="icon">🎛️</span> Командный центр
+    </a>
+
     <div class="nav-section-label">Ежедневное</div>
     <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
       <span class="icon">☀️</span> Сегодня

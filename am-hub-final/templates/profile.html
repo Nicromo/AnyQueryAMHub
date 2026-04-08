@@ -112,6 +112,27 @@
   </div>
 </div>
 
+<!-- K.Talk -->
+<div class="card" id="ktalk">
+  <h3 style="font-size:1rem;margin:0 0 4px">📹 K.Talk Уведомления</h3>
+  <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px">
+    Уведомления о встречах, чекапах и фолоуапах будут дублироваться в твой K.Talk канал.
+    Создай <b>Incoming Webhook</b> в K.Talk: Настройки канала → Интеграции → Входящие Webhooks.
+  </p>
+  <div style="display:flex;gap:10px;align-items:flex-end">
+    <div class="form-group" style="flex:1;margin:0">
+      <label>Webhook URL</label>
+      <input class="form-control" id="f-ktalk-webhook"
+             value="{{ profile.ktalk_webhook or '' }}"
+             placeholder="https://tbank.ktalk.ru/hooks/XXXXXXXX">
+    </div>
+    <button onclick="testKTalk()" class="btn btn-ghost btn-sm" id="ktalk-test-btn" style="margin-bottom:14px">
+      🔌 Проверить
+    </button>
+  </div>
+  <div id="ktalk-test-result" style="font-size:0.8rem;margin-top:4px"></div>
+</div>
+
 <!-- Сохранить -->
 <div style="display:flex;gap:10px;align-items:center">
   <button onclick="saveProfile()" class="btn btn-primary" id="save-btn">
@@ -279,6 +300,33 @@ async function importAirtable() {
   }
 }
 
+async function testKTalk() {
+  const url  = document.getElementById('f-ktalk-webhook').value.trim();
+  const res  = document.getElementById('ktalk-test-result');
+  const btn  = document.getElementById('ktalk-test-btn');
+  if (!url) { res.textContent = '⚠️ Введи Webhook URL'; res.style.color = 'var(--yellow)'; return; }
+  btn.disabled = true;
+  res.textContent = '⏳ Отправляю тест...';
+  try {
+    const r = await fetch('/api/profile/test-ktalk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webhook_url: url }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      res.textContent = '✅ Сообщение отправлено в K.Talk!';
+      res.style.color = 'var(--green)';
+    } else {
+      res.textContent = '❌ ' + (d.error || 'Ошибка');
+      res.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    res.textContent = '❌ ' + e.message;
+    res.style.color = 'var(--red)';
+  } finally { btn.disabled = false; }
+}
+
 async function saveProfile() {
   const btn = document.getElementById('save-btn');
   const res = document.getElementById('save-result');
@@ -295,6 +343,7 @@ async function saveProfile() {
         mr_password:     document.getElementById('f-mr-pass').value.trim(),
         tg_notify_chat:  document.getElementById('f-notify').value.trim(),
         airtable_token:  document.getElementById('f-at-token').value.trim(),
+        ktalk_webhook:   document.getElementById('f-ktalk-webhook').value.trim(),
       }),
     });
     const d = await r.json();

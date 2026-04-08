@@ -120,10 +120,16 @@ def init_db():
                 mr_password     TEXT DEFAULT '',
                 tg_notify_chat  TEXT DEFAULT '',
                 airtable_token  TEXT DEFAULT '',
+                ktalk_webhook   TEXT DEFAULT '',
                 created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Миграция: ktalk_webhook
+        try:
+            conn.execute("ALTER TABLE manager_profiles ADD COLUMN ktalk_webhook TEXT DEFAULT ''")
+        except Exception:
+            pass
 
 
 # ── Clients ──────────────────────────────────────────────────────────────────
@@ -430,26 +436,28 @@ def get_manager_profile(tg_id: int) -> dict:
     return {
         "tg_id": tg_id, "display_name": "", "mr_login": "",
         "mr_password": "", "tg_notify_chat": "", "airtable_token": "",
+        "ktalk_webhook": "",
     }
 
 
 def save_manager_profile(tg_id: int, display_name: str = "", mr_login: str = "",
                           mr_password: str = "", tg_notify_chat: str = "",
-                          airtable_token: str = ""):
+                          airtable_token: str = "", ktalk_webhook: str = ""):
     """Создаёт или обновляет профиль менеджера."""
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO manager_profiles (tg_id, display_name, mr_login, mr_password,
-                                          tg_notify_chat, airtable_token, updated_at)
-            VALUES (?,?,?,?,?,?, CURRENT_TIMESTAMP)
+                                          tg_notify_chat, airtable_token, ktalk_webhook, updated_at)
+            VALUES (?,?,?,?,?,?,?, CURRENT_TIMESTAMP)
             ON CONFLICT(tg_id) DO UPDATE SET
                 display_name   = excluded.display_name,
                 mr_login       = excluded.mr_login,
                 mr_password    = excluded.mr_password,
                 tg_notify_chat = excluded.tg_notify_chat,
                 airtable_token = excluded.airtable_token,
+                ktalk_webhook  = excluded.ktalk_webhook,
                 updated_at     = CURRENT_TIMESTAMP
-        """, (tg_id, display_name, mr_login, mr_password, tg_notify_chat, airtable_token))
+        """, (tg_id, display_name, mr_login, mr_password, tg_notify_chat, airtable_token, ktalk_webhook))
 
 
 def get_all_manager_profiles() -> list[dict]:
