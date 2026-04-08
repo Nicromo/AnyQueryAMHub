@@ -1364,6 +1364,101 @@ async def api_ai_upload(request: Request):
         "tasks_count": len(tasks),
     }
 
+
+# ── AI-ассистент: фолоуап, подготовка, риски ───────────────────────────────────
+
+@app.get("/api/client/{client_id}/prep-brief", response_class=JSONResponse)
+async def api_prep_brief(request: Request, client_id: int):
+    """Получить brieferror для подготовки к встрече."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    try:
+        from ai_assistant import generate_prep_brief
+        meetings = get_client_meetings(client_id, limit=3)
+        tasks = get_client_tasks(client_id, "open")
+        brief = await generate_prep_brief(client, meetings, tasks)
+        return {"brief": brief, "ok": True}
+    except Exception as exc:
+        logging.error("prep_brief error: %s", exc)
+        return {"brief": "", "ok": False, "error": str(exc)[:200]}
+
+
+@app.get("/api/client/{client_id}/smart-followup", response_class=JSONResponse)
+async def api_smart_followup(request: Request, client_id: int):
+    """Получить рекомендуемый текст фолоуапа."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    try:
+        from ai_assistant import generate_smart_followup
+        meetings = get_client_meetings(client_id, limit=3)
+        tasks = get_client_tasks(client_id, "open")
+        text = await generate_smart_followup(client, meetings, tasks)
+        return {"text": text, "ok": True}
+    except Exception as exc:
+        logging.error("smart_followup error: %s", exc)
+        return {"text": "", "ok": False, "error": str(exc)[:200]}
+
+
+@app.get("/api/client/{client_id}/risk", response_class=JSONResponse)
+async def api_risk_detection(request: Request, client_id: int):
+    """Получить анализ рисков по аккаунту."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    try:
+        from ai_assistant import detect_account_risks
+        meetings = get_client_meetings(client_id, limit=3)
+        tasks = get_client_tasks(client_id, "open")
+        risk_data = await detect_account_risks(client, meetings, tasks)
+        return risk_data
+    except Exception as exc:
+        logging.error("risk_detection error: %s", exc)
+        return {"risk_level": "unknown", "flags": [], "recommendation": f"Error: {str(exc)[:100]}"}
+
+
+@app.get("/api/client/{client_id}/metrics", response_class=JSONResponse)
+async def api_client_metrics(request: Request, client_id: int):
+    """Получить метрики клиента из Merchrules."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404)
+
+    try:
+        from merchrules_sync import get_client_metrics
+        site_ids = (client.get("site_ids") or "").strip()
+        if not site_ids:
+            return {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": "no_site_ids"}
+
+        # Берём первый site_id
+        first_site = site_ids.split(",")[0].strip()
+        mr_login, mr_password = get_user_mr_creds(user)
+        metrics = await get_client_metrics(first_site, mr_login, mr_password)
+        return metrics
+    except Exception as exc:
+        logging.error("client_metrics error: %s", exc)
+        return {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": str(exc)[:100]}
+
 # ── Чеклист встречи ───────────────────────────────────────────────────────────
 
 # AI-подсказки по сегменту для страницы чеклиста

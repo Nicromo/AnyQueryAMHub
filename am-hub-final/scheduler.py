@@ -311,6 +311,292 @@ async def job_meeting_reminders():
         logger.error("job_meeting_reminders error: %s", exc)
 
 
+async def job_client_morning_reminder():
+    """Каждый день в 09:00: напоминания клиентам о встречах на сегодня."""
+    try:
+        from database import get_conn, get_all_manager_profiles, get_manager_client_ids
+        from tg_bot import send_message
+
+        today = date.today().isoformat()
+
+        # Клиенты с запланированной встречей на сегодня
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT c.id, c.name, c.segment, c.tg_chat_id, c.manager_tg_id
+                FROM clients c
+                WHERE c.planned_meeting = ?
+            """, (today,)).fetchall()
+
+        clients = [dict(r) for r in rows]
+        if not clients:
+            return
+
+        profiles = get_all_manager_profiles()
+        tg_id_to_profile = {p["tg_id"]: p for p in profiles}
+
+        for client in clients:
+            # Отправляем сообщение в канал клиента если есть
+            if client.get("tg_chat_id"):
+                msg = (
+                    f"🗓️ <b>Напоминание о встрече с AnyQuery</b>\n\n"
+                    f"Сегодня, <b>{date.today().strftime('%d.%m.%Y')}</b>\n"
+                    f"📋 Тема: регулярный чекап с вашим менеджером\n\n"
+                    f"<b>Повестка встречи:</b>\n"
+                    f"• Итоги работы за период\n"
+                    f"• Статус текущих задач\n"
+                    f"• Новые потребности и вопросы\n"
+                    f"• Планы на следующий период\n\n"
+                    f"До встречи! 🚀\n"
+                    f"<i>anyquery AM Hub</i>"
+                )
+                await send_message(client["tg_chat_id"], msg)
+
+            # Отправляем менеджеру напоминание
+            if client.get("manager_tg_id"):
+                profile = tg_id_to_profile.get(client["manager_tg_id"], {})
+                notify_chat = profile.get("tg_notify_chat", "")
+                if notify_chat:
+                    manager_msg = f"📅 Сегодня встреча с {client['name']}. Напоминание отправлено в их канал."
+                    await send_message(notify_chat, manager_msg)
+
+        logger.info("Morning reminder sent to %d clients", len(clients))
+
+    except Exception as exc:
+        logger.error("job_client_morning_reminder error: %s", exc)
+
+
+async def job_qbr_prep_tasks():
+    """
+    Каждый день в 10:00: проверяем, находимся ли между 14-16 числом
+    последнего месяца квартала (3, 6, 9, 12). Если да — создаём QBR задачи.
+    """
+    try:
+        from database import get_all_clients, create_internal_task, get_client_tasks, get_all_manager_profiles, get_manager_client_ids
+        from tg_bot import send_message
+
+        today = date.today()
+        # Проверяем: последний месяц квартала и дата 14-16?
+        quarter_end_months = [3, 6, 9, 12]
+        if today.month not in quarter_end_months or not (14 <= today.day <= 16):
+            return
+
+        # Получаем всех клиентов
+        clients = get_all_clients()
+
+        # Фильтруем ENT и SME (и SME+, SME-)
+        target_clients = [c for c in clients if c["segment"] in ("ENT", "SME", "SME+", "SME-")]
+
+        # Группируем по менеджерам
+        profiles = get_all_manager_profiles()
+        manager_created: dict[int, int] = {}
+
+        for client in target_clients:
+            # Проверяем, нет ли уже похожей задачи в последние 60 дней
+            tasks = get_client_tasks(client["id"], "open")
+            cutoff = today - timedelta(days=60)
+            has_qbr = any(
+                "qbr" in t["text"].lower() and "подготовить" in t["text"].lower() and
+                (t.get("created_at") or "") >= cutoff.isoformat()
+                for t in tasks
+            )
+            if has_qbr:
+                continue
+
+            # Создаём задачу
+            text = f"📊 Подготовить QBR для {client['name']} ({client['segment']}) — до конца квартала"
+            create_internal_task(client["id"], text)
+
+            # Считаем по менеджерам
+            manager_id = client.get("manager_tg_id", 0)
+            if manager_id:
+                manager_created[manager_id] = manager_created.get(manager_id, 0) + 1
+
+        # Уведомляем менеджеров в TG
+        tg_id_to_profile = {p["tg_id"]: p for p in profiles}
+        for manager_id, count in manager_created.items():
+            profile = tg_id_to_profile.get(manager_id, {})
+            notify_chat = profile.get("tg_notify_chat", "")
+            if notify_chat:
+                msg = f"📊 Через 2 недели конец квартала! Созданы задачи QBR для {count} клиентов."
+                await send_message(notify_chat, msg)
+
+        logger.info("QBR prep tasks created for %d clients", sum(manager_created.values()))
+
+    except Exception as exc:
+        logger.error("job_qbr_prep_tasks error: %s", exc)
+
+
+async def job_auto_escalation():
+    """
+    Каждый понедельник в 10:00: ищем клиентов с красным статусом чекапа (14+ дней).
+    Уведомляем менеджеров.
+    """
+    try:
+        from database import get_all_clients, checkup_status, CHECKUP_DAYS, get_all_manager_profiles, get_manager_client_ids
+        from tg_bot import send_message
+
+        clients = get_all_clients()
+        overdue = []
+
+        for c in clients:
+            status = checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])
+            # Красный статус = более N дней без чекапа
+            if status["color"] != "red":
+                continue
+
+            # Проверяем: 14+ дней?
+            days = CHECKUP_DAYS.get(c["segment"], 90)
+            last_date_str = c.get("last_checkup") or c.get("last_meeting")
+            if last_date_str:
+                try:
+                    last_date = date.fromisoformat(last_date_str)
+                    days_overdue = (date.today() - last_date).days - days
+                    if days_overdue >= 14:
+                        overdue.append((c, days_overdue))
+                except ValueError:
+                    pass
+            else:
+                # Нет никогда было встреч — это критично
+                overdue.append((c, 999))
+
+        if not overdue:
+            return
+
+        # Группируем по менеджерам и отправляем
+        profiles = get_all_manager_profiles()
+        tg_id_to_profile = {p["tg_id"]: p for p in profiles}
+
+        for manager_profile in profiles:
+            manager_id = manager_profile["tg_id"]
+            notify_chat = manager_profile.get("tg_notify_chat", "")
+            if not notify_chat:
+                continue
+
+            # Клиенты этого менеджера
+            client_ids = get_manager_client_ids(manager_id)
+            manager_overdue = [(c, d) for c, d in overdue if c["id"] in client_ids]
+
+            if manager_overdue:
+                lines = ["🚨 <b>Эскалация</b>", ""]
+                for client, days in manager_overdue:
+                    lines.append(f"• <b>{client['name']}</b> [{client['segment']}] — просрочен чекап на {days} дней! Требуется контакт.")
+                msg = "\n".join(lines)
+                await send_message(notify_chat, msg)
+
+        logger.info("Auto escalation: %d overdue clients notified", len(overdue))
+
+    except Exception as exc:
+        logger.error("job_auto_escalation error: %s", exc)
+
+
+async def job_risk_detection():
+    """
+    Каждую пятницу в 18:00: ищем рисковые клиенты.
+    - 3+ встречи с mood = neutral или risk
+    - 3+ заблокированных задач
+    Отправляем consolidated report всем менеджерам.
+    """
+    try:
+        from database import get_all_clients, get_client_meetings, get_client_tasks, get_all_manager_profiles
+        from tg_bot import send_message
+
+        clients = get_all_clients()
+
+        mood_risk = []  # Клиенты с плохим настроением
+        task_risk = []  # Клиенты с заблокированными задачами
+
+        for client in clients:
+            # Проверяем последние 3 встречи
+            meetings = get_client_meetings(client["id"], limit=3)
+            if len(meetings) >= 3:
+                moods = [m.get("mood", "neutral") for m in meetings]
+                if all(m in ("neutral", "risk") for m in moods):
+                    mood_risk.append((client, moods))
+
+            # Проверяем заблокированные задачи
+            tasks = get_client_tasks(client["id"], "blocked")
+            if len(tasks) >= 3:
+                task_risk.append((client, len(tasks)))
+
+        if not mood_risk and not task_risk:
+            return
+
+        # Отправляем консолидированный отчёт
+        lines = [
+            "⚠️ <b>Детекция рисков — AM Hub</b>",
+            "",
+        ]
+
+        if mood_risk:
+            lines.append("<b>Риск по настроению (3+ встречи не позитивные):</b>")
+            for client, moods in mood_risk:
+                mood_str = ", ".join(moods)
+                lines.append(f"• <b>{client['name']}</b> [{client['segment']}] — последние 3: {mood_str}")
+            lines.append("")
+
+        if task_risk:
+            lines.append("<b>Много заблокированных задач:</b>")
+            for client, count in task_risk:
+                lines.append(f"• <b>{client['name']}</b> [{client['segment']}] — {count} заблокированных задач")
+
+        msg = "\n".join(lines)
+
+        # Отправляем всем менеджерам
+        profiles = get_all_manager_profiles()
+        for profile in profiles:
+            notify_chat = profile.get("tg_notify_chat", "")
+            if notify_chat:
+                await send_message(notify_chat, msg)
+
+        logger.info("Risk detection: %d mood risks, %d task risks", len(mood_risk), len(task_risk))
+
+    except Exception as exc:
+        logger.error("job_risk_detection error: %s", exc)
+
+
+async def job_weekly_pdf_digest():
+    """Каждую пятницу в 16:30: отправляем еженедельный дайджест в TG (расширенный)."""
+    try:
+        from database import get_all_clients, get_all_tasks, checkup_status
+        from tg_bot import send_message, format_weekly_digest
+
+        clients = get_all_clients()
+        for c in clients:
+            c["status"] = checkup_status(
+                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
+            )
+
+        open_tasks = get_all_tasks("open")
+
+        # Получаем базовый дайджест и добавляем доп. данные
+        msg = format_weekly_digest(clients, open_tasks)
+
+        # Дополняем статистикой
+        today = date.today()
+        week_start = (today - timedelta(days=today.weekday())).strftime("%d.%m")
+
+        # Добавляем детальные метрики в конец
+        by_segment = {}
+        for c in clients:
+            seg = c["segment"]
+            by_segment[seg] = by_segment.get(seg, 0) + 1
+
+        segment_line = "Распределение по сегментам: " + ", ".join(
+            f"{seg}({count})" for seg, count in sorted(by_segment.items())
+        )
+
+        msg += f"\n\n📈 {segment_line}"
+
+        # Разбиваем на части если нужно
+        for chunk in _split_message(msg, 3800):
+            await send_message(get_notify_chat_id(), chunk)
+
+        logger.info("Weekly PDF digest sent")
+
+    except Exception as exc:
+        logger.error("job_weekly_pdf_digest error: %s", exc)
+
+
 def _split_message(text: str, max_len: int = 3800) -> list[str]:
     if len(text) <= max_len:
         return [text]
@@ -371,9 +657,46 @@ def start_scheduler():
         id="meeting_reminders",
         replace_existing=True,
     )
+    # Напоминания клиентам о встречах на сегодня — каждый день в 09:00
+    scheduler.add_job(
+        job_client_morning_reminder,
+        CronTrigger(hour=9, minute=0),
+        id="client_morning_reminder",
+        replace_existing=True,
+    )
+    # Подготовка QBR задач — каждый день в 10:00 (проверяет дату 14-16 последнего месяца квартала)
+    scheduler.add_job(
+        job_qbr_prep_tasks,
+        CronTrigger(hour=10, minute=0),
+        id="qbr_prep_tasks",
+        replace_existing=True,
+    )
+    # Автоэскалация просроченных клиентов — каждый понедельник в 10:00
+    scheduler.add_job(
+        job_auto_escalation,
+        CronTrigger(day_of_week="mon", hour=10, minute=0),
+        id="auto_escalation",
+        replace_existing=True,
+    )
+    # Детекция рисков — каждую пятницу в 18:00
+    scheduler.add_job(
+        job_risk_detection,
+        CronTrigger(day_of_week="fri", hour=18, minute=0),
+        id="risk_detection",
+        replace_existing=True,
+    )
+    # Еженедельный PDF дайджест — каждую пятницу в 16:30
+    scheduler.add_job(
+        job_weekly_pdf_digest,
+        CronTrigger(day_of_week="fri", hour=16, minute=30),
+        id="weekly_pdf_digest",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
-        "Scheduler started: morning_plan (9:00 пн-пт), weekly_digest (пт 17:00), "
+        "Scheduler started with 11 jobs: morning_plan (9:00 пн-пт), weekly_digest (пт 17:00), "
         "mr_sync (каждый час в :00), airtable_sync (каждый час в :30), "
-        "meeting_reminders (каждые 30 мин), auto_checkup_tasks (08:00)"
+        "meeting_reminders (каждые 30 мин), auto_checkup_tasks (08:00), "
+        "client_morning_reminder (09:00), qbr_prep_tasks (10:00), "
+        "auto_escalation (пн 10:00), risk_detection (пт 18:00), weekly_pdf_digest (пт 16:30)"
     )

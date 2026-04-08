@@ -154,16 +154,43 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
         return
 
     cmd = text.split()[0].lower().split("@")[0]  # /cmd@botname → /cmd
+    args = text.split()[1:] if len(text.split()) > 1 else []
+    arg_str = " ".join(args).strip() if args else ""
 
     if cmd in ("/start", "/help"):
         await send_message(chat_id, (
             "👋 <b>AM Hub Bot</b>\n\n"
             "Доступные команды:\n"
+            "/status — общая статистика\n"
             "/checkups — просроченные чекапы\n"
-            "/top50 — Top-50 клиентов (еженедельный)\n"
-            "/top50m — Top-50 клиентов (ежемесячный)\n"
+            "/checkup &lt;name&gt; — статус клиента\n"
+            "/tasks &lt;name&gt; — список задач клиента\n"
+            "/done &lt;task_id&gt; — закрыть задачу\n"
+            "/prep &lt;name&gt; — подготовка к встрече\n"
+            "/clients — мои клиенты\n"
+            "/top50 — Top-50 (еженедельный)\n"
+            "/top50m — Top-50 (ежемесячный)\n"
             "/help — эта справка"
         ))
+
+    elif cmd == "/status":
+        clients = get_clients_fn()
+        from database import checkup_status
+        for c in clients:
+            c["status"] = checkup_status(
+                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
+            )
+        overdue = [c for c in clients if c.get("status", {}).get("color") == "red"]
+        warning = [c for c in clients if c.get("status", {}).get("color") == "yellow"]
+        all_tasks = get_all_tasks("open") if "get_all_tasks" in dir() else []
+        msg = (
+            f"📊 <b>Статус AM Hub</b>\n\n"
+            f"👥 Всего клиентов: {len(clients)}\n"
+            f"🔴 Просроченных: {len(overdue)}\n"
+            f"🟡 Требуют внимания: {len(warning)}\n"
+            f"📋 Открытых задач: {len([t for t in all_tasks if t.get('status') == 'open'])}"
+        )
+        await send_message(chat_id, msg)
 
     elif cmd == "/checkups":
         clients = get_clients_fn()
@@ -175,6 +202,123 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
             )
         msg = format_overdue_checkups(clients)
         await send_message(chat_id, msg)
+
+    elif cmd == "/checkup" and arg_str:
+        from database import get_all_clients, get_client_tasks, checkup_status
+        clients = get_all_clients()
+        # Fuzzy search по имени
+        matches = [c for c in clients if arg_str.lower() in c["name"].lower()]
+        if not matches:
+            await send_message(chat_id, f"❌ Клиент '{arg_str}' не найден")
+            return
+        if len(matches) > 1:
+            names = ", ".join([m["name"] for m in matches[:5]])
+            await send_message(chat_id, f"🔍 Найдено {len(matches)} совпадений: {names}")
+            return
+        client = matches[0]
+        status = checkup_status(
+            client.get("last_checkup") or client.get("last_meeting"), client["segment"]
+        )
+        tasks = get_client_tasks(client["id"], "open")
+        msg = (
+            f"📌 <b>{client['name']}</b> [{client['segment']}]\n\n"
+            f"Статус чекапа: {status['label']}\n"
+            f"Последний чекап: {client.get('last_checkup') or client.get('last_meeting') or 'Не проводился'}\n"
+            f"Открытых задач: {len(tasks)}"
+        )
+        await send_message(chat_id, msg)
+
+    elif cmd == "/tasks" and arg_str:
+        from database import get_all_clients, get_client_tasks
+        clients = get_all_clients()
+        matches = [c for c in clients if arg_str.lower() in c["name"].lower()]
+        if not matches:
+            await send_message(chat_id, f"❌ Клиент '{arg_str}' не найден")
+            return
+        if len(matches) > 1:
+            names = ", ".join([m["name"] for m in matches[:5]])
+            await send_message(chat_id, f"🔍 Найдено {len(matches)} совпадений: {names}")
+            return
+        client = matches[0]
+        tasks = get_client_tasks(client["id"], "open")
+        if not tasks:
+            await send_message(chat_id, f"✅ У {client['name']} нет открытых задач")
+            return
+        lines = [f"📋 <b>Задачи {client['name']}</b>", ""]
+        for t in tasks[:10]:
+            status_icon = "🔴" if t.get("status") == "blocked" else "⏳"
+            due = f" (до {t['due_date']})" if t.get("due_date") else ""
+            lines.append(f"{status_icon} #{t['id']}: {t['text'][:60]}{due}")
+        if len(tasks) > 10:
+            lines.append(f"\n…и ещё {len(tasks)-10} задач")
+        await send_message(chat_id, "\n".join(lines))
+
+    elif cmd == "/done" and arg_str:
+        try:
+            from database import update_task_status, get_conn
+            task_id = int(arg_str)
+            update_task_status(task_id, "done")
+            await send_message(chat_id, f"✅ Задача #{task_id} закрыта")
+        except (ValueError, Exception) as e:
+            await send_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+
+    elif cmd == "/prep" and arg_str:
+        from database import get_all_clients, get_client_meetings, get_client_tasks
+        clients = get_all_clients()
+        matches = [c for c in clients if arg_str.lower() in c["name"].lower()]
+        if not matches:
+            await send_message(chat_id, f"❌ Клиент '{arg_str}' не найден")
+            return
+        if len(matches) > 1:
+            names = ", ".join([m["name"] for m in matches[:5]])
+            await send_message(chat_id, f"🔍 Найдено {len(matches)} совпадений: {names}")
+            return
+        client = matches[0]
+        meetings = get_client_meetings(client["id"], limit=3)
+        tasks = get_client_tasks(client["id"], "open")
+
+        lines = [f"📚 <b>Подготовка к встрече: {client['name']}</b>", ""]
+
+        if meetings:
+            lines.append("<b>Последние встречи:</b>")
+            for m in meetings[:2]:
+                lines.append(f"• {m.get('meeting_date')}: {m.get('summary', 'без описания')[:80]}")
+            lines.append("")
+
+        if tasks:
+            lines.append(f"<b>Открытые задачи ({len(tasks)}):</b>")
+            for t in tasks[:5]:
+                lines.append(f"• {t['text'][:70]}")
+            if len(tasks) > 5:
+                lines.append(f"  и ещё {len(tasks)-5}…")
+            lines.append("")
+
+        lines.append("<b>Рекомендуемые вопросы:</b>")
+        lines.append("• Как идут работы со следующей задачей?")
+        lines.append("• Есть ли новые потребности или проблемы?")
+        lines.append("• Когда планируем встречу на следующий месяц?")
+
+        await send_message(chat_id, "\n".join(lines))
+
+    elif cmd == "/clients":
+        from database import get_all_clients
+        clients = get_all_clients()
+        by_segment = {}
+        for c in clients:
+            seg = c["segment"]
+            if seg not in by_segment:
+                by_segment[seg] = []
+            by_segment[seg].append(c)
+
+        lines = ["👥 <b>Мои клиенты</b>", ""]
+        for seg in ["ENT", "SME+", "SME", "SME-", "SMB", "SS"]:
+            if seg in by_segment:
+                lines.append(f"<b>{seg} ({len(by_segment[seg])})</b>")
+                for c in by_segment[seg][:5]:
+                    lines.append(f"  • {c['name']}")
+                if len(by_segment[seg]) > 5:
+                    lines.append(f"    и ещё {len(by_segment[seg])-5}…")
+        await send_message(chat_id, "\n".join(lines))
 
     elif cmd in ("/top50", "/top50m"):
         mode = "monthly" if cmd == "/top50m" else "weekly"
@@ -201,6 +345,15 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
 
     else:
         await send_message(chat_id, f"❓ Неизвестная команда: {cmd}\nНапиши /help")
+
+
+def get_all_tasks(status: str = "open") -> list:
+    """Получает все задачи из БД."""
+    try:
+        from database import get_all_tasks as db_get_all_tasks
+        return db_get_all_tasks(status)
+    except Exception:
+        return []
 
 
 def format_morning_plan(clients: list, urgent_tasks: list, week_tasks: list) -> str:

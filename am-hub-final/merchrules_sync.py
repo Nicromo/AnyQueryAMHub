@@ -236,3 +236,88 @@ def invalidate_cache(login: str = ""):
     else:
         _data_cache.clear()
         _auth_cache.clear()
+
+
+# ── Метрики клиента ────────────────────────────────────────────────────────────
+
+_metrics_cache: dict[str, dict] = {}  # site_id → {metrics, updated_at}
+METRICS_CACHE_TTL_MINUTES = 60
+
+
+async def get_client_metrics(site_id: str, login: str = "", password: str = "") -> dict:
+    """
+    Получает ключевые метрики клиента с Merchrules.
+    Пытается hit /backend-v2/sites/{site_id}/analytics или /backend-v2/sites/{site_id}/stats
+    Возвращает:
+    {
+        "gmv": 0,
+        "conversion": 0.0,
+        "search_ctr": 0.0,
+        "orders": 0,
+        "error": None
+    }
+    Результаты кэшируются на METRICS_CACHE_TTL_MINUTES минут.
+    """
+    if not site_id:
+        return {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": "no site_id"}
+
+    # Проверяем кэш
+    now = datetime.now()
+    cached = _metrics_cache.get(site_id, {})
+    if (
+        cached.get("metrics") is not None
+        and cached.get("updated_at") is not None
+        and now - cached["updated_at"] < timedelta(minutes=METRICS_CACHE_TTL_MINUTES)
+    ):
+        return cached["metrics"]
+
+    if not login:
+        login, password = _default_creds()
+
+    result = {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": None}
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            token = await get_auth_token(client, login, password)
+            if not token:
+                result["error"] = "auth_failed"
+                return result
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Пробуем оба endpoint'а
+            endpoints = [
+                f"{MERCHRULES_URL}/backend-v2/sites/{site_id}/analytics",
+                f"{MERCHRULES_URL}/backend-v2/sites/{site_id}/stats",
+            ]
+
+            for endpoint in endpoints:
+                try:
+                    resp = await client.get(endpoint, headers=headers, timeout=15)
+                    if resp.status_code == 200:
+                        data = resp.json()
+
+                        # Пытаемся распарсить
+                        if isinstance(data, dict):
+                            result["gmv"] = int(data.get("gmv") or data.get("revenue") or 0)
+                            result["conversion"] = float(data.get("conversion") or data.get("conversion_rate") or 0.0)
+                            result["search_ctr"] = float(data.get("search_ctr") or data.get("ctr") or 0.0)
+                            result["orders"] = int(data.get("orders") or data.get("order_count") or 0)
+                            result["error"] = None
+                            break
+                except Exception as e:
+                    logger.debug("Metrics endpoint %s failed: %s", endpoint, e)
+                    continue
+
+            # Если оба endpoint'а упали
+            if result["error"] is None and result["gmv"] == 0:
+                result["error"] = "no_data"
+
+    except Exception as exc:
+        logger.error("get_client_metrics error for site %s: %s", site_id, exc)
+        result["error"] = str(exc)[:100]
+
+    # Кэшируем результат
+    _metrics_cache[site_id] = {"metrics": result, "updated_at": now}
+
+    return result
