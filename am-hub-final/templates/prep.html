@@ -14,6 +14,27 @@
     <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm">✍️ Фолоуап</a>
     <a href="/roadmap?client_id={{ client.id }}" class="btn btn-ghost btn-sm">🗺️ Роадмап</a>
     <a href="/qbr/{{ client.id }}" class="btn btn-ghost btn-sm">📊 QBR</a>
+    <button onclick="loadAiPrep()" class="btn btn-ghost btn-sm" id="ai-prep-btn">🤖 ИИ-подготовка</button>
+    <button onclick="loadSmartFollowup()" class="btn btn-ghost btn-sm" id="ai-followup-btn">✨ Умный фолоуап</button>
+    <button onclick="loadRisk()" class="btn btn-ghost btn-sm" id="ai-risk-btn">⚠️ Анализ рисков</button>
+    <button onclick="loadMetrics()" class="btn btn-ghost btn-sm" id="metrics-btn">📊 Метрики MR</button>
+  </div>
+</div>
+
+<!-- ИИ-панель (скрыта до нажатия) -->
+<div id="ai-panel" style="display:none;margin-bottom:16px">
+  <div class="card" style="border-left:3px solid var(--accent)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 id="ai-panel-title" style="font-size:1rem;margin:0">🤖 ИИ-помощник</h3>
+      <button onclick="document.getElementById('ai-panel').style.display='none'"
+              style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem">✕</button>
+    </div>
+    <div id="ai-panel-content" style="font-size:0.88rem;line-height:1.7;white-space:pre-wrap;color:var(--text)">
+      <div style="text-align:center;padding:20px;color:var(--text-muted)">⏳ Загружаю данные...</div>
+    </div>
+    <div id="ai-panel-actions" style="margin-top:12px;display:none">
+      <button onclick="copyAiContent()" class="btn btn-ghost btn-sm">📋 Скопировать</button>
+    </div>
   </div>
 </div>
 
@@ -347,6 +368,103 @@ async function savePlannedDate() {
   });
   const d = await r.json();
   if (d.ok) location.reload();
+}
+
+// ── ИИ-помощник ────────────────────────────────────────────────────────────
+function showAiPanel(title) {
+  const panel = document.getElementById('ai-panel');
+  document.getElementById('ai-panel-title').textContent = title;
+  document.getElementById('ai-panel-content').innerHTML =
+    '<div style="text-align:center;padding:20px;color:var(--text-muted)">⏳ ИИ думает...</div>';
+  document.getElementById('ai-panel-actions').style.display = 'none';
+  panel.style.display = 'block';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function fetchAiEndpoint(url, title) {
+  showAiPanel(title);
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    const content = document.getElementById('ai-panel-content');
+    const actions = document.getElementById('ai-panel-actions');
+    if (d.ok === false || d.error) {
+      content.innerHTML = `<span style="color:var(--red)">❌ ${d.error || 'Ошибка'}</span>`;
+    } else {
+      const text = d.brief || d.text || JSON.stringify(d, null, 2);
+      content.textContent = text;
+      actions.style.display = 'block';
+    }
+  } catch(e) {
+    document.getElementById('ai-panel-content').innerHTML =
+      `<span style="color:var(--red)">❌ ${e.message}</span>`;
+  }
+}
+
+function loadAiPrep() {
+  fetchAiEndpoint('/api/client/{{ client.id }}/prep-brief', '🤖 ИИ-подготовка к встрече');
+}
+
+function loadSmartFollowup() {
+  fetchAiEndpoint('/api/client/{{ client.id }}/smart-followup', '✨ Предложение фолоуапа');
+}
+
+async function loadRisk() {
+  showAiPanel('⚠️ Анализ рисков аккаунта');
+  try {
+    const r = await fetch('/api/client/{{ client.id }}/risk');
+    const d = await r.json();
+    const content = document.getElementById('ai-panel-content');
+    const levelEmoji = { low: '🟢', medium: '🟡', high: '🔴' }[d.risk_level] || '⚪';
+    let html = `<b>${levelEmoji} Уровень риска: ${d.risk_level?.toUpperCase() || '—'}</b>\n\n`;
+    if (d.flags?.length) {
+      html += 'Флаги:\n' + d.flags.map(f => `• ${f}`).join('\n') + '\n\n';
+    }
+    if (d.recommendation) {
+      html += `💡 Рекомендация: ${d.recommendation}`;
+    }
+    content.textContent = html;
+    document.getElementById('ai-panel-actions').style.display = 'block';
+  } catch(e) {
+    document.getElementById('ai-panel-content').innerHTML =
+      `<span style="color:var(--red)">❌ ${e.message}</span>`;
+  }
+}
+
+async function loadMetrics() {
+  showAiPanel('📊 Метрики Merchrules');
+  try {
+    const r = await fetch('/api/client/{{ client.id }}/metrics');
+    const d = await r.json();
+    const content = document.getElementById('ai-panel-content');
+    if (d.error === 'no_site_ids') {
+      content.textContent = '⚠️ У клиента не заданы Site ID для Merchrules. Добавь их в профиле клиента.';
+      return;
+    }
+    if (d.error) {
+      content.innerHTML = `<span style="color:var(--yellow)">⚠️ ${d.error}</span>`;
+      return;
+    }
+    const fmt = n => n ? Number(n).toLocaleString('ru-RU') : '—';
+    content.textContent =
+      `GMV: ${fmt(d.gmv)} ₽\n` +
+      `Заказы: ${fmt(d.orders)}\n` +
+      `Конверсия: ${d.conversion ? (d.conversion * 100).toFixed(2) + '%' : '—'}\n` +
+      `CTR поиска: ${d.search_ctr ? (d.search_ctr * 100).toFixed(2) + '%' : '—'}`;
+    document.getElementById('ai-panel-actions').style.display = 'block';
+  } catch(e) {
+    document.getElementById('ai-panel-content').innerHTML =
+      `<span style="color:var(--red)">❌ ${e.message}</span>`;
+  }
+}
+
+function copyAiContent() {
+  const text = document.getElementById('ai-panel-content').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    btn.textContent = '✅ Скопировано';
+    setTimeout(() => btn.textContent = '📋 Скопировать', 1500);
+  });
 }
 </script>
 {% endblock %}

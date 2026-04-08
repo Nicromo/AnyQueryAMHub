@@ -166,9 +166,8 @@ async def index(request: Request, segment: str = "", sort: str = ""):
     # Добавляем статус чекапа и дополнительные поля к каждому клиенту
     for c in clients:
         c["status"] = checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])
-        # Считаем заблокированные задачи отдельно
-        all_t = get_client_tasks(c["id"], "open")
-        c["blocked_tasks"] = sum(1 for t in all_t if t.get("status") == "blocked")
+        # Считаем заблокированные задачи отдельно (отдельный запрос)
+        c["blocked_tasks"] = len(get_client_tasks(c["id"], "blocked"))
         # Настроение последней встречи
         meetings = get_client_meetings(c["id"], limit=1)
         c["mood"] = meetings[0]["mood"] if meetings else "neutral"
