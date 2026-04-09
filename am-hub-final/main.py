@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
 from database import (
-    init_db, seed_clients, get_all_clients, get_client,
+    init_db, get_all_clients, get_client,
     get_client_meetings, get_client_tasks, get_all_tasks,
     get_today_overview, create_meeting,
     create_tasks_bulk, update_task_status, mark_meeting_tg_sent,
@@ -59,12 +59,11 @@ session_mgr = SessionManager(SECRET_KEY)
 
 # Инициализация БД при старте
 init_db()
-seed_clients()
 
 
 @app.on_event("startup")
 async def startup_event():
-    """При запуске на Railway: регистрируем webhook + стартуем планировщик."""
+    """При запуске на Railway: регистрируем webhook, импортируем клиентов из Airtable."""
     if BOT_TOKEN and RAILWAY_DOMAIN:
         webhook_url = f"https://{RAILWAY_DOMAIN}/tg/webhook"
         ok = await tg_bot.set_webhook(webhook_url)
@@ -72,6 +71,42 @@ async def startup_event():
             logging.info("TG webhook registered: %s", webhook_url)
         else:
             logging.warning("TG webhook registration failed")
+
+    # Импорт клиентов из Airtable при каждом старте
+    try:
+        records = await import_clients_from_airtable()
+        if records:
+            import sqlite3 as _sq
+            from pathlib import Path as _P
+            added = updated = 0
+            with _sq.connect(_P("data/am_hub.db")) as conn:
+                for rec in records:
+                    name = rec["name"]
+                    if not name:
+                        continue
+                    segment = rec.get("segment", "SMB")
+                    site_id = rec.get("site_id", "")
+                    manager = rec.get("manager", "")
+                    existing = conn.execute(
+                        "SELECT id FROM clients WHERE name = ?", (name,)
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            "UPDATE clients SET segment=?, site_ids=? WHERE id=?",
+                            (segment, site_id, existing[0])
+                        )
+                        updated += 1
+                    else:
+                        conn.execute(
+                            "INSERT INTO clients (name, segment, site_ids, assigned_manager) VALUES (?,?,?,?)",
+                            (name, segment, site_id, manager)
+                        )
+                        added += 1
+            logging.info("Airtable startup sync: +%d added, ~%d updated", added, updated)
+        else:
+            logging.warning("Airtable startup sync: 0 records (token missing?)")
+    except Exception as exc:
+        logging.warning("Airtable startup sync failed: %s", exc)
 
     # Запускаем планировщик (утренний план, дайджест, MR sync)
     try:

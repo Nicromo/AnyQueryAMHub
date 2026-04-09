@@ -441,49 +441,6 @@ def get_all_clients_for_manager(tg_id: int | None = None) -> list[dict]:
 
 # Формат: (name, segment, site_ids)
 # site_ids — через запятую, для Merchrules API
-SEED_CLIENTS = [
-    # ── ENT ──────────────────────────────────────────────────────────────────
-    ("cdek.shopping",         "ENT",  "8591"),
-    ("shoppinglive.ru",       "ENT",  "2878"),
-    ("beeline.ru",            "ENT",  "2203,6784"),
-    ("lazurit.com",           "ENT",  "2169"),
-    ("m-market.kg",           "ENT",  "8875"),
-    ("tts.ru",                "ENT",  "7085"),
-    ("electrogor.ru",         "ENT",  "7093"),
-    ("mechta.kz",             "ENT",  "2053"),
-    ("vamsvet",               "ENT",  "1193"),
-    ("kuvalda.ru",            "ENT",  "2557"),
-    ("yves-rocher",           "ENT",  "513"),
-    ("водолей.рф",            "ENT",  "2987"),
-    ("tvoydom.ru",            "ENT",  "1462,7655"),
-    ("ogo1.ru",               "ENT",  "662"),
-    ("mila.by",               "ENT",  "8990"),
-    # ── SME+ ─────────────────────────────────────────────────────────────────
-    ("etm.ru",                "SME+", "2034"),
-    ("dogeat.ru",             "SME+", "1951"),
-    ("online-samsung.ru",     "SME+", "2199"),
-    ("prezident.ru",          "SME+", "9261"),
-    # ── SME- ─────────────────────────────────────────────────────────────────
-    ("teremonline.ru",        "SME-", "1909"),
-    ("ya-magazin",            "SME-", "9466"),
-    ("monamiprofessional",    "SME-", "3982"),
-    ("vodovoz.ru",            "SME-", "4882"),
-    # ── SMB ──────────────────────────────────────────────────────────────────
-    ("krasotkapro.ru",        "SMB",  "2485"),
-    ("Semicvetic",            "SMB",  "2760"),
-    ("postmeridiem",          "SMB",  "2284"),
-    ("3259404.ru",            "SMB",  "2806"),
-    ("fabrika-stil.ru",       "SMB",  "8499"),
-    ("urbantiger",            "SMB",  "3811"),
-    ("uyutstroy.su",          "SMB",  "3554"),
-    ("divanboss.ru",          "SMB",  "7820"),
-    ("Neverlate-shop",        "SMB",  "3080"),
-    ("stout.ru",              "SMB",  "7596"),
-    ("rommer.ru",             "SMB",  "7595"),
-    # ── SS ───────────────────────────────────────────────────────────────────
-    ("swankystamping",        "SS",   "3081"),
-    ("teremoot",              "SS",   "5535"),
-]
 
 
 # ── Checklist templates ───────────────────────────────────────────────────────
@@ -601,10 +558,3 @@ def clear_checklist(client_id: int):
         )
 
 
-def seed_clients():
-    """Заполнить/обновить БД клиентами из актуального списка."""
-    with get_conn() as conn:
-        count = conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
-    # Всегда обновляем site_ids даже если клиенты уже есть
-    for name, segment, site_ids in SEED_CLIENTS:
-        upsert_client(name, segment, site_ids=site_ids)
