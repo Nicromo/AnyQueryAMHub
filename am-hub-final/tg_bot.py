@@ -16,9 +16,15 @@ import httpx
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
-ALLOWED_IDS: set[int] = {
-    int(x) for x in os.getenv("ALLOWED_TG_IDS", "").split(",") if x.strip()
-}
+def _parse_allowed_ids() -> set[int]:
+    result = set()
+    for x in os.getenv("ALLOWED_TG_IDS", "").split(","):
+        clean = x.strip().strip("<>").strip()
+        if clean.lstrip("-").isdigit():
+            result.add(int(clean))
+    return result
+
+ALLOWED_IDS: set[int] = _parse_allowed_ids()
 
 
 async def send_message(
