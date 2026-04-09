@@ -294,11 +294,19 @@ async def import_clients_from_airtable() -> list[dict]:
                     if not name:
                         continue
 
-                    # Manager может быть списком linked record IDs или строкой
-                    if isinstance(manager_raw, list):
-                        manager = manager_raw[0] if manager_raw else ""
+                    # Manager: текст / collaborator dict / linked record list
+                    if isinstance(manager_raw, dict):
+                        # Collaborator field: {"id": "usr...", "name": "...", "email": "..."}
+                        manager = manager_raw.get("name") or manager_raw.get("email") or ""
+                    elif isinstance(manager_raw, list):
+                        # Linked record или multi-collaborator
+                        first = manager_raw[0] if manager_raw else ""
+                        if isinstance(first, dict):
+                            manager = first.get("name") or first.get("email") or ""
+                        else:
+                            manager = str(first)
                     else:
-                        manager = manager_raw or ""
+                        manager = str(manager_raw or "").strip()
 
                     # Нормализуем сегмент
                     if isinstance(segment_raw, list):

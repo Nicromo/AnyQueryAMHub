@@ -11,6 +11,50 @@
   </p>
 </div>
 
+<!-- Имя менеджера (для авто-выбора клиентов) -->
+<div class="card" style="padding:14px 18px;margin-bottom:12px;border-left:3px solid
+  {% if manager_display_name %}var(--accent){% else %}var(--yellow){% endif %}">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div>
+      <div style="font-size:.88rem;font-weight:600">👤 Моё имя в Airtable</div>
+      {% if manager_display_name %}
+      <div style="font-size:.78rem;color:var(--accent);margin-top:2px">
+        ✅ <b>{{ manager_display_name }}</b> — клиенты выбраны автоматически
+      </div>
+      {% else %}
+      <div style="font-size:.78rem;color:var(--yellow);margin-top:2px">
+        Укажи своё имя как в Airtable → клиенты выберутся автоматически
+      </div>
+      {% endif %}
+    </div>
+    <button onclick="toggleNameForm()" class="btn btn-ghost btn-sm">
+      {% if manager_display_name %}✏️ Изменить{% else %}+ Указать{% endif %}
+    </button>
+  </div>
+
+  <div id="name-form" style="display:none;margin-top:12px">
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <div style="flex:1">
+        <label style="font-size:.78rem;color:var(--text-muted)">Имя как в Airtable</label>
+        {% if all_managers %}
+        <select id="manager-name-select" class="form-control" style="margin-top:4px"
+                onchange="document.getElementById('manager-name-input').value=this.value">
+          <option value="">— выбрать из списка —</option>
+          {% for m in all_managers %}
+          <option value="{{ m }}" {% if m == manager_display_name %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+        {% endif %}
+        <input type="text" id="manager-name-input" class="form-control"
+               style="margin-top:6px" value="{{ manager_display_name }}"
+               placeholder="Например: Иван Петров">
+      </div>
+      <button onclick="saveManagerName()" class="btn btn-primary btn-sm">💾 Сохранить</button>
+    </div>
+    <div id="name-result" style="font-size:.78rem;margin-top:6px"></div>
+  </div>
+</div>
+
 <!-- Merchrules credentials -->
 <div class="card" style="padding:14px 18px;margin-bottom:12px;border-left:3px solid
   {% if mr_login_set %}var(--accent){% else %}var(--yellow){% endif %}">
@@ -114,6 +158,31 @@
 <div id="save-result" style="margin-top:10px;font-size:0.85rem;text-align:center"></div>
 
 <script>
+function toggleNameForm() {
+  const f = document.getElementById('name-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveManagerName() {
+  const name = document.getElementById('manager-name-input').value.trim();
+  const res = document.getElementById('name-result');
+  if (!name) { res.textContent = '❌ Введи имя'; res.style.color='var(--red)'; return; }
+  const r = await fetch('/api/settings/manager-name', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ name }),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    res.textContent = `✅ Сохранено, выбрано ${d.clients_selected} клиентов`;
+    res.style.color = 'var(--accent)';
+    setTimeout(() => location.reload(), 900);
+  } else {
+    res.textContent = '❌ ' + (d.error || 'Ошибка');
+    res.style.color = 'var(--red)';
+  }
+}
+
 function toggleMRForm() {
   const f = document.getElementById('mr-form');
   f.style.display = f.style.display === 'none' ? 'block' : 'none';

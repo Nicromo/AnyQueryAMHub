@@ -23,16 +23,30 @@
   </div>
 </div>
 
-<!-- Фильтр по сегменту -->
-<div class="filter-tabs">
+<!-- Фильтры -->
+<div class="filter-tabs" style="flex-wrap:wrap;gap:6px">
+  {% set seg_base = ('?manager=' ~ manager) if manager else '' %}
   {% set total = counts.ENT + counts['SME+'] + counts['SME-'] + counts.SME + counts.SMB + counts.SS %}
-  <a href="/" class="tab-btn {% if not segment %}active{% endif %}">Все ({{ total }})</a>
-  <a href="/?segment=ENT"  class="tab-btn {% if segment == 'ENT'  %}active{% endif %}">🔵 ENT ({{ counts.ENT }})</a>
-  <a href="/?segment=SME+" class="tab-btn {% if segment == 'SME+' %}active{% endif %}">🟣 SME+ ({{ counts['SME+'] }})</a>
-  <a href="/?segment=SME-" class="tab-btn {% if segment == 'SME-' %}active{% endif %}">🟣 SME- ({{ counts['SME-'] }})</a>
-  <a href="/?segment=SMB"  class="tab-btn {% if segment == 'SMB'  %}active{% endif %}">🟢 SMB ({{ counts.SMB }})</a>
-  <a href="/?segment=SS"   class="tab-btn {% if segment == 'SS'   %}active{% endif %}">🟠 SS ({{ counts.SS }})</a>
-  <a href="/?sort=attention" class="tab-btn {% if sort == 'attention' %}active{% endif %}" style="margin-left:auto">⚠️ Сначала важные</a>
+  <a href="{{ '/?manager=' ~ manager if manager else '/' }}" class="tab-btn {% if not segment %}active{% endif %}">Все ({{ total }})</a>
+  <a href="{{ seg_base }}{% if seg_base %}&{% else %}?{% endif %}segment=ENT"  class="tab-btn {% if segment == 'ENT'  %}active{% endif %}">🔵 ENT ({{ counts.ENT }})</a>
+  <a href="{{ seg_base }}{% if seg_base %}&{% else %}?{% endif %}segment=SME+" class="tab-btn {% if segment == 'SME+' %}active{% endif %}">🟣 SME+ ({{ counts['SME+'] }})</a>
+  <a href="{{ seg_base }}{% if seg_base %}&{% else %}?{% endif %}segment=SME-" class="tab-btn {% if segment == 'SME-' %}active{% endif %}">🟣 SME- ({{ counts['SME-'] }})</a>
+  <a href="{{ seg_base }}{% if seg_base %}&{% else %}?{% endif %}segment=SMB"  class="tab-btn {% if segment == 'SMB'  %}active{% endif %}">🟢 SMB ({{ counts.SMB }})</a>
+  <a href="{{ seg_base }}{% if seg_base %}&{% else %}?{% endif %}segment=SS"   class="tab-btn {% if segment == 'SS'   %}active{% endif %}">🟠 SS ({{ counts.SS }})</a>
+
+  {% if all_managers %}
+  <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+    <span style="font-size:.75rem;color:var(--text-muted)">Менеджер:</span>
+    <select onchange="filterByManager(this.value)"
+            style="background:var(--surface);border:1px solid var(--border);border-radius:6px;
+                   padding:4px 8px;font-size:.8rem;color:var(--text);cursor:pointer">
+      <option value="" {% if not manager %}selected{% endif %}>Все</option>
+      {% for m in all_managers %}
+      <option value="{{ m }}" {% if manager == m %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
 </div>
 
 <!-- Сводка по флагам -->
@@ -122,6 +136,10 @@
     </div>
   </div>
 
+  {% if c.assigned_manager %}
+  <div style="font-size:.72rem;color:var(--text-muted)">👤 {{ c.assigned_manager }}</div>
+  {% endif %}
+
   <!-- Действия -->
   <div class="cc-actions">
     <a href="/prep/{{ c.id }}"      class="btn btn-ghost btn-sm">📋 Подготовка</a>
@@ -208,6 +226,16 @@ async function refreshMR() {
     btn.textContent = '❌ Ошибка';
   }
   setTimeout(() => { btn.textContent = '🔄 Merchrules'; btn.disabled = false; }, 3000);
+}
+
+function filterByManager(val) {
+  const seg = new URLSearchParams(window.location.search).get('segment') || '';
+  let url = '/';
+  const params = [];
+  if (val) params.push('manager=' + encodeURIComponent(val));
+  if (seg) params.push('segment=' + encodeURIComponent(seg));
+  if (params.length) url += '?' + params.join('&');
+  window.location.href = url;
 }
 
 // Автозагрузка при открытии страницы

@@ -96,9 +96,13 @@ def init_db():
             except Exception:
                 pass
 
-        # Колонка менеджера для персонализации дашборда
+        # Колонки менеджера
         try:
             conn.execute("ALTER TABLE clients ADD COLUMN manager_tg_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN assigned_manager TEXT DEFAULT ''")
         except Exception:
             pass
 
@@ -114,12 +118,17 @@ def init_db():
         # Персональные credentials каждого AM для Merchrules
         conn.execute("""
             CREATE TABLE IF NOT EXISTS manager_credentials (
-                tg_id       INTEGER PRIMARY KEY,
-                mr_login    TEXT NOT NULL DEFAULT '',
-                mr_password TEXT NOT NULL DEFAULT '',
-                updated_at  TEXT DEFAULT (datetime('now'))
+                tg_id                INTEGER PRIMARY KEY,
+                mr_login             TEXT NOT NULL DEFAULT '',
+                mr_password          TEXT NOT NULL DEFAULT '',
+                manager_display_name TEXT NOT NULL DEFAULT '',
+                updated_at           TEXT DEFAULT (datetime('now'))
             )
         """)
+        try:
+            conn.execute("ALTER TABLE manager_credentials ADD COLUMN manager_display_name TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass
 
 
 # ── Clients ──────────────────────────────────────────────────────────────────
@@ -386,6 +395,24 @@ def set_manager_clients(tg_id: int, client_ids: list[int]):
         )
 
 
+def get_all_managers() -> list[str]:
+    """Возвращает список уникальных имён менеджеров из таблицы клиентов."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT assigned_manager FROM clients WHERE assigned_manager != '' ORDER BY assigned_manager"
+        ).fetchall()
+    return [r["assigned_manager"] for r in rows]
+
+
+def get_clients_by_manager(manager_name: str) -> list[int]:
+    """Возвращает client_id всех клиентов с данным менеджером."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM clients WHERE assigned_manager = ?", (manager_name,)
+        ).fetchall()
+    return [r["id"] for r in rows]
+
+
 def save_mr_credentials(tg_id: int, mr_login: str, mr_password: str):
     """Сохраняет MR credentials менеджера."""
     with get_conn() as conn:
@@ -397,6 +424,25 @@ def save_mr_credentials(tg_id: int, mr_login: str, mr_password: str):
                 mr_password = excluded.mr_password,
                 updated_at  = excluded.updated_at
         """, (tg_id, mr_login.strip(), mr_password.strip()))
+
+
+def save_manager_display_name(tg_id: int, display_name: str):
+    """Сохраняет имя менеджера как оно записано в Airtable (для авто-выбора клиентов)."""
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO manager_credentials (tg_id, manager_display_name)
+            VALUES (?, ?)
+            ON CONFLICT(tg_id) DO UPDATE SET manager_display_name = excluded.manager_display_name
+        """, (tg_id, display_name.strip()))
+
+
+def get_manager_display_name(tg_id: int) -> str:
+    """Возвращает имя менеджера как в Airtable."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT manager_display_name FROM manager_credentials WHERE tg_id=?", (tg_id,)
+        ).fetchone()
+    return row["manager_display_name"] if row else ""
 
 
 def get_mr_credentials(tg_id: int) -> dict:

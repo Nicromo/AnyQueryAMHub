@@ -24,6 +24,8 @@ from database import (
     create_internal_task, get_internal_tasks,
     CHECKLIST_TEMPLATES,
     get_manager_client_ids, set_manager_clients, get_all_clients_for_manager,
+    get_all_managers, get_clients_by_manager,
+    save_manager_display_name, get_manager_display_name,
 )
 from auth import SessionManager, verify_tg_auth
 from tg import build_followup_message, send_to_tg
@@ -168,7 +170,7 @@ async def logout():
 # ── Главная — трекер чекапов ─────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, segment: str = "", sort: str = ""):
+async def index(request: Request, segment: str = "", sort: str = "", manager: str = ""):
     user = get_user_or_redirect(request)
     if not user:
         return RedirectResponse("/login")
@@ -191,6 +193,10 @@ async def index(request: Request, segment: str = "", sort: str = ""):
     if segment:
         clients = [c for c in clients if c["segment"] == segment]
 
+    # Фильтр по менеджеру
+    if manager:
+        clients = [c for c in clients if c.get("assigned_manager") == manager]
+
     # Сортировка: сначала требующие внимания
     def attention_score(c):
         s = 0
@@ -204,8 +210,10 @@ async def index(request: Request, segment: str = "", sort: str = ""):
     clients.sort(key=attention_score)
 
     segments = ["ENT", "SME+", "SME-", "SME", "SMB", "SS"]
+    all_clients_list = get_all_clients()
     counts = {s: sum(1 for c in clients if c["segment"] == s) for s in segments}
     has_personal_list = bool(tg_id and get_manager_client_ids(tg_id))
+    all_managers = get_all_managers()
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -213,11 +221,13 @@ async def index(request: Request, segment: str = "", sort: str = ""):
         "clients": clients,
         "segment": segment,
         "sort": sort,
+        "manager": manager,
         "segments": segments,
         "counts": counts,
+        "all_managers": all_managers,
         "today": date.today().isoformat(),
         "has_personal_list": has_personal_list,
-        "total_all": len(get_all_clients()),
+        "total_all": len(all_clients_list),
     })
 
 
@@ -443,12 +453,16 @@ async def my_clients_page(request: Request):
     my_ids = set(get_manager_client_ids(tg_id or 0))
 
     creds = get_mr_credentials(tg_id or 0)
+    display_name = get_manager_display_name(tg_id or 0)
+    all_managers = get_all_managers()
     return templates.TemplateResponse("my_clients.html", {
         "request": request,
         "user": user,
         "all_clients": all_clients,
         "my_ids": my_ids,
         "mr_login_set": creds.get("mr_login", ""),
+        "manager_display_name": display_name,
+        "all_managers": all_managers,
         "today": date.today().isoformat(),
     })
 
@@ -487,6 +501,26 @@ async def save_mr_creds(request: Request):
     save_mr_credentials(tg_id, login, password)
     invalidate_user_cache(tg_id)
     return {"ok": True}
+
+
+@app.post("/api/settings/manager-name", response_class=JSONResponse)
+async def save_manager_name(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not tg_id:
+        raise HTTPException(400)
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "name обязателен"}
+    save_manager_display_name(tg_id, name)
+    # Автоматически выбираем клиентов этого менеджера
+    client_ids = get_clients_by_manager(name)
+    if client_ids:
+        set_manager_clients(tg_id, client_ids)
+    return {"ok": True, "clients_selected": len(client_ids)}
 
 
 @app.delete("/api/settings/mr-credentials", response_class=JSONResponse)
