@@ -11,8 +11,20 @@
 </head>
 <body>
 {% block body %}
+
+<!-- ── Mobile topbar ── -->
+<header class="topbar">
+  <div class="topbar-logo">AM <span>Hub</span></div>
+  <button class="hamburger" id="hamburger" aria-label="Меню" onclick="toggleSidebar()">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+
+<!-- Mobile overlay -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
 <div class="layout">
-  <nav class="sidebar">
+  <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo">AM <span>Hub</span></div>
 
     <!-- Быстрый поиск клиента -->
@@ -24,36 +36,36 @@
 
     <!-- Навигация -->
     <div class="nav-section-label">Ежедневное</div>
-    <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
+    <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today" onclick="closeSidebar()">
       <span class="icon">☀️</span> Сегодня
     </a>
-    <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
+    <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/" onclick="closeSidebar()">
       <span class="icon">📊</span> Все клиенты
     </a>
-    <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50">
+    <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50" onclick="closeSidebar()">
       <span class="icon">🏆</span> Top-50
     </a>
-    <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks">
+    <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks" onclick="closeSidebar()">
       <span class="icon">✅</span> Задачи
-      <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.72rem"></span>
+      <span id="nav-tasks-badge" class="badge-nav" style="display:none"></span>
     </a>
 
-    <div class="nav-section-label" style="margin-top:8px">Анализ</div>
-    <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
+    <div class="nav-section-label">Анализ</div>
+    <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics" onclick="closeSidebar()">
       <span class="icon">📈</span> Аналитика
     </a>
-    <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar">
+    <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar" onclick="closeSidebar()">
       <span class="icon">📆</span> QBR Календарь
     </a>
-    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
+    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks" onclick="closeSidebar()">
       <span class="icon">🔒</span> Внутренние задачи
     </a>
 
-    <div class="nav-section-label" style="margin-top:8px">Инструменты</div>
-    <a class="nav-link {% if request.url.path == '/settings/my-clients' %}active{% endif %}" href="/settings/my-clients">
+    <div class="nav-section-label">Инструменты</div>
+    <a class="nav-link {% if request.url.path == '/settings/my-clients' %}active{% endif %}" href="/settings/my-clients" onclick="closeSidebar()">
       <span class="icon">👤</span> Мои клиенты
     </a>
-    <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
+    <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap" onclick="closeSidebar()">
       <span class="icon">🗺️</span> Роадмап
     </a>
     <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank">
@@ -63,17 +75,17 @@
       <span class="icon">🔗</span> Merchrules ↗
     </a>
 
-    <!-- Статистика дашборда -->
+    <!-- Статистика -->
     <div id="sidebar-stats" class="sidebar-stats" style="display:none">
-      <div class="stat-item red"  id="stat-overdue">—</div>
+      <div class="stat-item red"    id="stat-overdue">—</div>
       <div class="stat-item yellow" id="stat-warning">—</div>
-      <div class="stat-item" id="stat-tasks">—</div>
+      <div class="stat-item"        id="stat-tasks">—</div>
     </div>
 
     <div class="sidebar-bottom">
       {% if user %}
-        <span style="color:var(--text-muted);font-size:0.78rem">👤 {{ user.name }}</span><br>
-        <a href="/logout" style="color:var(--text-muted);font-size:0.78rem">Выйти</a>
+        <span>👤 {{ user.name }}</span><br>
+        <a href="/logout" style="color:var(--text-muted)">Выйти</a>
       {% endif %}
     </div>
   </nav>
@@ -84,7 +96,7 @@
 </div>
 {% endblock %}
 
-<!-- Toast уведомление -->
+<!-- Toast -->
 {% if request.query_params.get('saved') %}
 <div class="toast success" id="toast">
   ✅ Фолоуап сохранён
@@ -95,7 +107,22 @@
 {% endif %}
 
 <script>
-// ── Быстрый поиск клиента ─────────────────────────────────────────────────
+// ── Мобильное меню ────────────────────────────────────────────────────────────
+function toggleSidebar() {
+  const s = document.getElementById('sidebar');
+  const o = document.getElementById('sidebar-overlay');
+  const h = document.getElementById('hamburger');
+  const open = s.classList.toggle('open');
+  o.classList.toggle('open', open);
+  h.classList.toggle('open', open);
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+  document.getElementById('hamburger').classList.remove('open');
+}
+
+// ── Быстрый поиск клиента ────────────────────────────────────────────────────
 let _searchTimer = null;
 function sidebarSearch(q) {
   clearTimeout(_searchTimer);
@@ -106,36 +133,32 @@ function sidebarSearch(q) {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       if (!data.length) { drop.style.display = 'none'; return; }
-      drop.innerHTML = data.map(c =>
-        `<a href="/prep/${c.id}" class="search-item">
-          <span class="badge badge-${c.segment.toLowerCase().replace('+','-plus').replace('-','-minus')}">${c.segment}</span>
-          ${c.name}
-        </a>`
-      ).join('');
+      drop.innerHTML = data.map(c => {
+        const seg = c.segment.toLowerCase().replace('+','-plus').replace('-','-minus');
+        return `<a href="/prep/${c.id}" class="search-item" onclick="closeSidebar()">
+          <span class="badge badge-${seg}">${c.segment}</span>${c.name}
+        </a>`;
+      }).join('');
       drop.style.display = 'block';
     } catch(e) { drop.style.display = 'none'; }
   }, 220);
 }
-
-// Закрыть дропдаун при клике вне
 document.addEventListener('click', e => {
   if (!e.target.closest('.search-wrap'))
     document.getElementById('search-results').style.display = 'none';
 });
 
-// ── Загрузка статистики ───────────────────────────────────────────────────
+// ── Статистика сайдбара ───────────────────────────────────────────────────────
 (async function loadStats() {
   try {
     const s = await fetch('/api/stats').then(r => r.json());
-    const box = document.getElementById('sidebar-stats');
     document.getElementById('stat-overdue').textContent = `🔴 ${s.overdue} просроч.`;
     document.getElementById('stat-warning').textContent = `🟡 ${s.warning} скоро`;
-    document.getElementById('stat-tasks').textContent = `📋 ${s.open_tasks} задач`;
-    box.style.display = 'block';
-    // Бейдж на ссылке "Задачи"
+    document.getElementById('stat-tasks').textContent   = `📋 ${s.open_tasks} задач`;
+    document.getElementById('sidebar-stats').style.display = 'block';
     if (s.open_tasks > 0) {
-      const badge = document.getElementById('nav-tasks-badge');
-      if (badge) { badge.textContent = s.open_tasks; badge.style.display = 'inline'; }
+      const b = document.getElementById('nav-tasks-badge');
+      if (b) { b.textContent = s.open_tasks; b.style.display = 'inline'; }
     }
   } catch(e) {}
 })();
