@@ -140,6 +140,139 @@ async def fetch_site_meetings(
     return result
 
 
+async def fetch_site_roadmap(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> list:
+    """Получаем роадмап для site_id из /roadmap."""
+    try:
+        resp = await client.get(
+            f"{MERCHRULES_URL}/roadmap",
+            params={"site_id": site_id},
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data if isinstance(data, list) else data.get("items") or data.get("roadmap") or []
+    except Exception as exc:
+        logger.warning("fetch_site_roadmap(%s) error: %s", site_id, exc)
+    return []
+
+
+async def fetch_site_analytics(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> dict:
+    """Получаем полную аналитику для site_id из /analytics/full."""
+    try:
+        resp = await client.get(
+            f"{MERCHRULES_URL}/analytics/full",
+            params={"site_id": site_id},
+            headers=headers,
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as exc:
+        logger.warning("fetch_site_analytics(%s) error: %s", site_id, exc)
+    return {}
+
+
+async def fetch_site_checkups(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> list:
+    """Получаем список чекапов для site_id из /checkups."""
+    try:
+        resp = await client.get(
+            f"{MERCHRULES_URL}/checkups",
+            params={"site_id": site_id},
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data if isinstance(data, list) else data.get("items") or data.get("checkups") or []
+    except Exception as exc:
+        logger.warning("fetch_site_checkups(%s) error: %s", site_id, exc)
+    return []
+
+
+async def fetch_site_feeds(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> list:
+    """Получаем список фидов для site_id из /feeds."""
+    try:
+        resp = await client.get(
+            f"{MERCHRULES_URL}/feeds",
+            params={"site_id": site_id},
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data if isinstance(data, list) else data.get("items") or data.get("feeds") or []
+    except Exception as exc:
+        logger.warning("fetch_site_feeds(%s) error: %s", site_id, exc)
+    return []
+
+
+async def fetch_feed_status(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> dict:
+    """Получаем статус обработки фида из /feed-processing."""
+    try:
+        resp = await client.get(
+            f"{MERCHRULES_URL}/feed-processing",
+            params={"site_id": site_id},
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as exc:
+        logger.warning("fetch_feed_status(%s) error: %s", site_id, exc)
+    return {}
+
+
+async def get_client_full_data(site_id: str) -> dict:
+    """
+    Получает все данные из Merchrules для одного клиента:
+    задачи, встречи, роадмап, аналитику, чекапы, фиды.
+    """
+    if not MR_LOGIN or not MR_PASSWORD or not site_id:
+        return {}
+
+    async with httpx.AsyncClient(timeout=30) as hx:
+        token = await get_auth_token(hx)
+        if not token:
+            return {}
+
+        auth_headers = {"Authorization": f"Bearer {token}"}
+
+        tasks_data, meetings_data, roadmap, analytics, checkups, feeds, feed_status = await asyncio.gather(
+            fetch_site_tasks(hx, auth_headers, site_id),
+            fetch_site_meetings(hx, auth_headers, site_id),
+            fetch_site_roadmap(hx, auth_headers, site_id),
+            fetch_site_analytics(hx, auth_headers, site_id),
+            fetch_site_checkups(hx, auth_headers, site_id),
+            fetch_site_feeds(hx, auth_headers, site_id),
+            fetch_feed_status(hx, auth_headers, site_id),
+            return_exceptions=True,
+        )
+
+        def safe(v):
+            return v if not isinstance(v, Exception) else {}
+
+        return {
+            **safe(tasks_data),
+            **safe(meetings_data),
+            "roadmap": safe(roadmap) if isinstance(roadmap, list) else [],
+            "analytics": safe(analytics),
+            "checkups": safe(checkups) if isinstance(checkups, list) else [],
+            "feeds": safe(feeds) if isinstance(feeds, list) else [],
+            "feed_status": safe(feed_status),
+        }
+
+
 # ── Публичный API ─────────────────────────────────────────────────────────────
 
 async def sync_clients_from_merchrules(clients: list[dict]) -> dict:

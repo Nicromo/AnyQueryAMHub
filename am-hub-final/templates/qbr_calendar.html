@@ -2,29 +2,50 @@
 {% block title %}QBR Календарь — AM Hub{% endblock %}
 {% block content %}
 
-<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
   <div>
-    <h1>📊 QBR Календарь</h1>
-    <p style="color:var(--text-muted)">Квартальные бизнес-ревью · все клиенты</p>
+    <h1>📆 QBR Календарь</h1>
+    <p style="color:var(--text-muted)">Квартальные бизнес-ревью</p>
   </div>
-  <a href="/followup/0" class="btn btn-primary btn-sm" style="display:none">+ Провести QBR</a>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button class="btn btn-ghost btn-sm" id="prev-month" onclick="shiftMonth(-1)">‹</button>
+    <span id="month-label" style="font-weight:600;font-size:.95rem;min-width:140px;text-align:center"></span>
+    <button class="btn btn-ghost btn-sm" id="next-month" onclick="shiftMonth(1)">›</button>
+  </div>
 </div>
 
-<!-- Предстоящие QBR -->
+<!-- Клиенты которым нужен QBR -->
+{% if needs_qbr %}
+<div class="card" style="margin-bottom:16px;padding:12px 14px">
+  <div style="font-size:.82rem;color:var(--yellow);font-weight:600;margin-bottom:8px">
+    ⚠️ НУЖЕН QBR — ENT/SME+ без QBR за 90 дней ({{ needs_qbr|length }})
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px">
+    {% for c in needs_qbr %}
+    <div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.82rem">
+      <a href="/prep/{{ c.id }}" style="color:var(--text)">{{ c.name }}</a>
+      <a href="/qbr/{{ c.id }}" style="color:var(--accent);font-size:.75rem">→ QBR</a>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Предстоящие встречи -->
 {% if upcoming %}
 <div style="margin-bottom:16px">
-  <h2 style="font-size:.9rem;color:var(--text-muted);margin-bottom:10px">📅 ЗАПЛАНИРОВАНЫ</h2>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">
+  <div style="font-size:.82rem;color:var(--text-muted);font-weight:600;margin-bottom:8px">📅 ЗАПЛАНИРОВАНЫ</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px">
     {% for c in upcoming %}
-    <div class="card" style="border-left:4px solid var(--accent);padding:12px 14px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <a href="/prep/{{ c.id }}" style="font-weight:600;font-size:.9rem">{{ c.name }}</a>
+    <div class="card" style="padding:10px 12px;border-left:3px solid var(--accent)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <a href="/prep/{{ c.id }}" style="font-weight:600;font-size:.88rem">{{ c.name }}</a>
         <span class="badge badge-{{ c.segment|lower }}">{{ c.segment }}</span>
       </div>
-      <div style="font-size:.82rem;color:var(--accent);margin-top:4px">📅 {{ c.planned_meeting }}</div>
+      <div style="font-size:.78rem;color:var(--accent)">📅 {{ c.planned_meeting }}</div>
       <div style="display:flex;gap:6px;margin-top:8px">
-        <a href="/qbr/{{ c.id }}" class="btn btn-primary btn-sm" style="flex:1;text-align:center">📊 Провести</a>
-        <a href="/checklist/{{ c.id }}?meeting_type=qbr" class="btn btn-ghost btn-sm">✅</a>
+        <a href="/qbr/{{ c.id }}" class="btn btn-primary btn-sm" style="flex:1;text-align:center;font-size:.75rem">📊 Провести</a>
+        <a href="/checklist/{{ c.id }}?meeting_type=qbr" class="btn btn-ghost btn-sm" style="font-size:.75rem">✅</a>
       </div>
     </div>
     {% endfor %}
@@ -32,23 +53,18 @@
 </div>
 {% endif %}
 
-<!-- Все ENT без QBR за квартал -->
-{% if needs_qbr %}
-<div style="margin-bottom:16px">
-  <h2 style="font-size:.9rem;color:var(--yellow);margin-bottom:10px">⚠️ НУЖЕН QBR (ENT без QBR за 90 дней)</h2>
-  <div style="display:flex;flex-wrap:wrap;gap:8px">
-    {% for c in needs_qbr %}
-    <div class="cc-flag flag-yellow" style="padding:6px 12px;font-size:.82rem;display:flex;align-items:center;gap:8px">
-      <a href="/prep/{{ c.id }}" style="color:inherit">{{ c.name }}</a>
-      <a href="/qbr/{{ c.id }}" style="color:var(--accent)">→ Провести</a>
-    </div>
+<!-- Календарная сетка -->
+<div class="card" style="padding:14px;margin-bottom:16px">
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:8px">
+    {% for day in ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'] %}
+    <div style="text-align:center;font-size:.72rem;color:var(--text-muted);padding:4px">{{ day }}</div>
     {% endfor %}
   </div>
+  <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px"></div>
 </div>
-{% endif %}
 
 <!-- История QBR -->
-<h2 style="font-size:.9rem;color:var(--text-muted);margin-bottom:10px">📋 ИСТОРИЯ QBR</h2>
+<div style="font-size:.82rem;color:var(--text-muted);font-weight:600;margin-bottom:8px">📋 ИСТОРИЯ QBR</div>
 {% if qbr_history %}
 <div class="card" style="padding:0;overflow:hidden">
   <table class="table">
@@ -103,7 +119,6 @@
 <div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
   <div style="font-size:2rem">📊</div>
   <p style="margin-top:8px">QBR-встреч ещё не было</p>
-  <p style="font-size:.82rem;margin-top:4px">Проведи QBR через страницу подготовки → QBR</p>
 </div>
 {% endif %}
 
@@ -112,7 +127,7 @@
   <div class="card" style="width:420px;max-width:95vw">
     <h3 style="font-size:.95rem;margin-bottom:12px">✏️ Комментарий к QBR</h3>
     <textarea id="comment-text" class="form-control" rows="4"
-      placeholder="Добавь комментарий... (прошлые комментарии не удаляются)"></textarea>
+      placeholder="Добавь комментарий..."></textarea>
     <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
       <button onclick="document.getElementById('comment-modal').style.display='none'" class="btn btn-ghost">Отмена</button>
       <button onclick="saveComment()" class="btn btn-primary">💾 Сохранить</button>
@@ -121,6 +136,108 @@
 </div>
 
 <script>
+// ── Данные о QBR-встречах для календаря ──────────────────────────────────────
+const QBR_EVENTS = [
+  {% for m in qbr_history %}
+  { date: "{{ m.meeting_date[:10] }}", name: "{{ m.client_name|replace('"','\\"') }}", mood: "{{ m.mood }}", id: {{ m.client_id }} },
+  {% endfor %}
+  {% for c in upcoming %}
+  {% if c.planned_meeting %}
+  { date: "{{ c.planned_meeting[:10] }}", name: "{{ c.name|replace('"','\\"') }}", mood: "upcoming", id: {{ c.id }} },
+  {% endif %}
+  {% endfor %}
+];
+
+// Группируем события по дате
+const eventsByDate = {};
+QBR_EVENTS.forEach(e => {
+  if (!eventsByDate[e.date]) eventsByDate[e.date] = [];
+  eventsByDate[e.date].push(e);
+});
+
+// ── Построение календаря ──────────────────────────────────────────────────────
+let currentYear, currentMonth;
+
+function initCalendar() {
+  const now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth();
+  renderCalendar();
+}
+
+function shiftMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth < 0)  { currentMonth = 11; currentYear--; }
+  if (currentMonth > 11) { currentMonth = 0;  currentYear++; }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                      'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  document.getElementById('month-label').textContent =
+    monthNames[currentMonth] + ' ' + currentYear;
+
+  const grid = document.getElementById('cal-grid');
+  grid.innerHTML = '';
+
+  // Первый день месяца (0=вс, пересчитываем под пн=0)
+  const firstDay = new Date(currentYear, currentMonth, 1);
+  let startDow = firstDay.getDay(); // 0=sun
+  startDow = (startDow === 0) ? 6 : startDow - 1; // -> пн=0
+
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  // Пустые ячейки до начала
+  for (let i = 0; i < startDow; i++) {
+    const blank = document.createElement('div');
+    blank.style.cssText = 'min-height:64px;background:transparent';
+    grid.appendChild(blank);
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const mm = String(currentMonth + 1).padStart(2,'0');
+    const dd = String(d).padStart(2,'0');
+    const dateStr = `${currentYear}-${mm}-${dd}`;
+    const events = eventsByDate[dateStr] || [];
+    const isToday = dateStr === todayStr;
+
+    const cell = document.createElement('div');
+    cell.style.cssText = `
+      min-height:64px;border-radius:6px;padding:4px;
+      background:${isToday ? 'var(--accent)' : 'var(--surface)'};
+      border:1px solid ${isToday ? 'var(--accent)' : 'var(--border)'};
+      overflow:hidden;cursor:${events.length ? 'pointer' : 'default'};
+      transition:border-color .15s;
+    `;
+
+    const dayNum = document.createElement('div');
+    dayNum.textContent = d;
+    dayNum.style.cssText = `font-size:.72rem;font-weight:600;color:${isToday ? '#fff' : 'var(--text-muted)'};margin-bottom:2px`;
+    cell.appendChild(dayNum);
+
+    events.forEach(ev => {
+      const dot = document.createElement('div');
+      const colors = { positive: '#4ade80', risk: '#f87171', neutral: '#fbbf24', upcoming: '#7c6af7' };
+      const bg = colors[ev.mood] || '#7c6af7';
+      dot.style.cssText = `
+        background:${bg}22;border-left:2px solid ${bg};
+        border-radius:3px;padding:2px 4px;margin-top:2px;
+        font-size:.65rem;color:${bg};white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis;max-width:100%;
+      `;
+      dot.textContent = ev.name;
+      dot.title = ev.name;
+      dot.onclick = () => { window.location.href = `/prep/${ev.id}`; };
+      cell.appendChild(dot);
+    });
+
+    grid.appendChild(cell);
+  }
+}
+
+// ── Комментарии к QBR ─────────────────────────────────────────────────────────
 let _editMeetingId = null;
 let _existingComment = '';
 
@@ -129,7 +246,7 @@ function editComment(meetingId, existing) {
   _existingComment = existing;
   document.getElementById('comment-text').value = '';
   document.getElementById('comment-text').placeholder = existing
-    ? `Существующий: "${existing.substring(0,50)}..."\n\nДопиши новый комментарий:`
+    ? `Существующий: "${existing.substring(0,50)}..."\n\nДопиши новый:`
     : 'Добавь комментарий...';
   document.getElementById('comment-modal').style.display = 'flex';
 }
@@ -156,5 +273,7 @@ async function saveComment() {
 document.getElementById('comment-modal').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
 });
+
+initCalendar();
 </script>
 {% endblock %}

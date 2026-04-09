@@ -237,6 +237,7 @@ async def followup_page(request: Request, client_id: int):
         "request": request,
         "user": user,
         "client": client,
+        "client_site_ids": client.get("site_ids", ""),
         "last_meetings": last_meetings,
         "today": date.today().isoformat(),
         "suggested_next": suggested_next,
@@ -578,6 +579,55 @@ async def api_metrics_upload(request: Request):
     }, ensure_ascii=False), encoding="utf-8")
 
     return {"ok": True, "rows": len(rows), "cols": len(headers)}
+
+
+# ── API — импорт клиентов из Airtable ────────────────────────────────────────
+
+@app.post("/api/admin/import-airtable", response_class=JSONResponse)
+async def api_import_airtable(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+
+    from airtable_sync import import_clients_from_airtable
+    import sqlite3 as _sq
+    from pathlib import Path as _P
+
+    records = await import_clients_from_airtable()
+    if not records:
+        return {"ok": False, "error": "Airtable вернул 0 записей — проверьте AIRTABLE_TOKEN"}
+
+    db_path = _P("data/am_hub.db")
+    added = 0
+    updated = 0
+    with _sq.connect(db_path) as conn:
+        for rec in records:
+            name = rec["name"]
+            site_id = rec["site_id"]
+            manager = rec["manager"]
+            if not name:
+                continue
+            # Определяем сегмент по полю airtable (если нет — SMB по умолчанию)
+            existing = conn.execute(
+                "SELECT id, site_ids FROM clients WHERE name = ?", (name,)
+            ).fetchone()
+            if existing:
+                # Обновляем site_id если изменился
+                if site_id and not existing[1]:
+                    conn.execute(
+                        "UPDATE clients SET site_ids=? WHERE id=?",
+                        (site_id, existing[0])
+                    )
+                    updated += 1
+            else:
+                conn.execute(
+                    "INSERT INTO clients (name, segment, site_ids, assigned_manager) VALUES (?,?,?,?)",
+                    (name, "SMB", site_id, manager)
+                )
+                added += 1
+
+    logging.info("Airtable import: %d added, %d updated", added, updated)
+    return {"ok": True, "added": added, "updated": updated, "total": len(records)}
 
 
 # ── API — статистика дашборда ────────────────────────────────────────────────
@@ -1080,20 +1130,27 @@ async def analytics_page(request: Request):
     from pathlib import Path
     db_path = Path("data/am_hub.db")
 
+    # Определяем диапазон дат по параметру ?range=
+    range_param = request.query_params.get("range", "week")
+    range_days_map = {"week": 7, "month": 30, "quarter": 90}
+    range_days = range_days_map.get(range_param, 7)
+    # Для отображения встреч по неделям берём кратное число недель
+    meetings_window = max(range_days, 14)  # минимум 2 недели
+
     stats = {}
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         today = date.today()
 
-        # Встречи по неделям за последние 12 недель
-        meetings_weekly = conn.execute("""
+        # Встречи по неделям за выбранный период
+        meetings_weekly = conn.execute(f"""
             SELECT strftime('%Y-W%W', meeting_date) as week,
                    COUNT(*) as cnt,
                    SUM(CASE WHEN mood='positive' THEN 1 ELSE 0 END) as positive,
                    SUM(CASE WHEN mood='risk' THEN 1 ELSE 0 END) as risk
             FROM meetings
-            WHERE meeting_date >= date('now', '-84 days')
+            WHERE meeting_date >= date('now', '-{meetings_window} days')
             GROUP BY week ORDER BY week
         """).fetchall()
 
@@ -1102,18 +1159,18 @@ async def analytics_page(request: Request):
             SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status
         """).fetchall()
 
-        # Задачи созданные vs закрытые за последние 4 недели
-        task_flow = conn.execute("""
+        # Задачи созданные vs закрытые за выбранный период
+        task_flow = conn.execute(f"""
             SELECT strftime('%Y-W%W', created_at) as week,
                    COUNT(*) as created,
                    SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as done
             FROM tasks
-            WHERE created_at >= date('now', '-28 days')
+            WHERE created_at >= date('now', '-{range_days} days')
             GROUP BY week ORDER BY week
         """).fetchall()
 
         # Чекапы: соответствие ритму по сегментам
-        clients_data = conn.execute("""
+        clients_data = conn.execute(f"""
             SELECT c.segment,
                    COUNT(*) as total,
                    SUM(CASE WHEN c.last_checkup IS NOT NULL
@@ -1126,12 +1183,12 @@ async def analytics_page(request: Request):
             GROUP BY c.segment ORDER BY c.segment
         """).fetchall()
 
-        # Топ клиентов по кол-ву встреч за квартал
-        top_active = conn.execute("""
+        # Топ клиентов по кол-ву встреч за выбранный диапазон
+        top_active = conn.execute(f"""
             SELECT c.name, c.segment, COUNT(m.id) as meetings
             FROM clients c
             LEFT JOIN meetings m ON m.client_id = c.id
-              AND m.meeting_date >= date('now', '-90 days')
+              AND m.meeting_date >= date('now', '-{range_days} days')
             GROUP BY c.id ORDER BY meetings DESC LIMIT 10
         """).fetchall()
 
@@ -1151,6 +1208,7 @@ async def analytics_page(request: Request):
         "request": request,
         "user": user,
         "stats": stats,
+        "range_param": range_param,
         "today": date.today().isoformat(),
     })
 
@@ -1197,9 +1255,9 @@ async def qbr_calendar_page(request: Request):
     return templates.TemplateResponse("qbr_calendar.html", {
         "request": request,
         "user": user,
-        "qbr_meetings": qbr_meetings,
+        "qbr_history": qbr_meetings,
         "upcoming": upcoming,
-        "ent_no_qbr": ent_no_qbr,
+        "needs_qbr": ent_no_qbr,
         "today": now_iso,
     })
 

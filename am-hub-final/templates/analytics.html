@@ -8,9 +8,9 @@
     <p style="color:var(--text-muted)">Сводка: встречи, задачи, чекапы</p>
   </div>
   <div style="display:flex;gap:8px">
-    <button onclick="setRange('week')"  class="tab-btn active" id="range-week">Неделя</button>
-    <button onclick="setRange('month')" class="tab-btn" id="range-month">Месяц</button>
-    <button onclick="setRange('quarter')" class="tab-btn" id="range-quarter">Квартал</button>
+    <a href="/analytics?range=week"    class="tab-btn {% if range_param == 'week' %}active{% endif %}">Неделя</a>
+    <a href="/analytics?range=month"   class="tab-btn {% if range_param == 'month' %}active{% endif %}">Месяц</a>
+    <a href="/analytics?range=quarter" class="tab-btn {% if range_param == 'quarter' %}active{% endif %}">Квартал</a>
   </div>
 </div>
 
@@ -135,13 +135,4 @@
 .kpi-label { font-size: .78rem; color: var(--text-muted); margin-top: 4px; }
 </style>
 
-<script>
-function setRange(r) {
-  ['week','month','quarter'].forEach(x => {
-    document.getElementById('range-'+x)?.classList.toggle('active', x === r);
-  });
-  // TODO: reload with range param
-  window.location.href = '/analytics?range=' + r;
-}
-</script>
 {% endblock %}

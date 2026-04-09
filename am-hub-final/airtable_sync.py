@@ -224,3 +224,136 @@ async def sync_meeting_to_airtable(
                 return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:300]}"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+
+# ── Импорт клиентов из Airtable ───────────────────────────────────────────────
+
+# Точные ID полей из таблицы клиентов
+CLIENTS_TABLE_ID  = "tblIKAi1gcFayRJTn"
+CLIENTS_VIEW_ID   = "viwocTz78z44WlAu1"
+FIELD_ACCOUNT_NAME = "fldXeHkgIjzvr294Z"   # Название аккаунта
+FIELD_MANAGER      = "fld0XMiWRh9xzvDy6"   # Аккаунт-менеджер
+FIELD_SITE_ID      = "fldreqkwkEXrEGGwg"   # Номер аккаунта (site_id)
+
+# QBR-календарь
+QBR_TABLE_ID = "tblqQbChhRYoZoxWu"
+QBR_VIEW_ID  = "viw6JIE6SS2ub3enK"
+
+
+async def import_clients_from_airtable() -> list[dict]:
+    """
+    Загружает список клиентов из Airtable.
+    Возвращает список dict с ключами: name, site_id, manager
+    """
+    if not AIRTABLE_TOKEN:
+        logger.warning("AIRTABLE_TOKEN не задан — пропускаем импорт клиентов")
+        return []
+
+    records = []
+    offset = None
+
+    async with httpx.AsyncClient(timeout=30) as hx:
+        while True:
+            params: dict = {
+                "view": CLIENTS_VIEW_ID,
+                "fields[]": [FIELD_ACCOUNT_NAME, FIELD_MANAGER, FIELD_SITE_ID],
+                "pageSize": 100,
+            }
+            if offset:
+                params["offset"] = offset
+
+            try:
+                resp = await hx.get(
+                    f"{BASE_URL}/{AIRTABLE_BASE_ID}/{CLIENTS_TABLE_ID}",
+                    headers=_headers(),
+                    params=params,
+                    timeout=20,
+                )
+                if resp.status_code != 200:
+                    logger.warning("Airtable import_clients error: %s %s", resp.status_code, resp.text[:200])
+                    break
+
+                body = resp.json()
+                for rec in body.get("records", []):
+                    fields = rec.get("fields", {})
+                    name = fields.get(FIELD_ACCOUNT_NAME)
+                    site_id = fields.get(FIELD_SITE_ID)
+                    manager_raw = fields.get(FIELD_MANAGER)
+
+                    if not name:
+                        continue
+
+                    # Manager may be a list of linked record IDs or plain string
+                    if isinstance(manager_raw, list):
+                        manager = manager_raw[0] if manager_raw else ""
+                    else:
+                        manager = manager_raw or ""
+
+                    records.append({
+                        "name": str(name).strip(),
+                        "site_id": str(site_id).strip() if site_id else "",
+                        "manager": str(manager).strip(),
+                        "airtable_id": rec.get("id", ""),
+                    })
+
+                offset = body.get("offset")
+                if not offset:
+                    break
+
+            except Exception as exc:
+                logger.warning("import_clients_from_airtable error: %s", exc)
+                break
+
+    logger.info("Airtable: imported %d clients", len(records))
+    return records
+
+
+async def get_qbr_calendar_from_airtable() -> list[dict]:
+    """
+    Загружает QBR-события из Airtable-таблицы QBR-календаря.
+    Возвращает список dict с ключами: name, date, status, description
+    """
+    if not AIRTABLE_TOKEN:
+        return []
+
+    records = []
+    offset = None
+
+    async with httpx.AsyncClient(timeout=30) as hx:
+        while True:
+            params: dict = {
+                "view": QBR_VIEW_ID,
+                "pageSize": 100,
+            }
+            if offset:
+                params["offset"] = offset
+
+            try:
+                resp = await hx.get(
+                    f"{BASE_URL}/{AIRTABLE_BASE_ID}/{QBR_TABLE_ID}",
+                    headers=_headers(),
+                    params=params,
+                    timeout=20,
+                )
+                if resp.status_code != 200:
+                    logger.warning("Airtable QBR calendar error: %s", resp.status_code)
+                    break
+
+                body = resp.json()
+                for rec in body.get("records", []):
+                    fields = rec.get("fields", {})
+                    records.append({
+                        "airtable_id": rec.get("id", ""),
+                        "fields": fields,
+                    })
+
+                offset = body.get("offset")
+                if not offset:
+                    break
+
+            except Exception as exc:
+                logger.warning("get_qbr_calendar_from_airtable error: %s", exc)
+                break
+
+    logger.info("Airtable QBR calendar: %d records", len(records))
+    return records
