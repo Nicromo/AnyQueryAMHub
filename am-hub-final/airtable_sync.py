@@ -21,7 +21,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-AIRTABLE_TOKEN    = os.getenv("AIRTABLE_TOKEN", "patGWwb2jBAKXddDI.f7f4a270685a36112d6958c8299056c7930f67c798908f74db6d81a0bae69d8d")
+AIRTABLE_TOKEN    = os.getenv("AIRTABLE_TOKEN", "")
 AIRTABLE_BASE_ID  = os.getenv("AIRTABLE_BASE_ID", "appEAS1rPKpevoIel")
 AIRTABLE_TABLE_ID = os.getenv("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn")
 
@@ -234,6 +234,16 @@ CLIENTS_VIEW_ID   = "viwocTz78z44WlAu1"
 FIELD_ACCOUNT_NAME = "fldXeHkgIjzvr294Z"   # Название аккаунта
 FIELD_MANAGER      = "fld0XMiWRh9xzvDy6"   # Аккаунт-менеджер
 FIELD_SITE_ID      = "fldreqkwkEXrEGGwg"   # Номер аккаунта (site_id)
+FIELD_SEGMENT      = "fldyvNxsQglqiQs48"   # Сегмент (ENT / SME+ / SME- / SMB / SS)
+
+# Нормализация значений сегмента из Airtable
+SEGMENT_MAP = {
+    "ent": "ENT", "enterprise": "ENT",
+    "sme+": "SME+", "sme plus": "SME+", "sme_plus": "SME+",
+    "sme-": "SME-", "sme minus": "SME-", "sme_minus": "SME-", "sme": "SME-",
+    "smb": "SMB", "small": "SMB",
+    "ss": "SS", "self-service": "SS", "self service": "SS",
+}
 
 # QBR-календарь
 QBR_TABLE_ID = "tblqQbChhRYoZoxWu"
@@ -256,7 +266,7 @@ async def import_clients_from_airtable() -> list[dict]:
         while True:
             params: dict = {
                 "view": CLIENTS_VIEW_ID,
-                "fields[]": [FIELD_ACCOUNT_NAME, FIELD_MANAGER, FIELD_SITE_ID],
+                "fields[]": [FIELD_ACCOUNT_NAME, FIELD_MANAGER, FIELD_SITE_ID, FIELD_SEGMENT],
                 "pageSize": 100,
             }
             if offset:
@@ -279,20 +289,28 @@ async def import_clients_from_airtable() -> list[dict]:
                     name = fields.get(FIELD_ACCOUNT_NAME)
                     site_id = fields.get(FIELD_SITE_ID)
                     manager_raw = fields.get(FIELD_MANAGER)
+                    segment_raw = fields.get(FIELD_SEGMENT)
 
                     if not name:
                         continue
 
-                    # Manager may be a list of linked record IDs or plain string
+                    # Manager может быть списком linked record IDs или строкой
                     if isinstance(manager_raw, list):
                         manager = manager_raw[0] if manager_raw else ""
                     else:
                         manager = manager_raw or ""
 
+                    # Нормализуем сегмент
+                    if isinstance(segment_raw, list):
+                        segment_raw = segment_raw[0] if segment_raw else ""
+                    seg_key = str(segment_raw or "").strip().lower()
+                    segment = SEGMENT_MAP.get(seg_key, "SMB")
+
                     records.append({
                         "name": str(name).strip(),
                         "site_id": str(site_id).strip() if site_id else "",
                         "manager": str(manager).strip(),
+                        "segment": segment,
                         "airtable_id": rec.get("id", ""),
                     })
 

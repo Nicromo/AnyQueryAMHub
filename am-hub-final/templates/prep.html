@@ -162,6 +162,91 @@
 
 </div>
 
+<!-- ── Данные из Merchrules ─────────────────────────────────────────────────── -->
+{% if client.site_ids %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:0">
+
+  <!-- Чекапы MR -->
+  <div class="card">
+    <h3 style="font-size:.9rem;margin-bottom:10px">🔍 Чекапы (Merchrules)</h3>
+    {% if mr_checkups %}
+      {% for c in mr_checkups[:5] %}
+      <div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.82rem">
+        <span style="color:var(--text-muted)">{{ c.get('date','')[:10] }}</span>
+        <span style="margin-left:8px">{{ c.get('title') or c.get('name') or c.get('type','') }}</span>
+      </div>
+      {% endfor %}
+    {% elif mr_ok %}
+      <p style="color:var(--text-muted);font-size:.82rem;text-align:center;padding:12px 0">Нет данных</p>
+    {% else %}
+      <p style="color:var(--text-muted);font-size:.82rem;text-align:center;padding:12px 0">
+        🔧 В разработке — требует MERCHRULES_LOGIN
+      </p>
+    {% endif %}
+    <a href="{{ merchrules_url }}/checkups?site_id={{ client.site_ids.split(',')[0] }}" target="_blank"
+       class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;text-align:center;font-size:.75rem">
+      Открыть в MR ↗
+    </a>
+  </div>
+
+  <!-- Роадмап MR -->
+  <div class="card">
+    <h3 style="font-size:.9rem;margin-bottom:10px">🗺️ Роадмап (Merchrules)</h3>
+    {% if mr_roadmap %}
+      {% for item in mr_roadmap[:5] %}
+      <div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.82rem">
+        <span>{{ item.get('title') or item.get('name','') }}</span>
+        {% if item.get('status') %}
+        <span style="float:right;font-size:.72rem;color:var(--text-muted)">{{ item.get('status') }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% elif mr_ok %}
+      <p style="color:var(--text-muted);font-size:.82rem;text-align:center;padding:12px 0">Роадмап пуст</p>
+    {% else %}
+      <p style="color:var(--text-muted);font-size:.82rem;text-align:center;padding:12px 0">
+        🔧 В разработке
+      </p>
+    {% endif %}
+    <a href="/roadmap?client_id={{ client.id }}" class="btn btn-ghost btn-sm"
+       style="width:100%;margin-top:8px;text-align:center;font-size:.75rem">
+      Полный роадмап →
+    </a>
+  </div>
+
+  <!-- Фиды MR -->
+  <div class="card">
+    <h3 style="font-size:.9rem;margin-bottom:10px">📡 Фиды (Merchrules)</h3>
+    {% if mr_feeds %}
+      {% for f in mr_feeds[:5] %}
+      <div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.82rem;display:flex;justify-content:space-between">
+        <span>{{ f.get('name') or f.get('url','') }}</span>
+        {% set fstatus = f.get('status','') %}
+        <span style="font-size:.7rem;color:{% if fstatus == 'ok' %}var(--accent){% elif fstatus == 'error' %}var(--red){% else %}var(--text-muted){% endif %}">
+          {{ fstatus or '—' }}
+        </span>
+      </div>
+      {% endfor %}
+    {% elif mr_feed_status %}
+      <div style="font-size:.82rem;padding:4px 0">
+        Статус: <b>{{ mr_feed_status.get('status','—') }}</b>
+      </div>
+    {% elif mr_ok %}
+      <p style="color:var(--text-muted);font-size:.82rem;text-align:center;padding:12px 0">Нет фидов</p>
+    {% else %}
+      <p style="color:var(--text-muted);font-size:.82rem;text-align:center;padding:12px 0">
+        🔧 В разработке
+      </p>
+    {% endif %}
+    <a href="{{ merchrules_url }}/feeds?site_id={{ client.site_ids.split(',')[0] }}" target="_blank"
+       class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;text-align:center;font-size:.75rem">
+      Открыть в MR ↗
+    </a>
+  </div>
+
+</div>
+{% endif %}
+
 <!-- Запланировать регулярную встречу с буфером -->
 <div class="card" style="margin-top:0">
   <details>

@@ -32,9 +32,10 @@ from sheets import get_top50_data, SHEETS_SPREADSHEET_ID, SHEETS_TOP50_GID
 import tg_bot
 from ai_followup import process_transcript as ai_process_transcript
 from merchrules_sync import (
-    sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate
+    sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate,
+    get_client_full_data,
 )
-from airtable_sync import sync_meeting_to_airtable
+from airtable_sync import sync_meeting_to_airtable, import_clients_from_airtable
 from database import (
     set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings
 )
@@ -203,6 +204,16 @@ async def prep_page(request: Request, client_id: int):
     days = CHECKUP_DAYS.get(client["segment"], 90)
     suggested_next = (date.today() + timedelta(days=days)).isoformat()
 
+    # Данные из Merchrules (не блокируем загрузку если MR недоступен)
+    mr_data: dict = {}
+    site_ids_raw = client.get("site_ids", "")
+    if site_ids_raw:
+        first_site_id = site_ids_raw.split(",")[0].strip()
+        try:
+            mr_data = await get_client_full_data(first_site_id)
+        except Exception as exc:
+            logging.warning("prep MR fetch error: %s", exc)
+
     return templates.TemplateResponse("prep.html", {
         "request": request,
         "user": user,
@@ -213,6 +224,13 @@ async def prep_page(request: Request, client_id: int):
         "today": date.today().isoformat(),
         "checkup_days": days,
         "suggested_next": suggested_next,
+        "mr_roadmap": mr_data.get("roadmap", []),
+        "mr_checkups": mr_data.get("checkups", []),
+        "mr_feeds": mr_data.get("feeds", []),
+        "mr_feed_status": mr_data.get("feed_status", {}),
+        "mr_analytics": mr_data.get("analytics", {}),
+        "mr_ok": bool(mr_data),
+        "merchrules_url": os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
     })
 
 
@@ -611,18 +629,18 @@ async def api_import_airtable(request: Request):
             existing = conn.execute(
                 "SELECT id, site_ids FROM clients WHERE name = ?", (name,)
             ).fetchone()
+            segment = rec.get("segment", "SMB")
             if existing:
-                # Обновляем site_id если изменился
-                if site_id and not existing[1]:
-                    conn.execute(
-                        "UPDATE clients SET site_ids=? WHERE id=?",
-                        (site_id, existing[0])
-                    )
-                    updated += 1
+                # Обновляем site_id и сегмент
+                conn.execute(
+                    "UPDATE clients SET site_ids=?, segment=? WHERE id=?",
+                    (site_id or existing[1], segment, existing[0])
+                )
+                updated += 1
             else:
                 conn.execute(
                     "INSERT INTO clients (name, segment, site_ids, assigned_manager) VALUES (?,?,?,?)",
-                    (name, "SMB", site_id, manager)
+                    (name, segment, site_id, manager)
                 )
                 added += 1
 
@@ -1237,7 +1255,14 @@ async def qbr_calendar_page(request: Request):
     if not user:
         return RedirectResponse("/login")
 
+    from airtable_sync import get_qbr_calendar_from_airtable
     qbr_meetings = get_qbr_calendar()
+    at_qbr_raw: list = []
+    try:
+        at_qbr_raw = await get_qbr_calendar_from_airtable()
+    except Exception as exc:
+        logging.warning("Airtable QBR fetch error: %s", exc)
+
     upcoming = get_upcoming_meetings(days_ahead=30)
 
     # Клиенты ENT без QBR за последние 90 дней
@@ -1258,6 +1283,7 @@ async def qbr_calendar_page(request: Request):
         "qbr_history": qbr_meetings,
         "upcoming": upcoming,
         "needs_qbr": ent_no_qbr,
+        "at_qbr_count": len(at_qbr_raw),
         "today": now_iso,
     })
 
