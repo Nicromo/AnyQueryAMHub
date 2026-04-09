@@ -111,6 +111,16 @@ def init_db():
             )
         """)
 
+        # Персональные credentials каждого AM для Merchrules
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS manager_credentials (
+                tg_id       INTEGER PRIMARY KEY,
+                mr_login    TEXT NOT NULL DEFAULT '',
+                mr_password TEXT NOT NULL DEFAULT '',
+                updated_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
 
 # ── Clients ──────────────────────────────────────────────────────────────────
 
@@ -374,6 +384,30 @@ def set_manager_clients(tg_id: int, client_ids: list[int]):
             "INSERT OR IGNORE INTO manager_clients (tg_id, client_id) VALUES (?,?)",
             [(tg_id, cid) for cid in client_ids],
         )
+
+
+def save_mr_credentials(tg_id: int, mr_login: str, mr_password: str):
+    """Сохраняет MR credentials менеджера."""
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO manager_credentials (tg_id, mr_login, mr_password, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(tg_id) DO UPDATE SET
+                mr_login    = excluded.mr_login,
+                mr_password = excluded.mr_password,
+                updated_at  = excluded.updated_at
+        """, (tg_id, mr_login.strip(), mr_password.strip()))
+
+
+def get_mr_credentials(tg_id: int) -> dict:
+    """Возвращает MR credentials менеджера или пустой dict."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT mr_login, mr_password FROM manager_credentials WHERE tg_id=?", (tg_id,)
+        ).fetchone()
+    if row and row["mr_login"]:
+        return {"mr_login": row["mr_login"], "mr_password": row["mr_password"]}
+    return {}
 
 
 def get_all_clients_for_manager(tg_id: int | None = None) -> list[dict]:

@@ -33,11 +33,12 @@ import tg_bot
 from ai_followup import process_transcript as ai_process_transcript
 from merchrules_sync import (
     sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate,
-    get_client_full_data,
+    get_client_full_data, get_client_full_data_for_user, invalidate_user_cache,
 )
 from airtable_sync import sync_meeting_to_airtable, import_clients_from_airtable
 from database import (
-    set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings
+    set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings,
+    save_mr_credentials, get_mr_credentials,
 )
 
 load_dotenv()
@@ -204,13 +205,21 @@ async def prep_page(request: Request, client_id: int):
     days = CHECKUP_DAYS.get(client["segment"], 90)
     suggested_next = (date.today() + timedelta(days=days)).isoformat()
 
-    # Данные из Merchrules (не блокируем загрузку если MR недоступен)
+    # Данные из Merchrules — используем credentials текущего пользователя
     mr_data: dict = {}
     site_ids_raw = client.get("site_ids", "")
-    if site_ids_raw:
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if site_ids_raw and tg_id:
         first_site_id = site_ids_raw.split(",")[0].strip()
+        creds = get_mr_credentials(tg_id)
         try:
-            mr_data = await get_client_full_data(first_site_id)
+            if creds:
+                mr_data = await get_client_full_data_for_user(
+                    first_site_id, tg_id,
+                    creds["mr_login"], creds["mr_password"]
+                )
+            else:
+                mr_data = await get_client_full_data(first_site_id)
         except Exception as exc:
             logging.warning("prep MR fetch error: %s", exc)
 
@@ -398,11 +407,13 @@ async def my_clients_page(request: Request):
     all_clients = get_all_clients()
     my_ids = set(get_manager_client_ids(tg_id or 0))
 
+    creds = get_mr_credentials(tg_id or 0)
     return templates.TemplateResponse("my_clients.html", {
         "request": request,
         "user": user,
         "all_clients": all_clients,
         "my_ids": my_ids,
+        "mr_login_set": creds.get("mr_login", ""),
         "today": date.today().isoformat(),
     })
 
@@ -421,6 +432,38 @@ async def save_my_clients(request: Request):
     client_ids = [int(x) for x in body.get("client_ids", []) if str(x).isdigit()]
     set_manager_clients(tg_id, client_ids)
     return {"ok": True, "count": len(client_ids)}
+
+
+# ── API — сохранить MR credentials менеджера ──────────────────────────────────
+
+@app.post("/api/settings/mr-credentials", response_class=JSONResponse)
+async def save_mr_creds(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not tg_id:
+        raise HTTPException(400)
+    body = await request.json()
+    login = (body.get("mr_login") or "").strip()
+    password = (body.get("mr_password") or "").strip()
+    if not login or not password:
+        return {"ok": False, "error": "login и password обязательны"}
+    save_mr_credentials(tg_id, login, password)
+    invalidate_user_cache(tg_id)
+    return {"ok": True}
+
+
+@app.delete("/api/settings/mr-credentials", response_class=JSONResponse)
+async def delete_mr_creds(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if tg_id:
+        save_mr_credentials(tg_id, "", "")
+        invalidate_user_cache(tg_id)
+    return {"ok": True}
 
 
 # ── API — обновить TG chat_id клиента ────────────────────────────────────────

@@ -11,6 +11,47 @@
   </p>
 </div>
 
+<!-- Merchrules credentials -->
+<div class="card" style="padding:14px 18px;margin-bottom:12px;border-left:3px solid
+  {% if mr_login_set %}var(--accent){% else %}var(--yellow){% endif %}">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div>
+      <div style="font-size:.88rem;font-weight:600">🔗 Merchrules credentials</div>
+      {% if mr_login_set %}
+      <div style="font-size:.78rem;color:var(--accent);margin-top:2px">✅ Подключено: <b>{{ mr_login_set }}</b></div>
+      {% else %}
+      <div style="font-size:.78rem;color:var(--yellow);margin-top:2px">⚠️ Не настроено — данные из MR не будут загружаться</div>
+      {% endif %}
+    </div>
+    <button onclick="toggleMRForm()" class="btn btn-ghost btn-sm">
+      {% if mr_login_set %}✏️ Изменить{% else %}+ Добавить{% endif %}
+    </button>
+  </div>
+
+  <div id="mr-form" style="display:none;margin-top:14px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <label style="font-size:.78rem;color:var(--text-muted)">Логин (email)</label>
+        <input type="email" id="mr-login" class="form-control" style="margin-top:4px"
+               value="{{ mr_login_set }}" placeholder="your@email.com">
+      </div>
+      <div>
+        <label style="font-size:.78rem;color:var(--text-muted)">Пароль</label>
+        <input type="password" id="mr-password" class="form-control" style="margin-top:4px"
+               placeholder="••••••••">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="saveMRCreds()" class="btn btn-primary btn-sm">💾 Сохранить</button>
+      {% if mr_login_set %}
+      <button onclick="deleteMRCreds()" class="btn btn-ghost btn-sm" style="color:var(--red)">🗑 Удалить</button>
+      {% endif %}
+      <button onclick="testMRCreds()" class="btn btn-ghost btn-sm">🔍 Проверить подключение</button>
+    </div>
+    <div id="mr-result" style="font-size:.78rem;margin-top:8px"></div>
+  </div>
+</div>
+
 <!-- Поиск + статистика -->
 <div class="card" style="padding:14px 18px">
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -71,6 +112,53 @@
 </div>
 
 <div id="save-result" style="margin-top:10px;font-size:0.85rem;text-align:center"></div>
+
+<script>
+function toggleMRForm() {
+  const f = document.getElementById('mr-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveMRCreds() {
+  const login = document.getElementById('mr-login').value.trim();
+  const password = document.getElementById('mr-password').value.trim();
+  const res = document.getElementById('mr-result');
+  if (!login || !password) { res.textContent = '❌ Заполни оба поля'; res.style.color='var(--red)'; return; }
+  const r = await fetch('/api/settings/mr-credentials', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ mr_login: login, mr_password: password }),
+  });
+  const d = await r.json();
+  if (d.ok) { res.textContent = '✅ Сохранено'; res.style.color='var(--accent)'; setTimeout(()=>location.reload(),800); }
+  else { res.textContent = '❌ ' + (d.error||'Ошибка'); res.style.color='var(--red)'; }
+}
+
+async function deleteMRCreds() {
+  if (!confirm('Удалить credentials?')) return;
+  await fetch('/api/settings/mr-credentials', { method: 'DELETE' });
+  location.reload();
+}
+
+async function testMRCreds() {
+  const login = document.getElementById('mr-login').value.trim();
+  const password = document.getElementById('mr-password').value.trim();
+  const res = document.getElementById('mr-result');
+  if (!login || !password) { res.textContent = '❌ Сначала введи данные'; return; }
+  res.textContent = '⏳ Проверяем...';
+  const save = await fetch('/api/settings/mr-credentials', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ mr_login: login, mr_password: password }),
+  });
+  const sd = await save.json();
+  if (!sd.ok) { res.textContent = '❌ ' + (sd.error||'Ошибка'); res.style.color='var(--red)'; return; }
+  const r = await fetch('/api/mr/sync', { method: 'POST' });
+  const d = await r.json();
+  if (d.ok) { res.textContent = `✅ Подключено! Синхронизировано ${d.synced_sites} сайтов`; res.style.color='var(--accent)'; }
+  else { res.textContent = '❌ Не удалось — проверь логин/пароль'; res.style.color='var(--red)'; }
+}
+</script>
 
 <style>
 .client-pick-item:hover { background: var(--surface2); }

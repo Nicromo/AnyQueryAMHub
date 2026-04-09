@@ -19,8 +19,11 @@ MERCHRULES_URL = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platfor
 MR_LOGIN = os.getenv("MERCHRULES_LOGIN", "")
 MR_PASSWORD = os.getenv("MERCHRULES_PASSWORD", "")
 
-# Кэш токена авторизации
+# Кэш токена авторизации (глобальный — для обратной совместимости)
 _auth_cache: dict = {"token": None, "expires_at": None}
+
+# Кэш токенов per-user: { tg_id: {"token": ..., "expires_at": ...} }
+_user_auth_cache: dict = {}
 
 # Кэш данных по клиентам
 _data_cache: dict = {"data": None, "updated_at": None}
@@ -231,6 +234,84 @@ async def fetch_feed_status(
     except Exception as exc:
         logger.warning("fetch_feed_status(%s) error: %s", site_id, exc)
     return {}
+
+
+async def get_auth_token_for_user(
+    client: httpx.AsyncClient, tg_id: int, mr_login: str, mr_password: str
+) -> Optional[str]:
+    """Авторизация по конкретным credentials (per-user), кэш per tg_id."""
+    now = datetime.now()
+    cache = _user_auth_cache.get(tg_id, {})
+    if cache.get("token") and cache.get("expires_at") and now < cache["expires_at"]:
+        return cache["token"]
+
+    try:
+        resp = await client.post(
+            f"{MERCHRULES_URL}/backend-v2/auth/login",
+            json={"username": mr_login, "password": mr_password},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            body = resp.json()
+            token = body.get("token") or body.get("access_token") or body.get("accessToken")
+            if token:
+                _user_auth_cache[tg_id] = {
+                    "token": token,
+                    "expires_at": now + timedelta(hours=1),
+                }
+                logger.info("MR per-user auth OK (tg_id=%s)", tg_id)
+                return token
+        logger.warning("MR per-user auth failed (tg_id=%s): %s", tg_id, resp.status_code)
+    except Exception as exc:
+        logger.warning("MR per-user auth error (tg_id=%s): %s", tg_id, exc)
+    return None
+
+
+async def get_client_full_data_for_user(
+    site_id: str, tg_id: int, mr_login: str, mr_password: str
+) -> dict:
+    """
+    Получает все данные из Merchrules для клиента, используя credentials конкретного AM.
+    """
+    if not mr_login or not mr_password or not site_id:
+        return {}
+
+    async with httpx.AsyncClient(timeout=30) as hx:
+        token = await get_auth_token_for_user(hx, tg_id, mr_login, mr_password)
+        if not token:
+            return {}
+
+        auth_headers = {"Authorization": f"Bearer {token}"}
+
+        results = await asyncio.gather(
+            fetch_site_tasks(hx, auth_headers, site_id),
+            fetch_site_meetings(hx, auth_headers, site_id),
+            fetch_site_roadmap(hx, auth_headers, site_id),
+            fetch_site_analytics(hx, auth_headers, site_id),
+            fetch_site_checkups(hx, auth_headers, site_id),
+            fetch_site_feeds(hx, auth_headers, site_id),
+            fetch_feed_status(hx, auth_headers, site_id),
+            return_exceptions=True,
+        )
+
+        def safe(v):
+            return v if not isinstance(v, Exception) else {}
+
+        tasks_d, meetings_d, roadmap, analytics, checkups, feeds, feed_status = results
+        return {
+            **safe(tasks_d),
+            **safe(meetings_d),
+            "roadmap": safe(roadmap) if isinstance(roadmap, list) else [],
+            "analytics": safe(analytics),
+            "checkups": safe(checkups) if isinstance(checkups, list) else [],
+            "feeds": safe(feeds) if isinstance(feeds, list) else [],
+            "feed_status": safe(feed_status),
+        }
+
+
+def invalidate_user_cache(tg_id: int):
+    """Сбрасывает кэш токена конкретного пользователя."""
+    _user_auth_cache.pop(tg_id, None)
 
 
 async def get_client_full_data(site_id: str) -> dict:
