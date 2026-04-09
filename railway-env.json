@@ -1,0 +1,13 @@
+{
+  "AIRTABLE_TOKEN": "<patGWwb2jBAKXddDI.f7f4a270685a36112d6958c8299056c7930f67c798908f74db6d81a0bae69d8d>",
+  "AIRTABLE_BASE_ID": "appEAS1rPKpevoIel",
+  "AIRTABLE_TABLE_ID": "tblIKAi1gcFayRJTn",
+  "MERCHRULES_API_URL": "https://merchrules.any-platform.ru",
+  "MERCHRULES_LOGIN": "<твой_логин>",
+  "MERCHRULES_PASSWORD": "<твой_пароль>",
+  "TG_BOT_TOKEN": "<токен_бота_от_@BotFather>",
+  "TG_BOT_USERNAME": "<username_бота_без_@>",
+  "ALLOWED_TG_IDS": "<tg_id1,tg_id2>",
+  "SECRET_KEY": "<случайная_строка_минимум_32_символа>",
+  "GROQ_API_KEY": "<groq_api_key_если_используешь_AI>"
+}
