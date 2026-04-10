@@ -37,7 +37,7 @@ from database import (
     get_recurring_tasks_to_create, create_recurring_copy,
     CHAT_NORM_DAYS,
 )
-from auth import SessionManager, verify_tg_auth
+from auth import SessionManager, verify_mr_credentials, verify_admin_password
 from tg import build_followup_message, send_to_tg
 from merchrules import sync_meeting_to_merchrules
 from sheets import get_top50_data, SHEETS_SPREADSHEET_ID, SHEETS_TOP50_GID
@@ -126,30 +126,84 @@ def get_user_or_redirect(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    error = request.query_params.get("error", "")
+    username = request.query_params.get("username", "")
+    error_text = {
+        "invalid":    "Неверный логин или пароль",
+        "mr_down":    "Merchrules недоступен — попробуй позже",
+        "no_access":  "Нет доступа к системе",
+    }.get(error, "")
     return templates.TemplateResponse("login.html", {
-        "request": request,
-        "bot_username": BOT_USERNAME,
+        "request":  request,
+        "error":    error_text,
+        "username": username,
     })
 
 
-@app.get("/auth/telegram")
-async def tg_callback(request: Request, response: Response):
-    """Telegram Login Widget редиректит сюда с параметрами."""
-    data = dict(request.query_params)
-    if BOT_TOKEN and not verify_tg_auth(dict(data), BOT_TOKEN):
-        raise HTTPException(status_code=403, detail="Неверная подпись Telegram")
+@app.post("/auth/login")
+async def auth_login(request: Request, username: str = Form(...), password: str = Form(...)):
+    """
+    Авторизация через Merchrules.
+    1. Проверяем логин/пароль через MR API
+    2. При успехе — тянем клиентов этого AM из Airtable + MR
+    3. Ставим сессионную cookie и редиректим на главную
+    """
+    username = username.strip()
 
-    tg_id = int(data.get("id", 0))
-    tg_name = data.get("first_name", "") + " " + data.get("last_name", "")
-    tg_username = data.get("username", "")
+    # Пробуем Merchrules
+    user_data = await verify_mr_credentials(username, password)
 
-    # Проверяем доступ (если список не пустой)
-    if ALLOWED_IDS and tg_id not in ALLOWED_IDS:
-        raise HTTPException(status_code=403, detail="Доступ закрыт")
+    # Fallback: ADMIN_PASSWORD из env (если MR не настроен)
+    if not user_data:
+        user_data = verify_admin_password(username, password)
 
-    token = session_mgr.create_session(tg_id, tg_name.strip())
+    if not user_data:
+        safe_u = username.replace("&", "").replace("<", "")
+        return RedirectResponse(
+            url=f"/login?error=invalid&username={safe_u}",
+            status_code=302,
+        )
+
+    # Сохраняем/обновляем пользователя в БД
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            conn.execute(
+                """INSERT INTO users(tg_id, tg_username, tg_name)
+                   VALUES(?,?,?)
+                   ON CONFLICT(tg_id) DO UPDATE SET
+                     tg_username=excluded.tg_username,
+                     tg_name=excluded.tg_name,
+                     last_login=CURRENT_TIMESTAMP""",
+                (user_data["id"], username, user_data["name"])
+            )
+    except Exception as e:
+        logging.warning("User save error: %s", e)
+
+    # Асинхронно импортируем клиентов из Airtable (в фоне, не блокируем вход)
+    async def _bg_import():
+        try:
+            from airtable_sync import import_clients_from_airtable
+            await import_clients_from_airtable()
+            logging.info("Post-login Airtable import done for %s", username)
+        except Exception as exc:
+            logging.warning("Post-login Airtable import failed: %s", exc)
+
+    import asyncio
+    asyncio.create_task(_bg_import())
+
+    # Создаём сессию
+    session_token = session_mgr.create_session(user_data)
     resp = RedirectResponse(url="/", status_code=302)
-    resp.set_cookie("session", token, max_age=86400 * 7, httponly=True, samesite="lax")
+    resp.set_cookie(
+        "session", session_token,
+        max_age=86400 * 7,
+        httponly=True,
+        samesite="lax",
+    )
+    logging.info("Login: %s (%s) authenticated via %s",
+                 user_data["name"], username,
+                 "MR" if user_data.get("mr_token") else "admin_password")
     return resp
 
 
