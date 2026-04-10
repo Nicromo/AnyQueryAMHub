@@ -1243,6 +1243,196 @@ async def job_airtable_health_sync():
         logger.error("job_airtable_health_sync error: %s", exc)
 
 
+# ── AR sync — Дебиторская задолженность ──────────────────────────────────────
+
+async def job_ar_sync():
+    """
+    Ежедневно — синхронизирует задолженность из Airtable → БД.
+    Алертит AM если просрочка > 30 дней.
+    """
+    try:
+        from database import get_all_clients, update_client_ar, get_am_setting, get_all_manager_tg_ids
+        from airtable_sync import sync_ar_from_airtable
+        from tg_bot import send_message
+
+        clients = get_all_clients()
+        ar_data = await sync_ar_from_airtable(clients)
+
+        for item in ar_data:
+            update_client_ar(item["client_id"], item["amount"], item["days_overdue"])
+
+        # Алерт по критичным просрочкам (> 30 дней)
+        critical = [x for x in ar_data if x["days_overdue"] >= 30]
+        if not critical:
+            return
+
+        chat_id = get_notify_chat_id()
+        if not chat_id:
+            return
+
+        lines = [f"💰 <b>Дебиторская задолженность — просрочка!</b>\n"]
+        for item in sorted(critical, key=lambda x: -x["days_overdue"])[:10]:
+            days_icon = "🔴" if item["days_overdue"] >= 60 else "🟡"
+            amount_str = f"{item['amount']:,.0f} ₽" if item["amount"] else "сумма неизвестна"
+            lines.append(
+                f"{days_icon} <b>{item['name']}</b>: {amount_str}, "
+                f"просрочка {item['days_overdue']} дн."
+            )
+        lines.append("\n👉 AM Hub → клиент → обсудить оплату")
+        await send_message(chat_id, "\n".join(lines))
+        logger.info("AR sync: %d clients with AR, %d critical", len(ar_data), len(critical))
+
+    except Exception as exc:
+        logger.error("job_ar_sync error: %s", exc)
+
+
+# ── Тикеты TBank Time → задачи AM ────────────────────────────────────────────
+
+async def job_time_tickets_to_tasks():
+    """
+    Ежедневно — получает тикеты из TBank Time.
+    Если тикет открыт > 3 дней → создаёт задачу AM.
+    """
+    try:
+        from database import (
+            get_all_clients, create_internal_task,
+            get_old_open_tickets, mark_ticket_task_created,
+        )
+        from tbank_time import sync_tickets_to_db
+        from tg_bot import send_message
+
+        clients = get_all_clients()
+        await sync_tickets_to_db(clients)
+
+        old_tickets = get_old_open_tickets(days=3)
+        created = 0
+
+        for ticket in old_tickets:
+            client_id = ticket.get("client_id")
+            if not client_id:
+                continue
+
+            priority_tag = "🔴" if ticket["priority"] in ("high", "urgent", "critical") else "🟡"
+            task_text = (
+                f"{priority_tag} [Тикет {ticket['days_open']}д] {ticket['subject'][:100]}"
+            )
+            create_internal_task(
+                client_id=client_id,
+                text=task_text,
+                internal_note=f"Тикет из TBank Time. Открыт {ticket['days_open']} дней. {ticket.get('url', '')}",
+            )
+            mark_ticket_task_created(ticket["id"])
+            created += 1
+
+        if created:
+            chat_id = get_notify_chat_id()
+            if chat_id:
+                await send_message(
+                    chat_id,
+                    f"🎫 <b>Тикеты без ответа ({created})</b>\n"
+                    f"Открыты более 3 дней → создано задач AM\n"
+                    f"👉 AM Hub → Внутренние задачи"
+                )
+            logger.info("Time tickets: %d tasks created", created)
+
+    except Exception as exc:
+        logger.error("job_time_tickets_to_tasks error: %s", exc)
+
+
+# ── Апсел-сигналы ─────────────────────────────────────────────────────────────
+
+async def job_upsell_detection():
+    """
+    Еженедельно — детектирует апсел-сигналы по каждому клиенту.
+    Создаёт задачи AM если найдены возможности.
+    """
+    try:
+        from database import (
+            get_all_clients, get_client_tasks, save_upsell_signal,
+            get_client_upsell_signals, create_internal_task,
+        )
+        from ai_followup import detect_upsell_signals
+        from merchrules_sync import get_client_mr_data
+        from tg_bot import send_message
+        import os
+
+        chat_id = get_notify_chat_id()
+        mr_token = os.getenv("MERCHRULES_TOKEN", "")
+
+        clients = get_all_clients()
+        found_total = 0
+
+        for c in clients:
+            if c["segment"] not in ("ENT", "SME+", "SME"):
+                continue
+
+            tasks = get_client_tasks(c["id"], "open")
+            mr_data = {}
+            if mr_token and c.get("site_ids"):
+                site_id = c["site_ids"].split(",")[0].strip()
+                mr_data = await get_client_mr_data(site_id) or {}
+
+            # Проверяем нет ли уже открытых сигналов
+            existing = get_client_upsell_signals(c["id"])
+            if any(s["status"] == "open" for s in existing):
+                continue  # Уже есть открытый сигнал
+
+            signals = await detect_upsell_signals(c, mr_data, tasks)
+            for sig in signals:
+                if sig.get("confidence", 0) < 0.65:
+                    continue
+                signal_id = save_upsell_signal(c["id"], sig["type"], sig["details"])
+                create_internal_task(
+                    client_id=c["id"],
+                    text=f"📈 [Апсел] {sig['details'][:120]}",
+                    internal_note=f"Авто-детект. Тип: {sig['type']}. Уверенность: {sig['confidence']:.0%}",
+                )
+                found_total += 1
+
+        if found_total and chat_id:
+            await send_message(
+                chat_id,
+                f"📈 <b>Апсел-сигналы</b>: найдено {found_total} возможностей\n"
+                f"👉 AM Hub → Внутренние задачи"
+            )
+        logger.info("Upsell detection: %d signals found", found_total)
+
+    except Exception as exc:
+        logger.error("job_upsell_detection error: %s", exc)
+
+
+# ── Автотеги клиентов ─────────────────────────────────────────────────────────
+
+async def job_auto_tagging():
+    """
+    Еженедельно — AI расставляет теги всем клиентам на основе истории.
+    """
+    try:
+        from database import (
+            get_all_clients, get_client_tasks, get_client_meetings, set_client_tags,
+        )
+        from ai_followup import generate_client_tags
+
+        clients = get_all_clients()
+        tagged = 0
+
+        for c in clients:
+            try:
+                tasks    = get_client_tasks(c["id"], "open")
+                meetings = get_client_meetings(c["id"], limit=5)
+                tags = await generate_client_tags(c, tasks, meetings)
+                if tags:
+                    set_client_tags(c["id"], tags, source="ai")
+                    tagged += 1
+            except Exception as e:
+                logger.debug("Auto-tagging failed for %s: %s", c["name"], e)
+
+        logger.info("Auto-tagging complete: %d clients tagged", tagged)
+
+    except Exception as exc:
+        logger.error("job_auto_tagging error: %s", exc)
+
+
 async def job_mr_task_done_notify():
     """
     Б2: При синхронизации MR — уведомляем клиента в TG о закрытых задачах.
@@ -1516,14 +1706,43 @@ def start_scheduler():
         id="airtable_health_sync",
         replace_existing=True,
     )
+    # AR: Дебиторская задолженность из Airtable — каждый день в 05:30
+    scheduler.add_job(
+        job_ar_sync,
+        CronTrigger(hour=5, minute=30),
+        id="ar_sync",
+        replace_existing=True,
+    )
+    # Тикеты TBank Time → задачи AM — каждый день в 08:45
+    scheduler.add_job(
+        job_time_tickets_to_tasks,
+        CronTrigger(hour=8, minute=45),
+        id="time_tickets_to_tasks",
+        replace_existing=True,
+    )
+    # Апсел-сигналы — вторник в 09:00
+    scheduler.add_job(
+        job_upsell_detection,
+        CronTrigger(day_of_week="tue", hour=9, minute=0),
+        id="upsell_detection",
+        replace_existing=True,
+    )
+    # Автотеги — воскресенье в 02:00
+    scheduler.add_job(
+        job_auto_tagging,
+        CronTrigger(day_of_week="sun", hour=2, minute=0),
+        id="auto_tagging",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
-        "Scheduler started: 28 jobs active — morning_plan, weekly_digest, mr_sync, "
+        "Scheduler started: 33 jobs active — morning_plan, weekly_digest, mr_sync, "
         "auto_checkup, health_score, metrics_degradation, qbr_cycle, personal_digest, "
         "chat_reminder, recurring_tasks, pre_meeting_brief, followup_reminder, "
         "meeting_day_client_reminder, risk_score_update, platform_audit, "
         "nightly_problem_detection, quarterly_benchmark, mr_task_done_notify, "
         "client_anniversary_check, welcome_sequence, ai_task_prioritization, "
         "cross_client_patterns, stale_task_alert, search_metrics_monitor, "
-        "ai_synonym_recommendations, seasonal_checklists, airtable_health_sync"
+        "ai_synonym_recommendations, seasonal_checklists, airtable_health_sync, "
+        "ar_sync, time_tickets_to_tasks, upsell_detection, auto_tagging"
     )

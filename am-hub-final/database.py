@@ -203,12 +203,69 @@ def init_db():
             ("tasks",     "metric_after",     "TEXT DEFAULT ''"),
             ("clients",   "risk_score",       "INTEGER DEFAULT 0"),
             ("clients",   "am_name",          "TEXT DEFAULT ''"),
+            ("clients",   "welcome_sent",     "INTEGER DEFAULT 0"),
+            ("clients",   "created_at",       "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+            # AR (дебиторская задолженность)
+            ("clients",   "ar_amount",        "REAL DEFAULT 0"),
+            ("clients",   "ar_days_overdue",  "INTEGER DEFAULT 0"),
+            ("clients",   "ar_updated_at",    "DATE"),
         ]
         for table, col, defn in new_cols:
             try:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+
+        # ── Новые таблицы (фаза 3+) ───────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_tags (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id  INTEGER NOT NULL REFERENCES clients(id),
+                tag        TEXT NOT NULL,
+                source     TEXT DEFAULT 'manual',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(client_id, tag)
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS am_settings (
+                tg_id         INTEGER NOT NULL,
+                setting_key   TEXT NOT NULL,
+                setting_value TEXT DEFAULT '',
+                PRIMARY KEY (tg_id, setting_key)
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS upsell_signals (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id   INTEGER NOT NULL REFERENCES clients(id),
+                signal_type TEXT NOT NULL,
+                details     TEXT DEFAULT '',
+                status      TEXT DEFAULT 'open',
+                detected_at DATE NOT NULL,
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS support_tickets (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id    INTEGER REFERENCES clients(id),
+                external_id  TEXT DEFAULT '',
+                subject      TEXT NOT NULL,
+                status       TEXT DEFAULT 'open',
+                priority     TEXT DEFAULT 'normal',
+                source       TEXT DEFAULT 'time',
+                days_open    INTEGER DEFAULT 0,
+                url          TEXT DEFAULT '',
+                task_created INTEGER DEFAULT 0,
+                fetched_at   DATE NOT NULL,
+                created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(external_id)
+            )
+        """)
 
         # ── Seed шаблонов сообщений ───────────────────────────────────────────
         seed_count = conn.execute("SELECT COUNT(*) FROM message_templates").fetchone()[0]
@@ -1537,3 +1594,212 @@ def get_upcoming_seasonal_events(days_ahead: int = 21) -> list[dict]:
         except Exception:
             pass
     return result
+
+
+# ── Клиентские теги ───────────────────────────────────────────────────────────
+
+def get_client_tags(client_id: int) -> list[str]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT tag FROM client_tags WHERE client_id=? ORDER BY source DESC, created_at DESC",
+            (client_id,)
+        ).fetchall()
+    return [r["tag"] for r in rows]
+
+
+def set_client_tags(client_id: int, tags: list[str], source: str = "manual"):
+    """Заменяет теги клиента (из указанного источника) новым списком."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM client_tags WHERE client_id=? AND source=?", (client_id, source))
+        for tag in tags:
+            tag = tag.strip()[:50]
+            if tag:
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO client_tags(client_id, tag, source) VALUES(?,?,?)",
+                        (client_id, tag, source)
+                    )
+                except Exception:
+                    pass
+
+
+def get_all_clients_with_tags() -> list[dict]:
+    """Все клиенты + их теги (для AI авто-тегирования)."""
+    clients = get_all_clients()
+    for c in clients:
+        c["tags"] = get_client_tags(c["id"])
+    return clients
+
+
+# ── AM Персональные настройки ─────────────────────────────────────────────────
+
+AM_SETTING_DEFAULTS = {
+    "morning_plan_hour":     "9",
+    "health_alert_threshold": "50",
+    "notify_overdue_checkups": "1",
+    "notify_ai_priority":    "1",
+    "notify_stale_tasks":    "1",
+    "notify_upsell":         "1",
+    "notify_ar_overdue":     "1",
+    "notify_tickets":        "1",
+    "dashboard_sort":        "health",   # health | risk | name | segment | ar
+    "dashboard_filter":      "all",      # all | mine
+    "show_ar_badge":         "1",
+    "show_tags":             "1",
+    "show_upsell_badge":     "1",
+    "off_hours_start":       "21",
+    "off_hours_end":         "8",
+    "timezone":              "Europe/Moscow",
+}
+
+
+def get_am_setting(tg_id: int, key: str, default: str | None = None) -> str:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT setting_value FROM am_settings WHERE tg_id=? AND setting_key=?",
+            (tg_id, key)
+        ).fetchone()
+    if row:
+        return row["setting_value"]
+    return default if default is not None else AM_SETTING_DEFAULTS.get(key, "")
+
+
+def set_am_setting(tg_id: int, key: str, value: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO am_settings(tg_id, setting_key, setting_value) VALUES(?,?,?)",
+            (tg_id, key, str(value))
+        )
+
+
+def get_am_settings(tg_id: int) -> dict:
+    """Все настройки AM: дефолты + переопределённые."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT setting_key, setting_value FROM am_settings WHERE tg_id=?", (tg_id,)
+        ).fetchall()
+    settings = dict(AM_SETTING_DEFAULTS)
+    for r in rows:
+        settings[r["setting_key"]] = r["setting_value"]
+    return settings
+
+
+def save_am_settings(tg_id: int, settings: dict):
+    """Сохранить несколько настроек разом."""
+    allowed = set(AM_SETTING_DEFAULTS.keys())
+    with get_conn() as conn:
+        for key, value in settings.items():
+            if key in allowed:
+                conn.execute(
+                    "INSERT OR REPLACE INTO am_settings(tg_id, setting_key, setting_value) VALUES(?,?,?)",
+                    (tg_id, key, str(value))
+                )
+
+
+# ── AR — Дебиторская задолженность ───────────────────────────────────────────
+
+def update_client_ar(client_id: int, ar_amount: float, ar_days_overdue: int):
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE clients SET ar_amount=?, ar_days_overdue=?, ar_updated_at=? WHERE id=?",
+            (ar_amount, ar_days_overdue, today, client_id)
+        )
+
+
+def get_clients_with_ar(min_amount: float = 1.0) -> list[dict]:
+    """Клиенты с ненулевой задолженностью."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clients WHERE ar_amount >= ? ORDER BY ar_days_overdue DESC",
+            (min_amount,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_ar_overdue_clients(days: int = 30) -> list[dict]:
+    """Клиенты с просрочкой более N дней."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clients WHERE ar_days_overdue >= ? AND ar_amount > 0 ORDER BY ar_days_overdue DESC",
+            (days,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Апсел-сигналы ─────────────────────────────────────────────────────────────
+
+def save_upsell_signal(client_id: int, signal_type: str, details: str = "") -> int:
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO upsell_signals(client_id, signal_type, details, detected_at) VALUES(?,?,?,?)",
+            (client_id, signal_type, details, today)
+        )
+    return cur.lastrowid
+
+
+def get_open_upsell_signals() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT u.*, c.name as client_name, c.segment
+            FROM upsell_signals u JOIN clients c ON c.id = u.client_id
+            WHERE u.status = 'open'
+            ORDER BY u.detected_at DESC
+        """).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_upsell_signal(signal_id: int, status: str):
+    with get_conn() as conn:
+        conn.execute("UPDATE upsell_signals SET status=? WHERE id=?", (status, signal_id))
+
+
+def get_client_upsell_signals(client_id: int) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM upsell_signals WHERE client_id=? ORDER BY detected_at DESC LIMIT 5",
+            (client_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Тикеты поддержки ──────────────────────────────────────────────────────────
+
+def upsert_support_ticket(
+    external_id: str, client_id: int | None, subject: str,
+    status: str, priority: str, days_open: int, url: str = "", source: str = "time",
+) -> int:
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO support_tickets
+                (external_id, client_id, subject, status, priority, days_open, url, source, fetched_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(external_id) DO UPDATE SET
+                status=excluded.status, days_open=excluded.days_open, fetched_at=excluded.fetched_at
+        """, (external_id, client_id, subject, status, priority, days_open, url, source, today))
+        row = conn.execute(
+            "SELECT id FROM support_tickets WHERE external_id=?", (external_id,)
+        ).fetchone()
+    return row["id"] if row else 0
+
+
+def get_old_open_tickets(days: int = 3) -> list[dict]:
+    """Тикеты открытые более N дней без задачи AM."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT t.*, c.name as client_name, c.segment, c.am_name
+            FROM support_tickets t
+            LEFT JOIN clients c ON c.id = t.client_id
+            WHERE t.status NOT IN ('resolved','closed')
+              AND t.days_open >= ?
+              AND t.task_created = 0
+            ORDER BY t.days_open DESC
+        """, (days,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_ticket_task_created(ticket_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE support_tickets SET task_created=1 WHERE id=?", (ticket_id,))

@@ -835,3 +835,158 @@ async def run_post_meeting_pipeline(
     )
     result["transcript"] = transcript
     return result
+
+
+# ── Автотеги клиентов ─────────────────────────────────────────────────────────
+
+async def generate_client_tags(client: dict, tasks: list[dict], meetings: list[dict]) -> list[str]:
+    """
+    AI генерирует 3-6 тегов для клиента на основе истории.
+    Теги описывают характер клиента / текущее состояние.
+    """
+    segment = client.get("segment", "")
+    health  = client.get("health_score", 0)
+    risk    = client.get("risk_score", 0)
+    name    = client.get("name", "")
+
+    task_texts = "; ".join(t["text"][:60] for t in tasks[:10])
+    meeting_moods = [m.get("mood", "neutral") for m in meetings[:5]]
+    risk_cnt = sum(1 for m in meeting_moods if m == "risk")
+    pos_cnt  = sum(1 for m in meeting_moods if m == "positive")
+
+    prompt = f"""Клиент: {name} [{segment}], health={health}, risk={risk}
+Последние задачи: {task_texts or 'нет'}
+Настроения встреч (последние 5): {meeting_moods}
+
+Сгенерируй от 3 до 6 коротких тегов для этого клиента (на русском, 1-3 слова каждый).
+Теги описывают: характер отношений, текущий статус, возможности, риски.
+
+Возможные теги (но не ограничивайся ими):
+технический, лояльный, активный, сложный, растущий, в риске,
+партнёр, новый, приоритет, уходит, нужна встреча, требует внимания,
+потенциал апсела, стабильный, неактивный, промоутер
+
+Ответь строго в формате JSON: {{"tags": ["тег1", "тег2", "тег3"]}}"""
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as hx:
+            resp = await hx.post(
+                GROQ_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.4,
+                    "max_tokens": 200,
+                },
+            )
+        text = resp.json()["choices"][0]["message"]["content"].strip()
+        import re
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            tags = [str(t).strip()[:40] for t in data.get("tags", []) if t]
+            return tags[:6]
+    except Exception as exc:
+        logger.warning("generate_client_tags error for %s: %s", name, exc)
+
+    # Fallback: rule-based теги
+    tags = []
+    if risk > 60:
+        tags.append("в риске")
+    if health < 40:
+        tags.append("требует внимания")
+    if health > 75:
+        tags.append("стабильный")
+    if risk_cnt >= 2:
+        tags.append("сложный")
+    if pos_cnt >= 3:
+        tags.append("лояльный")
+    return tags or ["активный"]
+
+
+# ── Апсел-сигналы ─────────────────────────────────────────────────────────────
+
+async def detect_upsell_signals(
+    client: dict,
+    mr_data: dict,
+    tasks: list[dict],
+) -> list[dict]:
+    """
+    AI + rule-based детект апсел-возможностей.
+    Возвращает список сигналов: [{type, details, confidence}]
+    """
+    signals = []
+    name = client.get("name", "")
+    segment = client.get("segment", "")
+    health = client.get("health_score", 0)
+
+    # Rule-based сигналы
+    analytics = mr_data.get("analytics", {}) or {}
+    search_vol = analytics.get("total_searches", 0)
+    prev_vol   = analytics.get("prev_searches", 0)
+
+    if prev_vol and search_vol > prev_vol * 1.3:
+        signals.append({
+            "type": "volume_growth",
+            "details": f"Поиск вырос на {int((search_vol/prev_vol-1)*100)}% — возможно нужен более высокий тариф",
+            "confidence": 0.85,
+        })
+
+    # Нет расширенной аналитики → предложить
+    if not analytics.get("has_recommendations") and segment in ("ENT", "SME+"):
+        signals.append({
+            "type": "feature_gap",
+            "details": "Клиент не использует персонализированные рекомендации — возможность допродажи AnyRecs",
+            "confidence": 0.7,
+        })
+
+    # Индекс близок к лимиту
+    index_size = analytics.get("index_size", 0)
+    index_limit = analytics.get("index_limit", 0)
+    if index_limit and index_size and index_size / index_limit > 0.85:
+        signals.append({
+            "type": "index_limit",
+            "details": f"Индекс заполнен на {int(index_size/index_limit*100)}% — нужно расширение",
+            "confidence": 0.9,
+        })
+
+    # Сегмент не соответствует объёму
+    if segment in ("SME", "SMB") and search_vol > 500_000:
+        signals.append({
+            "type": "segment_mismatch",
+            "details": f"Объём поиска ({search_vol:,}) соответствует ENT — обсудить апгрейд тарифа",
+            "confidence": 0.75,
+        })
+
+    # Клиент лоялен и стабилен — время продавать доп. продукты
+    if health > 70 and not any(s["type"] == "upsell_offer" for s in signals):
+        open_task_texts = " ".join(t["text"].lower() for t in tasks[:20])
+        if "рекоменда" not in open_task_texts and "апсел" not in open_task_texts:
+            # AI проверяет контекст
+            prompt = f"""Клиент {name} [{segment}], health={health}.
+Задачи: {open_task_texts[:300] or 'нет активных задач'}
+Есть ли возможность предложить дополнительные продукты или расширение? Ответь одним словом: да / нет"""
+            try:
+                async with httpx.AsyncClient(timeout=15) as hx:
+                    resp = await hx.post(
+                        GROQ_URL,
+                        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                        json={
+                            "model": GROQ_MODEL,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.2,
+                            "max_tokens": 10,
+                        },
+                    )
+                ans = resp.json()["choices"][0]["message"]["content"].strip().lower()
+                if "да" in ans:
+                    signals.append({
+                        "type": "upsell_offer",
+                        "details": f"Клиент стабилен (health={health}) — хороший момент для разговора о расширении",
+                        "confidence": 0.6,
+                    })
+            except Exception:
+                pass
+
+    return signals

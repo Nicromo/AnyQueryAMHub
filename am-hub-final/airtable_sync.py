@@ -298,3 +298,102 @@ async def sync_health_to_airtable(
         except Exception as exc:
             logger.warning("Airtable health sync exception for %s: %s", client_name, exc)
             return False
+
+
+# ── AR — Дебиторская задолженность из Airtable ────────────────────────────────
+
+AR_FIELD_NAMES = [
+    "дебиторская задолженность", "дебиторка", "долг", "задолженность",
+    "ar", "accounts receivable", "receivable", "debt", "оплата", "баланс",
+]
+AR_DAYS_FIELD_NAMES = [
+    "дней просрочки", "дни просрочки", "просрочка", "ar days",
+    "overdue days", "days overdue",
+]
+
+
+async def fetch_ar_for_client(
+    hx: httpx.AsyncClient,
+    schema: dict,
+    record_id: str,
+) -> dict:
+    """Получаем AR-поля для одной записи в Airtable."""
+    id_to_name = {v: k for k, v in schema.items()}
+    ar_fid   = _find_field(schema, AR_FIELD_NAMES)
+    days_fid = _find_field(schema, AR_DAYS_FIELD_NAMES)
+    ar_name   = id_to_name.get(ar_fid)   if ar_fid   else None
+    days_name = id_to_name.get(days_fid) if days_fid else None
+
+    # Если не нашли поле через схему — пробуем напрямую
+    fallback_ar_names   = ["Дебиторская задолженность", "Дебиторка", "Долг", "AR", "Задолженность"]
+    fallback_days_names = ["Дней просрочки", "Просрочка", "AR Days"]
+
+    try:
+        resp = await hx.get(
+            f"{BASE_URL}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}/{record_id}",
+            headers=_headers(), timeout=10,
+        )
+        if resp.status_code != 200:
+            return {"amount": 0.0, "days_overdue": 0}
+        fields = resp.json().get("fields", {})
+
+        # Ищем сумму задолженности
+        amount = 0.0
+        for fname in ([ar_name] if ar_name else []) + fallback_ar_names:
+            if fname and fname in fields:
+                val = fields[fname]
+                if isinstance(val, (int, float)):
+                    amount = float(val)
+                elif isinstance(val, str):
+                    import re
+                    m = re.search(r'[\d.,]+', val.replace(" ", ""))
+                    if m:
+                        amount = float(m.group().replace(",", "."))
+                break
+
+        # Ищем дни просрочки
+        days_overdue = 0
+        for fname in ([days_name] if days_name else []) + fallback_days_names:
+            if fname and fname in fields:
+                val = fields[fname]
+                if isinstance(val, (int, float)):
+                    days_overdue = int(val)
+                elif isinstance(val, str) and val.strip().isdigit():
+                    days_overdue = int(val.strip())
+                break
+
+        return {"amount": amount, "days_overdue": days_overdue}
+    except Exception as exc:
+        logger.warning("fetch_ar_for_client error: %s", exc)
+        return {"amount": 0.0, "days_overdue": 0}
+
+
+async def sync_ar_from_airtable(clients: list[dict]) -> list[dict]:
+    """
+    Л5: Получает AR для всех клиентов из Airtable.
+    Возвращает список {client_id, name, amount, days_overdue}
+    """
+    if not AIRTABLE_TOKEN:
+        return []
+
+    results = []
+    async with httpx.AsyncClient(timeout=20) as hx:
+        schema = await get_table_schema(hx)
+        if not schema:
+            return []
+
+        for c in clients:
+            record_id = await find_client_record(hx, schema, c["name"])
+            if not record_id:
+                continue
+            ar = await fetch_ar_for_client(hx, schema, record_id)
+            if ar["amount"] > 0 or ar["days_overdue"] > 0:
+                results.append({
+                    "client_id":    c["id"],
+                    "name":         c["name"],
+                    "amount":       ar["amount"],
+                    "days_overdue": ar["days_overdue"],
+                })
+                logger.info("AR sync: %s amount=%.0f days=%d", c["name"], ar["amount"], ar["days_overdue"])
+
+    return results

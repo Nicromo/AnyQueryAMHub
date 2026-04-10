@@ -2368,6 +2368,125 @@ async def api_benchmark(request: Request):
     }
 
 
+# ── Персональные настройки AM ─────────────────────────────────────────────────
+
+@app.get("/settings/personal", response_class=HTMLResponse)
+async def personal_settings_page(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    from database import get_am_settings, AM_SETTING_DEFAULTS
+    settings = get_am_settings(tg_id or 0)
+    return templates.TemplateResponse("settings_personal.html", {
+        "request": request,
+        "user": user,
+        "settings": settings,
+        "setting_keys": AM_SETTING_DEFAULTS,
+        "today": date.today().isoformat(),
+    })
+
+
+@app.post("/api/settings/personal", response_class=JSONResponse)
+async def save_personal_settings(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not tg_id:
+        raise HTTPException(400)
+    from database import save_am_settings
+    body = await request.json()
+    save_am_settings(int(tg_id), body)
+    return {"ok": True}
+
+
+# ── AR — Дебиторская задолженность ───────────────────────────────────────────
+
+@app.get("/api/ar-dashboard", response_class=JSONResponse)
+async def api_ar_dashboard(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import get_clients_with_ar
+    clients = get_clients_with_ar()
+    total = sum(c.get("ar_amount", 0) for c in clients)
+    return {
+        "ok": True,
+        "clients": [
+            {
+                "id": c["id"], "name": c["name"], "segment": c["segment"],
+                "ar_amount": c["ar_amount"], "ar_days_overdue": c["ar_days_overdue"],
+                "ar_updated_at": c.get("ar_updated_at", ""),
+            }
+            for c in clients
+        ],
+        "total": total,
+        "count": len(clients),
+    }
+
+
+@app.post("/api/ar/sync", response_class=JSONResponse)
+async def api_ar_sync(request: Request):
+    """Ручной запуск синхронизации AR из Airtable."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import get_all_clients, update_client_ar
+    from airtable_sync import sync_ar_from_airtable
+    clients = get_all_clients()
+    ar_data = await sync_ar_from_airtable(clients)
+    for item in ar_data:
+        update_client_ar(item["client_id"], item["amount"], item["days_overdue"])
+    return {"ok": True, "synced": len(ar_data)}
+
+
+# ── Апсел-сигналы ─────────────────────────────────────────────────────────────
+
+@app.get("/api/upsell-signals", response_class=JSONResponse)
+async def api_upsell_signals(request: Request):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import get_open_upsell_signals
+    return {"ok": True, "signals": get_open_upsell_signals()}
+
+
+@app.post("/api/upsell-signals/{signal_id}/status", response_class=JSONResponse)
+async def api_update_upsell_signal(request: Request, signal_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import update_upsell_signal
+    body = await request.json()
+    status = body.get("status", "dismissed")
+    update_upsell_signal(signal_id, status)
+    return {"ok": True}
+
+
+# ── Теги клиента ──────────────────────────────────────────────────────────────
+
+@app.get("/api/client/{client_id}/tags", response_class=JSONResponse)
+async def api_get_tags(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import get_client_tags
+    return {"ok": True, "tags": get_client_tags(client_id)}
+
+
+@app.post("/api/client/{client_id}/tags", response_class=JSONResponse)
+async def api_set_tags(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import set_client_tags
+    body = await request.json()
+    tags = [str(t).strip() for t in body.get("tags", []) if str(t).strip()]
+    set_client_tags(client_id, tags, source="manual")
+    return {"ok": True, "tags": tags}
+
+
 @app.post("/api/client/{client_id}/send-benchmark", response_class=JSONResponse)
 async def api_send_benchmark(request: Request, client_id: int):
     """Отправить бенчмарк конкретному клиенту в TG."""

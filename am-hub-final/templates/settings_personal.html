@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}Мои настройки — AM Hub{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>⚙️ Мои настройки</h1>
+  <p class="subtitle">Настройте AM Hub под свой рабочий процесс. Настройки сохраняются отдельно для каждого менеджера.</p>
+</div>
+
+<div id="save-banner" style="display:none;background:var(--green);color:#fff;padding:10px 18px;border-radius:8px;margin-bottom:16px;font-weight:600">
+  ✅ Настройки сохранены
+</div>
+
+<form id="settings-form" style="max-width:680px">
+
+  <!-- Дашборд -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><h3>📊 Дашборд</h3></div>
+    <div class="card-body">
+
+      <div class="form-group">
+        <label>Сортировка клиентов по умолчанию</label>
+        <select name="dashboard_sort" class="form-control">
+          <option value="health"   {% if settings.dashboard_sort == 'health' %}selected{% endif %}>Health Score (хуже вверх)</option>
+          <option value="risk"     {% if settings.dashboard_sort == 'risk' %}selected{% endif %}>Risk Score (выше вверх)</option>
+          <option value="ar"       {% if settings.dashboard_sort == 'ar' %}selected{% endif %}>Дебиторка (больше вверх)</option>
+          <option value="name"     {% if settings.dashboard_sort == 'name' %}selected{% endif %}>Название (А-Я)</option>
+          <option value="segment"  {% if settings.dashboard_sort == 'segment' %}selected{% endif %}>Сегмент</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Фильтр клиентов</label>
+        <select name="dashboard_filter" class="form-control">
+          <option value="all"  {% if settings.dashboard_filter == 'all' %}selected{% endif %}>Все клиенты</option>
+          <option value="mine" {% if settings.dashboard_filter == 'mine' %}selected{% endif %}>Только мои</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Показывать на карточках клиентов</label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px">
+          <label class="toggle-label">
+            <input type="checkbox" name="show_ar_badge" value="1"
+                   {% if settings.show_ar_badge == '1' %}checked{% endif %}>
+            💰 Дебиторка
+          </label>
+          <label class="toggle-label">
+            <input type="checkbox" name="show_tags" value="1"
+                   {% if settings.show_tags == '1' %}checked{% endif %}>
+            🏷️ Теги
+          </label>
+          <label class="toggle-label">
+            <input type="checkbox" name="show_upsell_badge" value="1"
+                   {% if settings.show_upsell_badge == '1' %}checked{% endif %}>
+            📈 Апсел-сигналы
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Уведомления -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><h3>🔔 Уведомления в Telegram</h3></div>
+    <div class="card-body">
+
+      <div class="form-group">
+        <label>Утренний план — час отправки</label>
+        <input type="number" name="morning_plan_hour" class="form-control"
+               min="6" max="11" value="{{ settings.morning_plan_hour }}"
+               style="width:100px">
+        <small style="color:#888">По умолчанию: 9 утра</small>
+      </div>
+
+      <div class="form-group">
+        <label>Алерт по Health Score если ниже</label>
+        <input type="number" name="health_alert_threshold" class="form-control"
+               min="10" max="90" value="{{ settings.health_alert_threshold }}"
+               style="width:100px">
+        <small style="color:#888">0–100. По умолчанию: 50</small>
+      </div>
+
+      <div class="form-group">
+        <label>Получать уведомления</label>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+          {% set notifs = [
+            ('notify_overdue_checkups', '🔴 Просроченные чекапы'),
+            ('notify_ai_priority',      '🧠 AI-приоритизация задач'),
+            ('notify_stale_tasks',      '⏳ Зависшие задачи (>45 дней)'),
+            ('notify_upsell',           '📈 Апсел-сигналы'),
+            ('notify_ar_overdue',       '💰 Просрочка по оплате'),
+            ('notify_tickets',          '🎫 Тикеты TBank Time'),
+          ] %}
+          {% for key, label in notifs %}
+          <label class="toggle-label">
+            <input type="checkbox" name="{{ key }}" value="1"
+                   {% if settings[key] == '1' %}checked{% endif %}>
+            {{ label }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Не отправлять уведомления</label>
+        <div style="display:flex;gap:12px;align-items:center;margin-top:6px">
+          <span>с</span>
+          <input type="number" name="off_hours_start" class="form-control"
+                 min="17" max="23" value="{{ settings.off_hours_start }}" style="width:80px">
+          <span>до</span>
+          <input type="number" name="off_hours_end" class="form-control"
+                 min="6" max="12" value="{{ settings.off_hours_end }}" style="width:80px">
+          <span>часов</span>
+        </div>
+        <small style="color:#888">Например: с 21 до 8 — ночные уведомления не придут</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- Персональная информация -->
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header"><h3>👤 Личные данные</h3></div>
+    <div class="card-body">
+      <div class="form-group">
+        <label>Часовой пояс</label>
+        <select name="timezone" class="form-control">
+          {% for tz in ['Europe/Moscow', 'Europe/Kaliningrad', 'Asia/Yekaterinburg', 'Asia/Novosibirsk', 'Asia/Krasnoyarsk', 'Asia/Irkutsk', 'Asia/Vladivostok'] %}
+          <option value="{{ tz }}" {% if settings.timezone == tz %}selected{% endif %}>{{ tz }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;align-items:center">
+    <button type="submit" class="btn btn-primary">💾 Сохранить</button>
+    <span id="save-status" style="color:#888;font-size:0.9rem"></span>
+  </div>
+</form>
+
+<style>
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.toggle-label input[type=checkbox] {
+  width: 16px;
+  height: 16px;
+}
+.form-group {
+  margin-bottom: 20px;
+}
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+</style>
+
+<script>
+document.getElementById('settings-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const fd = new FormData(this);
+  const data = {};
+
+  // Собираем все поля
+  for (const [key, val] of fd.entries()) {
+    data[key] = val;
+  }
+
+  // Чекбоксы — если не отмечен, ставим "0"
+  const checkboxes = ['show_ar_badge','show_tags','show_upsell_badge',
+    'notify_overdue_checkups','notify_ai_priority','notify_stale_tasks',
+    'notify_upsell','notify_ar_overdue','notify_tickets'];
+  for (const cb of checkboxes) {
+    if (!(cb in data)) data[cb] = '0';
+  }
+
+  const resp = await fetch('/api/settings/personal', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data),
+  });
+  const result = await resp.json();
+  if (result.ok) {
+    document.getElementById('save-banner').style.display = 'block';
+    document.getElementById('save-status').textContent = '';
+    setTimeout(() => {
+      document.getElementById('save-banner').style.display = 'none';
+    }, 3000);
+  } else {
+    document.getElementById('save-status').textContent = '❌ Ошибка сохранения';
+  }
+});
+</script>
+{% endblock %}
