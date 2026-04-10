@@ -804,6 +804,445 @@ async def job_quarterly_benchmark():
         logger.error("job_quarterly_benchmark error: %s", exc)
 
 
+# ── Ж3: Годовщины клиентов ───────────────────────────────────────────────────
+
+async def job_client_anniversary_check():
+    """
+    Ж3: Ежедневно проверяет годовщины клиентов (1/2/3/5 лет).
+    Отправляет AM черновик поздравления в TG.
+    """
+    try:
+        from database import get_clients_with_anniversary_soon
+        from ai_followup import generate_anniversary_message
+        from tg_bot import send_message
+
+        chat_id = get_notify_chat_id()
+        clients = get_clients_with_anniversary_soon(days_ahead=5)
+        if not clients or not chat_id:
+            return
+
+        for c in clients:
+            years = c["anniversary_years"]
+            days_left = c["anniversary_days_left"]
+            draft = await generate_anniversary_message(c, years)
+
+            prefix = "🎉 Сегодня!" if days_left == 0 else f"⏰ Через {days_left} дн."
+            msg = (
+                f"🎂 <b>Годовщина клиента</b> · {prefix}\n\n"
+                f"<b>{c['name']}</b> [{c['segment']}] — {years} {'год' if years == 1 else 'года' if years < 5 else 'лет'} с AnyQuery\n"
+                f"Дата: {c['anniversary_date']}\n\n"
+                f"<b>Черновик поздравления:</b>\n{draft}\n\n"
+                f"👉 Отправь клиенту в TG или адаптируй по своему"
+            )
+            await send_message(chat_id, msg)
+            logger.info("Anniversary alert: %s (%d years)", c["name"], years)
+
+    except Exception as exc:
+        logger.error("job_client_anniversary_check error: %s", exc)
+
+
+# ── Ж4: Welcome-sequence для новых клиентов ──────────────────────────────────
+
+async def job_welcome_sequence():
+    """
+    Ж4: Ежедневно проверяет новых клиентов и отправляет welcome-сообщение.
+    Также авто-создаёт онбординг-задачи.
+    """
+    try:
+        from database import get_new_clients_for_welcome, mark_welcome_sent, create_internal_task, get_task_templates
+        from ai_followup import generate_welcome_message
+        from tg_bot import send_message
+
+        clients = get_new_clients_for_welcome()
+        if not clients:
+            return
+
+        # Найдём шаблон онбординга
+        templates = get_task_templates()
+        onboarding_tmpl = next((t for t in templates if "онбординг" in t["name"].lower()), None)
+
+        for c in clients:
+            # Отправляем welcome в TG-канал клиента
+            if c.get("tg_chat_id"):
+                draft = await generate_welcome_message(c)
+                await send_message(c["tg_chat_id"], draft)
+
+            # Создаём онбординг-задачи если есть шаблон
+            if onboarding_tmpl:
+                import json
+                from datetime import date, timedelta
+                tasks_raw = onboarding_tmpl.get("tasks", [])
+                for task_data in tasks_raw:
+                    days = task_data.get("days", 7)
+                    due = (date.today() + timedelta(days=days)).isoformat()
+                    create_internal_task(
+                        client_id=c["id"],
+                        text=task_data.get("text", "Онбординг задача"),
+                        due_date=due,
+                        internal_note=f"Авто-создана при онбординге нового клиента"
+                    )
+
+            mark_welcome_sent(c["id"])
+            logger.info("Welcome sequence sent for client %s", c["name"])
+
+    except Exception as exc:
+        logger.error("job_welcome_sequence error: %s", exc)
+
+
+# ── З2: AI-приоритизация задач ────────────────────────────────────────────────
+
+async def job_ai_task_prioritization():
+    """
+    З2: Каждое утро 07:30 — AI расставляет приоритеты задач и отправляет список AM.
+    """
+    try:
+        from database import get_all_tasks, get_all_manager_tg_ids, get_manager_client_ids, get_client_tasks, get_client, checkup_status
+        from ai_followup import prioritize_tasks_ai
+        from tg_bot import send_message
+        from datetime import date
+
+        manager_ids = get_all_manager_tg_ids()
+        today = date.today().isoformat()
+
+        for tg_id in manager_ids:
+            client_ids = get_manager_client_ids(tg_id)
+            if not client_ids:
+                continue
+
+            # Собираем все открытые задачи менеджера
+            all_tasks = []
+            for cid in client_ids:
+                client = get_client(cid)
+                if not client:
+                    continue
+                tasks = get_client_tasks(cid, "open")
+                for t in tasks:
+                    t["client_name"] = client["name"]
+                    t["segment"] = client["segment"]
+                all_tasks.extend(tasks)
+
+            if not all_tasks:
+                continue
+
+            # AI приоритизация
+            prioritized = await prioritize_tasks_ai(all_tasks, [])
+
+            # Топ-10 задач для AM
+            top = prioritized[:10]
+            lines = [f"🧠 <b>AI-приоритеты на {today}</b>\n"]
+            for i, t in enumerate(top, 1):
+                due = f" · {t.get('due_date', '')[:10]}" if t.get("due_date") else ""
+                reason = f"\n   <i>{t.get('priority_reason', '')}</i>" if t.get("priority_reason") else ""
+                status_icon = "🔴" if t.get("status") == "blocked" else "📋"
+                lines.append(f"{i}. {status_icon} <b>{t.get('client_name', '?')}</b>{due}\n   {t.get('text', '')[:80]}{reason}")
+
+            lines.append("\n<i>Порядок определён AI на основе сегмента, дедлайнов и рисков</i>")
+            await send_message(tg_id, "\n".join(lines))
+            logger.info("AI prioritization sent to manager %s", tg_id)
+
+    except Exception as exc:
+        logger.error("job_ai_task_prioritization error: %s", exc)
+
+
+# ── З3: Кросс-клиентные паттерны ─────────────────────────────────────────────
+
+async def job_cross_client_patterns():
+    """
+    З3: Каждую неделю — ищет одинаковые проблемы у 3+ клиентов.
+    Сигнализирует о системных проблемах.
+    """
+    try:
+        from database import get_common_task_patterns
+        from tg_bot import send_message
+
+        chat_id = get_notify_chat_id()
+        if not chat_id:
+            return
+
+        patterns = get_common_task_patterns(days_back=7, min_count=3)
+        if not patterns:
+            return
+
+        lines = [f"🔍 <b>Системные паттерны за неделю</b>\n"]
+        lines.append("Одна и та же проблема у нескольких клиентов:\n")
+
+        for p in patterns[:5]:
+            clients_list = list({t["client_name"] for t in p["clients"]})[:5]
+            lines.append(f"• <b>«{p['keyword']}»</b> — {p['count']} задач у {len(clients_list)} клиентов")
+            lines.append(f"  Клиенты: {', '.join(clients_list)}")
+
+        lines.append("\n💡 Возможно это системная проблема — стоит создать задачу для команды")
+        await send_message(chat_id, "\n".join(lines))
+
+    except Exception as exc:
+        logger.error("job_cross_client_patterns error: %s", exc)
+
+
+# ── З4: Авто-закрытие/алерт по устаревшим задачам ────────────────────────────
+
+async def job_stale_task_alert():
+    """
+    З4: Еженедельно — алерт по задачам открытым > 45 дней без движения.
+    """
+    try:
+        from database import get_open_tasks_older_than
+        from tg_bot import send_message
+
+        chat_id = get_notify_chat_id()
+        if not chat_id:
+            return
+
+        stale = get_open_tasks_older_than(days=45)
+        if not stale:
+            return
+
+        lines = [f"⏳ <b>Зависшие задачи ({len(stale)} шт)</b>\n"]
+        lines.append("Открыты более 45 дней без изменений:\n")
+
+        # Группируем по клиентам
+        by_client: dict = {}
+        for t in stale:
+            name = t.get("client_name", "?")
+            by_client.setdefault(name, []).append(t)
+
+        for client_name, tasks in list(by_client.items())[:8]:
+            lines.append(f"• <b>{client_name}</b>:")
+            for t in tasks[:2]:
+                age = t.get("created_at", "")[:10]
+                lines.append(f"  — #{t['id']} {t['text'][:60]} (с {age})")
+
+        lines.append("\n👉 AM Hub → Задачи → проверь и закрой или обнови")
+        await send_message(chat_id, "\n".join(lines))
+
+    except Exception as exc:
+        logger.error("job_stale_task_alert error: %s", exc)
+
+
+# ── К1: Мониторинг метрик поиска ─────────────────────────────────────────────
+
+async def job_search_metrics_monitor():
+    """
+    К1: Еженедельно — проверяет метрики поиска через Merchrules /analytics/full.
+    Создаёт диагностические задачи при падении CTR/конверсии > 15%.
+    """
+    try:
+        from database import get_all_clients, create_internal_task
+        from tg_bot import send_message
+        import httpx, os
+
+        chat_id = get_notify_chat_id()
+        mr_base = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+        mr_token = os.getenv("MERCHRULES_TOKEN", "")
+
+        if not mr_token:
+            logger.info("job_search_metrics_monitor: MERCHRULES_TOKEN not set, skipping")
+            return
+
+        clients = get_all_clients()
+        alerts = []
+
+        async with httpx.AsyncClient(timeout=30) as hx:
+            for c in clients:
+                site_ids = c.get("site_ids", "").strip()
+                if not site_ids:
+                    continue
+                site_id = site_ids.split(",")[0].strip()
+
+                try:
+                    resp = await hx.get(
+                        f"{mr_base}/analytics/full",
+                        headers={"Authorization": f"Bearer {mr_token}"},
+                        params={"site_id": site_id, "period": "week"}
+                    )
+                    if resp.status_code != 200:
+                        continue
+
+                    data = resp.json()
+                    # Ожидаем: { "ctr": float, "conversion": float, "prev_ctr": float, "prev_conversion": float }
+                    ctr = data.get("ctr", 0)
+                    prev_ctr = data.get("prev_ctr", 0)
+                    conv = data.get("conversion", 0)
+                    prev_conv = data.get("prev_conversion", 0)
+
+                    issues = []
+                    if prev_ctr > 0 and (prev_ctr - ctr) / prev_ctr > 0.15:
+                        issues.append(f"CTR упал: {prev_ctr:.1%} → {ctr:.1%}")
+                    if prev_conv > 0 and (prev_conv - conv) / prev_conv > 0.15:
+                        issues.append(f"Конверсия упала: {prev_conv:.1%} → {conv:.1%}")
+
+                    for issue in issues:
+                        create_internal_task(
+                            client_id=c["id"],
+                            text=f"📉 [Метрики] {issue}",
+                            internal_note="Авто-детект. Проверить настройки поиска, бустинг, индекс."
+                        )
+                        alerts.append({"name": c["name"], "segment": c["segment"], "issue": issue})
+
+                except Exception as e:
+                    logger.debug("Metrics check failed for %s: %s", c["name"], e)
+                    continue
+
+        if alerts and chat_id:
+            lines = [f"📉 <b>Падение метрик поиска ({len(alerts)})</b>\n"]
+            for a in alerts[:8]:
+                lines.append(f"• <b>{a['name']}</b> [{a['segment']}]: {a['issue']}")
+            lines.append("\n👉 AM Hub → Внутренние задачи")
+            await send_message(chat_id, "\n".join(lines))
+
+    except Exception as exc:
+        logger.error("job_search_metrics_monitor error: %s", exc)
+
+
+# ── К2: AI-рекомендации синонимов ────────────────────────────────────────────
+
+async def job_ai_synonym_recommendations():
+    """
+    К2: Еженедельно — анализирует настройки поиска через Merchrules /search-settings,
+    генерирует AI-рекомендации по синонимам.
+    """
+    try:
+        from database import get_all_clients, create_internal_task
+        from ai_followup import generate_synonym_recommendations
+        from tg_bot import send_message
+        import httpx, os
+
+        chat_id = get_notify_chat_id()
+        mr_base = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+        mr_token = os.getenv("MERCHRULES_TOKEN", "")
+
+        if not mr_token:
+            logger.info("job_ai_synonym_recommendations: MERCHRULES_TOKEN not set, skipping")
+            return
+
+        clients = [c for c in __import__("database").get_all_clients()
+                   if c["segment"] in ("ENT", "SME+", "SME")][:10]  # приоритет крупным
+
+        created = 0
+        async with httpx.AsyncClient(timeout=30) as hx:
+            for c in clients:
+                site_ids = c.get("site_ids", "").strip()
+                if not site_ids:
+                    continue
+                site_id = site_ids.split(",")[0].strip()
+
+                try:
+                    resp = await hx.get(
+                        f"{mr_base}/search-settings",
+                        headers={"Authorization": f"Bearer {mr_token}"},
+                        params={"site_id": site_id}
+                    )
+                    if resp.status_code != 200:
+                        continue
+
+                    data = resp.json()
+                    zero_results = data.get("zero_result_queries", [])[:20]
+                    top_queries = data.get("top_queries", [])[:20]
+
+                    if not zero_results:
+                        continue
+
+                    recs = await generate_synonym_recommendations(c, zero_results, top_queries)
+                    if recs:
+                        summary = "; ".join(f"{r['query']} → {', '.join(r['synonyms'][:2])}" for r in recs[:3])
+                        create_internal_task(
+                            client_id=c["id"],
+                            text=f"💡 [AI] Рекомендации синонимов: {summary[:150]}",
+                            internal_note=f"AI-анализ {len(zero_results)} запросов без результатов. Полный список в задаче."
+                        )
+                        created += 1
+
+                except Exception as e:
+                    logger.debug("Synonym check failed for %s: %s", c["name"], e)
+                    continue
+
+        if created and chat_id:
+            await send_message(chat_id, f"💡 <b>AI-синонимы</b>: создано {created} задач с рекомендациями\n👉 AM Hub → Внутренние задачи")
+
+    except Exception as exc:
+        logger.error("job_ai_synonym_recommendations error: %s", exc)
+
+
+# ── К3: Сезонные чеклисты ────────────────────────────────────────────────────
+
+async def job_seasonal_checklists():
+    """
+    К3: Ежемесячно — проверяет ближайшие сезонные события и создаёт задачи для ENT/SME+.
+    """
+    try:
+        from database import get_all_clients, create_internal_task, get_upcoming_seasonal_events
+        from tg_bot import send_message
+
+        chat_id = get_notify_chat_id()
+        events = get_upcoming_seasonal_events(days_ahead=21)
+        if not events:
+            return
+
+        clients = [c for c in __import__("database").get_all_clients()
+                   if c["segment"] in ("ENT", "SME+", "SME")]
+        created = 0
+
+        for event in events:
+            for c in clients:
+                for task_text in event["tasks"]:
+                    # Проверяем нет ли уже такой задачи
+                    from database import get_client_tasks
+                    open_tasks = get_client_tasks(c["id"], "open")
+                    if any(task_text[:40] in t["text"] for t in open_tasks):
+                        continue
+                    from datetime import date, timedelta
+                    due = (date.today() + timedelta(days=event["days_left"] - 7)).isoformat()
+                    create_internal_task(
+                        client_id=c["id"],
+                        text=f"🗓️ [{event['name']}] {task_text}",
+                        due_date=due,
+                        internal_note=f"Авто-сезонная задача. Событие: {event['name']} {event['date']}"
+                    )
+                    created += 1
+
+        if created and chat_id:
+            event_names = " / ".join(e["name"] for e in events)
+            await send_message(
+                chat_id,
+                f"🗓️ <b>Сезонные задачи</b>: создано {created} задач\n"
+                f"События: {event_names}\n👉 AM Hub → Внутренние задачи"
+            )
+        logger.info("Seasonal checklists: %d tasks created for %d events", created, len(events))
+
+    except Exception as exc:
+        logger.error("job_seasonal_checklists error: %s", exc)
+
+
+# ── Л2: Airtable health sync ─────────────────────────────────────────────────
+
+async def job_airtable_health_sync():
+    """
+    Л2: Ежедневно — пушит health_score и risk_score всех клиентов в Airtable.
+    """
+    try:
+        from database import get_all_clients, calculate_health_score, calculate_risk_score
+        from airtable_sync import sync_health_to_airtable
+
+        clients = get_all_clients()
+        synced = 0
+        for c in clients:
+            health = calculate_health_score(c["id"])
+            risk = calculate_risk_score(c["id"])
+            ok = await sync_health_to_airtable(
+                client_name=c["name"],
+                health_score=health["score"],
+                health_color=health["color"],
+                risk_score=risk["score"],
+                risk_level=risk["level"],
+            )
+            if ok:
+                synced += 1
+
+        logger.info("Airtable health sync: %d/%d clients updated", synced, len(clients))
+
+    except Exception as exc:
+        logger.error("job_airtable_health_sync error: %s", exc)
+
+
 async def job_mr_task_done_notify():
     """
     Б2: При синхронизации MR — уведомляем клиента в TG о закрытых задачах.
@@ -1014,11 +1453,77 @@ def start_scheduler():
         id="mr_task_done_notify",
         replace_existing=True,
     )
+    # Ж3: Годовщины клиентов — каждый день в 09:15
+    scheduler.add_job(
+        job_client_anniversary_check,
+        CronTrigger(hour=9, minute=15),
+        id="client_anniversary_check",
+        replace_existing=True,
+    )
+    # Ж4: Welcome-последовательность — каждый день в 10:00
+    scheduler.add_job(
+        job_welcome_sequence,
+        CronTrigger(hour=10, minute=0),
+        id="welcome_sequence",
+        replace_existing=True,
+    )
+    # З2: AI-приоритизация задач — пн-пт в 07:30
+    scheduler.add_job(
+        job_ai_task_prioritization,
+        CronTrigger(day_of_week="mon-fri", hour=7, minute=30),
+        id="ai_task_prioritization",
+        replace_existing=True,
+    )
+    # З3: Кросс-клиентные паттерны — понедельник в 09:00
+    scheduler.add_job(
+        job_cross_client_patterns,
+        CronTrigger(day_of_week="mon", hour=9, minute=0),
+        id="cross_client_patterns",
+        replace_existing=True,
+    )
+    # З4: Алерт по устаревшим задачам — понедельник в 10:30
+    scheduler.add_job(
+        job_stale_task_alert,
+        CronTrigger(day_of_week="mon", hour=10, minute=30),
+        id="stale_task_alert",
+        replace_existing=True,
+    )
+    # К1: Мониторинг метрик поиска — понедельник в 08:00
+    scheduler.add_job(
+        job_search_metrics_monitor,
+        CronTrigger(day_of_week="mon", hour=8, minute=0),
+        id="search_metrics_monitor",
+        replace_existing=True,
+    )
+    # К2: AI-рекомендации синонимов — среда в 10:00
+    scheduler.add_job(
+        job_ai_synonym_recommendations,
+        CronTrigger(day_of_week="wed", hour=10, minute=0),
+        id="ai_synonym_recommendations",
+        replace_existing=True,
+    )
+    # К3: Сезонные чеклисты — 1-е число каждого месяца в 08:00
+    scheduler.add_job(
+        job_seasonal_checklists,
+        CronTrigger(day=1, hour=8, minute=0),
+        id="seasonal_checklists",
+        replace_existing=True,
+    )
+    # Л2: Airtable health/risk sync — каждый день в 05:00
+    scheduler.add_job(
+        job_airtable_health_sync,
+        CronTrigger(hour=5, minute=0),
+        id="airtable_health_sync",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
-        "Scheduler started: 19 jobs active — morning_plan, weekly_digest, mr_sync, "
+        "Scheduler started: 28 jobs active — morning_plan, weekly_digest, mr_sync, "
         "auto_checkup, health_score, metrics_degradation, qbr_cycle, personal_digest, "
         "chat_reminder, recurring_tasks, pre_meeting_brief, followup_reminder, "
         "meeting_day_client_reminder, risk_score_update, platform_audit, "
-        "nightly_problem_detection, quarterly_benchmark, mr_task_done_notify"
+        "nightly_problem_detection, quarterly_benchmark, mr_task_done_notify, "
+        "client_anniversary_check, welcome_sequence, ai_task_prioritization, "
+        "cross_client_patterns, stale_task_alert, search_metrics_monitor, "
+        "ai_synonym_recommendations, seasonal_checklists, airtable_health_sync"
     )

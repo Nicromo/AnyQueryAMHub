@@ -631,6 +631,129 @@ Site ID: {site_id}
         return []
 
 
+async def generate_anniversary_message(client: dict, years: int) -> str:
+    """Ж3: Черновик поздравления клиента с годовщиной работы с AnyQuery."""
+    system = (
+        "Ты — аккаунт-менеджер AnyQuery. Пишешь тёплое, искреннее поздравление клиенту "
+        "с годовщиной сотрудничества. Тон: дружелюбный, не шаблонный, без пафоса. "
+        "Кратко, 3-4 предложения."
+    )
+    label = {1: "первый год", 2: "два года", 3: "три года", 5: "пять лет"}.get(years, f"{years} лет")
+    user_prompt = f"""Клиент: {client['name']} (сегмент {client['segment']})
+Годовщина: {label} вместе с AnyQuery
+
+Напиши поздравительное сообщение в TG. Упомяни цифру (год/лет), поблагодари за доверие,
+намекни на продолжение работы. Без emoji-спама. Подпись: команда AnyQuery."""
+    result = await _call_groq(system, user_prompt, max_tokens=300)
+    return result or f"🎉 {years} {'год' if years == 1 else 'года' if years < 5 else 'лет'} вместе — спасибо за доверие, {client['name']}! Продолжаем расти вместе 🚀\n\nС уважением, команда AnyQuery"
+
+
+async def generate_welcome_message(client: dict) -> str:
+    """Ж4: Приветственное сообщение для нового клиента."""
+    system = (
+        "Ты — аккаунт-менеджер AnyQuery. Пишешь первое приветственное сообщение новому клиенту в TG. "
+        "Тон: тёплый, профессиональный, краткий. Дай понять что рядом и готов помочь."
+    )
+    user_prompt = f"""Новый клиент: {client['name']} (сегмент {client['segment']})
+
+Напиши приветственное сообщение в TG-канал. Включи:
+- Тёплое приветствие
+- Кратко: кто мы и что делаем
+- Как с нами связаться (AM всегда на связи)
+- Следующий шаг (первая встреча)
+Не более 5 предложений."""
+    result = await _call_groq(system, user_prompt, max_tokens=300)
+    return result or (
+        f"👋 Добро пожаловать в AnyQuery, {client['name']}!\n\n"
+        "Мы рады начать работу вместе. Ваш аккаунт-менеджер всегда на связи — "
+        "пишите сюда с любыми вопросами.\n\n"
+        "Первым шагом предлагаем провести онбординг-встречу — согласуем задачи и ритм работы. "
+        "Когда вам удобно? 📅"
+    )
+
+
+async def prioritize_tasks_ai(tasks: list[dict], clients_context: list[dict]) -> list[dict]:
+    """
+    З2: AI-приоритизация задач на утро.
+    Возвращает задачи с полем priority_rank и reason.
+    """
+    system = (
+        "Ты — ассистент аккаунт-менеджера. Помогаешь расставить приоритеты задач на день. "
+        "Учитывай: дедлайн, сегмент клиента (ENT важнее SS), риск (mood risk = важнее), "
+        "заблокированные задачи, просроченность. Отвечай ТОЛЬКО валидным JSON."
+    )
+    tasks_text = "\n".join(
+        f"ID:{t['id']} [{t.get('segment','?')}] {t['text'][:80]} "
+        f"дедлайн:{t.get('due_date','-')} статус:{t.get('status','open')} клиент:{t.get('client_name','?')}"
+        for t in tasks[:30]
+    )
+    user_prompt = f"""Задачи на сегодня:
+{tasks_text}
+
+Расставь приоритеты. Верни JSON:
+{{"tasks": [{{"id": 123, "priority_rank": 1, "reason": "ENT клиент, просрочена"}}]}}
+Сортируй от самого важного (1) к наименее важному."""
+
+    raw = await _call_groq(system, user_prompt, max_tokens=800)
+    if not raw:
+        return tasks
+    try:
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
+        rank_map = {item["id"]: item for item in data.get("tasks", [])}
+        for t in tasks:
+            info = rank_map.get(t["id"], {})
+            t["priority_rank"] = info.get("priority_rank", 999)
+            t["priority_reason"] = info.get("reason", "")
+        return sorted(tasks, key=lambda x: x.get("priority_rank", 999))
+    except Exception as e:
+        logger.error("prioritize_tasks_ai error: %s", e)
+        return tasks
+
+
+async def generate_synonym_recommendations(
+    client: dict,
+    zero_results_queries: list[str],
+    top_queries: list[str],
+) -> list[dict]:
+    """К2: AI-рекомендации синонимов на основе нулевых результатов."""
+    system = (
+        "Ты — эксперт по настройке поиска для e-commerce. Анализируешь запросы клиента "
+        "и предлагаешь синонимы для улучшения качества поиска. "
+        "Отвечай ТОЛЬКО валидным JSON."
+    )
+    zero_text = "\n".join(f"- {q}" for q in zero_results_queries[:20]) or "нет данных"
+    top_text = "\n".join(f"- {q}" for q in top_queries[:20]) or "нет данных"
+
+    user_prompt = f"""Клиент: {client['name']} (сегмент {client['segment']})
+
+Запросы без результатов:
+{zero_text}
+
+Топ поисковых запросов:
+{top_text}
+
+Предложи синонимы которые помогут найти товары. Верни JSON:
+{{"synonyms": [
+  {{"query": "оригинальный запрос", "synonyms": ["вариант1", "вариант2"], "reason": "почему"}},
+]}}"""
+    raw = await _call_groq(system, user_prompt, max_tokens=800)
+    if not raw:
+        return []
+    try:
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw.strip()).get("synonyms", [])
+    except Exception as e:
+        logger.error("generate_synonym_recommendations error: %s", e)
+        return []
+
+
 async def transcribe_audio(audio_url: str) -> str:
     """
     Транскрибирует аудио через OpenAI Whisper API.

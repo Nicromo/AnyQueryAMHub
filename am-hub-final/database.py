@@ -1369,3 +1369,171 @@ def log_platform_audit(client_id: int, issues: list[dict]):
             "INSERT INTO platform_audits (client_id, audit_date, issues_json) VALUES (?,?,?)",
             (client_id, date.today().isoformat(), json.dumps(issues, ensure_ascii=False))
         )
+
+
+# ── Ж3: Годовщины клиентов ────────────────────────────────────────────────────
+
+def get_clients_with_anniversary_soon(days_ahead: int = 7) -> list[dict]:
+    """
+    Клиенты у которых через days_ahead дней (±) будет годовщина (1/2/3 года).
+    Ориентируемся по первой встрече (min meeting_date).
+    """
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT c.*, MIN(m.meeting_date) as first_meeting
+            FROM clients c
+            JOIN meetings m ON m.client_id = c.id
+            GROUP BY c.id
+            HAVING first_meeting IS NOT NULL
+        """).fetchall()
+
+    result = []
+    today = date.today()
+    for row in rows:
+        r = dict(row)
+        first = r.get("first_meeting")
+        if not first:
+            continue
+        try:
+            first_date = date.fromisoformat(first[:10])
+        except Exception:
+            continue
+
+        for years in (1, 2, 3, 5):
+            try:
+                anniversary = first_date.replace(year=first_date.year + years)
+            except ValueError:
+                anniversary = first_date.replace(year=first_date.year + years, day=28)
+            diff = (anniversary - today).days
+            if -1 <= diff <= days_ahead:
+                r["anniversary_years"] = years
+                r["anniversary_date"] = anniversary.isoformat()
+                r["anniversary_days_left"] = diff
+                result.append(r)
+                break
+
+    return result
+
+
+# ── Ж4: Welcome-sequence для новых клиентов ───────────────────────────────────
+
+def get_new_clients_for_welcome() -> list[dict]:
+    """Новые клиенты (добавлены за последние 3 дня) без отправленного welcome."""
+    cutoff = (date.today() - timedelta(days=3)).isoformat()
+    with get_conn() as conn:
+        # Убеждаемся что колонка есть
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN welcome_sent INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
+        except Exception:
+            pass
+
+        rows = conn.execute("""
+            SELECT * FROM clients
+            WHERE welcome_sent = 0
+              AND created_at >= ?
+              AND tg_chat_id IS NOT NULL AND tg_chat_id != ''
+        """, (cutoff,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_welcome_sent(client_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE clients SET welcome_sent=1 WHERE id=?", (client_id,))
+
+
+# ── З3: Кросс-клиентные паттерны ─────────────────────────────────────────────
+
+def get_common_task_patterns(days_back: int = 7, min_count: int = 3) -> list[dict]:
+    """
+    Находит общие паттерны в задачах за последние N дней.
+    Возвращает группы похожих задач (по ключевым словам).
+    """
+    cutoff = (date.today() - timedelta(days=days_back)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT t.text, t.client_id, c.name as client_name, c.segment, t.created_at
+            FROM tasks t JOIN clients c ON c.id = t.client_id
+            WHERE t.created_at >= ?
+              AND t.is_internal = 0
+            ORDER BY t.created_at DESC
+        """, (cutoff,)).fetchall()
+
+    # Ключевые слова для кластеризации
+    keywords = [
+        "синоним", "стоп-слов", "нулевые", "конверсия", "ctr", "буст",
+        "индекс", "поиск", "фильтр", "заблокировано", "ошибка", "проблема",
+        "аудит", "настройк", "интеграц",
+    ]
+
+    patterns = {}
+    for row in rows:
+        r = dict(row)
+        text_lower = r["text"].lower()
+        for kw in keywords:
+            if kw in text_lower:
+                if kw not in patterns:
+                    patterns[kw] = []
+                patterns[kw].append(r)
+                break
+
+    return [
+        {"keyword": kw, "count": len(tasks), "clients": tasks, "keyword_label": kw}
+        for kw, tasks in patterns.items()
+        if len(tasks) >= min_count
+    ]
+
+
+# ── З4: Авто-закрытие устаревших задач ────────────────────────────────────────
+
+def get_open_tasks_older_than(days: int = 60) -> list[dict]:
+    """Задачи открытые более N дней без изменений."""
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT t.*, c.name as client_name, c.segment
+            FROM tasks t JOIN clients c ON c.id = t.client_id
+            WHERE t.status = 'open'
+              AND t.created_at < ?
+              AND t.is_internal = 0
+            ORDER BY t.created_at ASC
+        """, (cutoff,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── К3: Сезонные события ──────────────────────────────────────────────────────
+
+SEASONAL_EVENTS = [
+    {"name": "Новый год",     "month": 12, "day": 1,  "days_before": 21,
+     "tasks": ["Настроить сезонный буст для новогодних товаров", "Добавить синонимы: подарки, новый год, ёлка", "Проверить актуальность стоп-слов перед пиковым сезоном"]},
+    {"name": "8 Марта",       "month": 2,  "day": 15, "days_before": 21,
+     "tasks": ["Настроить буст для товаров к 8 марта: цветы, парфюм, украшения", "Добавить синонимы: 8 марта, международный женский день, подарок маме"]},
+    {"name": "23 Февраля",    "month": 2,  "day": 2,  "days_before": 14,
+     "tasks": ["Настроить буст для мужских товаров к 23 февраля", "Проверить синонимы: день защитника, подарок мужчине, папе"]},
+    {"name": "11.11 Распродажа", "month": 10, "day": 20, "days_before": 21,
+     "tasks": ["Настроить буст топ-товаров к распродаже 11.11", "Проверить скорость поиска под пиковую нагрузку", "Добавить синонимы для акционных запросов"]},
+    {"name": "Чёрная пятница", "month": 11, "day": 1, "days_before": 21,
+     "tasks": ["Настроить буст для акционных товаров к Чёрной пятнице", "Проверить бустинг: скидки, акция, распродажа"]},
+    {"name": "День знаний",   "month": 8,  "day": 15, "days_before": 14,
+     "tasks": ["Настроить буст для школьных товаров: канцелярия, рюкзаки", "Добавить синонимы: 1 сентября, школа, учёба"]},
+]
+
+
+def get_upcoming_seasonal_events(days_ahead: int = 21) -> list[dict]:
+    """Ближайшие сезонные события для подготовки."""
+    today = date.today()
+    result = []
+    for event in SEASONAL_EVENTS:
+        try:
+            event_date = date(today.year, event["month"], event["day"])
+            if event_date < today:
+                event_date = date(today.year + 1, event["month"], event["day"])
+            diff = (event_date - today).days
+            if 0 <= diff <= days_ahead:
+                result.append({**event, "date": event_date.isoformat(), "days_left": diff})
+        except Exception:
+            pass
+    return result

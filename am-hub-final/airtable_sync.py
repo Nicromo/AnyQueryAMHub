@@ -224,3 +224,77 @@ async def sync_meeting_to_airtable(
                 return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:300]}"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+
+# ── Л2: Health / Risk sync ────────────────────────────────────────────────────
+
+HEALTH_FIELD_NAMES = [
+    "health score", "health", "здоровье клиента", "оценка здоровья", "am score",
+]
+RISK_FIELD_NAMES = [
+    "risk score", "риск", "risk", "уровень риска", "risk level",
+]
+
+
+async def sync_health_to_airtable(
+    client_name: str,
+    health_score: int,
+    health_color: str,
+    risk_score: int,
+    risk_level: str,
+) -> bool:
+    """
+    Л2: Обновляем health_score и risk_score клиента в Airtable.
+    Возвращает True если обновление прошло успешно.
+    """
+    if not AIRTABLE_TOKEN:
+        return False
+
+    async with httpx.AsyncClient(timeout=15) as hx:
+        schema = await get_table_schema(hx)
+        if not schema:
+            return False
+
+        record_id = await find_client_record(hx, schema, client_name)
+        if not record_id:
+            return False
+
+        id_to_name = {v: k for k, v in schema.items()}
+        health_fid = _find_field(schema, HEALTH_FIELD_NAMES)
+        risk_fid   = _find_field(schema, RISK_FIELD_NAMES)
+        health_field_name = id_to_name.get(health_fid) if health_fid else None
+        risk_field_name   = id_to_name.get(risk_fid)   if risk_fid   else None
+
+        fields_to_update: dict = {}
+
+        if health_field_name:
+            fields_to_update[health_field_name] = health_score
+        else:
+            fields_to_update["Health Score"] = health_score
+
+        if risk_field_name:
+            fields_to_update[risk_field_name] = risk_score
+        else:
+            fields_to_update["Risk Score"] = risk_score
+
+        try:
+            resp = await hx.patch(
+                f"{BASE_URL}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}/{record_id}",
+                headers=_headers(),
+                json={"fields": fields_to_update},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                logger.info(
+                    "Airtable health sync OK: %s health=%d(%s) risk=%d(%s)",
+                    client_name, health_score, health_color, risk_score, risk_level,
+                )
+                return True
+            logger.warning(
+                "Airtable health sync error for %s: HTTP %d %s",
+                client_name, resp.status_code, resp.text[:200],
+            )
+            return False
+        except Exception as exc:
+            logger.warning("Airtable health sync exception for %s: %s", client_name, exc)
+            return False

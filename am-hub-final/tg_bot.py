@@ -149,11 +149,46 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
     if not chat_id or not text.startswith("/"):
         return
 
+    cmd = text.split()[0].lower().split("@")[0]  # /cmd@botname → /cmd
+
+    # Л4: /status доступен клиентам без проверки ALLOWED_IDS
+    if cmd == "/status":
+        from database import get_all_clients, get_client_tasks, checkup_status, calculate_health_score
+        all_clients = get_all_clients()
+        # Ищем клиента у которого tg_chat_id совпадает с текущим chat_id
+        client = next((c for c in all_clients if str(c.get("tg_chat_id", "")).strip() == str(chat_id)), None)
+        if not client:
+            await send_message(chat_id, (
+                "❓ Ваш чат не привязан к клиенту в системе.\n"
+                "Обратитесь к вашему аккаунт-менеджеру."
+            ))
+            return
+        tasks = get_client_tasks(client["id"], "open")
+        status = checkup_status(client.get("last_checkup") or client.get("last_meeting"), client["segment"])
+        color_map = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
+        lines = [
+            f"📋 <b>Статус: {client['name']}</b>",
+            f"",
+            f"Статус чекапа: {color_map.get(status['color'], '❓')} {status['label']}",
+            f"Открытых задач: {len(tasks)}",
+        ]
+        if tasks:
+            lines.append("\n<b>Ваши задачи:</b>")
+            for t in tasks[:10]:
+                due = f" · {t['due_date']}" if t.get("due_date") else ""
+                status_icon = "🔴" if t.get("due_date") and t["due_date"] < date.today().isoformat() else "📌"
+                lines.append(f"{status_icon} {t['text'][:80]}{due}")
+            if len(tasks) > 10:
+                lines.append(f"<i>…и ещё {len(tasks) - 10}</i>")
+        else:
+            lines.append("\n✅ Нет активных задач.")
+        lines.append("\n<i>По вопросам — напишите вашему аккаунт-менеджеру</i>")
+        await send_message(chat_id, "\n".join(lines))
+        return
+
     if not is_allowed(user_id):
         await send_message(chat_id, "⛔ Доступ закрыт.")
         return
-
-    cmd = text.split()[0].lower().split("@")[0]  # /cmd@botname → /cmd
 
     if cmd in ("/start", "/help"):
         await send_message(chat_id, (
@@ -164,6 +199,7 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
             "/client cdek — досье клиента\n"
             "/done 42 — закрыть задачу по ID\n"
             "/task cdek Настроить фильтры — создать задачу\n"
+            "/status — статус задач для клиента\n"
             "/top50 — Top-50 (еженедельный)\n"
             "/top50m — Top-50 (ежемесячный)\n"
             "/help — эта справка"
