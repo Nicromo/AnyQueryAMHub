@@ -206,9 +206,18 @@ def init_db():
             ("clients",   "welcome_sent",     "INTEGER DEFAULT 0"),
             ("clients",   "created_at",       "DATETIME DEFAULT CURRENT_TIMESTAMP"),
             # AR (дебиторская задолженность)
-            ("clients",   "ar_amount",        "REAL DEFAULT 0"),
-            ("clients",   "ar_days_overdue",  "INTEGER DEFAULT 0"),
-            ("clients",   "ar_updated_at",    "DATE"),
+            ("clients",   "ar_amount",         "REAL DEFAULT 0"),
+            ("clients",   "ar_days_overdue",   "INTEGER DEFAULT 0"),
+            ("clients",   "ar_updated_at",     "DATE"),
+            # Airtable
+            ("clients",   "airtable_record_id","TEXT DEFAULT ''"),
+            ("clients",   "contract_end_date", "DATE"),
+            ("clients",   "mrr",               "REAL DEFAULT 0"),
+            # MR feeds
+            ("clients",   "feed_index_size",   "INTEGER DEFAULT 0"),
+            ("clients",   "feed_index_limit",  "INTEGER DEFAULT 0"),
+            ("clients",   "feed_status",       "TEXT DEFAULT ''"),
+            ("clients",   "feed_updated_at",   "DATE"),
         ]
         for table, col, defn in new_cols:
             try:
@@ -322,6 +331,115 @@ def get_client(client_id: int):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     return dict(row) if row else None
+
+
+VALID_SEGMENTS = {"ENT", "SME+", "SME", "SME-", "SMB", "SS"}
+SEGMENT_ALIASES = {
+    "enterprise": "ENT", "корпоративный": "ENT", "крупный": "ENT",
+    "sme plus": "SME+", "средний+": "SME+",
+    "средний": "SME",
+    "small medium": "SMB", "малый": "SMB", "малый бизнес": "SMB",
+    "self service": "SS", "self-service": "SS", "самообслуживание": "SS",
+}
+
+
+def normalize_segment(raw: str) -> str:
+    """Приводит произвольное название сегмента к стандартному."""
+    if not raw:
+        return "SME"
+    r = raw.strip()
+    if r in VALID_SEGMENTS:
+        return r
+    lo = r.lower()
+    if lo in SEGMENT_ALIASES:
+        return SEGMENT_ALIASES[lo]
+    for alias, seg in SEGMENT_ALIASES.items():
+        if alias in lo:
+            return seg
+    for seg in VALID_SEGMENTS:
+        if seg.lower() in lo:
+            return seg
+    return "SME"
+
+
+def upsert_client_from_airtable(
+    name: str,
+    segment: str,
+    site_ids: str = "",
+    tg_chat_id: str = "",
+    am_name: str = "",
+    ar_amount: float = 0.0,
+    ar_days_overdue: int = 0,
+    contract_end_date: str = "",
+    mrr: float = 0.0,
+    airtable_record_id: str = "",
+) -> int:
+    """
+    Создаёт или обновляет клиента из данных Airtable.
+    Не перезаписывает site_ids/notes/tg_chat_id если они уже есть в БД и Airtable вернул пустое.
+    """
+    seg = normalize_segment(segment)
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO clients
+                (name, segment, site_ids, tg_chat_id, am_name,
+                 ar_amount, ar_days_overdue, ar_updated_at,
+                 contract_end_date, mrr, airtable_record_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(name) DO UPDATE SET
+                segment     = excluded.segment,
+                site_ids    = CASE WHEN excluded.site_ids != ''
+                                   THEN excluded.site_ids ELSE clients.site_ids END,
+                tg_chat_id  = CASE WHEN excluded.tg_chat_id != ''
+                                   THEN excluded.tg_chat_id ELSE clients.tg_chat_id END,
+                am_name     = CASE WHEN excluded.am_name != ''
+                                   THEN excluded.am_name ELSE clients.am_name END,
+                ar_amount       = excluded.ar_amount,
+                ar_days_overdue = excluded.ar_days_overdue,
+                ar_updated_at   = excluded.ar_updated_at,
+                contract_end_date = CASE WHEN excluded.contract_end_date != ''
+                                         THEN excluded.contract_end_date
+                                         ELSE clients.contract_end_date END,
+                mrr             = CASE WHEN excluded.mrr > 0
+                                       THEN excluded.mrr ELSE clients.mrr END,
+                airtable_record_id = excluded.airtable_record_id
+            RETURNING id
+        """, (name, seg, site_ids, tg_chat_id, am_name,
+              ar_amount, ar_days_overdue, today,
+              contract_end_date, mrr, airtable_record_id))
+        return cur.fetchone()[0]
+
+
+def update_client_feeds(client_id: int, index_size: int, index_limit: int, status: str):
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE clients SET feed_index_size=?, feed_index_limit=?, feed_status=?, feed_updated_at=? WHERE id=?",
+            (index_size, index_limit, status, today, client_id)
+        )
+
+
+def get_clients_near_index_limit(threshold: float = 0.85) -> list[dict]:
+    """Клиенты у которых индекс заполнен более чем на threshold."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clients WHERE feed_index_limit > 0 AND feed_index_size * 1.0 / feed_index_limit >= ?",
+            (threshold,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_clients_with_contract_expiring(days_ahead: int = 60) -> list[dict]:
+    """Клиенты с истекающим контрактом в ближайшие N дней."""
+    today = date.today()
+    deadline = (today + timedelta(days=days_ahead)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clients WHERE contract_end_date IS NOT NULL AND contract_end_date BETWEEN ? AND ? ORDER BY contract_end_date",
+            (today.isoformat(), deadline)
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def upsert_client(name: str, segment: str, tg_chat_id: str = "",

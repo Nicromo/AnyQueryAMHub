@@ -86,7 +86,7 @@ seed_clients()
 
 @app.on_event("startup")
 async def startup_event():
-    """При запуске на Railway: регистрируем webhook + стартуем планировщик."""
+    """При запуске на Railway: регистрируем webhook + стартуем планировщик + импорт клиентов."""
     if BOT_TOKEN and RAILWAY_DOMAIN:
         webhook_url = f"https://{RAILWAY_DOMAIN}/tg/webhook"
         ok = await tg_bot.set_webhook(webhook_url)
@@ -95,7 +95,15 @@ async def startup_event():
         else:
             logging.warning("TG webhook registration failed")
 
-    # Запускаем планировщик (утренний план, дайджест, MR sync)
+    # Импорт клиентов из Airtable при каждом старте
+    try:
+        from airtable_sync import import_clients_from_airtable
+        stats = await import_clients_from_airtable()
+        logging.info("Startup Airtable client import: %s", stats)
+    except Exception as exc:
+        logging.warning("Startup Airtable import failed: %s", exc)
+
+    # Запускаем планировщик
     try:
         from scheduler import start_scheduler
         start_scheduler()
@@ -2439,6 +2447,73 @@ async def api_ar_sync(request: Request):
     for item in ar_data:
         update_client_ar(item["client_id"], item["amount"], item["days_overdue"])
     return {"ok": True, "synced": len(ar_data)}
+
+
+@app.post("/api/sync/airtable-clients", response_class=JSONResponse)
+async def api_sync_airtable_clients(request: Request):
+    """Ручной запуск импорта клиентов из Airtable."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from airtable_sync import import_clients_from_airtable
+    stats = await import_clients_from_airtable()
+    return stats
+
+
+@app.post("/api/sync/mr-feeds", response_class=JSONResponse)
+async def api_sync_mr_feeds(request: Request):
+    """Ручной запуск синхронизации feeds из Merchrules."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from scheduler import job_mr_feeds_sync
+    await job_mr_feeds_sync()
+    return {"ok": True}
+
+
+@app.post("/api/sync/mr-roadmap", response_class=JSONResponse)
+async def api_sync_mr_roadmap(request: Request):
+    """Ручной запуск синхронизации roadmap из Merchrules."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from scheduler import job_mr_roadmap_sync
+    await job_mr_roadmap_sync()
+    return {"ok": True}
+
+
+@app.post("/api/sync/contracts", response_class=JSONResponse)
+async def api_sync_contracts(request: Request):
+    """Ручной запуск проверки контрактов."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from scheduler import job_contract_expiry_check
+    await job_contract_expiry_check()
+    return {"ok": True}
+
+
+@app.get("/api/sync/status", response_class=JSONResponse)
+async def api_sync_status(request: Request):
+    """Статус всех интеграций — последний раз когда тянули данные."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401)
+    from database import get_all_clients, get_clients_with_ar
+    from merchrules_sync import _data_cache, _auth_cache
+    clients = get_all_clients()
+    clients_with_site = sum(1 for c in clients if c.get("site_ids"))
+    clients_with_ar   = len(get_clients_with_ar())
+    clients_airtable  = sum(1 for c in clients if c.get("airtable_record_id"))
+    return {
+        "ok": True,
+        "clients_total":      len(clients),
+        "clients_with_site_id": clients_with_site,
+        "clients_from_airtable": clients_airtable,
+        "clients_with_ar":    clients_with_ar,
+        "mr_cache_updated_at": _data_cache["updated_at"].isoformat() if _data_cache.get("updated_at") else None,
+        "mr_auth_ok":         bool(_auth_cache.get("token")),
+    }
 
 
 # ── Апсел-сигналы ─────────────────────────────────────────────────────────────

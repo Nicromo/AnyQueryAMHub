@@ -109,6 +109,158 @@ async def fetch_site_tasks(
     return result
 
 
+async def fetch_site_checkups(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> dict:
+    """Получаем данные чекапов для site_id."""
+    result = {"next_checkup": None, "last_checkup_mr": None, "checkup_type": None}
+    for endpoint in [
+        f"{MERCHRULES_URL}/backend-v2/checkups",
+        f"{MERCHRULES_URL}/backend-v2/meetings?type=checkup",
+    ]:
+        try:
+            resp = await client.get(
+                endpoint,
+                params={"site_id": site_id, "limit": 5},
+                headers=headers,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data if isinstance(data, list) else data.get("checkups") or data.get("items") or []
+                if items:
+                    dates = [
+                        i.get("date") or i.get("meeting_date") or i.get("scheduled_at", "")[:10]
+                        for i in items if i.get("date") or i.get("meeting_date") or i.get("scheduled_at")
+                    ]
+                    if dates:
+                        result["last_checkup_mr"] = max(d for d in dates if d)
+                break
+        except Exception as exc:
+            logger.debug("fetch_site_checkups(%s) %s: %s", site_id, endpoint, exc)
+    return result
+
+
+async def fetch_site_feeds(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> dict:
+    """Получаем данные индекса/фидов для site_id."""
+    result = {"feed_index_size": 0, "feed_index_limit": 0, "feed_status": "", "feed_count": 0}
+    for endpoint in [
+        f"{MERCHRULES_URL}/backend-v2/feeds",
+        f"{MERCHRULES_URL}/backend-v2/sites/{site_id}/feeds",
+        f"{MERCHRULES_URL}/backend-v2/index",
+    ]:
+        try:
+            resp = await client.get(
+                endpoint,
+                params={"site_id": site_id},
+                headers=headers,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data if isinstance(data, list) else data.get("feeds") or data.get("items") or [data]
+                total_size  = 0
+                total_limit = 0
+                statuses    = []
+                for feed in items:
+                    total_size  += int(feed.get("index_size")  or feed.get("size")  or feed.get("indexed", 0))
+                    total_limit += int(feed.get("index_limit") or feed.get("limit") or feed.get("max", 0))
+                    st = feed.get("status") or feed.get("state") or ""
+                    if st:
+                        statuses.append(str(st))
+                result["feed_index_size"]  = total_size
+                result["feed_index_limit"] = total_limit
+                result["feed_status"]      = statuses[0] if statuses else ""
+                result["feed_count"]       = len(items)
+                break
+        except Exception as exc:
+            logger.debug("fetch_site_feeds(%s) %s: %s", site_id, endpoint, exc)
+    return result
+
+
+async def fetch_site_roadmap(
+    client: httpx.AsyncClient, headers: dict, site_id: str
+) -> list[dict]:
+    """Получаем roadmap-задачи для site_id."""
+    for endpoint in [
+        f"{MERCHRULES_URL}/backend-v2/roadmap",
+        f"{MERCHRULES_URL}/backend-v2/improvements",
+        f"{MERCHRULES_URL}/backend-v2/projects",
+    ]:
+        try:
+            resp = await client.get(
+                endpoint,
+                params={"site_id": site_id, "limit": 50},
+                headers=headers,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data if isinstance(data, list) else (
+                    data.get("roadmap") or data.get("improvements")
+                    or data.get("items") or []
+                )
+                return [
+                    {
+                        "id":       i.get("id"),
+                        "title":    i.get("title") or i.get("name") or "",
+                        "status":   i.get("status") or "plan",
+                        "priority": i.get("priority") or "medium",
+                        "due_date": i.get("due_date") or i.get("dueDate") or "",
+                        "overdue":  bool(
+                            i.get("due_date") and i["due_date"] < datetime.today().date().isoformat()
+                        ),
+                    }
+                    for i in items
+                ]
+        except Exception as exc:
+            logger.debug("fetch_site_roadmap(%s) %s: %s", site_id, endpoint, exc)
+    return []
+
+
+async def fetch_all_mr_sites(
+    client: httpx.AsyncClient, headers: dict
+) -> list[dict]:
+    """
+    Получаем список всех сайтов/клиентов из Merchrules.
+    Используется для импорта клиентов в БД.
+    """
+    for endpoint in [
+        f"{MERCHRULES_URL}/backend-v2/sites",
+        f"{MERCHRULES_URL}/backend-v2/clients",
+        f"{MERCHRULES_URL}/backend-v2/accounts",
+    ]:
+        try:
+            resp = await client.get(
+                endpoint,
+                params={"limit": 500},
+                headers=headers,
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data if isinstance(data, list) else (
+                    data.get("sites") or data.get("clients")
+                    or data.get("accounts") or data.get("items") or []
+                )
+                logger.info("MR sites fetched: %d from %s", len(items), endpoint)
+                return [
+                    {
+                        "site_id":  str(i.get("id") or i.get("site_id") or ""),
+                        "name":     i.get("name") or i.get("title") or i.get("domain") or "",
+                        "domain":   i.get("domain") or i.get("url") or "",
+                        "segment":  i.get("segment") or i.get("plan") or i.get("tier") or "",
+                        "am_name":  i.get("am") or i.get("account_manager") or i.get("manager") or "",
+                    }
+                    for i in items if i.get("name") or i.get("domain")
+                ]
+        except Exception as exc:
+            logger.debug("fetch_all_mr_sites %s: %s", endpoint, exc)
+    return []
+
+
 async def fetch_site_meetings(
     client: httpx.AsyncClient, headers: dict, site_id: str
 ) -> dict:
@@ -183,11 +335,13 @@ async def sync_clients_from_merchrules(clients: list[dict]) -> dict:
         if not site_ids:
             return {}
 
-        # Параллельно запрашиваем задачи и встречи по каждому site_id
+        # Параллельно запрашиваем задачи, встречи, чекапы и фиды по каждому site_id
         async def fetch_one(site_id: str):
-            tasks_data = await fetch_site_tasks(hx, headers, site_id)
+            tasks_data    = await fetch_site_tasks(hx, headers, site_id)
             meetings_data = await fetch_site_meetings(hx, headers, site_id)
-            return site_id, {**tasks_data, **meetings_data}
+            checkups_data = await fetch_site_checkups(hx, headers, site_id)
+            feeds_data    = await fetch_site_feeds(hx, headers, site_id)
+            return site_id, {**tasks_data, **meetings_data, **checkups_data, **feeds_data}
 
         fetch_tasks = [fetch_one(sid) for sid in site_ids]
         done = await asyncio.gather(*fetch_tasks, return_exceptions=True)

@@ -804,6 +804,239 @@ async def job_quarterly_benchmark():
         logger.error("job_quarterly_benchmark error: %s", exc)
 
 
+# ── Импорт клиентов из Airtable ──────────────────────────────────────────────
+
+async def job_airtable_client_import():
+    """
+    Ежедневно 04:00 — импортирует всех клиентов из Airtable в локальную БД.
+    Создаёт новых, обновляет существующих. Не удаляет.
+    """
+    try:
+        from airtable_sync import import_clients_from_airtable
+        stats = await import_clients_from_airtable()
+        logger.info("Airtable client import: %s", stats)
+    except Exception as exc:
+        logger.error("job_airtable_client_import error: %s", exc)
+
+
+# ── Импорт клиентов из Merchrules ─────────────────────────────────────────────
+
+async def job_mr_client_import():
+    """
+    Еженедельно — получает список всех сайтов из Merchrules, дополняет БД.
+    Главным образом обновляет site_ids у существующих клиентов.
+    """
+    try:
+        from database import upsert_client_from_airtable
+        from merchrules_sync import get_auth_token, fetch_all_mr_sites
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx)
+            if not token:
+                logger.info("job_mr_client_import: no MR token, skipping")
+                return
+            headers = {"Authorization": f"Bearer {token}"}
+            sites = await fetch_all_mr_sites(hx, headers)
+
+        imported = 0
+        for site in sites:
+            name = site.get("name") or site.get("domain") or ""
+            if not name or len(name) < 2:
+                continue
+            try:
+                upsert_client_from_airtable(
+                    name=name,
+                    segment=site.get("segment") or "SME",
+                    site_ids=site.get("site_id") or "",
+                    am_name=site.get("am_name") or "",
+                )
+                imported += 1
+            except Exception:
+                pass
+
+        logger.info("MR client import: %d sites processed", imported)
+    except Exception as exc:
+        logger.error("job_mr_client_import error: %s", exc)
+
+
+# ── Синхронизация feeds из MR → БД ───────────────────────────────────────────
+
+async def job_mr_feeds_sync():
+    """
+    Ежедневно — обновляет данные индекса (feeds) всех клиентов из MR в БД.
+    Создаёт задачи если индекс заполнен > 85%.
+    """
+    try:
+        from database import get_all_clients, update_client_feeds, create_internal_task, get_clients_near_index_limit
+        from merchrules_sync import get_auth_token, fetch_site_feeds
+        from tg_bot import send_message
+        import httpx
+
+        chat_id = get_notify_chat_id()
+        clients = get_all_clients()
+
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx)
+            if not token:
+                return
+            headers = {"Authorization": f"Bearer {token}"}
+
+            for c in clients:
+                site_ids_raw = c.get("site_ids") or ""
+                if not site_ids_raw:
+                    continue
+                site_id = site_ids_raw.split(",")[0].strip()
+                feeds = await fetch_site_feeds(hx, headers, site_id)
+                if feeds["feed_index_size"] or feeds["feed_status"]:
+                    update_client_feeds(
+                        c["id"],
+                        feeds["feed_index_size"],
+                        feeds["feed_index_limit"],
+                        feeds["feed_status"],
+                    )
+
+        # Алерт по клиентам близким к лимиту
+        near_limit = get_clients_near_index_limit(threshold=0.85)
+        for c in near_limit:
+            pct = int(c["feed_index_size"] / c["feed_index_limit"] * 100) if c["feed_index_limit"] else 0
+            # Проверяем нет ли уже задачи
+            from database import get_client_tasks
+            open_tasks = get_client_tasks(c["id"], "open")
+            if any("индекс" in t["text"].lower() for t in open_tasks):
+                continue
+            create_internal_task(
+                client_id=c["id"],
+                text=f"📦 Индекс заполнен на {pct}% ({c['feed_index_size']:,} / {c['feed_index_limit']:,} товаров)",
+                internal_note="Авто-детект. Обсудить расширение индекса."
+            )
+
+        if near_limit and chat_id:
+            lines = [f"📦 <b>Индекс близок к лимиту ({len(near_limit)} клиентов)</b>\n"]
+            for c in near_limit[:5]:
+                pct = int(c["feed_index_size"] / c["feed_index_limit"] * 100) if c["feed_index_limit"] else 0
+                lines.append(f"• <b>{c['name']}</b> [{c['segment']}]: {pct}% заполнено")
+            lines.append("\n👉 AM Hub → Внутренние задачи")
+            await send_message(chat_id, "\n".join(lines))
+
+    except Exception as exc:
+        logger.error("job_mr_feeds_sync error: %s", exc)
+
+
+# ── Roadmap-задачи из MR → задачи AM ─────────────────────────────────────────
+
+async def job_mr_roadmap_sync():
+    """
+    Еженедельно — проверяет roadmap в MR.
+    Если задача просрочена или в статусе blocked → создаёт задачу AM.
+    """
+    try:
+        from database import get_all_clients, create_internal_task, get_client_tasks
+        from merchrules_sync import get_auth_token, fetch_site_roadmap
+        from tg_bot import send_message
+        import httpx
+
+        chat_id = get_notify_chat_id()
+        clients = get_all_clients()
+        total_issues = 0
+
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx)
+            if not token:
+                return
+            headers = {"Authorization": f"Bearer {token}"}
+
+            for c in clients:
+                site_ids_raw = c.get("site_ids") or ""
+                if not site_ids_raw:
+                    continue
+                site_id = site_ids_raw.split(",")[0].strip()
+                roadmap = await fetch_site_roadmap(hx, headers, site_id)
+
+                for item in roadmap:
+                    if not (item.get("overdue") or item.get("status") == "blocked"):
+                        continue
+                    # Проверяем нет ли уже такой задачи
+                    open_tasks = get_client_tasks(c["id"], "open")
+                    title_short = item["title"][:50]
+                    if any(title_short.lower() in t["text"].lower() for t in open_tasks):
+                        continue
+                    status_label = "просрочена" if item.get("overdue") else "заблокирована"
+                    create_internal_task(
+                        client_id=c["id"],
+                        text=f"🗺️ [Roadmap {status_label}] {item['title'][:100]}",
+                        due_date=item.get("due_date") or None,
+                        internal_note=f"Статус в MR: {item['status']}. Приоритет: {item['priority']}."
+                    )
+                    total_issues += 1
+
+        if total_issues and chat_id:
+            await send_message(
+                chat_id,
+                f"🗺️ <b>Roadmap-задачи требуют внимания ({total_issues})</b>\n"
+                f"Просрочены или заблокированы\n👉 AM Hub → Внутренние задачи"
+            )
+        logger.info("Roadmap sync: %d issues found", total_issues)
+
+    except Exception as exc:
+        logger.error("job_mr_roadmap_sync error: %s", exc)
+
+
+# ── Контракты — алерт о продлении ────────────────────────────────────────────
+
+async def job_contract_expiry_check():
+    """
+    Ежедневно — проверяет контракты, истекающие в ближайшие 60/30/14 дней.
+    Отправляет AM алерт и создаёт задачу.
+    """
+    try:
+        from database import get_clients_with_contract_expiring, create_internal_task, get_client_tasks
+        from tg_bot import send_message
+        from datetime import date
+
+        chat_id = get_notify_chat_id()
+        today = date.today()
+        expiring = get_clients_with_contract_expiring(days_ahead=60)
+        if not expiring:
+            return
+
+        alerts = []
+        for c in expiring:
+            end = c.get("contract_end_date")
+            if not end:
+                continue
+            from datetime import date as _date
+            days_left = (_date.fromisoformat(end) - today).days
+
+            # Создаём задачу только если нет уже открытой
+            open_tasks = get_client_tasks(c["id"], "open")
+            if not any("продлен" in t["text"].lower() or "контракт" in t["text"].lower() for t in open_tasks):
+                urgency = "🔴" if days_left <= 14 else ("🟡" if days_left <= 30 else "🟢")
+                create_internal_task(
+                    client_id=c["id"],
+                    text=f"{urgency} Продление контракта через {days_left} дн. ({end})",
+                    due_date=(today + __import__("datetime").timedelta(days=max(1, days_left - 7))).isoformat(),
+                    internal_note=f"MRR: {c.get('mrr', 0):,.0f} ₽. Контракт истекает {end}."
+                )
+
+            alerts.append({"name": c["name"], "days_left": days_left, "end": end,
+                          "segment": c["segment"], "mrr": c.get("mrr", 0)})
+
+        if alerts and chat_id:
+            lines = [f"📋 <b>Продление контрактов ({len(alerts)})</b>\n"]
+            for a in sorted(alerts, key=lambda x: x["days_left"])[:8]:
+                icon = "🔴" if a["days_left"] <= 14 else ("🟡" if a["days_left"] <= 30 else "🟢")
+                mrr_str = f" · {a['mrr']:,.0f}₽/мес" if a["mrr"] else ""
+                lines.append(
+                    f"{icon} <b>{a['name']}</b> [{a['segment']}] — {a['days_left']} дн. ({a['end']}){mrr_str}"
+                )
+            lines.append("\n👉 AM Hub → Внутренние задачи")
+            await send_message(chat_id, "\n".join(lines))
+
+    except Exception as exc:
+        logger.error("job_contract_expiry_check error: %s", exc)
+
+
 # ── Ж3: Годовщины клиентов ───────────────────────────────────────────────────
 
 async def job_client_anniversary_check():
@@ -1734,9 +1967,44 @@ def start_scheduler():
         id="auto_tagging",
         replace_existing=True,
     )
+    # Импорт клиентов из Airtable — каждый день в 04:00
+    scheduler.add_job(
+        job_airtable_client_import,
+        CronTrigger(hour=4, minute=0),
+        id="airtable_client_import",
+        replace_existing=True,
+    )
+    # Импорт клиентов из Merchrules — воскресенье в 03:00
+    scheduler.add_job(
+        job_mr_client_import,
+        CronTrigger(day_of_week="sun", hour=3, minute=0),
+        id="mr_client_import",
+        replace_existing=True,
+    )
+    # Feeds/индекс из MR — каждый день в 06:30
+    scheduler.add_job(
+        job_mr_feeds_sync,
+        CronTrigger(hour=6, minute=30),
+        id="mr_feeds_sync",
+        replace_existing=True,
+    )
+    # Roadmap из MR → задачи AM — пятница в 16:00
+    scheduler.add_job(
+        job_mr_roadmap_sync,
+        CronTrigger(day_of_week="fri", hour=16, minute=0),
+        id="mr_roadmap_sync",
+        replace_existing=True,
+    )
+    # Контракты — истечение — каждый день в 07:45
+    scheduler.add_job(
+        job_contract_expiry_check,
+        CronTrigger(hour=7, minute=45),
+        id="contract_expiry_check",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
-        "Scheduler started: 33 jobs active — morning_plan, weekly_digest, mr_sync, "
+        "Scheduler started: 38 jobs active — morning_plan, weekly_digest, mr_sync, "
         "auto_checkup, health_score, metrics_degradation, qbr_cycle, personal_digest, "
         "chat_reminder, recurring_tasks, pre_meeting_brief, followup_reminder, "
         "meeting_day_client_reminder, risk_score_update, platform_audit, "

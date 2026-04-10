@@ -397,3 +397,199 @@ async def sync_ar_from_airtable(clients: list[dict]) -> list[dict]:
                 logger.info("AR sync: %s amount=%.0f days=%d", c["name"], ar["amount"], ar["days_overdue"])
 
     return results
+
+
+# ── Импорт клиентов из Airtable → локальная БД ───────────────────────────────
+
+# Поля которые ищем при импорте клиентов
+SEGMENT_FIELD_NAMES = [
+    "сегмент", "segment", "тип", "тариф", "план", "plan", "tier",
+]
+SITE_ID_FIELD_NAMES = [
+    "site_id", "site id", "сайт", "домен", "domain", "сайты", "site_ids",
+    "id сайта", "merchrules id", "mr id", "url",
+]
+AM_FIELD_NAMES = [
+    "аккаунт менеджер", "am", "менеджер", "account manager",
+    "ответственный", "owner", "куратор",
+]
+CONTRACT_DATE_NAMES = [
+    "дата окончания", "конец контракта", "contract end", "end date",
+    "дата договора", "срок", "renewal date", "продление",
+]
+MRR_FIELD_NAMES = [
+    "mrr", "mрр", "выручка", "revenue", "оплата", "сумма", "платёж",
+    "ежемесячная оплата", "monthly",
+]
+TG_CHAT_FIELD_NAMES = [
+    "telegram", "tg", "tg chat", "tg_chat_id", "чат", "chat id",
+    "telegram chat", "канал",
+]
+
+
+def _extract_field_value(fields: dict, candidates: list[str], schema: dict | None = None) -> str:
+    """Ищет значение поля по списку возможных имён. Возвращает строку или ''."""
+    # Прямой поиск по нижнему регистру
+    for name in candidates:
+        for field_name, value in fields.items():
+            if field_name.lower().strip() == name.lower():
+                return str(value) if value is not None else ""
+    # Неточный поиск
+    for name in candidates:
+        for field_name, value in fields.items():
+            if name in field_name.lower() or field_name.lower() in name:
+                return str(value) if value is not None else ""
+    return ""
+
+
+def _extract_numeric(fields: dict, candidates: list[str]) -> float:
+    """Ищет числовое значение поля."""
+    import re
+    raw = _extract_field_value(fields, candidates)
+    if not raw or raw in ("None", ""):
+        return 0.0
+    m = re.search(r"[\d.,]+", raw.replace(" ", "").replace("\xa0", ""))
+    if m:
+        try:
+            return float(m.group().replace(",", "."))
+        except ValueError:
+            pass
+    return 0.0
+
+
+async def _fetch_all_airtable_records(hx: httpx.AsyncClient) -> list[dict]:
+    """Загружаем все записи из таблицы Airtable с пагинацией."""
+    records = []
+    offset = None
+
+    while True:
+        params: dict = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        try:
+            resp = await hx.get(
+                f"{BASE_URL}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}",
+                headers=_headers(),
+                params=params,
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                logger.warning("Airtable fetch all error: %s %s", resp.status_code, resp.text[:200])
+                break
+            body = resp.json()
+            records.extend(body.get("records", []))
+            offset = body.get("offset")
+            if not offset:
+                break
+        except Exception as exc:
+            logger.warning("Airtable fetch_all_records error: %s", exc)
+            break
+
+    return records
+
+
+async def import_clients_from_airtable() -> dict:
+    """
+    Главная функция: тянет всех клиентов из Airtable → создаёт/обновляет в локальной БД.
+    Возвращает {"created": N, "updated": N, "skipped": N, "errors": [...]}
+    """
+    if not AIRTABLE_TOKEN:
+        return {"ok": False, "error": "AIRTABLE_TOKEN не задан"}
+
+    from database import upsert_client_from_airtable
+
+    stats = {"created": 0, "updated": 0, "skipped": 0, "errors": []}
+
+    async with httpx.AsyncClient(timeout=30) as hx:
+        # Загружаем схему для понимания структуры
+        schema = await get_table_schema(hx)
+        id_to_name = {v: k for k, v in schema.items()} if schema else {}
+
+        records = await _fetch_all_airtable_records(hx)
+        logger.info("Airtable import: fetched %d records", len(records))
+
+        for rec in records:
+            fields = rec.get("fields", {})
+            record_id = rec.get("id", "")
+
+            # Имя клиента — обязательное поле
+            name = ""
+            for fname in ["Name", "Клиент", "Название", "Сайт", "Компания", "Имя"]:
+                if fname in fields and fields[fname]:
+                    name = str(fields[fname]).strip()
+                    break
+            if not name:
+                # Пробуем первое непустое текстовое поле
+                for v in fields.values():
+                    if isinstance(v, str) and len(v) > 2:
+                        name = v.strip()
+                        break
+
+            if not name or len(name) < 2:
+                stats["skipped"] += 1
+                continue
+
+            # Сегмент
+            segment_raw = _extract_field_value(fields, SEGMENT_FIELD_NAMES)
+
+            # Site IDs
+            site_ids_raw = _extract_field_value(fields, SITE_ID_FIELD_NAMES)
+            # Убираем лишние символы
+            import re as _re
+            site_ids = ",".join(
+                s.strip() for s in _re.split(r"[,;\s]+", site_ids_raw) if s.strip().isdigit()
+            )
+
+            # AM
+            am_name = _extract_field_value(fields, AM_FIELD_NAMES)
+
+            # TG chat
+            tg_chat_id = _extract_field_value(fields, TG_CHAT_FIELD_NAMES)
+            # TG chat_id должен быть числом (или пустым)
+            if tg_chat_id and not tg_chat_id.lstrip("-").isdigit():
+                tg_chat_id = ""
+
+            # Контракт и финансы
+            contract_end = _extract_field_value(fields, CONTRACT_DATE_NAMES)
+            # Нормализуем дату
+            if contract_end:
+                for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+                    try:
+                        from datetime import datetime as _dt
+                        contract_end = _dt.strptime(contract_end[:10], fmt).strftime("%Y-%m-%d")
+                        break
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    contract_end = ""
+
+            mrr = _extract_numeric(fields, MRR_FIELD_NAMES)
+
+            # AR
+            ar_amount    = _extract_numeric(fields, AR_FIELD_NAMES)
+            ar_days_raw  = _extract_field_value(fields, AR_DAYS_FIELD_NAMES)
+            ar_days_overdue = 0
+            if ar_days_raw and ar_days_raw.strip().isdigit():
+                ar_days_overdue = int(ar_days_raw.strip())
+
+            try:
+                upsert_client_from_airtable(
+                    name=name,
+                    segment=segment_raw,
+                    site_ids=site_ids,
+                    tg_chat_id=tg_chat_id,
+                    am_name=am_name,
+                    ar_amount=ar_amount,
+                    ar_days_overdue=ar_days_overdue,
+                    contract_end_date=contract_end,
+                    mrr=mrr,
+                    airtable_record_id=record_id,
+                )
+                stats["updated"] += 1
+            except Exception as exc:
+                logger.warning("Airtable import error for %s: %s", name, exc)
+                stats["errors"].append({"name": name, "error": str(exc)})
+
+    stats["ok"] = True
+    logger.info("Airtable client import done: %s", stats)
+    return stats
