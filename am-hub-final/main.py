@@ -2,7 +2,8 @@
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from database import engine, get_db, Base
+from database import get_db, Base
+from database import engine
 import os
 
 # Создание таблиц БД
@@ -30,3 +31,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+

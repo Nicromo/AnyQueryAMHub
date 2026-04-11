@@ -1,3 +1,7 @@
+﻿from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import os
 """
 База данных — SQLite через встроенный sqlite3.
 Никаких ORM — просто, быстро, надёжно.
@@ -640,3 +644,4 @@ def seed_clients():
     # Всегда обновляем site_ids даже если клиенты уже есть
     for name, segment, site_ids in SEED_CLIENTS:
         upsert_client(name, segment, site_ids=site_ids)
+
