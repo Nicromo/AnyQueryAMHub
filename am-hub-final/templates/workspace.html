@@ -1,94 +1,86 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>AM Hub | Command Center</title>
+    <title>AM Hub | Live</title>
     <link rel="stylesheet" href="/static/css/main.css">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="dark-mode">
-    <!-- Command Palette -->
-    <div id="cmd-palette" class="hidden">
-        <div class="cmd-overlay"></div>
-        <div class="cmd-box">
-            <div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Search clients, tasks..."></div>
-            <div class="cmd-results" id="cmd-results"></div>
-        </div>
-    </div>
+    <div id="cmd-palette" class="hidden"><div class="cmd-overlay"></div><div class="cmd-box"><div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Search clients..."></div><div class="cmd-results" id="cmd-results"></div></div></div>
 
-    <!-- Left Dock -->
-    <nav class="left-dock">
-        <div class="dock-logo">AQ</div>
-        <a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a>
-        <a href="#" class="dock-item"><i data-lucide="users"></i></a>
-        <div class="dock-spacer"></div>
-        <button onclick="refreshData()" class="dock-item" title="Refresh"><i data-lucide="refresh-cw"></i></button>
-        <div class="dock-avatar">DM</div>
-    </nav>
+    <nav class="left-dock"><div class="dock-logo">AQ</div><a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a><div class="dock-spacer"></div><div class="dock-avatar">DM</div></nav>
 
-    <!-- Main Content -->
     <main class="main-content">
         <header class="top-bar">
-            <div class="search-trigger" onclick="toggleCmdPalette()">
-                <i data-lucide="search"></i><span>Search or command...</span><span class="kbd-shortcut">Ctrl K</span>
-            </div>
-            <div class="user-menu"><span>Dimaa</span></div>
+            <div class="search-trigger" onclick="toggleCmdPalette()"><i data-lucide="search"></i><span>Search clients...</span><span class="kbd-shortcut">Ctrl K</span></div>
+            <button class="btn-primary btn-sm" onclick="loadData()">🔄 Refresh Data</button>
         </header>
 
         <div class="bento-grid">
-            <!-- Hero Card: Active Client (Dynamic) -->
-            <div class="card hero-card span-2">
-                <div class="card-header"><h3>Active Focus</h3><button class="btn-icon" onclick="refreshData()"><i data-lucide="refresh-cw"></i></button></div>
-                <div id="hero-content" class="hero-content">
-                    <div class="skeleton-line" style="width: 60%"></div>
-                    <div class="skeleton-line" style="width: 40%"></div>
-                </div>
-            </div>
+            <!-- Stats -->
+            <div class="card stat-card"><h3>Total Clients</h3><div class="stat-value" id="stat-total">-</div></div>
+            <div class="card stat-card danger"><h3>Critical Health</h3><div class="stat-value" id="stat-critical">-</div></div>
+            <div class="card stat-card warning"><h3>Open Tasks</h3><div class="stat-value" id="stat-tasks">-</div></div>
 
-            <!-- Stats Card -->
-            <div class="card stats-card">
-                <div class="card-header"><h3>Overview</h3></div>
-                <div id="stats-content" class="stats-grid">
-                    <div class="stat-item"><span class="label">Clients</span><span class="value" id="stat-clients">-</span></div>
-                    <div class="stat-item"><span class="label">Critical</span><span class="value danger" id="stat-critical">-</span></div>
-                    <div class="stat-item"><span class="label">Tasks</span><span class="value" id="stat-tasks">-</span></div>
-                </div>
-            </div>
-
-            <!-- AI Insights -->
-            <div class="card ai-card">
-                <div class="card-header"><h3><i data-lucide="sparkles"></i> AI Insights</h3></div>
-                <div class="ai-content">
-                    <div class="ai-alert"><i data-lucide="alert-triangle"></i><div><strong>Anomaly Detected</strong><p>ROAS drop in 2 accounts.</p></div></div>
-                    <button class="btn-primary btn-sm" onclick="alert('Brief generated!')">Generate Brief</button>
-                </div>
-            </div>
-
-            <!-- Tasks List (Dynamic) -->
-            <div class="card tasks-card span-2">
-                <div class="card-header"><h3>Prioritized Tasks</h3><button class="btn-primary btn-sm" onclick="addDemoTask()">+ Quick Add</button></div>
-                <ul class="task-list" id="task-list">
-                    <li class="skeleton-line" style="width: 100%"></li>
-                    <li class="skeleton-line" style="width: 90%"></li>
-                </ul>
-            </div>
+            <!-- Clients List -->
+            <div class="card span-2"><div class="card-header"><h3>Recent Clients</h3></div><ul class="task-list" id="clients-list"><li>Loading...</li></ul></div>
             
-            <!-- Clients List Preview -->
-            <div class="card clients-card span-4">
-                <div class="card-header"><h3>All Clients</h3></div>
-                <div class="table-container">
-                    <table class="data-table">
-                        <thead><tr><th>Name</th><th>Segment</th><th>Health</th><th>Tickets</th><th>Trend</th></tr></thead>
-                        <tbody id="clients-table-body">
-                            <!-- Data injected via JS -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <!-- Action -->
+            <div class="card"><h3>Quick Action</h3><input type="text" id="new-task" placeholder="New task..." style="width:100%; padding:8px; margin:10px 0; background:#1e293b; border:1px solid #334155; color:white; border-radius:6px;"><button class="btn-primary btn-sm" style="width:100%" onclick="addTask()">Create Task</button></div>
         </div>
     </main>
 
-    <script src="/static/js/app.js"></script>
-    <script>lucide.createIcons();</script>
+    <script>
+        lucide.createIcons();
+        
+        // Load Data from API
+        async function loadData() {
+            try {
+                const stats = await fetch('/api/stats').then(r => r.json());
+                document.getElementById('stat-total').innerText = stats.total_clients;
+                document.getElementById('stat-critical').innerText = stats.critical_health;
+                document.getElementById('stat-tasks').innerText = stats.open_tasks;
+
+                const clients = await fetch('/api/clients').then(r => r.json());
+                const list = document.getElementById('clients-list');
+                list.innerHTML = '';
+                clients.forEach(c => {
+                    const li = document.createElement('li');
+                    li.className = 'task-item';
+                    li.innerHTML = \<span>\</span><span class="badge \">\</span><span style="margin-left:auto; font-size:0.8em; color:#94a3b8">Health: \</span>\;
+                    list.appendChild(li);
+                });
+                
+                // Update search results
+                const resBox = document.getElementById('cmd-results');
+                resBox.innerHTML = clients.map(c => \<div class="cmd-item" onclick="alert('Open \')">\</div>\).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        async function addTask() {
+            const title = document.getElementById('new-task').value;
+            if(!title) return;
+            await fetch('/api/tasks?title=' + encodeURIComponent(title), {method: 'POST'});
+            document.getElementById('new-task').value = '';
+            loadData();
+            alert('Task created!');
+        }
+
+        // Cmd+K Logic
+        window.toggleCmdPalette = () => {
+            const p = document.getElementById('cmd-palette');
+            p.classList.toggle('hidden');
+            if (!p.classList.contains('hidden')) document.getElementById('cmd-input').focus();
+        };
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); toggleCmdPalette(); }
+            if (e.key === 'Escape') document.getElementById('cmd-palette').classList.add('hidden');
+        });
+        document.querySelector('.cmd-overlay').addEventListener('click', toggleCmdPalette);
+
+        // Init
+        loadData();
+    </script>
 </body>
 </html>
