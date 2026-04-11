@@ -1,24 +1,61 @@
+```
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
 .env
+.env.local
 .env.*
-!.env.example
-config.json
-*.csv
-*.xlsx
-.DS_Store
-*.command
 .venv/
 venv/
-node_modules/
+ENV/
+.env.bak
+.python-version
 
-# База данных (локальная)
-am-hub-final/data/*.db
-am-hub-final/data/*.db-wal
-am-hub-final/data/*.db-shm
+# Dependencies
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+*.tmp
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
 
-# Файл кредов
-~/.search-checkup-creds.json
-*.credentials.json
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+```

@@ -247,6 +247,46 @@
 </div>
 {% endif %}
 
+<!-- БЫСТРЫЕ ССЫЛКИ НА ВНЕШНИЕ СЕРВИСЫ -->
+<div class="card" style="margin-top:16px">
+  <h3 style="font-size:1rem;margin-bottom:12px">🚀 Быстрые ссылки</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+    <a href="{{ quick_links.merchrules }}" target="_blank" class="btn btn-ghost btn-sm" style="text-align:left">
+      📊 Merchrules Analytics
+    </a>
+    <a href="{{ quick_links.time }}" target="_blank" class="btn btn-ghost btn-sm" style="text-align:left">
+      🎫 Time Support
+    </a>
+    <a href="{{ quick_links.ktalk_new }}" target="_blank" class="btn btn-ghost btn-sm" style="text-align:left">
+      📹 Новая встреча Ktalk
+    </a>
+    <a href="{{ quick_links.ktalk_recordings }}" target="_blank" class="btn btn-ghost btn-sm" style="text-align:left">
+      🎬 Записи встреч
+    </a>
+  </div>
+</div>
+
+<!-- PRE-CALL BRIEF -->
+<div class="card" style="margin-top:16px;border-left:4px solid var(--accent)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h3 style="font-size:1rem;margin:0">🧠 Pre-Call Brief</h3>
+    <div style="display:flex;gap:8px">
+      <button onclick="generateBrief()" class="btn btn-primary btn-sm">🔄 Генерировать бриф</button>
+      <button onclick="sendBriefTg()" class="btn btn-ghost btn-sm">✈️ В Telegram</button>
+    </div>
+  </div>
+  
+  <div id="brief-loading" style="display:none;padding:20px;text-align:center;color:var(--text-muted)">
+    ⏳ Генерируем бриф... (собираем данные из Merchrules, Time, Ktalk)
+  </div>
+  
+  <div id="brief-result" style="display:none;background:var(--surface2);border-radius:8px;padding:16px;margin-top:12px;font-size:0.9rem;line-height:1.5">
+    <!-- Сюда вставится сгенерированный бриф -->
+  </div>
+  
+  <div id="brief-error" style="display:none;color:var(--red);margin-top:12px"></div>
+</div>
+
 <!-- Запланировать регулярную встречу с буфером -->
 <div class="card" style="margin-top:0">
   <details>
@@ -432,6 +472,106 @@ async function savePlannedDate() {
   });
   const d = await r.json();
   if (d.ok) location.reload();
+}
+
+// Pre-Call Brief функции
+async function generateBrief() {
+  const loading = document.getElementById('brief-loading');
+  const result = document.getElementById('brief-result');
+  const error = document.getElementById('brief-error');
+  
+  loading.style.display = 'block';
+  result.style.display = 'none';
+  error.style.display = 'none';
+  
+  try {
+    const r = await fetch(`/prep/{{ client.id }}/brief`);
+    const data = await r.json();
+    
+    if (data.ok) {
+      // Форматируем бриф для отображения
+      const brief = data.brief;
+      let html = '';
+      
+      // Алерты
+      if (brief.alerts && brief.alerts.length > 0) {
+        html += '<div style="margin-bottom:16px">';
+        html += '<strong>⚠️ Внимание:</strong><ul style="margin:8px 0;padding-left:20px">';
+        for (const alert of brief.alerts) {
+          const emoji = alert.type === 'critical' ? '🔴' : '🟡';
+          html += `<li>${emoji} ${alert.message}</li>`;
+        }
+        html += '</ul></div>';
+      }
+      
+      // Рекомендации
+      if (brief.recommendations && brief.recommendations.length > 0) {
+        html += '<div style="margin-bottom:16px">';
+        html += '<strong>💡 Рекомендации:</strong><ol style="margin:8px 0;padding-left:20px">';
+        for (const rec of brief.recommendations) {
+          html += `<li>${rec}</li>`;
+        }
+        html += '</ol></div>';
+      }
+      
+      // Темы для разговора
+      if (brief.talking_points && brief.talking_points.length > 0) {
+        html += '<div style="margin-bottom:16px">';
+        html += '<strong>🗣 Темы для обсуждения:</strong><ul style="margin:8px 0;padding-left:20px">';
+        for (const point of brief.talking_points) {
+          html += `<li>${point}</li>`;
+        }
+        html += '</ul></div>';
+      }
+      
+      // Риски
+      if (brief.risks && brief.risks.length > 0) {
+        html += '<div style="margin-bottom:16px">';
+        html += '<strong>⚠️ Риски:</strong><ul style="margin:8px 0;padding-left:20px">';
+        for (const risk of brief.risks) {
+          html += `<li>${risk}</li>`;
+        }
+        html += '</ul></div>';
+      }
+      
+      // Быстрые ссылки из брифа
+      if (brief.quick_links) {
+        html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">';
+        html += '<strong>🔗 Ссылки:</strong><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">';
+        if (brief.quick_links.start_meeting) {
+          html += `<a href="${brief.quick_links.start_meeting}" target="_blank" class="btn btn-primary btn-sm">📹 Начать встречу</a>`;
+        }
+        if (brief.quick_links.merchrules) {
+          html += `<a href="${brief.quick_links.merchrules}" target="_blank" class="btn btn-ghost btn-sm">📊 Analytics</a>`;
+        }
+        html += '</div></div>';
+      }
+      
+      result.innerHTML = html;
+      result.style.display = 'block';
+    } else {
+      error.textContent = '❌ ' + (data.error || 'Ошибка генерации брифа');
+      error.style.display = 'block';
+    }
+  } catch (e) {
+    error.textContent = '❌ ' + e.message;
+    error.style.display = 'block';
+  } finally {
+    loading.style.display = 'none';
+  }
+}
+
+async function sendBriefTg() {
+  try {
+    const r = await fetch(`/prep/{{ client.id }}/brief/telegram`);
+    if (r.ok) {
+      alert('✅ Бриф отправлен в Telegram!');
+    } else {
+      alert('❌ Ошибка отправки брифа');
+    }
+  } catch (e) {
+    alert('❌ ' + e.message);
+  }
 }
 </script>
 {% endblock %}
