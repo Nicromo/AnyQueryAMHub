@@ -1,5 +1,5 @@
-"""
-AM Hub — главное приложение FastAPI
+﻿"""
+AM Hub вЂ” РіР»Р°РІРЅРѕРµ РїСЂРёР»РѕР¶РµРЅРёРµ FastAPI
 """
 import os
 import logging
@@ -7,6 +7,7 @@ from datetime import date, timedelta, datetime
 from typing import Optional
 
 from fastapi import FastAPI, Request, Form, Response, HTTPException
+from starlette.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -49,7 +50,7 @@ BOT_USERNAME = os.getenv("TG_BOT_USERNAME", "")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
 ALLOWED_IDS = set(int(x) for x in os.getenv("ALLOWED_TG_IDS", "").split(",") if x.strip())
 
-# Railway автоматически задаёт RAILWAY_PUBLIC_DOMAIN
+# Railway Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё Р·Р°РґР°С‘С‚ RAILWAY_PUBLIC_DOMAIN
 RAILWAY_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 
 app = FastAPI(title="AM Hub")
@@ -57,14 +58,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 session_mgr = SessionManager(SECRET_KEY)
 
-# Инициализация БД при старте
+# РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ Р‘Р” РїСЂРё СЃС‚Р°СЂС‚Рµ
 init_db()
 seed_clients()
 
 
 @app.on_event("startup")
 async def startup_event():
-    """При запуске на Railway: регистрируем webhook + стартуем планировщик."""
+    """РџСЂРё Р·Р°РїСѓСЃРєРµ РЅР° Railway: СЂРµРіРёСЃС‚СЂРёСЂСѓРµРј webhook + СЃС‚Р°СЂС‚СѓРµРј РїР»Р°РЅРёСЂРѕРІС‰РёРє."""
     if BOT_TOKEN and RAILWAY_DOMAIN:
         webhook_url = f"https://{RAILWAY_DOMAIN}/tg/webhook"
         ok = await tg_bot.set_webhook(webhook_url)
@@ -73,7 +74,7 @@ async def startup_event():
         else:
             logging.warning("TG webhook registration failed")
 
-    # Запускаем планировщик (утренний план, дайджест, MR sync)
+    # Р—Р°РїСѓСЃРєР°РµРј РїР»Р°РЅРёСЂРѕРІС‰РёРє (СѓС‚СЂРµРЅРЅРёР№ РїР»Р°РЅ, РґР°Р№РґР¶РµСЃС‚, MR sync)
     try:
         from scheduler import start_scheduler
         start_scheduler()
@@ -81,9 +82,9 @@ async def startup_event():
         logging.warning("Scheduler start failed: %s", exc)
 
 
-# ── Хелперы ───────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ РҐРµР»РїРµСЂС‹ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
-# checkup_status теперь живёт в database.py — импортируем оттуда
+# checkup_status С‚РµРїРµСЂСЊ Р¶РёРІС‘С‚ РІ database.py вЂ” РёРјРїРѕСЂС‚РёСЂСѓРµРј РѕС‚С‚СѓРґР°
 
 def get_user_or_redirect(request: Request):
     user = session_mgr.get_user(request)
@@ -93,7 +94,7 @@ def get_user_or_redirect(request: Request):
 
 
 def get_tg_id(user) -> Optional[int]:
-    """Извлекает tg_id из объекта сессии."""
+    """РР·РІР»РµРєР°РµС‚ tg_id РёР· РѕР±СЉРµРєС‚Р° СЃРµСЃСЃРёРё."""
     if isinstance(user, dict):
         return user.get("id")
     return getattr(user, "id", None)
@@ -101,19 +102,19 @@ def get_tg_id(user) -> Optional[int]:
 
 def get_user_mr_creds(user) -> tuple[str, str]:
     """
-    Возвращает (mr_login, mr_password) для текущего пользователя.
-    Приоритет: профиль в БД → env-переменные.
+    Р’РѕР·РІСЂР°С‰Р°РµС‚ (mr_login, mr_password) РґР»СЏ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.
+    РџСЂРёРѕСЂРёС‚РµС‚: РїСЂРѕС„РёР»СЊ РІ Р‘Р” в†’ env-РїРµСЂРµРјРµРЅРЅС‹Рµ.
     """
     tg_id = get_tg_id(user)
     if tg_id:
         profile = get_manager_profile(tg_id)
         if profile.get("mr_login") and profile.get("mr_password"):
             return profile["mr_login"], profile["mr_password"]
-    # Fallback — глобальные переменные окружения
+    # Fallback вЂ” РіР»РѕР±Р°Р»СЊРЅС‹Рµ РїРµСЂРµРјРµРЅРЅС‹Рµ РѕРєСЂСѓР¶РµРЅРёСЏ
     return os.getenv("MERCHRULES_LOGIN", ""), os.getenv("MERCHRULES_PASSWORD", "")
 
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ Auth в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -125,18 +126,18 @@ async def login_page(request: Request):
 
 @app.get("/auth/telegram")
 async def tg_callback(request: Request, response: Response):
-    """Telegram Login Widget редиректит сюда с параметрами."""
+    """Telegram Login Widget СЂРµРґРёСЂРµРєС‚РёС‚ СЃСЋРґР° СЃ РїР°СЂР°РјРµС‚СЂР°РјРё."""
     data = dict(request.query_params)
     if BOT_TOKEN and not verify_tg_auth(dict(data), BOT_TOKEN):
-        raise HTTPException(status_code=403, detail="Неверная подпись Telegram")
+        raise HTTPException(status_code=403, detail="РќРµРІРµСЂРЅР°СЏ РїРѕРґРїРёСЃСЊ Telegram")
 
     tg_id = int(data.get("id", 0))
     tg_name = data.get("first_name", "") + " " + data.get("last_name", "")
     tg_username = data.get("username", "")
 
-    # Проверяем доступ (если список не пустой)
+    # РџСЂРѕРІРµСЂСЏРµРј РґРѕСЃС‚СѓРї (РµСЃР»Рё СЃРїРёСЃРѕРє РЅРµ РїСѓСЃС‚РѕР№)
     if ALLOWED_IDS and tg_id not in ALLOWED_IDS:
-        raise HTTPException(status_code=403, detail="Доступ закрыт")
+        raise HTTPException(status_code=403, detail="Р”РѕСЃС‚СѓРї Р·Р°РєСЂС‹С‚")
 
     token = session_mgr.create_session(tg_id, tg_name.strip())
     resp = RedirectResponse(url="/", status_code=302)
@@ -151,7 +152,7 @@ async def logout():
     return resp
 
 
-# ── Главная — трекер чекапов ─────────────────────────────────────────────────
+# в”Ђв”Ђ Р“Р»Р°РІРЅР°СЏ вЂ” С‚СЂРµРєРµСЂ С‡РµРєР°РїРѕРІ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, segment: str = "", sort: str = ""):
@@ -159,24 +160,24 @@ async def index(request: Request, segment: str = "", sort: str = ""):
     if not user:
         return RedirectResponse("/login")
 
-    # Загружаем клиентов: если у менеджера есть свой список — только его
+    # Р—Р°РіСЂСѓР¶Р°РµРј РєР»РёРµРЅС‚РѕРІ: РµСЃР»Рё Сѓ РјРµРЅРµРґР¶РµСЂР° РµСЃС‚СЊ СЃРІРѕР№ СЃРїРёСЃРѕРє вЂ” С‚РѕР»СЊРєРѕ РµРіРѕ
     tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     clients = get_all_clients_for_manager(tg_id)
 
-    # Добавляем статус чекапа и дополнительные поля к каждому клиенту
+    # Р”РѕР±Р°РІР»СЏРµРј СЃС‚Р°С‚СѓСЃ С‡РµРєР°РїР° Рё РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РїРѕР»СЏ Рє РєР°Р¶РґРѕРјСѓ РєР»РёРµРЅС‚Сѓ
     for c in clients:
         c["status"] = checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])
-        # Считаем заблокированные задачи отдельно (отдельный запрос)
+        # РЎС‡РёС‚Р°РµРј Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅРЅС‹Рµ Р·Р°РґР°С‡Рё РѕС‚РґРµР»СЊРЅРѕ (РѕС‚РґРµР»СЊРЅС‹Р№ Р·Р°РїСЂРѕСЃ)
         c["blocked_tasks"] = len(get_client_tasks(c["id"], "blocked"))
-        # Настроение последней встречи
+        # РќР°СЃС‚СЂРѕРµРЅРёРµ РїРѕСЃР»РµРґРЅРµР№ РІСЃС‚СЂРµС‡Рё
         meetings = get_client_meetings(c["id"], limit=1)
         c["mood"] = meetings[0]["mood"] if meetings else "neutral"
 
-    # Фильтр по сегменту
+    # Р¤РёР»СЊС‚СЂ РїРѕ СЃРµРіРјРµРЅС‚Сѓ
     if segment:
         clients = [c for c in clients if c["segment"] == segment]
 
-    # Сортировка: сначала требующие внимания
+    # РЎРѕСЂС‚РёСЂРѕРІРєР°: СЃРЅР°С‡Р°Р»Р° С‚СЂРµР±СѓСЋС‰РёРµ РІРЅРёРјР°РЅРёСЏ
     def attention_score(c):
         s = 0
         if c["status"]["color"] == "red":      s += 100
@@ -184,7 +185,7 @@ async def index(request: Request, segment: str = "", sort: str = ""):
         if c.get("mood") == "risk":            s += 40
         if c["status"]["color"] == "yellow":   s += 20
         if c.get("open_tasks", 0) > 0:         s += 5
-        return -s  # отрицательный — чтобы sort() ставил высокий балл первым
+        return -s  # РѕС‚СЂРёС†Р°С‚РµР»СЊРЅС‹Р№ вЂ” С‡С‚РѕР±С‹ sort() СЃС‚Р°РІРёР» РІС‹СЃРѕРєРёР№ Р±Р°Р»Р» РїРµСЂРІС‹Рј
 
     clients.sort(key=attention_score)
 
@@ -206,7 +207,7 @@ async def index(request: Request, segment: str = "", sort: str = ""):
     })
 
 
-# ── Подготовка к встрече ─────────────────────────────────────────────────────
+# в”Ђв”Ђ РџРѕРґРіРѕС‚РѕРІРєР° Рє РІСЃС‚СЂРµС‡Рµ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/prep/{client_id}", response_class=HTMLResponse)
 async def prep_page(request: Request, client_id: int):
@@ -216,7 +217,7 @@ async def prep_page(request: Request, client_id: int):
 
     client = get_client(client_id)
     if not client:
-        raise HTTPException(404, "Клиент не найден")
+        raise HTTPException(404, "РљР»РёРµРЅС‚ РЅРµ РЅР°Р№РґРµРЅ")
 
     meetings = get_client_meetings(client_id, limit=5)
     open_tasks = get_client_tasks(client_id, "open")
@@ -238,7 +239,7 @@ async def prep_page(request: Request, client_id: int):
     })
 
 
-# ── Фолоуап ──────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ Р¤РѕР»РѕСѓР°Рї в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/followup/{client_id}", response_class=HTMLResponse)
 async def followup_page(request: Request, client_id: int):
@@ -275,10 +276,10 @@ async def followup_submit(
     mood: str = Form("neutral"),
     next_meeting: str = Form(""),
     send_tg: str = Form(""),
-    # Задачи AnyQuery — массивы
+    # Р—Р°РґР°С‡Рё AnyQuery вЂ” РјР°СЃСЃРёРІС‹
     aq_task_text: list[str] = Form(default=[]),
     aq_task_due: list[str] = Form(default=[]),
-    # Задачи клиента
+    # Р—Р°РґР°С‡Рё РєР»РёРµРЅС‚Р°
     cl_task_text: list[str] = Form(default=[]),
     cl_task_due: list[str] = Form(default=[]),
 ):
@@ -290,7 +291,7 @@ async def followup_submit(
     if not client:
         raise HTTPException(404)
 
-    # Создаём встречу
+    # РЎРѕР·РґР°С‘Рј РІСЃС‚СЂРµС‡Сѓ
     meeting_id = create_meeting(
         client_id=client_id,
         meeting_date=meeting_date,
@@ -300,7 +301,7 @@ async def followup_submit(
         next_meeting=next_meeting or None,
     )
 
-    # Задачи
+    # Р—Р°РґР°С‡Рё
     tasks = []
     for text, due in zip(aq_task_text, aq_task_due):
         if text.strip():
@@ -312,7 +313,7 @@ async def followup_submit(
     if tasks:
         create_tasks_bulk(meeting_id, client_id, tasks)
 
-    # Синхронизация с MerchRules (кредсы из профиля пользователя)
+    # РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СЃ MerchRules (РєСЂРµРґСЃС‹ РёР· РїСЂРѕС„РёР»СЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ)
     aq_tasks_list = [t for t in tasks if t["owner"] == "anyquery"]
     cl_tasks_list = [t for t in tasks if t["owner"] == "client"]
     mr_login, mr_password = get_user_mr_creds(user)
@@ -330,7 +331,7 @@ async def followup_submit(
         password=mr_password,
     )
 
-    # Синхронизация с Airtable (дата + дописать комментарий)
+    # РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СЃ Airtable (РґР°С‚Р° + РґРѕРїРёСЃР°С‚СЊ РєРѕРјРјРµРЅС‚Р°СЂРёР№)
     try:
         await sync_meeting_to_airtable(
             client_name=client["name"],
@@ -342,7 +343,7 @@ async def followup_submit(
     except Exception as exc:
         logging.warning("Airtable sync error (followup): %s", exc)
 
-    # Отправка в TG
+    # РћС‚РїСЂР°РІРєР° РІ TG
     tg_ok = False
     if send_tg and BOT_TOKEN and client.get("tg_chat_id"):
         msg = build_followup_message(
@@ -359,7 +360,7 @@ async def followup_submit(
         if tg_ok:
             mark_meeting_tg_sent(meeting_id)
 
-    # K.Talk уведомление (параллельно TG, в канал менеджера)
+    # K.Talk СѓРІРµРґРѕРјР»РµРЅРёРµ (РїР°СЂР°Р»Р»РµР»СЊРЅРѕ TG, РІ РєР°РЅР°Р» РјРµРЅРµРґР¶РµСЂР°)
     try:
         tg_id = get_tg_id(user)
         ktalk_url = None
@@ -383,7 +384,7 @@ async def followup_submit(
     return RedirectResponse(f"/prep/{client_id}?saved=1&tg={'ok' if tg_ok else 'skip'}", status_code=303)
 
 
-# ── QBR ───────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ QBR в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/qbr/{client_id}", response_class=HTMLResponse)
 async def qbr_page(request: Request, client_id: int):
@@ -395,11 +396,11 @@ async def qbr_page(request: Request, client_id: int):
     if not client:
         raise HTTPException(404)
 
-    # Берём встречи за последние 3 месяца для автозаполнения
+    # Р‘РµСЂС‘Рј РІСЃС‚СЂРµС‡Рё Р·Р° РїРѕСЃР»РµРґРЅРёРµ 3 РјРµСЃСЏС†Р° РґР»СЏ Р°РІС‚РѕР·Р°РїРѕР»РЅРµРЅРёСЏ
     meetings = get_client_meetings(client_id, limit=20)
     all_tasks = get_client_tasks(client_id, "open") + get_client_tasks(client_id, "done")
 
-    # Фильтруем задачи последних 90 дней
+    # Р¤РёР»СЊС‚СЂСѓРµРј Р·Р°РґР°С‡Рё РїРѕСЃР»РµРґРЅРёС… 90 РґРЅРµР№
     cutoff = (date.today() - timedelta(days=90)).isoformat()
     recent_tasks = [t for t in all_tasks if (t.get("due_date") or "9999") >= cutoff]
 
@@ -414,7 +415,7 @@ async def qbr_page(request: Request, client_id: int):
     })
 
 
-# ── Профиль менеджера ────────────────────────────────────────────────────────
+# в”Ђв”Ђ РџСЂРѕС„РёР»СЊ РјРµРЅРµРґР¶РµСЂР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request, saved: str = ""):
@@ -475,7 +476,7 @@ async def api_test_mr(request: Request):
     login    = (body.get("login") or "").strip()
     password = (body.get("password") or "").strip()
     if not login or not password:
-        return {"ok": False, "error": "Введи логин и пароль"}
+        return {"ok": False, "error": "Р’РІРµРґРё Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ"}
 
     import httpx as _httpx
     mr_url = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
@@ -490,12 +491,12 @@ async def api_test_mr(request: Request):
             email = data.get("email") or data.get("user", {}).get("email", "")
             return {"ok": True, "email": email}
         else:
-            return {"ok": False, "error": f"Ошибка {r.status_code}: {r.text[:100]}"}
+            return {"ok": False, "error": f"РћС€РёР±РєР° {r.status_code}: {r.text[:100]}"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
-# ── Настройки менеджера: мой список клиентов ─────────────────────────────────
+# в”Ђв”Ђ РќР°СЃС‚СЂРѕР№РєРё РјРµРЅРµРґР¶РµСЂР°: РјРѕР№ СЃРїРёСЃРѕРє РєР»РёРµРЅС‚РѕРІ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/settings/my-clients", response_class=HTMLResponse)
 async def my_clients_page(request: Request):
@@ -532,21 +533,21 @@ async def save_my_clients(request: Request):
     return {"ok": True, "count": len(client_ids)}
 
 
-# ── Импорт клиентов из Airtable CS ALL ───────────────────────────────────────
+# в”Ђв”Ђ РРјРїРѕСЂС‚ РєР»РёРµРЅС‚РѕРІ РёР· Airtable CS ALL в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/admin/import-airtable", response_class=JSONResponse)
 async def api_import_airtable(request: Request):
     """
-    Запускает импорт всех клиентов из Airtable CS ALL view.
-    Авто-определяет поля, upsert клиентов, привязывает к менеджерам.
-    Только для авторизованных пользователей.
+    Р—Р°РїСѓСЃРєР°РµС‚ РёРјРїРѕСЂС‚ РІСЃРµС… РєР»РёРµРЅС‚РѕРІ РёР· Airtable CS ALL view.
+    РђРІС‚Рѕ-РѕРїСЂРµРґРµР»СЏРµС‚ РїРѕР»СЏ, upsert РєР»РёРµРЅС‚РѕРІ, РїСЂРёРІСЏР·С‹РІР°РµС‚ Рє РјРµРЅРµРґР¶РµСЂР°Рј.
+    РўРѕР»СЊРєРѕ РґР»СЏ Р°РІС‚РѕСЂРёР·РѕРІР°РЅРЅС‹С… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.
     """
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
 
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
-    # Можно передать свой токен и view_id через body
+    # РњРѕР¶РЅРѕ РїРµСЂРµРґР°С‚СЊ СЃРІРѕР№ С‚РѕРєРµРЅ Рё view_id С‡РµСЂРµР· body
     token = body.get("token") if isinstance(body, dict) else None
     view_id = body.get("view_id") if isinstance(body, dict) else None
 
@@ -558,7 +559,7 @@ async def api_import_airtable(request: Request):
 
     try:
         result = await import_clients_from_airtable(**import_kwargs)
-        # unmatched_managers — set, нужно сериализовать
+        # unmatched_managers вЂ” set, РЅСѓР¶РЅРѕ СЃРµСЂРёР°Р»РёР·РѕРІР°С‚СЊ
         if isinstance(result.get("unmatched_managers"), set):
             result["unmatched_managers"] = list(result["unmatched_managers"])
         return result
@@ -566,16 +567,16 @@ async def api_import_airtable(request: Request):
         return {"ok": False, "error": str(exc)}
 
 
-# ── Webhook от Merchrules ─────────────────────────────────────────────────────
+# в”Ђв”Ђ Webhook РѕС‚ Merchrules в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/webhook/merchrules", response_class=JSONResponse)
 async def webhook_merchrules(request: Request):
     """
-    Принимает события от Merchrules (задачи, статусы, комментарии).
-    Секрет: заголовок X-MR-Secret или query ?secret=... должен совпадать с MR_WEBHOOK_SECRET.
-    Если секрет не задан — принимаем всё (не рекомендуется в проде).
+    РџСЂРёРЅРёРјР°РµС‚ СЃРѕР±С‹С‚РёСЏ РѕС‚ Merchrules (Р·Р°РґР°С‡Рё, СЃС‚Р°С‚СѓСЃС‹, РєРѕРјРјРµРЅС‚Р°СЂРёРё).
+    РЎРµРєСЂРµС‚: Р·Р°РіРѕР»РѕРІРѕРє X-MR-Secret РёР»Рё query ?secret=... РґРѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ СЃ MR_WEBHOOK_SECRET.
+    Р•СЃР»Рё СЃРµРєСЂРµС‚ РЅРµ Р·Р°РґР°РЅ вЂ” РїСЂРёРЅРёРјР°РµРј РІСЃС‘ (РЅРµ СЂРµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ РІ РїСЂРѕРґРµ).
 
-    Merchrules должен слать POST с JSON:
+    Merchrules РґРѕР»Р¶РµРЅ СЃР»Р°С‚СЊ POST СЃ JSON:
     {
       "event": "task.updated" | "task.created" | "task.done",
       "site_id": "1234",
@@ -605,7 +606,7 @@ async def webhook_merchrules(request: Request):
     if not event or not site_id:
         return {"ok": True, "note": "no action needed"}
 
-    # Находим клиента по site_id
+    # РќР°С…РѕРґРёРј РєР»РёРµРЅС‚Р° РїРѕ site_id
     try:
         from database import get_all_clients, update_task_status, get_all_tasks, create_tasks_bulk
         all_clients = get_all_clients()
@@ -622,7 +623,7 @@ async def webhook_merchrules(request: Request):
         client_id = matched_client["id"]
 
         if event in ("task.done", "task.completed"):
-            # Закрываем задачу в БД по совпадению заголовка
+            # Р—Р°РєСЂС‹РІР°РµРј Р·Р°РґР°С‡Сѓ РІ Р‘Р” РїРѕ СЃРѕРІРїР°РґРµРЅРёСЋ Р·Р°РіРѕР»РѕРІРєР°
             title = (task.get("title") or "").lower().strip()
             if title:
                 open_tasks = get_all_tasks("open")
@@ -632,7 +633,7 @@ async def webhook_merchrules(request: Request):
                         logging.info("MR webhook: closed task '%s' for client %s", t["text"], matched_client["name"])
 
         elif event == "task.created":
-            # Создаём задачу в AM Hub если её нет
+            # РЎРѕР·РґР°С‘Рј Р·Р°РґР°С‡Сѓ РІ AM Hub РµСЃР»Рё РµС‘ РЅРµС‚
             title = task.get("title", "").strip()
             if title:
                 existing = get_all_tasks()
@@ -655,11 +656,11 @@ async def webhook_merchrules(request: Request):
         return {"ok": False, "error": str(exc)}
 
 
-# ── K.Talk API ────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ K.Talk API в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/profile/test-ktalk", response_class=JSONResponse)
 async def api_test_ktalk(request: Request):
-    """Проверить K.Talk webhook подключение."""
+    """РџСЂРѕРІРµСЂРёС‚СЊ K.Talk webhook РїРѕРґРєР»СЋС‡РµРЅРёРµ."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
@@ -667,17 +668,17 @@ async def api_test_ktalk(request: Request):
     body = await request.json()
     webhook_url = body.get("webhook_url", "").strip()
     if not webhook_url:
-        return {"ok": False, "error": "Webhook URL не указан"}
+        return {"ok": False, "error": "Webhook URL РЅРµ СѓРєР°Р·Р°РЅ"}
 
     result = await test_ktalk_connection(webhook_url)
     return result
 
 
-# ── /hub — Командный центр ───────────────────────────────────────────────────
+# в”Ђв”Ђ /hub вЂ” РљРѕРјР°РЅРґРЅС‹Р№ С†РµРЅС‚СЂ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/hub", response_class=HTMLResponse)
 async def hub_page(request: Request):
-    """Единый Командный центр — статус всех инструментов, быстрые действия, лог активности."""
+    """Р•РґРёРЅС‹Р№ РљРѕРјР°РЅРґРЅС‹Р№ С†РµРЅС‚СЂ вЂ” СЃС‚Р°С‚СѓСЃ РІСЃРµС… РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ, Р±С‹СЃС‚СЂС‹Рµ РґРµР№СЃС‚РІРёСЏ, Р»РѕРі Р°РєС‚РёРІРЅРѕСЃС‚Рё."""
     user = get_user_or_redirect(request)
     if not user:
         return RedirectResponse("/login")
@@ -689,7 +690,7 @@ async def hub_page(request: Request):
         checkup_status, get_conn
     )
 
-    # Общая статистика
+    # РћР±С‰Р°СЏ СЃС‚Р°С‚РёСЃС‚РёРєР°
     all_clients  = get_all_clients()
     all_tasks    = get_all_tasks("open")
     managers     = get_all_manager_profiles()
@@ -699,7 +700,7 @@ async def hub_page(request: Request):
     warning = sum(1 for c in all_clients
                   if checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])["color"] == "yellow")
 
-    # Ближайшие встречи (planned_meeting в ближайшие 7 дней)
+    # Р‘Р»РёР¶Р°Р№С€РёРµ РІСЃС‚СЂРµС‡Рё (planned_meeting РІ Р±Р»РёР¶Р°Р№С€РёРµ 7 РґРЅРµР№)
     from datetime import date, timedelta
     today = date.today()
     upcoming = []
@@ -715,7 +716,7 @@ async def hub_page(request: Request):
                 pass
     upcoming.sort(key=lambda x: x["days_until"])
 
-    # Последняя активность (последние 10 встреч)
+    # РџРѕСЃР»РµРґРЅСЏСЏ Р°РєС‚РёРІРЅРѕСЃС‚СЊ (РїРѕСЃР»РµРґРЅРёРµ 10 РІСЃС‚СЂРµС‡)
     with get_conn() as conn:
         recent_meetings = conn.execute("""
             SELECT m.id, m.meeting_date, m.meeting_type, m.mood,
@@ -725,7 +726,7 @@ async def hub_page(request: Request):
             ORDER BY m.created_at DESC LIMIT 10
         """).fetchall()
 
-    # Статус инструментов
+    # РЎС‚Р°С‚СѓСЃ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ
     airtable_token = os.getenv("AIRTABLE_TOKEN", "")
     mr_login, mr_password = get_user_mr_creds(user)
     bot_token = BOT_TOKEN
@@ -736,54 +737,54 @@ async def hub_page(request: Request):
     tools_status = [
         {
             "name": "Airtable",
-            "icon": "📋",
+            "icon": "рџ“‹",
             "connected": bool(airtable_token),
-            "detail": "Авто-синхронизация клиентов каждый час" if airtable_token else "Токен не задан",
+            "detail": "РђРІС‚Рѕ-СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РєР»РёРµРЅС‚РѕРІ РєР°Р¶РґС‹Р№ С‡Р°СЃ" if airtable_token else "РўРѕРєРµРЅ РЅРµ Р·Р°РґР°РЅ",
             "url": "https://airtable.com/appEAS1rPKpevoIel",
             "action_url": None,
         },
         {
             "name": "Merchrules",
-            "icon": "🔗",
+            "icon": "рџ”—",
             "connected": bool(mr_login),
-            "detail": f"Аккаунт: {mr_login}" if mr_login else "Войди в Профиль и добавь кредсы",
+            "detail": f"РђРєРєР°СѓРЅС‚: {mr_login}" if mr_login else "Р’РѕР№РґРё РІ РџСЂРѕС„РёР»СЊ Рё РґРѕР±Р°РІСЊ РєСЂРµРґСЃС‹",
             "url": "https://merchrules.any-platform.ru",
             "action_url": "/profile",
         },
         {
             "name": "Telegram Bot",
-            "icon": "🤖",
+            "icon": "рџ¤–",
             "connected": bool(bot_token),
-            "detail": f"@{os.getenv('TG_BOT_USERNAME', '?')}" if bot_token else "TG_BOT_TOKEN не задан",
+            "detail": f"@{os.getenv('TG_BOT_USERNAME', '?')}" if bot_token else "TG_BOT_TOKEN РЅРµ Р·Р°РґР°РЅ",
             "url": f"https://t.me/{os.getenv('TG_BOT_USERNAME', '')}" if os.getenv("TG_BOT_USERNAME") else "#",
             "action_url": None,
         },
         {
             "name": "K.Talk",
-            "icon": "📹",
+            "icon": "рџ“№",
             "connected": bool(ktalk_url),
-            "detail": "Webhook настроен" if ktalk_url else "Webhook не настроен — добавь в профиле",
+            "detail": "Webhook РЅР°СЃС‚СЂРѕРµРЅ" if ktalk_url else "Webhook РЅРµ РЅР°СЃС‚СЂРѕРµРЅ вЂ” РґРѕР±Р°РІСЊ РІ РїСЂРѕС„РёР»Рµ",
             "url": "https://tbank.ktalk.ru/",
             "action_url": "/profile#ktalk",
         },
         {
             "name": "Google Calendar",
-            "icon": "📅",
-            "connected": True,  # Всегда — через URL-ссылки без OAuth
-            "detail": "Создание событий через умные ссылки (без OAuth)",
+            "icon": "рџ“…",
+            "connected": True,  # Р’СЃРµРіРґР° вЂ” С‡РµСЂРµР· URL-СЃСЃС‹Р»РєРё Р±РµР· OAuth
+            "detail": "РЎРѕР·РґР°РЅРёРµ СЃРѕР±С‹С‚РёР№ С‡РµСЂРµР· СѓРјРЅС‹Рµ СЃСЃС‹Р»РєРё (Р±РµР· OAuth)",
             "url": "https://calendar.google.com",
             "action_url": None,
         },
     ]
 
-    # Расписание планировщика
+    # Р Р°СЃРїРёСЃР°РЅРёРµ РїР»Р°РЅРёСЂРѕРІС‰РёРєР°
     scheduler_jobs = [
-        {"name": "Утренний план",       "schedule": "09:00 пн-пт",       "icon": "☀️"},
-        {"name": "Еженедельный дайджест","schedule": "пт 17:00",          "icon": "📊"},
-        {"name": "Синхронизация MR",    "schedule": "каждый час в :00",   "icon": "🔗"},
-        {"name": "Синхронизация Airtable","schedule": "каждый час в :30", "icon": "📋"},
-        {"name": "Напоминания о встречах","schedule": "каждые 30 мин",    "icon": "📆"},
-        {"name": "Авто-чекап задачи",   "schedule": "08:00 ежедневно",    "icon": "🔔"},
+        {"name": "РЈС‚СЂРµРЅРЅРёР№ РїР»Р°РЅ",       "schedule": "09:00 РїРЅ-РїС‚",       "icon": "вЂпёЏ"},
+        {"name": "Р•Р¶РµРЅРµРґРµР»СЊРЅС‹Р№ РґР°Р№РґР¶РµСЃС‚","schedule": "РїС‚ 17:00",          "icon": "рџ“Љ"},
+        {"name": "РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ MR",    "schedule": "РєР°Р¶РґС‹Р№ С‡Р°СЃ РІ :00",   "icon": "рџ”—"},
+        {"name": "РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ Airtable","schedule": "РєР°Р¶РґС‹Р№ С‡Р°СЃ РІ :30", "icon": "рџ“‹"},
+        {"name": "РќР°РїРѕРјРёРЅР°РЅРёСЏ Рѕ РІСЃС‚СЂРµС‡Р°С…","schedule": "РєР°Р¶РґС‹Рµ 30 РјРёРЅ",    "icon": "рџ“†"},
+        {"name": "РђРІС‚Рѕ-С‡РµРєР°Рї Р·Р°РґР°С‡Рё",   "schedule": "08:00 РµР¶РµРґРЅРµРІРЅРѕ",    "icon": "рџ””"},
     ]
 
     return templates.TemplateResponse("hub.html", {
@@ -802,51 +803,51 @@ async def hub_page(request: Request):
     })
 
 
-# ── Admin API: ручной запуск scheduler jobs ───────────────────────────────────
+# в”Ђв”Ђ Admin API: СЂСѓС‡РЅРѕР№ Р·Р°РїСѓСЃРє scheduler jobs в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/admin/sync-mr", response_class=JSONResponse)
 async def api_admin_sync_mr(request: Request):
-    """Ручной запуск синхронизации статусов из Merchrules."""
+    """Р СѓС‡РЅРѕР№ Р·Р°РїСѓСЃРє СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё СЃС‚Р°С‚СѓСЃРѕРІ РёР· Merchrules."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
     try:
         from scheduler import job_mr_status_sync
         await job_mr_status_sync()
-        return {"ok": True, "message": "Синхронизация MR запущена"}
+        return {"ok": True, "message": "РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ MR Р·Р°РїСѓС‰РµРЅР°"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
 @app.post("/api/admin/run-morning-plan", response_class=JSONResponse)
 async def api_admin_morning_plan(request: Request):
-    """Ручной запуск утреннего плана в TG."""
+    """Р СѓС‡РЅРѕР№ Р·Р°РїСѓСЃРє СѓС‚СЂРµРЅРЅРµРіРѕ РїР»Р°РЅР° РІ TG."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
     try:
         from scheduler import job_morning_plan
         await job_morning_plan()
-        return {"ok": True, "message": "Утренний план отправлен"}
+        return {"ok": True, "message": "РЈС‚СЂРµРЅРЅРёР№ РїР»Р°РЅ РѕС‚РїСЂР°РІР»РµРЅ"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
 @app.post("/api/admin/run-digest", response_class=JSONResponse)
 async def api_admin_run_digest(request: Request):
-    """Ручной запуск еженедельного дайджеста."""
+    """Р СѓС‡РЅРѕР№ Р·Р°РїСѓСЃРє РµР¶РµРЅРµРґРµР»СЊРЅРѕРіРѕ РґР°Р№РґР¶РµСЃС‚Р°."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
     try:
         from scheduler import job_weekly_digest
         await job_weekly_digest()
-        return {"ok": True, "message": "Дайджест отправлен"}
+        return {"ok": True, "message": "Р”Р°Р№РґР¶РµСЃС‚ РѕС‚РїСЂР°РІР»РµРЅ"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
-# ── API — обновить TG chat_id клиента ────────────────────────────────────────
+# в”Ђв”Ђ API вЂ” РѕР±РЅРѕРІРёС‚СЊ TG chat_id РєР»РёРµРЅС‚Р° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/client/{client_id}/tg")
 async def update_tg(request: Request, client_id: int, tg_chat_id: str = Form(...)):
@@ -860,7 +861,7 @@ async def update_tg(request: Request, client_id: int, tg_chat_id: str = Form(...
     return RedirectResponse(f"/prep/{client_id}", status_code=303)
 
 
-# ── API — закрыть задачу ──────────────────────────────────────────────────────
+# в”Ђв”Ђ API вЂ” Р·Р°РєСЂС‹С‚СЊ Р·Р°РґР°С‡Сѓ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/task/{task_id}/done")
 async def close_task(request: Request, task_id: int):
@@ -872,10 +873,10 @@ async def close_task(request: Request, task_id: int):
     return RedirectResponse(ref, status_code=303)
 
 
-# ── Top-50 — веб-страница ────────────────────────────────────────────────────
+# в”Ђв”Ђ Top-50 вЂ” РІРµР±-СЃС‚СЂР°РЅРёС†Р° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 def _load_metrics_for_month(year_month: str) -> Optional[dict]:
-    """Загружает сохранённые метрики из data/metrics_{year_month}.json."""
+    """Р—Р°РіСЂСѓР¶Р°РµС‚ СЃРѕС…СЂР°РЅС‘РЅРЅС‹Рµ РјРµС‚СЂРёРєРё РёР· data/metrics_{year_month}.json."""
     from pathlib import Path as _P
     import json as _json
     p = _P("data") / f"metrics_{year_month}.json"
@@ -893,8 +894,8 @@ async def top50_page(request: Request, mode: str = "weekly"):
     if not user:
         return RedirectResponse("/login")
 
-    month_name_ru = ["Январь","Февраль","Март","Апрель","Май","Июнь",
-                     "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
+    month_name_ru = ["РЇРЅРІР°СЂСЊ","Р¤РµРІСЂР°Р»СЊ","РњР°СЂС‚","РђРїСЂРµР»СЊ","РњР°Р№","РСЋРЅСЊ",
+                     "РСЋР»СЊ","РђРІРіСѓСЃС‚","РЎРµРЅС‚СЏР±СЂСЊ","РћРєС‚СЏР±СЂСЊ","РќРѕСЏР±СЂСЊ","Р”РµРєР°Р±СЂСЊ"]
     now = date.today()
     month_name = month_name_ru[now.month - 1]
     year_month = now.strftime("%Y-%m")
@@ -928,7 +929,7 @@ async def top50_page(request: Request, mode: str = "weekly"):
     })
 
 
-# ── API: загрузить файл метрик (CSV / XLSX) ───────────────────────────────────
+# в”Ђв”Ђ API: Р·Р°РіСЂСѓР·РёС‚СЊ С„Р°Р№Р» РјРµС‚СЂРёРє (CSV / XLSX) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/metrics/upload", response_class=JSONResponse)
 async def api_metrics_upload(request: Request):
@@ -943,7 +944,7 @@ async def api_metrics_upload(request: Request):
     form = await request.form()
     file: UploadFile = form.get("file")
     if not file:
-        return {"ok": False, "error": "Файл не найден"}
+        return {"ok": False, "error": "Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ"}
 
     filename = file.filename or "metrics"
     content = await file.read()
@@ -973,15 +974,15 @@ async def api_metrics_upload(request: Request):
                 headers = all_rows[0]
                 rows = [r for r in all_rows[1:] if any(c.strip() for c in r)]
         else:
-            return {"ok": False, "error": "Поддерживаются только CSV и XLSX"}
+            return {"ok": False, "error": "РџРѕРґРґРµСЂР¶РёРІР°СЋС‚СЃСЏ С‚РѕР»СЊРєРѕ CSV Рё XLSX"}
 
     except Exception as exc:
-        return {"ok": False, "error": f"Ошибка разбора файла: {exc}"}
+        return {"ok": False, "error": f"РћС€РёР±РєР° СЂР°Р·Р±РѕСЂР° С„Р°Р№Р»Р°: {exc}"}
 
     if not headers or not rows:
-        return {"ok": False, "error": "Файл пустой или не содержит данных"}
+        return {"ok": False, "error": "Р¤Р°Р№Р» РїСѓСЃС‚РѕР№ РёР»Рё РЅРµ СЃРѕРґРµСЂР¶РёС‚ РґР°РЅРЅС‹С…"}
 
-    # Вычисляем KPI-карточки: числовые колонки → сумма / среднее
+    # Р’С‹С‡РёСЃР»СЏРµРј KPI-РєР°СЂС‚РѕС‡РєРё: С‡РёСЃР»РѕРІС‹Рµ РєРѕР»РѕРЅРєРё в†’ СЃСѓРјРјР° / СЃСЂРµРґРЅРµРµ
     kpis = []
     for i, h in enumerate(headers):
         vals = []
@@ -991,22 +992,22 @@ async def api_metrics_upload(request: Request):
                     vals.append(float(str(r[i]).replace(",", ".").replace(" ", "")))
                 except Exception:
                     pass
-        if vals and len(vals) >= len(rows) * 0.5:  # >50% числовые
+        if vals and len(vals) >= len(rows) * 0.5:  # >50% С‡РёСЃР»РѕРІС‹Рµ
             total = sum(vals)
             avg = total / len(vals)
             label_lower = h.lower()
-            if any(w in label_lower for w in ("gmv","выручка","оборот","сумма","руб")):
-                kpis.append({"label": h, "value": f"{total:,.0f} ₽".replace(",", " ")})
-            elif any(w in label_lower for w in ("заказ","order","cnt","кол-во","количество")):
+            if any(w in label_lower for w in ("gmv","РІС‹СЂСѓС‡РєР°","РѕР±РѕСЂРѕС‚","СЃСѓРјРјР°","СЂСѓР±")):
+                kpis.append({"label": h, "value": f"{total:,.0f} в‚Ѕ".replace(",", " ")})
+            elif any(w in label_lower for w in ("Р·Р°РєР°Р·","order","cnt","РєРѕР»-РІРѕ","РєРѕР»РёС‡РµСЃС‚РІРѕ")):
                 kpis.append({"label": h, "value": f"{int(total):,}".replace(",", " ")})
-            elif "конвер" in label_lower or "%" in h:
+            elif "РєРѕРЅРІРµСЂ" in label_lower or "%" in h:
                 kpis.append({"label": h, "value": f"{avg:.1f}%"})
             elif len(kpis) < 6:
                 kpis.append({"label": h, "value": f"{total:,.0f}".replace(",", " ")})
         if len(kpis) >= 6:
             break
 
-    # Сохраняем
+    # РЎРѕС…СЂР°РЅСЏРµРј
     now = date.today()
     year_month = now.strftime("%Y-%m")
     _P("data").mkdir(exist_ok=True)
@@ -1022,7 +1023,7 @@ async def api_metrics_upload(request: Request):
     return {"ok": True, "rows": len(rows), "cols": len(headers)}
 
 
-# ── API — статистика дашборда ────────────────────────────────────────────────
+# в”Ђв”Ђ API вЂ” СЃС‚Р°С‚РёСЃС‚РёРєР° РґР°С€Р±РѕСЂРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/api/stats", response_class=JSONResponse)
 async def api_stats(request: Request):
@@ -1045,17 +1046,17 @@ async def api_stats(request: Request):
     }
 
 
-# ── Telegram Webhook ─────────────────────────────────────────────────────────
+# в”Ђв”Ђ Telegram Webhook в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/tg/webhook")
 async def tg_webhook(request: Request):
-    """Принимает Updates от Telegram."""
+    """РџСЂРёРЅРёРјР°РµС‚ Updates РѕС‚ Telegram."""
     try:
         update = await request.json()
     except Exception:
         raise HTTPException(400, "Bad JSON")
 
-    # Передаём update в обработчик бота
+    # РџРµСЂРµРґР°С‘Рј update РІ РѕР±СЂР°Р±РѕС‚С‡РёРє Р±РѕС‚Р°
     async def _get_top50():
         all_clients = get_all_clients()
         my_client_names = [c["name"] for c in all_clients]
@@ -1077,7 +1078,7 @@ async def tg_webhook(request: Request):
     return {"ok": True}
 
 
-# ── Поиск клиентов (для быстрой навигации) ──────────────────────────────────
+# в”Ђв”Ђ РџРѕРёСЃРє РєР»РёРµРЅС‚РѕРІ (РґР»СЏ Р±С‹СЃС‚СЂРѕР№ РЅР°РІРёРіР°С†РёРё) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/api/search", response_class=JSONResponse)
 async def api_search(request: Request, q: str = ""):
@@ -1096,7 +1097,7 @@ async def api_search(request: Request, q: str = ""):
     return matches
 
 
-# ── Сегодня — ежедневный план ────────────────────────────────────────────────
+# в”Ђв”Ђ РЎРµРіРѕРґРЅСЏ вЂ” РµР¶РµРґРЅРµРІРЅС‹Р№ РїР»Р°РЅ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/today", response_class=HTMLResponse)
 async def today_page(request: Request):
@@ -1118,7 +1119,7 @@ async def today_page(request: Request):
         "request": request,
         "user": user,
         "today": date.today().isoformat(),
-        "weekday": ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"][date.today().weekday()],
+        "weekday": ["РџРѕРЅРµРґРµР»СЊРЅРёРє","Р’С‚РѕСЂРЅРёРє","РЎСЂРµРґР°","Р§РµС‚РІРµСЂРі","РџСЏС‚РЅРёС†Р°","РЎСѓР±Р±РѕС‚Р°","Р’РѕСЃРєСЂРµСЃРµРЅСЊРµ"][date.today().weekday()],
         "overdue": overdue,
         "warning": warning[:5],
         "urgent_tasks": overview["urgent_tasks"],
@@ -1126,7 +1127,7 @@ async def today_page(request: Request):
     })
 
 
-# ── Все задачи ───────────────────────────────────────────────────────────────
+# в”Ђв”Ђ Р’СЃРµ Р·Р°РґР°С‡Рё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/tasks", response_class=HTMLResponse)
 async def tasks_page(request: Request, status: str = "open", owner: str = "", segment: str = ""):
@@ -1153,7 +1154,7 @@ async def tasks_page(request: Request, status: str = "open", owner: str = "", se
     })
 
 
-# ── Роадмап — создание bulk-задач ────────────────────────────────────────────
+# в”Ђв”Ђ Р РѕР°РґРјР°Рї вЂ” СЃРѕР·РґР°РЅРёРµ bulk-Р·Р°РґР°С‡ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/roadmap", response_class=HTMLResponse)
 async def roadmap_page(request: Request, client_id: int = 0):
@@ -1161,7 +1162,7 @@ async def roadmap_page(request: Request, client_id: int = 0):
     if not user:
         return RedirectResponse("/login")
 
-    # Если открыли из карточки клиента — подставляем site_ids
+    # Р•СЃР»Рё РѕС‚РєСЂС‹Р»Рё РёР· РєР°СЂС‚РѕС‡РєРё РєР»РёРµРЅС‚Р° вЂ” РїРѕРґСЃС‚Р°РІР»СЏРµРј site_ids
     prefill_site_ids = ""
     prefill_client_name = ""
     if client_id:
@@ -1183,11 +1184,11 @@ async def roadmap_page(request: Request, client_id: int = 0):
     })
 
 
-# ── Merchrules Sync API ───────────────────────────────────────────────────────
+# в”Ђв”Ђ Merchrules Sync API в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/mr/sync", response_class=JSONResponse)
 async def mr_sync(request: Request):
-    """Принудительно сбрасывает кэш и заново тянет данные из Merchrules."""
+    """РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ СЃР±СЂР°СЃС‹РІР°РµС‚ РєСЌС€ Рё Р·Р°РЅРѕРІРѕ С‚СЏРЅРµС‚ РґР°РЅРЅС‹Рµ РёР· Merchrules."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
@@ -1201,8 +1202,8 @@ async def mr_sync(request: Request):
 @app.get("/api/mr/clients", response_class=JSONResponse)
 async def mr_clients(request: Request):
     """
-    Возвращает агрегированные MR-данные по клиентам менеджера.
-    Формат: { client_id: { open_tasks, blocked_tasks, overdue_tasks, last_meeting } }
+    Р’РѕР·РІСЂР°С‰Р°РµС‚ Р°РіСЂРµРіРёСЂРѕРІР°РЅРЅС‹Рµ MR-РґР°РЅРЅС‹Рµ РїРѕ РєР»РёРµРЅС‚Р°Рј РјРµРЅРµРґР¶РµСЂР°.
+    Р¤РѕСЂРјР°С‚: { client_id: { open_tasks, blocked_tasks, overdue_tasks, last_meeting } }
     """
     user = get_user_or_redirect(request)
     if not user:
@@ -1210,7 +1211,7 @@ async def mr_clients(request: Request):
 
     mr_login, mr_password = get_user_mr_creds(user)
     if not mr_login:
-        return {}  # нет кредов — отдаём пустой ответ
+        return {}  # РЅРµС‚ РєСЂРµРґРѕРІ вЂ” РѕС‚РґР°С‘Рј РїСѓСЃС‚РѕР№ РѕС‚РІРµС‚
 
     clients = get_all_clients_for_manager(get_tg_id(user))
     mr_data = await sync_clients_from_merchrules(clients, login=mr_login, password=mr_password)
@@ -1224,7 +1225,7 @@ async def mr_clients(request: Request):
     return result
 
 
-# ── AI: обработка транскрипта ────────────────────────────────────────────────
+# в”Ђв”Ђ AI: РѕР±СЂР°Р±РѕС‚РєР° С‚СЂР°РЅСЃРєСЂРёРїС‚Р° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/ai/process-transcript", response_class=JSONResponse)
 async def api_ai_process(request: Request):
@@ -1238,13 +1239,13 @@ async def api_ai_process(request: Request):
     meeting_date = (body.get("meeting_date") or date.today().isoformat())
 
     if not transcript:
-        return {"error": "Транскрипт пустой"}
+        return {"error": "РўСЂР°РЅСЃРєСЂРёРїС‚ РїСѓСЃС‚РѕР№"}
 
     result = await ai_process_transcript(transcript, client_name, meeting_date)
     return result
 
 
-# ── AI: загрузить задачи в Merchrules + сохранить встречу ────────────────────
+# в”Ђв”Ђ AI: Р·Р°РіСЂСѓР·РёС‚СЊ Р·Р°РґР°С‡Рё РІ Merchrules + СЃРѕС…СЂР°РЅРёС‚СЊ РІСЃС‚СЂРµС‡Сѓ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/ai/upload-tasks", response_class=JSONResponse)
 async def api_ai_upload(request: Request):
@@ -1261,11 +1262,11 @@ async def api_ai_upload(request: Request):
     meeting_date = body.get("meeting_date", date.today().isoformat())
 
     if not tasks:
-        return {"ok": False, "error": "Нет задач для загрузки"}
+        return {"ok": False, "error": "РќРµС‚ Р·Р°РґР°С‡ РґР»СЏ Р·Р°РіСЂСѓР·РєРё"}
     if not site_ids_raw:
-        return {"ok": False, "error": "Нет site_id"}
+        return {"ok": False, "error": "РќРµС‚ site_id"}
 
-    # Сохраняем встречу в БД
+    # РЎРѕС…СЂР°РЅСЏРµРј РІСЃС‚СЂРµС‡Сѓ РІ Р‘Р”
     meeting_id = None
     if client_id:
         client = get_client(client_id)
@@ -1278,7 +1279,7 @@ async def api_ai_upload(request: Request):
                 mood=mood,
                 next_meeting=None,
             )
-            # Сохраняем задачи в БД
+            # РЎРѕС…СЂР°РЅСЏРµРј Р·Р°РґР°С‡Рё РІ Р‘Р”
             db_tasks = []
             for t in tasks:
                 owner = "anyquery" if t.get("assignee") != "partner" else "client"
@@ -1286,7 +1287,7 @@ async def api_ai_upload(request: Request):
             if db_tasks:
                 create_tasks_bulk(meeting_id, client_id, db_tasks)
 
-    # Пробуем загрузить в Merchrules через кредсы текущего пользователя
+    # РџСЂРѕР±СѓРµРј Р·Р°РіСЂСѓР·РёС‚СЊ РІ Merchrules С‡РµСЂРµР· РєСЂРµРґСЃС‹ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
     import re as _re
     site_ids = [s.strip() for s in _re.split(r"[,\s]+", site_ids_raw) if s.strip()]
 
@@ -1299,13 +1300,13 @@ async def api_ai_upload(request: Request):
     if mr_login and mr_password:
         import httpx as _httpx
         async with _httpx.AsyncClient(timeout=30) as hx:
-            # Авторизуемся
+            # РђРІС‚РѕСЂРёР·СѓРµРјСЃСЏ
             auth_resp = await hx.post(
                 f"{merchrules_url}/backend-v2/auth/login",
                 json={"username": mr_login, "password": mr_password}
             )
             if auth_resp.status_code != 200:
-                return {"ok": False, "error": f"Не удалось авторизоваться в Merchrules: {auth_resp.status_code}"}
+                return {"ok": False, "error": f"РќРµ СѓРґР°Р»РѕСЃСЊ Р°РІС‚РѕСЂРёР·РѕРІР°С‚СЊСЃСЏ РІ Merchrules: {auth_resp.status_code}"}
 
             auth_token = auth_resp.json().get("token") or auth_resp.json().get("access_token", "")
             headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
@@ -1313,7 +1314,7 @@ async def api_ai_upload(request: Request):
             for site_id in site_ids:
                 for task in tasks:
                     if task.get("assignee") == "partner":
-                        continue  # Не загружаем задачи партнёра
+                        continue  # РќРµ Р·Р°РіСЂСѓР¶Р°РµРј Р·Р°РґР°С‡Рё РїР°СЂС‚РЅС‘СЂР°
                     try:
                         csv_row = (
                             f"title,description,status,priority,team,task_type,assignee,product,link,due_date\n"
@@ -1338,18 +1339,18 @@ async def api_ai_upload(request: Request):
                         errors.append({"site_id": site_id, "task": task.get("title", "?"),
                                        "error": str(exc)})
     else:
-        # Нет кредов Merchrules — только сохраняем в БД
+        # РќРµС‚ РєСЂРµРґРѕРІ Merchrules вЂ” С‚РѕР»СЊРєРѕ СЃРѕС…СЂР°РЅСЏРµРј РІ Р‘Р”
         return {
             "ok": True,
             "uploaded": [],
             "errors": [],
             "note": (
-                "Встреча и задачи сохранены в AM Hub. "
-                "Для загрузки в Merchrules укажи логин и пароль в разделе Профиль."
+                "Р’СЃС‚СЂРµС‡Р° Рё Р·Р°РґР°С‡Рё СЃРѕС…СЂР°РЅРµРЅС‹ РІ AM Hub. "
+                "Р”Р»СЏ Р·Р°РіСЂСѓР·РєРё РІ Merchrules СѓРєР°Р¶Рё Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ РІ СЂР°Р·РґРµР»Рµ РџСЂРѕС„РёР»СЊ."
             ),
         }
 
-    # Сбрасываем MR-кэш после загрузки задач
+    # РЎР±СЂР°СЃС‹РІР°РµРј MR-РєСЌС€ РїРѕСЃР»Рµ Р·Р°РіСЂСѓР·РєРё Р·Р°РґР°С‡
     if uploaded:
         mr_invalidate()
 
@@ -1364,11 +1365,11 @@ async def api_ai_upload(request: Request):
     }
 
 
-# ── AI-ассистент: фолоуап, подготовка, риски ───────────────────────────────────
+# в”Ђв”Ђ AI-Р°СЃСЃРёСЃС‚РµРЅС‚: С„РѕР»РѕСѓР°Рї, РїРѕРґРіРѕС‚РѕРІРєР°, СЂРёСЃРєРё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/api/client/{client_id}/prep-brief", response_class=JSONResponse)
 async def api_prep_brief(request: Request, client_id: int):
-    """Получить brieferror для подготовки к встрече."""
+    """РџРѕР»СѓС‡РёС‚СЊ brieferror РґР»СЏ РїРѕРґРіРѕС‚РѕРІРєРё Рє РІСЃС‚СЂРµС‡Рµ."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
@@ -1390,7 +1391,7 @@ async def api_prep_brief(request: Request, client_id: int):
 
 @app.get("/api/client/{client_id}/smart-followup", response_class=JSONResponse)
 async def api_smart_followup(request: Request, client_id: int):
-    """Получить рекомендуемый текст фолоуапа."""
+    """РџРѕР»СѓС‡РёС‚СЊ СЂРµРєРѕРјРµРЅРґСѓРµРјС‹Р№ С‚РµРєСЃС‚ С„РѕР»РѕСѓР°РїР°."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
@@ -1412,7 +1413,7 @@ async def api_smart_followup(request: Request, client_id: int):
 
 @app.get("/api/client/{client_id}/risk", response_class=JSONResponse)
 async def api_risk_detection(request: Request, client_id: int):
-    """Получить анализ рисков по аккаунту."""
+    """РџРѕР»СѓС‡РёС‚СЊ Р°РЅР°Р»РёР· СЂРёСЃРєРѕРІ РїРѕ Р°РєРєР°СѓРЅС‚Сѓ."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
@@ -1434,7 +1435,7 @@ async def api_risk_detection(request: Request, client_id: int):
 
 @app.get("/api/client/{client_id}/metrics", response_class=JSONResponse)
 async def api_client_metrics(request: Request, client_id: int):
-    """Получить метрики клиента из Merchrules."""
+    """РџРѕР»СѓС‡РёС‚СЊ РјРµС‚СЂРёРєРё РєР»РёРµРЅС‚Р° РёР· Merchrules."""
     user = get_user_or_redirect(request)
     if not user:
         raise HTTPException(401)
@@ -1449,7 +1450,7 @@ async def api_client_metrics(request: Request, client_id: int):
         if not site_ids:
             return {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": "no_site_ids"}
 
-        # Берём первый site_id
+        # Р‘РµСЂС‘Рј РїРµСЂРІС‹Р№ site_id
         first_site = site_ids.split(",")[0].strip()
         mr_login, mr_password = get_user_mr_creds(user)
         metrics = await get_client_metrics(first_site, mr_login, mr_password)
@@ -1458,39 +1459,39 @@ async def api_client_metrics(request: Request, client_id: int):
         logging.error("client_metrics error: %s", exc)
         return {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": str(exc)[:100]}
 
-# ── Чеклист встречи ───────────────────────────────────────────────────────────
+# в”Ђв”Ђ Р§РµРєР»РёСЃС‚ РІСЃС‚СЂРµС‡Рё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
-# AI-подсказки по сегменту для страницы чеклиста
+# AI-РїРѕРґСЃРєР°Р·РєРё РїРѕ СЃРµРіРјРµРЅС‚Сѓ РґР»СЏ СЃС‚СЂР°РЅРёС†С‹ С‡РµРєР»РёСЃС‚Р°
 AI_HINTS_BY_SEGMENT = {
     "ENT": [
-        "Как изменился GMV за период?",
-        "Есть ли планы на расширение?",
-        "Кто принимает решения о бюджете?",
-        "Как оцениваете ROI от AnyQuery?",
-        "Что мешает масштабироваться?",
+        "РљР°Рє РёР·РјРµРЅРёР»СЃСЏ GMV Р·Р° РїРµСЂРёРѕРґ?",
+        "Р•СЃС‚СЊ Р»Рё РїР»Р°РЅС‹ РЅР° СЂР°СЃС€РёСЂРµРЅРёРµ?",
+        "РљС‚Рѕ РїСЂРёРЅРёРјР°РµС‚ СЂРµС€РµРЅРёСЏ Рѕ Р±СЋРґР¶РµС‚Рµ?",
+        "РљР°Рє РѕС†РµРЅРёРІР°РµС‚Рµ ROI РѕС‚ AnyQuery?",
+        "Р§С‚Рѕ РјРµС€Р°РµС‚ РјР°СЃС€С‚Р°Р±РёСЂРѕРІР°С‚СЊСЃСЏ?",
     ],
     "SME+": [
-        "Какие метрики важнее всего для вас?",
-        "Что из роадмапа самое приоритетное?",
-        "Есть ли конкуренты которых отслеживаете?",
-        "Как ваша команда использует дашборд?",
+        "РљР°РєРёРµ РјРµС‚СЂРёРєРё РІР°Р¶РЅРµРµ РІСЃРµРіРѕ РґР»СЏ РІР°СЃ?",
+        "Р§С‚Рѕ РёР· СЂРѕР°РґРјР°РїР° СЃР°РјРѕРµ РїСЂРёРѕСЂРёС‚РµС‚РЅРѕРµ?",
+        "Р•СЃС‚СЊ Р»Рё РєРѕРЅРєСѓСЂРµРЅС‚С‹ РєРѕС‚РѕСЂС‹С… РѕС‚СЃР»РµР¶РёРІР°РµС‚Рµ?",
+        "РљР°Рє РІР°С€Р° РєРѕРјР°РЅРґР° РёСЃРїРѕР»СЊР·СѓРµС‚ РґР°С€Р±РѕСЂРґ?",
     ],
     "SME-": [
-        "Какие функции используете чаще всего?",
-        "Что было бы полезно добавить?",
-        "Как оцениваете работу поиска у вас?",
-        "Есть ли технические блокеры?",
+        "РљР°РєРёРµ С„СѓРЅРєС†РёРё РёСЃРїРѕР»СЊР·СѓРµС‚Рµ С‡Р°С‰Рµ РІСЃРµРіРѕ?",
+        "Р§С‚Рѕ Р±С‹Р»Рѕ Р±С‹ РїРѕР»РµР·РЅРѕ РґРѕР±Р°РІРёС‚СЊ?",
+        "РљР°Рє РѕС†РµРЅРёРІР°РµС‚Рµ СЂР°Р±РѕС‚Сѓ РїРѕРёСЃРєР° Сѓ РІР°СЃ?",
+        "Р•СЃС‚СЊ Р»Рё С‚РµС…РЅРёС‡РµСЃРєРёРµ Р±Р»РѕРєРµСЂС‹?",
     ],
     "SMB": [
-        "Как идут продажи в целом?",
-        "Влияет ли поиск на конверсию заметно?",
-        "Планируете ли рост ассортимента?",
-        "Нужна ли помощь с настройкой?",
+        "РљР°Рє РёРґСѓС‚ РїСЂРѕРґР°Р¶Рё РІ С†РµР»РѕРј?",
+        "Р’Р»РёСЏРµС‚ Р»Рё РїРѕРёСЃРє РЅР° РєРѕРЅРІРµСЂСЃРёСЋ Р·Р°РјРµС‚РЅРѕ?",
+        "РџР»Р°РЅРёСЂСѓРµС‚Рµ Р»Рё СЂРѕСЃС‚ Р°СЃСЃРѕСЂС‚РёРјРµРЅС‚Р°?",
+        "РќСѓР¶РЅР° Р»Рё РїРѕРјРѕС‰СЊ СЃ РЅР°СЃС‚СЂРѕР№РєРѕР№?",
     ],
     "SS": [
-        "Всё ли работает как ожидалось?",
-        "Есть ли вопросы по функционалу?",
-        "Планируете ли переход на более высокий план?",
+        "Р’СЃС‘ Р»Рё СЂР°Р±РѕС‚Р°РµС‚ РєР°Рє РѕР¶РёРґР°Р»РѕСЃСЊ?",
+        "Р•СЃС‚СЊ Р»Рё РІРѕРїСЂРѕСЃС‹ РїРѕ С„СѓРЅРєС†РёРѕРЅР°Р»Сѓ?",
+        "РџР»Р°РЅРёСЂСѓРµС‚Рµ Р»Рё РїРµСЂРµС…РѕРґ РЅР° Р±РѕР»РµРµ РІС‹СЃРѕРєРёР№ РїР»Р°РЅ?",
     ],
 }
 
@@ -1572,7 +1573,7 @@ async def api_checklist_clear(request: Request):
     return {"ok": True}
 
 
-# ── Внутренние задачи ─────────────────────────────────────────────────────────
+# в”Ђв”Ђ Р’РЅСѓС‚СЂРµРЅРЅРёРµ Р·Р°РґР°С‡Рё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/internal-tasks", response_class=HTMLResponse)
 async def internal_tasks_page(request: Request, status: str = "open"):
@@ -1609,7 +1610,7 @@ async def api_create_internal_task(request: Request):
     return {"ok": True, "task_id": task_id}
 
 
-# ── Аналитика ─────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ РђРЅР°Р»РёС‚РёРєР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
@@ -1627,7 +1628,7 @@ async def analytics_page(request: Request):
         conn.row_factory = sqlite3.Row
         today = date.today()
 
-        # Встречи по неделям за последние 12 недель
+        # Р’СЃС‚СЂРµС‡Рё РїРѕ РЅРµРґРµР»СЏРј Р·Р° РїРѕСЃР»РµРґРЅРёРµ 12 РЅРµРґРµР»СЊ
         meetings_weekly = conn.execute("""
             SELECT strftime('%Y-W%W', meeting_date) as week,
                    COUNT(*) as cnt,
@@ -1638,12 +1639,12 @@ async def analytics_page(request: Request):
             GROUP BY week ORDER BY week
         """).fetchall()
 
-        # Задачи по статусам
+        # Р—Р°РґР°С‡Рё РїРѕ СЃС‚Р°С‚СѓСЃР°Рј
         task_stats = conn.execute("""
             SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status
         """).fetchall()
 
-        # Задачи созданные vs закрытые за последние 4 недели
+        # Р—Р°РґР°С‡Рё СЃРѕР·РґР°РЅРЅС‹Рµ vs Р·Р°РєСЂС‹С‚С‹Рµ Р·Р° РїРѕСЃР»РµРґРЅРёРµ 4 РЅРµРґРµР»Рё
         task_flow = conn.execute("""
             SELECT strftime('%Y-W%W', created_at) as week,
                    COUNT(*) as created,
@@ -1653,7 +1654,7 @@ async def analytics_page(request: Request):
             GROUP BY week ORDER BY week
         """).fetchall()
 
-        # Чекапы: соответствие ритму по сегментам
+        # Р§РµРєР°РїС‹: СЃРѕРѕС‚РІРµС‚СЃС‚РІРёРµ СЂРёС‚РјСѓ РїРѕ СЃРµРіРјРµРЅС‚Р°Рј
         clients_data = conn.execute("""
             SELECT c.segment,
                    COUNT(*) as total,
@@ -1667,7 +1668,7 @@ async def analytics_page(request: Request):
             GROUP BY c.segment ORDER BY c.segment
         """).fetchall()
 
-        # Топ клиентов по кол-ву встреч за квартал
+        # РўРѕРї РєР»РёРµРЅС‚РѕРІ РїРѕ РєРѕР»-РІСѓ РІСЃС‚СЂРµС‡ Р·Р° РєРІР°СЂС‚Р°Р»
         top_active = conn.execute("""
             SELECT c.name, c.segment, COUNT(m.id) as meetings
             FROM clients c
@@ -1696,7 +1697,7 @@ async def analytics_page(request: Request):
     })
 
 
-# ── API: обновить оценку времени задачи ──────────────────────────────────────
+# в”Ђв”Ђ API: РѕР±РЅРѕРІРёС‚СЊ РѕС†РµРЅРєСѓ РІСЂРµРјРµРЅРё Р·Р°РґР°С‡Рё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/task/{task_id}/hours", response_class=JSONResponse)
 async def api_task_hours(request: Request, task_id: int):
@@ -1712,7 +1713,7 @@ async def api_task_hours(request: Request, task_id: int):
     return {"ok": True}
 
 
-# ── QBR Календарь ────────────────────────────────────────────────────────────
+# в”Ђв”Ђ QBR РљР°Р»РµРЅРґР°СЂСЊ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.get("/qbr-calendar", response_class=HTMLResponse)
 async def qbr_calendar_page(request: Request):
@@ -1723,7 +1724,7 @@ async def qbr_calendar_page(request: Request):
     qbr_meetings = get_qbr_calendar()
     upcoming = get_upcoming_meetings(days_ahead=30)
 
-    # Клиенты ENT без QBR за последние 90 дней
+    # РљР»РёРµРЅС‚С‹ ENT Р±РµР· QBR Р·Р° РїРѕСЃР»РµРґРЅРёРµ 90 РґРЅРµР№
     all_clients = get_all_clients()
     now_iso = date.today().isoformat()
     cutoff90 = (date.today() - timedelta(days=90)).isoformat()
@@ -1745,7 +1746,7 @@ async def qbr_calendar_page(request: Request):
     })
 
 
-# ── API: быстро закрыть чекап (с prep страницы) ──────────────────────────────
+# в”Ђв”Ђ API: Р±С‹СЃС‚СЂРѕ Р·Р°РєСЂС‹С‚СЊ С‡РµРєР°Рї (СЃ prep СЃС‚СЂР°РЅРёС†С‹) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/client/{client_id}/checkup-done", response_class=JSONResponse)
 async def api_checkup_done(request: Request, client_id: int):
@@ -1764,7 +1765,7 @@ async def api_checkup_done(request: Request, client_id: int):
     next_meeting  = body.get("next_meeting") or None
     meeting_date  = date.today().isoformat()
 
-    # Сохраняем встречу
+    # РЎРѕС…СЂР°РЅСЏРµРј РІСЃС‚СЂРµС‡Сѓ
     meeting_id = create_meeting(
         client_id=client_id,
         meeting_date=meeting_date,
@@ -1774,15 +1775,15 @@ async def api_checkup_done(request: Request, client_id: int):
         next_meeting=next_meeting,
     )
 
-    # Оценка встречи
+    # РћС†РµРЅРєР° РІСЃС‚СЂРµС‡Рё
     if rating and 1 <= rating <= 5:
         set_checkup_rating(meeting_id, rating)
 
-    # Планируем следующую встречу
+    # РџР»Р°РЅРёСЂСѓРµРј СЃР»РµРґСѓСЋС‰СѓСЋ РІСЃС‚СЂРµС‡Сѓ
     if next_meeting:
         set_planned_meeting(client_id, next_meeting)
 
-    # Синхронизация с Merchrules (кредсы из профиля)
+    # РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СЃ Merchrules (РєСЂРµРґСЃС‹ РёР· РїСЂРѕС„РёР»СЏ)
     mr_ok = False
     try:
         mr_login, mr_password = get_user_mr_creds(user)
@@ -1803,7 +1804,7 @@ async def api_checkup_done(request: Request, client_id: int):
     except Exception as exc:
         logging.warning("MR sync error (checkup-done): %s", exc)
 
-    # Синхронизация с Airtable
+    # РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СЃ Airtable
     airtable_ok = False
     try:
         at_result = await sync_meeting_to_airtable(
@@ -1825,7 +1826,7 @@ async def api_checkup_done(request: Request, client_id: int):
     }
 
 
-# ── API: запланировать дату следующей встречи ─────────────────────────────────
+# в”Ђв”Ђ API: Р·Р°РїР»Р°РЅРёСЂРѕРІР°С‚СЊ РґР°С‚Сѓ СЃР»РµРґСѓСЋС‰РµР№ РІСЃС‚СЂРµС‡Рё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/client/{client_id}/planned-meeting", response_class=JSONResponse)
 async def api_planned_meeting(request: Request, client_id: int):
@@ -1834,12 +1835,12 @@ async def api_planned_meeting(request: Request, client_id: int):
         raise HTTPException(401)
 
     body = await request.json()
-    planned_date = body.get("date") or None  # None — очищаем
+    planned_date = body.get("date") or None  # None вЂ” РѕС‡РёС‰Р°РµРј
     set_planned_meeting(client_id, planned_date)
     return {"ok": True}
 
 
-# ── API: пробросить задачи клиента в Merchrules ───────────────────────────────
+# в”Ђв”Ђ API: РїСЂРѕР±СЂРѕСЃРёС‚СЊ Р·Р°РґР°С‡Рё РєР»РёРµРЅС‚Р° РІ Merchrules в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/client/{client_id}/push-tasks", response_class=JSONResponse)
 async def api_push_tasks(request: Request, client_id: int):
@@ -1853,16 +1854,16 @@ async def api_push_tasks(request: Request, client_id: int):
 
     site_ids_raw = client.get("site_ids", "") or ""
     if not site_ids_raw.strip():
-        return {"ok": False, "error": "У клиента нет site_ids"}
+        return {"ok": False, "error": "РЈ РєР»РёРµРЅС‚Р° РЅРµС‚ site_ids"}
 
     open_tasks = get_client_tasks(client_id, "open")
     aq_tasks = [t for t in open_tasks if t["owner"] == "anyquery" and not t.get("is_internal")]
     if not aq_tasks:
-        return {"ok": True, "count": 0, "note": "Нет открытых задач AnyQuery"}
+        return {"ok": True, "count": 0, "note": "РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… Р·Р°РґР°С‡ AnyQuery"}
 
     mr_login, mr_password = get_user_mr_creds(user)
     if not mr_login or not mr_password:
-        return {"ok": False, "error": "Укажи логин и пароль Merchrules в разделе Профиль"}
+        return {"ok": False, "error": "РЈРєР°Р¶Рё Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ Merchrules РІ СЂР°Р·РґРµР»Рµ РџСЂРѕС„РёР»СЊ"}
 
     import httpx as _httpx, re as _re, io as _io
     site_ids = [s.strip() for s in _re.split(r"[,\s]+", site_ids_raw) if s.strip()]
@@ -1907,7 +1908,7 @@ async def api_push_tasks(request: Request, client_id: int):
     return {"ok": True, "count": uploaded, "errors": errors}
 
 
-# ── API: добавить комментарий к встрече ───────────────────────────────────────
+# в”Ђв”Ђ API: РґРѕР±Р°РІРёС‚СЊ РєРѕРјРјРµРЅС‚Р°СЂРёР№ Рє РІСЃС‚СЂРµС‡Рµ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @app.post("/api/meeting/{meeting_id}/comment", response_class=JSONResponse)
 async def api_meeting_comment(request: Request, meeting_id: int):
@@ -1918,13 +1919,13 @@ async def api_meeting_comment(request: Request, meeting_id: int):
     body = await request.json()
     comment = (body.get("comment") or "").strip()
     if not comment:
-        return {"ok": False, "error": "Пустой комментарий"}
+        return {"ok": False, "error": "РџСѓСЃС‚РѕР№ РєРѕРјРјРµРЅС‚Р°СЂРёР№"}
 
     meeting = get_meeting(meeting_id)
     if not meeting:
         raise HTTPException(404)
 
-    # Дописываем к существующему summary
+    # Р”РѕРїРёСЃС‹РІР°РµРј Рє СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРјСѓ summary
     existing = meeting.get("summary") or ""
     timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
     new_summary = (existing + f"\n\n[{timestamp}] {comment}").strip()
