@@ -1,86 +1,42 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>AM Hub | Live</title>
+    <title>AM Hub</title>
     <link rel="stylesheet" href="/static/css/main.css">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="dark-mode">
-    <div id="cmd-palette" class="hidden"><div class="cmd-overlay"></div><div class="cmd-box"><div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Search clients..."></div><div class="cmd-results" id="cmd-results"></div></div></div>
-
-    <nav class="left-dock"><div class="dock-logo">AQ</div><a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a><div class="dock-spacer"></div><div class="dock-avatar">DM</div></nav>
-
+    <div id="cmd-palette" class="hidden"><div class="cmd-overlay"></div><div class="cmd-box"><input type="text" placeholder="Search..."></div></div>
+    <nav class="left-dock"><div class="dock-logo">AQ</div><a href="#" class="dock-item active"><i data-lucide="layout-grid"></i></a><div class="dock-spacer"></div><div class="dock-avatar">DM</div></nav>
     <main class="main-content">
-        <header class="top-bar">
-            <div class="search-trigger" onclick="toggleCmdPalette()"><i data-lucide="search"></i><span>Search clients...</span><span class="kbd-shortcut">Ctrl K</span></div>
-            <button class="btn-primary btn-sm" onclick="loadData()">🔄 Refresh Data</button>
-        </header>
-
+        <header class="top-bar"><div class="search-trigger" onclick="toggleCmd()"><i data-lucide="search"></i><span>Search...</span><span class="kbd-shortcut">Ctrl K</span></div></header>
         <div class="bento-grid">
-            <!-- Stats -->
-            <div class="card stat-card"><h3>Total Clients</h3><div class="stat-value" id="stat-total">-</div></div>
-            <div class="card stat-card danger"><h3>Critical Health</h3><div class="stat-value" id="stat-critical">-</div></div>
-            <div class="card stat-card warning"><h3>Open Tasks</h3><div class="stat-value" id="stat-tasks">-</div></div>
-
-            <!-- Clients List -->
-            <div class="card span-2"><div class="card-header"><h3>Recent Clients</h3></div><ul class="task-list" id="clients-list"><li>Loading...</li></ul></div>
-            
-            <!-- Action -->
-            <div class="card"><h3>Quick Action</h3><input type="text" id="new-task" placeholder="New task..." style="width:100%; padding:8px; margin:10px 0; background:#1e293b; border:1px solid #334155; color:white; border-radius:6px;"><button class="btn-primary btn-sm" style="width:100%" onclick="addTask()">Create Task</button></div>
+            <div class="card span-2"><h3>Clients</h3><div id="client-list" style="margin-top:1rem">Loading...</div></div>
+            <div class="card"><h3>Stats</h3><p id="stats">Loading...</p></div>
+            <div class="card span-2"><h3>Tasks</h3><button onclick="createTask()" class="btn-primary btn-sm" style="margin-top:10px">+ Create Task</button><ul id="task-list" class="task-list"></ul></div>
         </div>
     </main>
-
     <script>
         lucide.createIcons();
-        
-        // Load Data from API
+        function toggleCmd() { document.getElementById('cmd-palette').classList.toggle('hidden'); }
         async function loadData() {
             try {
-                const stats = await fetch('/api/stats').then(r => r.json());
-                document.getElementById('stat-total').innerText = stats.total_clients;
-                document.getElementById('stat-critical').innerText = stats.critical_health;
-                document.getElementById('stat-tasks').innerText = stats.open_tasks;
-
-                const clients = await fetch('/api/clients').then(r => r.json());
-                const list = document.getElementById('clients-list');
-                list.innerHTML = '';
-                clients.forEach(c => {
-                    const li = document.createElement('li');
-                    li.className = 'task-item';
-                    li.innerHTML = \<span>\</span><span class="badge \">\</span><span style="margin-left:auto; font-size:0.8em; color:#94a3b8">Health: \</span>\;
-                    list.appendChild(li);
-                });
+                const res = await fetch('/api/clients');
+                const data = await res.json();
+                document.getElementById('client-list').innerHTML = data.map(c => <div><b></b> () - Health: </div>).join('') || 'No clients';
                 
-                // Update search results
-                const resBox = document.getElementById('cmd-results');
-                resBox.innerHTML = clients.map(c => \<div class="cmd-item" onclick="alert('Open \')">\</div>\).join('');
-            } catch(e) { console.error(e); }
+                const statsRes = await fetch('/health');
+                document.getElementById('stats').innerText = 'System OK';
+            } catch(e) { document.getElementById('client-list').innerText = 'Error loading data'; }
         }
-
-        async function addTask() {
-            const title = document.getElementById('new-task').value;
-            if(!title) return;
-            await fetch('/api/tasks?title=' + encodeURIComponent(title), {method: 'POST'});
-            document.getElementById('new-task').value = '';
-            loadData();
+        async function createTask() {
+            await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title: 'New Task'})});
             alert('Task created!');
+            loadData();
         }
-
-        // Cmd+K Logic
-        window.toggleCmdPalette = () => {
-            const p = document.getElementById('cmd-palette');
-            p.classList.toggle('hidden');
-            if (!p.classList.contains('hidden')) document.getElementById('cmd-input').focus();
-        };
-        document.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); toggleCmdPalette(); }
-            if (e.key === 'Escape') document.getElementById('cmd-palette').classList.add('hidden');
-        });
-        document.querySelector('.cmd-overlay').addEventListener('click', toggleCmdPalette);
-
-        // Init
-        loadData();
+        window.onload = loadData;
+        document.addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();toggleCmd();} });
     </script>
 </body>
 </html>
