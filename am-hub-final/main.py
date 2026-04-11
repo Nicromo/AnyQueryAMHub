@@ -1941,3 +1941,4 @@ async def api_meeting_comment(request: Request, meeting_id: int):
 @app.get("/workspace")
 async def get_workspace():
     return templates.TemplateResponse("workspace.html", {"request": request})
+
