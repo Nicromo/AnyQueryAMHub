@@ -1,117 +1,102 @@
 ﻿import os
-import httpx
+import random
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
-from database import engine, get_db, Base, init_db, Client, Task, Meeting
+from database import engine, get_db, init_db
+from models import Client, Task, Meeting
+from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
 
-# --- Конфигурация ---
-templates = Jinja2Templates(directory="templates")
-AIRTABLE_TOKEN = os.environ.get("AIRTABLE_TOKEN", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appEAS1rPKpevoIel")
-AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn")
+# --- Имитация внешних сервисов для демо (если нет ключей) ---
+def fetch_airtable_clients():
+    # Здесь был бы реальный запрос к Airtable API
+    # Возвращаем фейковые данные для демонстрации, если база пуста
+    return [
+        {"name": "12Storeez", "domain": "12storeez.com", "segment": "ENT", "health": 62, "trend": "drop", "tickets": 3},
+        {"name": "Lamoda", "domain": "lamoda.ru", "segment": "ENT", "health": 85, "trend": "growth", "tickets": 0},
+        {"name": "Tinkoff", "domain": "tinkoff.ru", "segment": "ENT", "health": 92, "trend": "stable", "tickets": 1},
+        {"name": "MVideo", "domain": "mvideo.ru", "segment": "SME", "health": 45, "trend": "drop", "tickets": 5},
+        {"name": "Detmir", "domain": "detmir.ru", "segment": "SME", "health": 78, "trend": "growth", "tickets": 2},
+    ]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if engine:
-        init_db()
-        # Синхронизация с Airtable при старте, если есть токен
-        if AIRTABLE_TOKEN:
-            await sync_airtable_startup()
-        print("✅ Database initialized & Airtable synced")
-    else:
-        print("⚠️ No DATABASE_URL found. Running in demo mode.")
+    init_db()
+    db = next(get_db())
+    # Заполняем базу клиентами, если она пуста
+    if db.query(Client).count() == 0:
+        print("🌱 Seeding database with demo clients...")
+        data = fetch_airtable_clients()
+        for item in data:
+            client = Client(
+                name=item["name"], 
+                domain=item["domain"], 
+                segment=item["segment"],
+                health_score=item["health"],
+                revenue_trend=item["trend"],
+                open_tickets=item["tickets"],
+                last_checkup=datetime.now() - timedelta(days=random.randint(1, 60))
+            )
+            db.add(client)
+            
+            # Добавим пару задач
+            db.add(Task(client_id=client.id, title=f"Проверить падение ROAS у {client.name}", priority="high", status="todo"))
+            if item["segment"] == "ENT":
+                db.add(Task(client_id=client.id, title=f"Подготовить QBR для {client.name}", priority="medium", status="in_progress"))
+                
+        db.commit()
+        print("✅ Database seeded successfully!")
     yield
 
 app = FastAPI(lifespan=lifespan, title="AM Hub")
+templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# --- Helper: Sync Airtable ---
-async def sync_airtable_startup():
-    if not AIRTABLE_TOKEN: return
-    async with httpx.AsyncClient() as client:
-        headers = {"Authorization": f"Bearer {AIRTABLE_TOKEN}"}
-        url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}"
-        try:
-            resp = await client.get(url, headers=headers, params={"maxRecords": 100}) # Лимит для старта
-            resp.raise_for_status()
-            data = resp.json().get("records", [])
-            
-            db = next(get_db())
-            for record in data:
-                fields = record.get("fields", {})
-                name = fields.get("Account") or fields.get("Название аккаунта", "Unknown")
-                # Простая логика: если нет такого клиента, создаем
-                if not db.query(Client).filter(Client.name == name).first():
-                    client_obj = Client(
-                        name=name,
-                        segment=fields.get("Segment", "SMB"),
-                        health_score=75.0, # Дефолт
-                        last_checkup=datetime.now() - timedelta(days=10)
-                    )
-                    db.add(client_obj)
-            db.commit()
-            print(f"✅ Imported {len(data)} clients from Airtable")
-        except Exception as e:
-            print(f"❌ Airtable sync error: {e}")
-
-# --- Routes ---
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     return templates.TemplateResponse("workspace.html", {"request": request})
 
-@app.get("/health")
-async def health():
-    return {"status": "ok", "db": "connected" if engine else "disconnected"}
+@app.get("/workspace", response_class=HTMLResponse)
+async def workspace(request: Request):
+    return templates.TemplateResponse("workspace.html", {"request": request})
 
-@app.get("/api/stats")
-async def get_stats(db: Session = Depends(get_db)):
-    if not engine: return {"clients": 0, "tasks": 0, "meetings": 0}
-    return {
-        "clients": db.query(Client).count(),
-        "tasks": db.query(Task).count(),
-        "meetings": db.query(Meeting).count()
-    }
+# --- API ENDPOINTS ---
 
 @app.get("/api/clients")
-async def get_clients(db: Session = Depends(get_db)):
-    if not engine: return []
-    clients = db.query(Client).order_by(desc(Client.health_score)).limit(20).all()
+def get_clients(db: Session = Depends(get_db)):
+    clients = db.query(Client).all()
     return [
         {
-            "id": c.id, "name": c.name, "segment": c.segment, 
-            "health": c.health_score, "last_checkup": c.last_checkup.isoformat() if c.last_checkup else None
+            "id": c.id, "name": c.name, "domain": c.domain, "segment": c.segment,
+            "health_score": c.health_score, "revenue_trend": c.revenue_trend,
+            "open_tickets": c.open_tickets, "last_checkup": c.last_checkup.isoformat() if c.last_checkup else None
         } for c in clients
     ]
 
 @app.get("/api/tasks")
-async def get_tasks(db: Session = Depends(get_db)):
-    if not engine: return []
-    tasks = db.query(Task).filter(Task.status != "done").order_by(desc(Task.priority)).limit(10).all()
+def get_tasks(db: Session = Depends(get_db)):
+    tasks = db.query(Task).filter(Task.status != "done").limit(10).all()
     return [
         {"id": t.id, "title": t.title, "priority": t.priority, "status": t.status} for t in tasks
     ]
 
 @app.post("/api/tasks")
-async def create_task(task: dict, db: Session = Depends(get_db)):
-    if not engine: return {"error": "No DB"}
-    new_task = Task(**task)
+def create_task(title: str, priority: str = "medium", db: Session = Depends(get_db)):
+    new_task = Task(title=title, priority=priority, status="todo")
     db.add(new_task)
     db.commit()
-    db.refresh(new_task)
-    return {"id": new_task.id, "status": "created"}
+    return {"status": "ok", "id": new_task.id}
 
-@app.get("/api/client/{client_id}")
-async def get_client_details(client_id: int, db: Session = Depends(get_db)):
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client: raise HTTPException(status_code=404, detail="Client not found")
-    return {
-        "id": client.id, "name": client.name, "domain": client.domain, 
-        "health": client.health_score, "segment": client.segment
-    }
+@app.get("/api/stats")
+def get_stats(db: Session = Depends(get_db)):
+    total_clients = db.query(Client).count()
+    critical_health = db.query(Client).filter(Client.health_score < 50).count()
+    total_tasks = db.query(Task).filter(Task.status != "done").count()
+    return {"total_clients": total_clients, "critical_health": critical_health, "total_tasks": total_tasks}
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "db": "connected"}

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -20,7 +20,9 @@
     <nav class="left-dock">
         <div class="dock-logo">AQ</div>
         <a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a>
+        <a href="#" class="dock-item"><i data-lucide="users"></i></a>
         <div class="dock-spacer"></div>
+        <button onclick="refreshData()" class="dock-item" title="Refresh"><i data-lucide="refresh-cw"></i></button>
         <div class="dock-avatar">DM</div>
     </nav>
 
@@ -28,17 +30,18 @@
     <main class="main-content">
         <header class="top-bar">
             <div class="search-trigger" onclick="toggleCmdPalette()">
-                <i data-lucide="search"></i><span>Search...</span><span class="kbd-shortcut">Ctrl K</span>
+                <i data-lucide="search"></i><span>Search or command...</span><span class="kbd-shortcut">Ctrl K</span>
             </div>
-            <button class="btn-primary btn-sm" onclick="loadData()">🔄 Refresh</button>
+            <div class="user-menu"><span>Dimaa</span></div>
         </header>
 
         <div class="bento-grid">
             <!-- Hero Card: Active Client (Dynamic) -->
             <div class="card hero-card span-2">
-                <div class="card-header"><h3>Active Focus</h3></div>
+                <div class="card-header"><h3>Active Focus</h3><button class="btn-icon" onclick="refreshData()"><i data-lucide="refresh-cw"></i></button></div>
                 <div id="hero-content" class="hero-content">
-                    <div class="skeleton-line"></div><div class="skeleton-line short"></div>
+                    <div class="skeleton-line" style="width: 60%"></div>
+                    <div class="skeleton-line" style="width: 40%"></div>
                 </div>
             </div>
 
@@ -47,27 +50,45 @@
                 <div class="card-header"><h3>Overview</h3></div>
                 <div id="stats-content" class="stats-grid">
                     <div class="stat-item"><span class="label">Clients</span><span class="value" id="stat-clients">-</span></div>
+                    <div class="stat-item"><span class="label">Critical</span><span class="value danger" id="stat-critical">-</span></div>
                     <div class="stat-item"><span class="label">Tasks</span><span class="value" id="stat-tasks">-</span></div>
+                </div>
+            </div>
+
+            <!-- AI Insights -->
+            <div class="card ai-card">
+                <div class="card-header"><h3><i data-lucide="sparkles"></i> AI Insights</h3></div>
+                <div class="ai-content">
+                    <div class="ai-alert"><i data-lucide="alert-triangle"></i><div><strong>Anomaly Detected</strong><p>ROAS drop in 2 accounts.</p></div></div>
+                    <button class="btn-primary btn-sm" onclick="alert('Brief generated!')">Generate Brief</button>
                 </div>
             </div>
 
             <!-- Tasks List (Dynamic) -->
             <div class="card tasks-card span-2">
-                <div class="card-header"><h3>Prioritized Tasks</h3><button class="btn-primary btn-sm" onclick="createRandomTask()">+ Add</button></div>
-                <ul id="task-list" class="task-list">
-                    <li class="skeleton-line"></li><li class="skeleton-line"></li>
+                <div class="card-header"><h3>Prioritized Tasks</h3><button class="btn-primary btn-sm" onclick="addDemoTask()">+ Quick Add</button></div>
+                <ul class="task-list" id="task-list">
+                    <li class="skeleton-line" style="width: 100%"></li>
+                    <li class="skeleton-line" style="width: 90%"></li>
                 </ul>
             </div>
             
-            <!-- AI Insight -->
-            <div class="card ai-card span-2">
-                <div class="card-header"><h3><i data-lucide="sparkles"></i> AI Insight</h3></div>
-                <p id="ai-text" class="ai-text">Analyzing data...</p>
+            <!-- Clients List Preview -->
+            <div class="card clients-card span-4">
+                <div class="card-header"><h3>All Clients</h3></div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead><tr><th>Name</th><th>Segment</th><th>Health</th><th>Tickets</th><th>Trend</th></tr></thead>
+                        <tbody id="clients-table-body">
+                            <!-- Data injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </main>
 
     <script src="/static/js/app.js"></script>
-    <script>lucide.createIcons(); loadData();</script>
+    <script>lucide.createIcons();</script>
 </body>
 </html>
