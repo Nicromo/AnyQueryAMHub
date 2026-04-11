@@ -1,34 +1,40 @@
-﻿from fastapi import FastAPI, Request, Depends
+﻿import os
+from fastapi import FastAPI, Request, Depends
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
-from database import get_db, Base
-from database import engine
-import os
+from fastapi.responses import HTMLResponse
+from database import engine, get_db, Base, init_db
+from contextlib import asynccontextmanager
 
-# Создание таблиц БД
-Base.metadata.create_all(bind=engine)
-
+# Шаблоны и статика
+templates = Jinja2Templates(directory="templates")
 app = FastAPI(title="AM Hub")
 
-# Подключение шаблонов и статики
-templates = Jinja2Templates(directory="templates")
+# Монтируем статику
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Инициализация БД при старте
+    init_db()
+    print("✅ Database initialized successfully")
+    yield
+
+app = FastAPI(lifespan=lifespan, title="AM Hub")
+
+@app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("workspace.html", {"request": request})
 
-@app.get("/workspace")
+@app.get("/workspace", response_class=HTMLResponse)
 async def get_workspace(request: Request):
     return templates.TemplateResponse("workspace.html", {"request": request})
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "db": "connected"}
+    return {"status": "ok", "message": "AM Hub is running"}
 
+# Запуск только если файл запущен напрямую (для локальной отладки)
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
+    uvicorn.run(app, host="0.0.0.0", port=8000)
