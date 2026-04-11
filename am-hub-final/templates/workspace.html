@@ -2,151 +2,23 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AM Hub | Command Center</title>
     <link rel="stylesheet" href="/static/css/main.css">
-    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="dark-mode">
-    <!-- Command Palette Overlay -->
     <div id="cmd-palette" class="hidden">
         <div class="cmd-overlay"></div>
         <div class="cmd-box">
-            <div class="cmd-input-wrapper">
-                <i data-lucide="search"></i>
-                <input type="text" id="cmd-input" placeholder="Type a command or search..." autocomplete="off">
-            </div>
-            <div class="cmd-results" id="cmd-results">
-                <div class="cmd-item"><span class="cmd-icon"><i data-lucide="home"></i></span> <span>Home Dashboard</span> <span class="cmd-shortcut">G H</span></div>
-                <div class="cmd-item"><span class="cmd-icon"><i data-lucide="users"></i></span> <span>Clients</span> <span class="cmd-shortcut">G C</span></div>
-                <div class="cmd-item"><span class="cmd-icon"><i data-lucide="check-square"></i></span> <span>Tasks</span> <span class="cmd-shortcut">G T</span></div>
-                <div class="cmd-item"><span class="cmd-icon"><i data-lucide="moon"></i></span> <span>Toggle Theme</span> <span class="cmd-shortcut">T</span></div>
-            </div>
+            <input type="text" placeholder="Type command... (Ctrl+K)">
         </div>
     </div>
-
-    <!-- Left Dock -->
-    <nav class="left-dock">
-        <div class="dock-logo">AQ</div>
-        <a href="/" class="dock-item active" title="Home"><i data-lucide="layout-grid"></i></a>
-        <a href="/clients" class="dock-item" title="Clients"><i data-lucide="users"></i></a>
-        <a href="/tasks" class="dock-item" title="Tasks"><i data-lucide="check-square"></i></a>
-        <div class="dock-spacer"></div>
-        <button id="theme-btn" class="dock-item" title="Toggle Theme"><i data-lucide="moon"></i></button>
-        <div class="dock-avatar">DM</div>
-    </nav>
-
-    <!-- Main Content -->
+    <nav class="left-dock"><div class="dock-logo">AQ</div></nav>
     <main class="main-content">
-        <!-- Top Bar -->
-        <header class="top-bar">
-            <div class="search-trigger" onclick="toggleCmdPalette()">
-                <i data-lucide="search"></i>
-                <span>Search or type a command...</span>
-                <span class="kbd-shortcut">Ctrl K</span>
-            </div>
-            <div class="user-menu">
-                <span>Dimaa</span>
-                <i data-lucide="chevron-down"></i>
-            </div>
-        </header>
-
-        <!-- Bento Grid Workspace -->
+        <header class="top-bar"><h1>AM Hub OS</h1></header>
         <div class="bento-grid">
-            <!-- Hero Card: Active Client -->
-            <div class="card hero-card span-2">
-                <div class="card-header">
-                    <h3>Active Focus</h3>
-                    <button class="btn-icon"><i data-lucide="more-horizontal"></i></button>
-                </div>
-                <div class="hero-content">
-                    <div class="client-info">
-                        <div class="client-avatar">12</div>
-                        <div>
-                            <h2>12Storeez</h2>
-                            <p class="domain">12storeez.com</p>
-                        </div>
-                    </div>
-                    <div class="health-score critical">
-                        <div class="score-value">62</div>
-                        <div class="score-label">Health Score</div>
-                    </div>
-                    <div class="quick-stats">
-                        <div class="stat"><span class="label">Revenue</span><span class="value">+12%</span></div>
-                        <div class="stat"><span class="label">Tickets</span><span class="value danger">3 Open</span></div>
-                        <div class="stat"><span class="label">Last Contact</span><span class="value">2d ago</span></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- AI Copilot -->
-            <div class="card ai-card">
-                <div class="card-header">
-                    <h3><i data-lucide="sparkles" class="icon-purple"></i> AI Insights</h3>
-                </div>
-                <div class="ai-content">
-                    <div class="ai-alert">
-                        <i data-lucide="alert-triangle"></i>
-                        <div>
-                            <strong>ROAS Drop Detected</strong>
-                            <p>ROAS fell below 2.0 threshold. Suggest checking recent campaigns.</p>
-                        </div>
-                    </div>
-                    <button class="btn-primary btn-sm" onclick="alert('Generating brief...')">Generate Brief</button>
-                </div>
-            </div>
-
-            <!-- Tasks List -->
-            <div class="card tasks-card span-2">
-                <div class="card-header">
-                    <h3>Prioritized Tasks</h3>
-                    <button class="btn-primary btn-sm">+ New Task</button>
-                </div>
-                <ul class="task-list">
-                    <li class="task-item priority-high">
-                        <input type="checkbox">
-                        <span>Resolve critical ticket #402 (Search Bug)</span>
-                        <span class="badge danger">High</span>
-                    </li>
-                    <li class="task-item">
-                        <input type="checkbox">
-                        <span>Prepare QBR for 12Storeez</span>
-                        <span class="badge warning">Due Tomorrow</span>
-                    </li>
-                    <li class="task-item">
-                        <input type="checkbox">
-                        <span>Sync with Merchrules API</span>
-                        <span class="badge success">Done</span>
-                    </li>
-                </ul>
-            </div>
-
-            <!-- Timeline -->
-            <div class="card timeline-card">
-                <div class="card-header">
-                    <h3>Recent Activity</h3>
-                </div>
-                <div class="timeline">
-                    <div class="timeline-item">
-                        <div class="timeline-dot"></div>
-                        <div class="timeline-content">
-                            <small>10:42 AM</small>
-                            <p>Meeting with 12Storeez completed</p>
-                        </div>
-                    </div>
-                    <div class="timeline-item">
-                        <div class="timeline-dot"></div>
-                        <div class="timeline-content">
-                            <small>Yesterday</small>
-                            <p>New task created: Audit Feeds</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div class="card hero-card"><h2>Welcome Back</h2><p>Interface loaded successfully.</p></div>
         </div>
     </main>
-
     <script src="/static/js/app.js"></script>
-    <script>lucide.createIcons();</script>
 </body>
 </html>
