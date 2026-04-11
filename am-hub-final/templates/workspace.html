@@ -7,50 +7,97 @@
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="dark-mode">
+    <!-- Command Palette -->
     <div id="cmd-palette" class="hidden">
         <div class="cmd-overlay"></div>
         <div class="cmd-box">
-            <div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Type command... (Ctrl+K)"></div>
-            <div class="cmd-results"><div class="cmd-item">🏠 Home</div><div class="cmd-item">👥 Clients</div><div class="cmd-item">✅ Tasks</div></div>
+            <div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Search clients, tasks..."></div>
+            <div class="cmd-results" id="cmd-results">
+                <div class="cmd-item" onclick="location.href='/'"><span>🏠 Dashboard</span></div>
+                <div class="cmd-item"><span>👥 Clients</span></div>
+                <div class="cmd-item"><span>✅ Tasks</span></div>
+            </div>
         </div>
     </div>
+
+    <!-- Left Dock -->
     <nav class="left-dock">
         <div class="dock-logo">AQ</div>
-        <a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a>
-        <a href="#" class="dock-item"><i data-lucide="users"></i></a>
+        <a href="/" class="dock-item active" title="Home"><i data-lucide="layout-grid"></i></a>
+        <a href="#" class="dock-item" title="Clients"><i data-lucide="users"></i></a>
+        <a href="#" class="dock-item" title="Tasks"><i data-lucide="check-square"></i></a>
         <div class="dock-spacer"></div>
         <div class="dock-avatar">DM</div>
     </nav>
+
+    <!-- Main Content -->
     <main class="main-content">
         <header class="top-bar">
             <div class="search-trigger" onclick="toggleCmdPalette()">
                 <i data-lucide="search"></i>
-                <span>Search or type a command...</span>
+                <span>Search or type command...</span>
                 <span class="kbd-shortcut">Ctrl K</span>
             </div>
+            <div class="user-menu"><span>Dimaa</span></div>
         </header>
+
         <div class="bento-grid">
+            <!-- Alerts Section -->
+            {% if alerts %}
+            <div class="card alert-card span-4">
+                {% for alert in alerts %}
+                <div class="alert-item {{ alert.type }}">
+                    <i data-lucide="{% if alert.type == 'critical' %}alert-triangle{% else %}info{% endif %}"></i>
+                    <span>{{ alert.msg }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Hero: Active Clients -->
             <div class="card hero-card span-2">
-                <h3>Active Focus</h3>
-                <div class="hero-content">
-                    <h2>12Storeez</h2>
-                    <p class="domain">12storeez.com</p>
-                    <div class="health-score critical">62 <span style="font-size:0.5em">Health</span></div>
+                <div class="card-header"><h3>🔍 Focus Accounts</h3></div>
+                <div class="client-list">
+                    {% for client in clients %}
+                    <div class="client-row">
+                        <div class="client-name">{{ client.name }}</div>
+                        <div class="client-metrics">
+                            <span class="badge {% if client.health < 60 %}danger{% elif client.health < 80 %}warning{% else %}success{% endif %}">
+                                Health: {{ client.health }}
+                            </span>
+                            <span>Rev: {{ client.revenue }}</span>
+                            <span class="danger">🔥 {{ client.tickets }} tickets</span>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
+
+            <!-- AI Insights -->
             <div class="card ai-card">
-                <h3>✨ AI Insights</h3>
-                <div class="ai-alert">⚠️ ROAS Drop Detected</div>
+                <div class="card-header"><h3>✨ AI Copilot</h3></div>
+                <div class="ai-content">
+                    <p>Based on recent data, <strong>12Storeez</strong> needs attention.</p>
+                    <button class="btn-primary btn-sm" onclick="alert('Generating brief...')">Generate Brief</button>
+                </div>
             </div>
+
+            <!-- Tasks -->
             <div class="card tasks-card span-2">
-                <h3>Prioritized Tasks</h3>
+                <div class="card-header"><h3>📋 Priority Tasks</h3></div>
                 <ul class="task-list">
-                    <li class="task-item">✅ Resolve ticket #402</li>
-                    <li class="task-item">⬜ Prepare QBR</li>
+                    {% for task in tasks %}
+                    <li class="task-item">
+                        <input type="checkbox">
+                        <span>{{ task.title }}</span>
+                        <span class="badge {% if task.priority == 'High' %}danger{% else %}warning{% endif %}">{{ task.priority }}</span>
+                    </li>
+                    {% endfor %}
                 </ul>
             </div>
         </div>
     </main>
+
     <script src="/static/js/app.js"></script>
     <script>lucide.createIcons();</script>
 </body>
