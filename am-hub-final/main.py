@@ -37,7 +37,8 @@ from merchrules_sync import (
     sync_clients_from_merchrules, get_client_mr_data, invalidate_cache as mr_invalidate,
     get_client_full_data, get_client_full_data_for_user, invalidate_user_cache,
 )
-from airtable_sync import sync_meeting_to_airtable, import_clients_from_airtable
+from airtable_sync import sync_meeting_to_airtable, import_clients_from_airtable, get_qbr_calendar_from_airtable
+from pre_call_brief import generate_pre_call_brief, format_brief_for_telegram
 from database import (
     set_planned_meeting, set_checkup_rating, get_qbr_calendar, get_upcoming_meetings,
     save_mr_credentials, get_mr_credentials,
@@ -231,6 +232,107 @@ async def index(request: Request, segment: str = "", sort: str = "", manager: st
     })
 
 
+@app.get("/prep/{client_id}/brief", response_class=JSONResponse)
+async def generate_brief_api(request: Request, client_id: int):
+    """Генерирует Pre-Call Brief для клиента."""
+    user = get_user_or_redirect(request)
+    if not user:
+        raise HTTPException(401, "Unauthorized")
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404, "Клиент не найден")
+
+    site_id = client.get("site_ids", "").split(",")[0].strip()
+    if not site_id:
+        return {"error": "Site ID не указан"}
+
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    creds = get_mr_credentials(tg_id) if tg_id else None
+    
+    mr_login = creds["mr_login"] if creds else os.getenv("MERCHRULES_LOGIN", "")
+    mr_password = creds["mr_password"] if creds else os.getenv("MERCHRULES_PASSWORD", "")
+    
+    try:
+        brief = await generate_pre_call_brief(
+            client_name=client["name"],
+            site_id=site_id,
+            manager_name=user.get("name", "AM"),
+            mr_login=mr_login,
+            mr_password=mr_password,
+            tg_id=tg_id or 0,
+        )
+        return {"ok": True, "brief": brief}
+    except Exception as exc:
+        logging.error("Brief generation error: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@app.get("/prep/{client_id}/brief/telegram", response_class=HTMLResponse)
+async def send_brief_telegram(request: Request, client_id: int):
+    """Отправляет бриф в Telegram."""
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404, "Клиент не найден")
+
+    site_id = client.get("site_ids", "").split(",")[0].strip()
+    if not site_id:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "user": user,
+            "error": "Site ID не указан",
+        })
+
+    tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    creds = get_mr_credentials(tg_id) if tg_id else None
+    
+    mr_login = creds["mr_login"] if creds else os.getenv("MERCHRULES_LOGIN", "")
+    mr_password = creds["mr_password"] if creds else os.getenv("MERCHRULES_PASSWORD", "")
+    
+    try:
+        brief = await generate_pre_call_brief(
+            client_name=client["name"],
+            site_id=site_id,
+            manager_name=user.get("name", "AM"),
+            mr_login=mr_login,
+            mr_password=mr_password,
+            tg_id=tg_id or 0,
+        )
+        
+        # Форматируем для Telegram
+        message = format_brief_for_telegram(brief)
+        
+        # Отправляем пользователю в TG
+        from tg import send_to_tg
+        user_tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        if user_tg_id and BOT_TOKEN:
+            await send_to_tg(user_tg_id, message, parse_mode="html")
+        
+        return templates.TemplateResponse("prep.html", {
+            "request": request,
+            "user": user,
+            "client": client,
+            "meetings": get_client_meetings(client_id, limit=5),
+            "open_tasks": get_client_tasks(client_id, "open"),
+            "status": checkup_status(client.get("last_checkup"), client["segment"]),
+            "today": date.today().isoformat(),
+            "checkup_days": CHECKUP_DAYS.get(client["segment"], 90),
+            "suggested_next": (date.today() + timedelta(days=CHECKUP_DAYS.get(client["segment"], 90))).isoformat(),
+            "brief_sent": True,
+        })
+    except Exception as exc:
+        logging.error("Brief telegram error: %s", exc)
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "user": user,
+            "error": f"Ошибка отправки брифа: {exc}",
+        })
+
+
 # ── Подготовка к встрече ─────────────────────────────────────────────────────
 
 @app.get("/prep/{client_id}", response_class=HTMLResponse)
@@ -268,6 +370,14 @@ async def prep_page(request: Request, client_id: int):
         except Exception as exc:
             logging.warning("prep MR fetch error: %s", exc)
 
+    # Быстрые ссылки на внешние сервисы
+    quick_links = {
+        "merchrules": f"https://merchrules.any-platform.ru/analytics/full?siteId={first_site_id}" if first_site_id else "",
+        "time": f"https://time.tbank.ru/tinkoff/channels/any-team-support?q={client['name']}",
+        "ktalk_new": f"https://tbank.ktalk.ru/new?topic=Встреча с {client['name']}",
+        "ktalk_recordings": f"https://tbank.ktalk.ru/content/artifacts?q={client['name']}",
+    }
+
     return templates.TemplateResponse("prep.html", {
         "request": request,
         "user": user,
@@ -285,6 +395,7 @@ async def prep_page(request: Request, client_id: int):
         "mr_analytics": mr_data.get("analytics", {}),
         "mr_ok": bool(mr_data),
         "merchrules_url": os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
+        "quick_links": quick_links,
     })
 
 
