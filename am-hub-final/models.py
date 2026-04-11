@@ -10,7 +10,7 @@ class Client(Base):
     name = Column(String, index=True)
     domain = Column(String, nullable=True)
     segment = Column(String, nullable=True)
-    manager_email = Column(String, nullable=True) # Исправлено: поле добавлено
+    manager_email = Column(String, nullable=True)  # ИСПРАВЛЕНО: Добавлено поле
     site_ids = Column(JSONB, default=list)
     health_score = Column(Float, default=0.0)
     last_checkup = Column(DateTime, nullable=True)
