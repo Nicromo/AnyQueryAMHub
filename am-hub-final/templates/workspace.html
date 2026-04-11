@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <title>AM Hub | Command Center</title>
-    <!-- Добавляем версию v2 для сброса кэша -->
-    <link rel="stylesheet" href="/static/css/main.css?v=2">
+    <link rel="stylesheet" href="/static/css/main.css">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="dark-mode">
+    <!-- Command Palette -->
     <div id="cmd-palette" class="hidden">
         <div class="cmd-overlay"></div>
         <div class="cmd-box">
@@ -16,69 +16,58 @@
         </div>
     </div>
 
+    <!-- Left Dock -->
     <nav class="left-dock">
         <div class="dock-logo">AQ</div>
         <a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a>
-        <a href="#" class="dock-item"><i data-lucide="users"></i></a>
         <div class="dock-spacer"></div>
         <div class="dock-avatar">DM</div>
     </nav>
 
+    <!-- Main Content -->
     <main class="main-content">
         <header class="top-bar">
             <div class="search-trigger" onclick="toggleCmdPalette()">
                 <i data-lucide="search"></i><span>Search...</span><span class="kbd-shortcut">Ctrl K</span>
             </div>
-            <div class="user-menu"><span>Dimaa</span></div>
+            <button class="btn-primary btn-sm" onclick="loadData()">🔄 Refresh</button>
         </header>
 
         <div class="bento-grid">
+            <!-- Hero Card: Active Client (Dynamic) -->
             <div class="card hero-card span-2">
                 <div class="card-header"><h3>Active Focus</h3></div>
-                <div class="hero-content" id="hero-content">
-                    <div class="loading">Загрузка данных...</div>
+                <div id="hero-content" class="hero-content">
+                    <div class="skeleton-line"></div><div class="skeleton-line short"></div>
                 </div>
             </div>
 
-            <div class="card ai-card">
-                <div class="card-header"><h3><i data-lucide="sparkles"></i> AI Insights</h3></div>
-                <div class="ai-content">
-                    <div class="ai-alert"><i data-lucide="info"></i><div><strong>System Ready</strong><p>Connected to DB</p></div></div>
+            <!-- Stats Card -->
+            <div class="card stats-card">
+                <div class="card-header"><h3>Overview</h3></div>
+                <div id="stats-content" class="stats-grid">
+                    <div class="stat-item"><span class="label">Clients</span><span class="value" id="stat-clients">-</span></div>
+                    <div class="stat-item"><span class="label">Tasks</span><span class="value" id="stat-tasks">-</span></div>
                 </div>
             </div>
 
+            <!-- Tasks List (Dynamic) -->
             <div class="card tasks-card span-2">
-                <div class="card-header"><h3>Clients List (Top 20)</h3></div>
-                <ul class="task-list" id="clients-list">
-                    <li class="loading">Loading...</li>
+                <div class="card-header"><h3>Prioritized Tasks</h3><button class="btn-primary btn-sm" onclick="createRandomTask()">+ Add</button></div>
+                <ul id="task-list" class="task-list">
+                    <li class="skeleton-line"></li><li class="skeleton-line"></li>
                 </ul>
+            </div>
+            
+            <!-- AI Insight -->
+            <div class="card ai-card span-2">
+                <div class="card-header"><h3><i data-lucide="sparkles"></i> AI Insight</h3></div>
+                <p id="ai-text" class="ai-text">Analyzing data...</p>
             </div>
         </div>
     </main>
 
-    <script src="/static/js/app.js?v=2"></script>
-    <script>
-        // Простой скрипт для загрузки клиентов прямо здесь
-        fetch('/api/clients')
-            .then(r => r.json())
-            .then(data => {
-                const list = document.getElementById('clients-list');
-                const hero = document.getElementById('hero-content');
-                if(data.length > 0) {
-                    list.innerHTML = data.map(c => 
-                        <li class="task-item"><span>\</span><span class="badge warning">\</span></li>
-                    ).join('');
-                    hero.innerHTML = 
-                        <div class="client-info"><div class="client-avatar">\</div>
-                        <div><h2>\</h2><p>Active Client</p></div></div>
-                        <div class="health-score"><div class="score-value">OK</div></div>
-                    ;
-                } else {
-                    list.innerHTML = '<li>No clients found in DB</li>';
-                }
-                lucide.createIcons();
-            })
-            .catch(e => console.error(e));
-    </script>
+    <script src="/static/js/app.js"></script>
+    <script>lucide.createIcons(); loadData();</script>
 </body>
 </html>
