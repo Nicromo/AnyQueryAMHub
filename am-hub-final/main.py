@@ -1936,3 +1936,7 @@ async def api_meeting_comment(request: Request, meeting_id: int):
         conn.execute("UPDATE meetings SET summary=? WHERE id=?", (new_summary, meeting_id))
 
     return {"ok": True}
+
+@app.get("/workspace")
+async def get_workspace():
+    return templates.TemplateResponse("workspace.html", {"request": request})
