@@ -10,17 +10,45 @@
     <div id="cmd-palette" class="hidden">
         <div class="cmd-overlay"></div>
         <div class="cmd-box">
-            <div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Type command..."></div>
-            <div class="cmd-results"><div class="cmd-item">Home</div><div class="cmd-item">Clients</div></div>
+            <div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Type command... (Ctrl+K)"></div>
+            <div class="cmd-results"><div class="cmd-item">🏠 Home</div><div class="cmd-item">👥 Clients</div><div class="cmd-item">✅ Tasks</div></div>
         </div>
     </div>
-    <nav class="left-dock"><div class="dock-logo">AQ</div><a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a><div class="dock-spacer"></div><div class="dock-avatar">DM</div></nav>
+    <nav class="left-dock">
+        <div class="dock-logo">AQ</div>
+        <a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a>
+        <a href="#" class="dock-item"><i data-lucide="users"></i></a>
+        <div class="dock-spacer"></div>
+        <div class="dock-avatar">DM</div>
+    </nav>
     <main class="main-content">
-        <header class="top-bar"><div class="search-trigger" onclick="toggleCmdPalette()"><i data-lucide="search"></i><span>Search...</span><span class="kbd-shortcut">Ctrl K</span></div></header>
+        <header class="top-bar">
+            <div class="search-trigger" onclick="toggleCmdPalette()">
+                <i data-lucide="search"></i>
+                <span>Search or type a command...</span>
+                <span class="kbd-shortcut">Ctrl K</span>
+            </div>
+        </header>
         <div class="bento-grid">
-            <div class="card hero-card span-2"><h3>Active Focus</h3><div class="hero-content"><h2>12Storeez</h2><div class="health-score critical">62</div></div></div>
-            <div class="card ai-card"><h3>AI Insights</h3><p>ROAS Drop Detected</p></div>
-            <div class="card tasks-card span-2"><h3>Tasks</h3><ul class="task-list"><li>Fix Bug #402</li></ul></div>
+            <div class="card hero-card span-2">
+                <h3>Active Focus</h3>
+                <div class="hero-content">
+                    <h2>12Storeez</h2>
+                    <p class="domain">12storeez.com</p>
+                    <div class="health-score critical">62 <span style="font-size:0.5em">Health</span></div>
+                </div>
+            </div>
+            <div class="card ai-card">
+                <h3>✨ AI Insights</h3>
+                <div class="ai-alert">⚠️ ROAS Drop Detected</div>
+            </div>
+            <div class="card tasks-card span-2">
+                <h3>Prioritized Tasks</h3>
+                <ul class="task-list">
+                    <li class="task-item">✅ Resolve ticket #402</li>
+                    <li class="task-item">⬜ Prepare QBR</li>
+                </ul>
+            </div>
         </div>
     </main>
     <script src="/static/js/app.js"></script>
