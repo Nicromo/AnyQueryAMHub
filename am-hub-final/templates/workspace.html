@@ -2,41 +2,49 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>AM Hub</title>
+    <title>AM Hub | Command Center</title>
     <link rel="stylesheet" href="/static/css/main.css">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="dark-mode">
-    <div id="cmd-palette" class="hidden"><div class="cmd-overlay"></div><div class="cmd-box"><input type="text" placeholder="Search..."></div></div>
-    <nav class="left-dock"><div class="dock-logo">AQ</div><a href="#" class="dock-item active"><i data-lucide="layout-grid"></i></a><div class="dock-spacer"></div><div class="dock-avatar">DM</div></nav>
+    <div id="cmd-palette" class="hidden">
+        <div class="cmd-overlay"></div>
+        <div class="cmd-box">
+            <div class="cmd-input-wrapper"><i data-lucide="search"></i><input type="text" id="cmd-input" placeholder="Type command..."></div>
+            <div class="cmd-results"><div class="cmd-item">Home Dashboard</div><div class="cmd-item">Clients List</div></div>
+        </div>
+    </div>
+    <nav class="left-dock">
+        <div class="dock-logo">AQ</div>
+        <a href="/" class="dock-item active"><i data-lucide="layout-grid"></i></a>
+        <div class="dock-spacer"></div>
+        <div class="dock-avatar">DM</div>
+    </nav>
     <main class="main-content">
-        <header class="top-bar"><div class="search-trigger" onclick="toggleCmd()"><i data-lucide="search"></i><span>Search...</span><span class="kbd-shortcut">Ctrl K</span></div></header>
+        <header class="top-bar">
+            <div class="search-trigger" onclick="toggleCmdPalette()">
+                <i data-lucide="search"></i><span>Search or command...</span><span class="kbd-shortcut">Ctrl K</span>
+            </div>
+        </header>
         <div class="bento-grid">
-            <div class="card span-2"><h3>Clients</h3><div id="client-list" style="margin-top:1rem">Loading...</div></div>
-            <div class="card"><h3>Stats</h3><p id="stats">Loading...</p></div>
-            <div class="card span-2"><h3>Tasks</h3><button onclick="createTask()" class="btn-primary btn-sm" style="margin-top:10px">+ Create Task</button><ul id="task-list" class="task-list"></ul></div>
+            <div class="card hero-card span-2">
+                <div class="card-header"><h3>Active Focus</h3></div>
+                <div class="hero-content">
+                    <div class="client-info"><div class="client-avatar">12</div><div><h2 id="client-name">Loading...</h2><p id="client-domain">...</p></div></div>
+                    <div class="health-score critical"><div class="score-value" id="health-score">-</div><div class="score-label">Health Score</div></div>
+                </div>
+            </div>
+            <div class="card ai-card">
+                <div class="card-header"><h3><i data-lucide="sparkles"></i> AI Insights</h3></div>
+                <div class="ai-content"><p id="ai-message">Waiting for data...</p></div>
+            </div>
+            <div class="card tasks-card span-2">
+                <div class="card-header"><h3>Clients List</h3></div>
+                <ul class="task-list" id="clients-list"><li>Loading clients...</li></ul>
+            </div>
         </div>
     </main>
-    <script>
-        lucide.createIcons();
-        function toggleCmd() { document.getElementById('cmd-palette').classList.toggle('hidden'); }
-        async function loadData() {
-            try {
-                const res = await fetch('/api/clients');
-                const data = await res.json();
-                document.getElementById('client-list').innerHTML = data.map(c => <div><b></b> () - Health: </div>).join('') || 'No clients';
-                
-                const statsRes = await fetch('/health');
-                document.getElementById('stats').innerText = 'System OK';
-            } catch(e) { document.getElementById('client-list').innerText = 'Error loading data'; }
-        }
-        async function createTask() {
-            await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title: 'New Task'})});
-            alert('Task created!');
-            loadData();
-        }
-        window.onload = loadData;
-        document.addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();toggleCmd();} });
-    </script>
+    <script src="/static/js/app.js"></script>
+    <script>lucide.createIcons();</script>
 </body>
 </html>
