@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Все задачи — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1>✅ Все задачи</h1>
+    <p>{{ tasks|length }} задач{% if status != 'open' %} ({{ status }}){% endif %}</p>
+  </div>
+  <a href="/roadmap" class="btn btn-primary">+ Создать задачи в Merchrules</a>
+</div>
+
+<!-- Фильтры -->
+<div class="filter-tabs">
+  <a href="/tasks?status=open"   class="tab-btn {% if status=='open'    %}active{% endif %}">🔵 Открытые ({{ total }})</a>
+  <a href="/tasks?status=done"   class="tab-btn {% if status=='done'    %}active{% endif %}">✅ Выполненные</a>
+  <a href="/tasks?status=blocked" class="tab-btn {% if status=='blocked' %}active{% endif %}">🔴 Заблокированные</a>
+  <a href="/tasks?status=open&owner=anyquery{% if segment %}&segment={{ segment }}{% endif %}"
+     class="tab-btn {% if owner=='anyquery' %}active{% endif %}">AnyQuery</a>
+  <a href="/tasks?status=open&owner=client{% if segment %}&segment={{ segment }}{% endif %}"
+     class="tab-btn {% if owner=='client'   %}active{% endif %}">Партнёры</a>
+</div>
+
+<!-- Фильтр по сегменту -->
+<div class="filter-tabs" style="margin-top:-8px">
+  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}"
+     class="tab-btn {% if not segment %}active{% endif %}">Все</a>
+  {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
+  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}&segment={{ seg }}"
+     class="tab-btn {% if segment==seg %}active{% endif %}">{{ seg }}</a>
+  {% endfor %}
+</div>
+
+{% if not tasks %}
+<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
+  <div style="font-size:2rem;margin-bottom:8px">🎉</div>
+  <p>Нет задач в статусе «{{ status }}»</p>
+</div>
+{% else %}
+<div class="card" style="padding:0;overflow:hidden">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Клиент</th>
+        <th>Задача</th>
+        <th>Кто</th>
+        <th>Дедлайн</th>
+        <th>Создана</th>
+        {% if status == 'open' %}<th></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in tasks %}
+    <tr>
+      <td>
+        <a href="/prep/{{ t.client_id }}" style="font-weight:600">{{ t.client_name }}</a>
+        <span class="badge badge-{{ t.segment|lower }}" style="margin-left:4px;font-size:0.7rem">{{ t.segment }}</span>
+      </td>
+      <td>{{ t.text }}</td>
+      <td>
+        <span style="color:{% if t.owner=='anyquery' %}var(--accent){% else %}var(--yellow){% endif %};font-size:0.85rem">
+          {% if t.owner == 'anyquery' %}🔵 AnyQuery{% else %}🟡 Партнёр{% endif %}
+        </span>
+      </td>
+      <td style="{% if t.due_date and t.due_date < today %}color:var(--red);font-weight:600{% endif %}">
+        {{ t.due_date or '—' }}
+        {% if t.due_date and t.due_date < today %}<span style="font-size:0.75rem"> ⚠️</span>{% endif %}
+      </td>
+      <td style="color:var(--text-muted);font-size:0.82rem">
+        {{ t.meeting_date[:10] if t.meeting_date else t.created_at[:10] if t.created_at else '—' }}
+      </td>
+      {% if status == 'open' %}
+      <td>
+        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
+          <button type="submit" class="btn btn-ghost btn-sm" title="Отметить выполненной">✓</button>
+        </form>
+      </td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

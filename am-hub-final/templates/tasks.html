@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Все задачи — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1>✅ Все задачи</h1>
+    <p>{{ tasks|length }} задач{% if status != 'open' %} ({{ status }}){% endif %}</p>
+  </div>
+  <a href="/roadmap" class="btn btn-primary">+ Создать задачи в Merchrules</a>
+</div>
+
+<!-- Подсказка: ритм чекапов -->
+<div class="card" style="background:#1a2030;border-color:#2e3a50;padding:12px 18px;margin-bottom:4px">
+  <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:0.85rem;color:var(--text-muted)">
+    <span>📆 <b style="color:var(--text)">Ритм чекапов:</b></span>
+    <span>🏢 ENT — раз в <b style="color:var(--red)">30 дней</b></span>
+    <span>📊 SME — раз в <b style="color:var(--yellow)">60 дней</b></span>
+    <span>🛒 SMB — раз в <b style="color:var(--green)">90 дней</b></span>
+    <span style="margin-left:auto;color:var(--text-muted)">
+      ⏱ Среднее время встречи: ENT 60 мин · SME 45 мин · SMB 30 мин
+    </span>
+  </div>
+</div>
+
+<!-- Фильтры -->
+<div class="filter-tabs">
+  <a href="/tasks?status=open"   class="tab-btn {% if status=='open'    %}active{% endif %}">🔵 Открытые ({{ total }})</a>
+  <a href="/tasks?status=done"   class="tab-btn {% if status=='done'    %}active{% endif %}">✅ Выполненные</a>
+  <a href="/tasks?status=blocked" class="tab-btn {% if status=='blocked' %}active{% endif %}">🔴 Заблокированные</a>
+  <a href="/tasks?status=open&owner=anyquery{% if segment %}&segment={{ segment }}{% endif %}"
+     class="tab-btn {% if owner=='anyquery' %}active{% endif %}">AnyQuery</a>
+  <a href="/tasks?status=open&owner=client{% if segment %}&segment={{ segment }}{% endif %}"
+     class="tab-btn {% if owner=='client'   %}active{% endif %}">Партнёры</a>
+</div>
+
+<!-- Фильтр по сегменту -->
+<div class="filter-tabs" style="margin-top:-8px">
+  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}"
+     class="tab-btn {% if not segment %}active{% endif %}">Все</a>
+  {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
+  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}&segment={{ seg }}"
+     class="tab-btn {% if segment==seg %}active{% endif %}">{{ seg }}</a>
+  {% endfor %}
+</div>
+
+{% if not tasks %}
+<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
+  <div style="font-size:2rem;margin-bottom:8px">🎉</div>
+  <p>Нет задач в статусе «{{ status }}»</p>
+</div>
+{% else %}
+
+<!-- Сводка по времени -->
+{% set total_hours = namespace(val=0) %}
+{% for t in tasks %}
+  {% if t.hours_estimate %}{% set total_hours.val = total_hours.val + t.hours_estimate %}{% endif %}
+{% endfor %}
+{% if total_hours.val > 0 %}
+<div class="card" style="padding:12px 18px;background:#1e1a2e;border-color:#3a2e5a;margin-bottom:4px">
+  <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:0.85rem">
+    <span>⏱ <b style="color:var(--accent)">Итого по оценкам:</b> {{ "%.1f"|format(total_hours.val) }} ч</span>
+    <span style="color:var(--text-muted)">≈ {{ (total_hours.val / 8)|round(1) }} рабочих дней</span>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="padding:0;overflow:hidden">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Клиент</th>
+        <th>Задача</th>
+        <th>Кто</th>
+        <th>⏱ Оценка</th>
+        <th>Дедлайн</th>
+        <th>Статус</th>
+        {% if status == 'open' %}<th></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in tasks %}
+    <tr>
+      <td>
+        <a href="/prep/{{ t.client_id }}" style="font-weight:600">{{ t.client_name }}</a>
+        <span class="badge badge-{{ t.segment|lower }}" style="margin-left:4px;font-size:0.7rem">{{ t.segment }}</span>
+      </td>
+      <td>
+        <span>{{ t.text }}</span>
+        {% if t.is_internal %}
+          <span style="font-size:0.72rem;background:#2a1a3a;color:#a08ad0;border-radius:4px;padding:1px 6px;margin-left:4px">внутр.</span>
+        {% endif %}
+        {% if t.internal_note %}
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">💬 {{ t.internal_note }}</div>
+        {% endif %}
+      </td>
+      <td>
+        <span style="color:{% if t.owner=='anyquery' %}var(--accent){% else %}var(--yellow){% endif %};font-size:0.85rem">
+          {% if t.owner == 'anyquery' %}🔵 AnyQuery{% else %}🟡 Партнёр{% endif %}
+        </span>
+      </td>
+      <td>
+        <!-- Инлайн редактирование оценки времени -->
+        <span class="hours-display" data-id="{{ t.id }}"
+              style="cursor:pointer;color:{% if t.hours_estimate %}var(--accent){% else %}var(--text-muted){% endif %};font-size:0.85rem"
+              onclick="editHours(this, {{ t.id }}, {{ t.hours_estimate or 0 }})">
+          {% if t.hours_estimate %}{{ "%.1f"|format(t.hours_estimate) }}ч{% else %}—{% endif %}
+        </span>
+      </td>
+      <td style="{% if t.due_date and t.due_date < today %}color:var(--red);font-weight:600{% endif %}">
+        {{ t.due_date or '—' }}
+        {% if t.due_date and t.due_date < today %}<span style="font-size:0.75rem"> ⚠️</span>{% endif %}
+      </td>
+      <td>
+        {% if t.status == 'blocked' %}
+          <span style="color:var(--red);font-size:0.82rem">🔴 Блок</span>
+        {% elif t.due_date and t.due_date < today %}
+          <span style="color:var(--red);font-size:0.82rem">⚠️ Просрочена</span>
+        {% else %}
+          <span style="color:var(--green);font-size:0.82rem">✅ В работе</span>
+        {% endif %}
+      </td>
+      {% if status == 'open' %}
+      <td>
+        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
+          <button type="submit" class="btn btn-ghost btn-sm" title="Отметить выполненной">✓</button>
+        </form>
+      </td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+function editHours(el, taskId, current) {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.step = '0.5';
+  input.min = '0';
+  input.max = '99';
+  input.value = current || '';
+  input.style.cssText = 'width:60px;padding:2px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.82rem';
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  async function save() {
+    const val = parseFloat(input.value) || 0;
+    await fetch(`/api/task/${taskId}/hours`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hours: val})
+    });
+    const span = document.createElement('span');
+    span.className = 'hours-display';
+    span.dataset.id = taskId;
+    span.style.cssText = 'cursor:pointer;font-size:0.85rem;color:' + (val ? 'var(--accent)' : 'var(--text-muted)');
+    span.textContent = val ? val.toFixed(1) + 'ч' : '—';
+    span.onclick = () => editHours(span, taskId, val);
+    input.replaceWith(span);
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+}
+</script>
+{% endblock %}

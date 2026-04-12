@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Трекер чекапов — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1>📊 Трекер чекапов</h1>
+  <p>{{ today }} · {{ clients|length }} клиент{{ 'ов' if clients|length > 4 else ('а' if clients|length > 1 else '') }}</p>
+</div>
+
+<!-- Фильтр по сегменту -->
+<div class="filter-tabs">
+  <a href="/" class="tab-btn {% if not segment %}active{% endif %}">Все ({{ counts.ENT + counts.SME + counts.SMB + counts.SS }})</a>
+  <a href="/?segment=ENT" class="tab-btn {% if segment == 'ENT' %}active{% endif %}">🔵 ENT ({{ counts.ENT }})</a>
+  <a href="/?segment=SME" class="tab-btn {% if segment == 'SME' %}active{% endif %}">🟣 SME ({{ counts.SME }})</a>
+  <a href="/?segment=SMB" class="tab-btn {% if segment == 'SMB' %}active{% endif %}">🟢 SMB ({{ counts.SMB }})</a>
+  <a href="/?segment=SS"  class="tab-btn {% if segment == 'SS'  %}active{% endif %}">🟠 SS  ({{ counts.SS }})</a>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Клиент</th>
+      <th>Сегмент</th>
+      <th>Последняя встреча</th>
+      <th>Следующая</th>
+      <th>Статус</th>
+      <th>Задачи</th>
+      <th>Действия</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for c in clients %}
+  <tr>
+    <td class="client-name">{{ c.name }}</td>
+    <td>
+      <span class="badge badge-{{ c.segment|lower }}">{{ c.segment }}</span>
+    </td>
+    <td>
+      {% if c.last_checkup or c.last_meeting %}
+        {{ (c.last_checkup or c.last_meeting)[:10] }}
+      {% else %}
+        <span style="color:var(--text-muted)">—</span>
+      {% endif %}
+    </td>
+    <td>
+      {% if c.status.next_date %}
+        {{ c.status.next_date }}
+      {% else %}
+        <span style="color:var(--red)">Нет данных</span>
+      {% endif %}
+    </td>
+    <td>
+      <span class="dot {{ c.status.color }}"></span>
+      <span style="margin-left:6px;font-size:0.85rem;
+        color:{% if c.status.color == 'red' %}var(--red){% elif c.status.color == 'yellow' %}var(--yellow){% else %}var(--green){% endif %}">
+        {{ c.status.label }}
+      </span>
+    </td>
+    <td>
+      {% if c.open_tasks > 0 %}
+        <span style="color:var(--yellow)">{{ c.open_tasks }} открыт{{ 'а' if c.open_tasks == 1 else ('ых' if c.open_tasks < 5 else 'ых') }}</span>
+      {% else %}
+        <span style="color:var(--text-muted)">—</span>
+      {% endif %}
+    </td>
+    <td style="white-space:nowrap">
+      <a href="/prep/{{ c.id }}" class="btn btn-ghost btn-sm">📋 Подготовка</a>
+      <a href="/followup/{{ c.id }}" class="btn btn-primary btn-sm" style="margin-left:4px">✍️ Фолоуап</a>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% endblock %}

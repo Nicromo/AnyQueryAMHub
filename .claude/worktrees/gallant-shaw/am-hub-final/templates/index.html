@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Клиенты — AM Hub{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1>👥 Все клиенты</h1>
+    <p style="color:var(--text-muted)">{{ today }} · {{ clients|length }} клиентов</p>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button onclick="refreshMR()" class="btn btn-ghost btn-sm" id="mr-refresh-btn" title="Обновить данные из Merchrules">
+      🔄 Merchrules
+    </button>
+    <a href="/today" class="btn btn-primary btn-sm">☀️ План на сегодня</a>
+  </div>
+</div>
+
+<!-- Фильтр по сегменту -->
+<div class="filter-tabs">
+  {% set total = counts.ENT + counts['SME+'] + counts['SME-'] + counts.SME + counts.SMB + counts.SS %}
+  <a href="/" class="tab-btn {% if not segment %}active{% endif %}">Все ({{ total }})</a>
+  <a href="/?segment=ENT"  class="tab-btn {% if segment == 'ENT'  %}active{% endif %}">🔵 ENT ({{ counts.ENT }})</a>
+  <a href="/?segment=SME+" class="tab-btn {% if segment == 'SME+' %}active{% endif %}">🟣 SME+ ({{ counts['SME+'] }})</a>
+  <a href="/?segment=SME-" class="tab-btn {% if segment == 'SME-' %}active{% endif %}">🟣 SME- ({{ counts['SME-'] }})</a>
+  <a href="/?segment=SMB"  class="tab-btn {% if segment == 'SMB'  %}active{% endif %}">🟢 SMB ({{ counts.SMB }})</a>
+  <a href="/?segment=SS"   class="tab-btn {% if segment == 'SS'   %}active{% endif %}">🟠 SS ({{ counts.SS }})</a>
+  <a href="/?sort=attention" class="tab-btn {% if sort == 'attention' %}active{% endif %}" style="margin-left:auto">⚠️ Сначала важные</a>
+</div>
+
+<!-- Сводка по флагам -->
+{% set n_red   = clients | selectattr('flags', 'defined') | selectattr('flags') | list | length %}
+{% set n_overdue = clients | selectattr('status.color', 'equalto', 'red') | list | length %}
+{% if n_overdue > 0 %}
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+  <div style="background:rgba(239,68,68,.12);border:1px solid var(--red);border-radius:8px;padding:8px 14px;font-size:0.85rem">
+    🔴 <b>{{ n_overdue }}</b> просрочено чекапов
+  </div>
+  {% set n_warn = clients | selectattr('status.color', 'equalto', 'yellow') | list | length %}
+  {% if n_warn > 0 %}
+  <div style="background:rgba(234,179,8,.1);border:1px solid var(--yellow);border-radius:8px;padding:8px 14px;font-size:0.85rem">
+    🟡 <b>{{ n_warn }}</b> скоро нужен чекап
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Сетка карточек -->
+<div class="clients-grid" id="clients-grid">
+{% for c in clients %}
+{% set flags = [] %}
+{% if c.status.color == 'red'    %}{% set _ = flags.append('overdue')  %}{% endif %}
+{% if c.status.color == 'yellow' %}{% set _ = flags.append('warning')  %}{% endif %}
+{% if c.open_tasks > 0           %}{% set _ = flags.append('tasks')    %}{% endif %}
+{% if c.blocked_tasks > 0        %}{% set _ = flags.append('blocked')  %}{% endif %}
+{% if c.mood == 'risk'           %}{% set _ = flags.append('risk')     %}{% endif %}
+
+<div class="client-card {% if 'overdue' in flags or 'blocked' in flags or 'risk' in flags %}card-alert{% elif 'warning' in flags %}card-warn{% endif %}"
+     data-segment="{{ c.segment }}"
+     data-flags="{{ flags | join(',') }}">
+
+  <!-- Заголовок карточки -->
+  <div class="cc-header">
+    <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <span class="dot {{ c.status.color }}" style="flex-shrink:0"></span>
+      <a href="/prep/{{ c.id }}" class="cc-name" title="{{ c.name }}">{{ c.name }}</a>
+    </div>
+    <span class="badge badge-{{ c.segment|lower }}">{{ c.segment }}</span>
+  </div>
+
+  <!-- Флаги внимания -->
+  {% if flags %}
+  <div class="cc-flags">
+    {% if 'overdue' in flags %}
+    <span class="cc-flag flag-red">⛔ Чекап просрочен</span>
+    {% endif %}
+    {% if 'blocked' in flags %}
+    <span class="cc-flag flag-red">🔴 Заблокированные задачи</span>
+    {% endif %}
+    {% if 'risk' in flags %}
+    <span class="cc-flag flag-red">😟 Риск настроения</span>
+    {% endif %}
+    {% if 'warning' in flags %}
+    <span class="cc-flag flag-yellow">🟡 Скоро чекап</span>
+    {% endif %}
+    {% if 'tasks' in flags and 'blocked' not in flags %}
+    <span class="cc-flag flag-blue">📋 {{ c.open_tasks }} задач открыто</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Метрики -->
+  <div class="cc-metrics">
+    <div class="cc-metric">
+      <span class="cc-metric-label">Последняя встреча</span>
+      <span class="cc-metric-val {% if not c.last_checkup and not c.last_meeting %}text-muted{% endif %}">
+        {{ (c.last_checkup or c.last_meeting or '—')[:10] }}
+      </span>
+    </div>
+    <div class="cc-metric">
+      <span class="cc-metric-label">Следующая</span>
+      <span class="cc-metric-val {% if not c.status.next_date %}text-red{% endif %}">
+        {{ c.status.next_date or 'Нет' }}
+      </span>
+    </div>
+    <div class="cc-metric">
+      <span class="cc-metric-label">Задачи (Hub)</span>
+      <span class="cc-metric-val {% if c.open_tasks > 0 %}text-yellow{% endif %}">
+        {{ c.open_tasks or '—' }}
+      </span>
+    </div>
+    <div class="cc-metric" id="mr-{{ c.id }}">
+      <span class="cc-metric-label">Задачи (MR)</span>
+      <span class="cc-metric-val text-muted">…</span>
+    </div>
+  </div>
+
+  <!-- Действия -->
+  <div class="cc-actions">
+    <a href="/prep/{{ c.id }}"      class="btn btn-ghost btn-sm">📋 Подготовка</a>
+    <a href="/followup/{{ c.id }}"  class="btn btn-primary btn-sm">✍️ Фолоуап</a>
+    <a href="/roadmap?client_id={{ c.id }}" class="btn btn-ghost btn-sm" title="Задачи в роадмап">🗺️</a>
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<style>
+.clients-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.client-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow .15s;
+}
+.client-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.25); }
+.card-alert { border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.04); }
+.card-warn  { border-color: rgba(234,179,8,.4); background: rgba(234,179,8,.03); }
+.cc-header  { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.cc-name    { font-weight:600; font-size:.95rem; color:var(--text); text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cc-name:hover { color:var(--accent); }
+.cc-flags   { display:flex; flex-wrap:wrap; gap:5px; }
+.cc-flag    { font-size:.72rem; padding:2px 8px; border-radius:10px; }
+.flag-red    { background:rgba(239,68,68,.15); color:#f87171; }
+.flag-yellow { background:rgba(234,179,8,.15);  color:#fbbf24; }
+.flag-blue   { background:rgba(59,130,246,.15); color:#60a5fa; }
+.cc-metrics { display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; }
+.cc-metric  { display:flex; flex-direction:column; gap:1px; }
+.cc-metric-label { font-size:.7rem; color:var(--text-muted); }
+.cc-metric-val   { font-size:.83rem; font-weight:500; }
+.text-muted { color:var(--text-muted) !important; }
+.text-red   { color:var(--red) !important; }
+.text-yellow{ color:var(--yellow) !important; }
+.cc-actions { display:flex; gap:6px; margin-top:2px; }
+</style>
+
+<script>
+// Загружаем MR-данные для всех клиентов
+async function loadMRData() {
+  try {
+    const r = await fetch('/api/mr/clients');
+    if (!r.ok) return;
+    const data = await r.json();
+    // data = { client_id: { open_tasks, blocked_tasks, overdue_tasks, last_meeting } }
+    Object.entries(data).forEach(([cid, d]) => {
+      const cell = document.getElementById(`mr-${cid}`);
+      if (!cell) return;
+      const val = cell.querySelector('.cc-metric-val');
+      if (!val) return;
+      const total = (d.open_tasks || 0) + (d.blocked_tasks || 0);
+      if (total === 0) {
+        val.textContent = '—';
+        val.className = 'cc-metric-val text-muted';
+      } else {
+        let txt = total;
+        if (d.blocked_tasks > 0) txt += ` (🔴${d.blocked_tasks} блок.)`;
+        val.textContent = txt;
+        val.className = 'cc-metric-val ' + (d.blocked_tasks > 0 ? 'text-red' : 'text-yellow');
+      }
+    });
+  } catch(e) { console.log('MR data not available', e); }
+}
+
+async function refreshMR() {
+  const btn = document.getElementById('mr-refresh-btn');
+  btn.textContent = '⏳ Загружаем…';
+  btn.disabled = true;
+  try {
+    await fetch('/api/mr/sync', { method: 'POST' });
+    await loadMRData();
+    btn.textContent = '✅ Обновлено';
+  } catch(e) {
+    btn.textContent = '❌ Ошибка';
+  }
+  setTimeout(() => { btn.textContent = '🔄 Merchrules'; btn.disabled = false; }, 3000);
+}
+
+// Автозагрузка при открытии страницы
+loadMRData();
+</script>
+{% endblock %}
