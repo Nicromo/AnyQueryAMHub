@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         with SessionLocal() as db: db.execute(text("SELECT 1"))
-        print("✅ DB Connected & Ready")
+        print("✅ DB Connected")
     except Exception as e: print(f"⚠️ DB Error: {e}")
     yield
 
