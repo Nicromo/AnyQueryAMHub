@@ -16,11 +16,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def lifespan(app: FastAPI):
     try:
         init_db()
-        with SessionLocal() as db:
-            db.execute(text("SELECT 1"))
-            print("✅ DB Connected & Ready")
-    except Exception as e:
-        print(f"⚠️ DB Connection Warning: {e}")
+        with SessionLocal() as db: db.execute(text("SELECT 1"))
+        print("✅ DB Connected & Ready")
+    except Exception as e: print(f"⚠️ DB Error: {e}")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -30,8 +28,7 @@ async def read_root(request: Request):
     return templates.TemplateResponse("workspace.html", {"request": request})
 
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health(): return {"status": "ok"}
 
 @app.get("/api/clients")
 async def get_clients():
@@ -39,7 +36,5 @@ async def get_clients():
         db = SessionLocal()
         clients = db.query(Client).limit(50).all()
         return [{"id": c.id, "name": c.name, "segment": c.segment} for c in clients]
-    except:
-        return []
-    finally:
-        db.close()
+    except: return []
+    finally: db.close()
