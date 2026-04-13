@@ -153,21 +153,49 @@ class SyncLog(Base):
 class User(Base):
     """Пользователи системы"""
     __tablename__ = "users"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     first_name = Column(String, nullable=True)
     last_name = Column(String, nullable=True)
     role = Column(String, default="manager")  # manager, admin, viewer
     is_active = Column(Boolean, default=True)
-    
-    hashed_password = Column(String, nullable=True)  # Для email/pass auth
-    telegram_id = Column(String, nullable=True, unique=True)  # Для Telegram auth
-    
+
+    hashed_password = Column(String, nullable=True)
+    telegram_id = Column(String, nullable=True, unique=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Связь с назначенными клиентами (менеджер видит своих клиентов)
+
+    # Персональные настройки (JSONB)
+    # Структура: {
+    #   "merchrules": {"login": "", "password": ""},
+    #   "airtable": {"pat": "", "base_id": ""},
+    #   "sheets": {"spreadsheet_id": "", "gid": ""},
+    #   "telegram": {"bot_token": "", "chat_id": ""},
+    #   "groq": {"api_key": "", "model": ""},
+    #   "sendgrid": {"api_key": "", "from_email": ""},
+    #   "ktalk": {"webhook_url": ""},
+    #   "tbank_time": {"api_token": ""},
+    #   "rules": {
+    #     "min_health_score": 0.5,
+    #     "checkup_interval_days": 30,
+    #     "warning_days": 14,
+    #     "segments": ["ENT", "SME+", "SME-", "SMB", "SS"],
+    #     "auto_create_tasks": true,
+    #     "morning_plan_time": "09:00",
+    #     "weekly_digest_day": "friday",
+    #   },
+    #   "preferences": {
+    #     "theme": "dark",
+    #     "notifications_email": true,
+    #     "notifications_tg": true,
+    #     "dashboard_view": "cards",
+    #   }
+    # }
+    settings = Column(JSONB, default=dict)
+
+    # Связь с назначенными клиентами
     assigned_clients = relationship(
         "Client",
         secondary="user_client_assignment",

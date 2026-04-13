@@ -969,6 +969,104 @@ async def api_generate_followup(request: Request, db: Session = Depends(get_db),
 
 
 # ============================================================================
+# SETTINGS
+# ============================================================================
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    settings = user.settings or {}
+    rules = settings.get("rules", {
+        "min_health_score": 0.5, "checkup_interval_days": 30, "warning_days": 14,
+        "segments": ["ENT", "SME+", "SME-", "SMB", "SS"],
+        "auto_create_tasks": True, "morning_plan_time": "09:00", "weekly_digest_day": "friday",
+    })
+    prefs = settings.get("preferences", {
+        "theme": "dark", "dashboard_view": "cards",
+        "notifications_email": True, "notifications_tg": True, "notifications_ktalk": False,
+        "notif_overdue": True, "notif_new_tasks": True, "notif_blocked": True, "notif_morning": True,
+    })
+    return templates.TemplateResponse("settings.html", {
+        "request": request, "user": user,
+        "user_settings": settings,
+        "rules": rules, "prefs": prefs,
+    })
+
+
+@app.post("/api/settings/integrations")
+async def api_save_integrations(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    for service in ["merchrules", "airtable", "sheets", "telegram", "groq", "ktalk", "tbank_time"]:
+        if service in data:
+            settings[service] = data[service]
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/settings/rules")
+async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    settings["rules"] = data
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/settings/prefs")
+async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    if "preferences" not in settings:
+        settings["preferences"] = {}
+    settings["preferences"].update(data)
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
 # ROOT
 # ============================================================================
 

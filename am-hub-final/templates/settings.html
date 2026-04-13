@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Настройки — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; max-width:900px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    h1 { font-size:1.4rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:24px; }
+    .tabs { display:flex; gap:4px; margin-bottom:20px; border-bottom:1px solid var(--border); }
+    .tab { padding:10px 18px; font-size:.82rem; cursor:pointer; color:var(--muted); border:none; background:none; border-bottom:2px solid transparent; transition:all .15s; }
+    .tab:hover { color:var(--text); }
+    .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+    .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .field { margin-bottom:14px; }
+    .field label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px; }
+    .field input, .field select { width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; }
+    .field input:focus, .field select:focus { border-color:var(--accent); }
+    .field-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .toggle-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.03); }
+    .toggle-row:last-child { border-bottom:none; }
+    .toggle-row label { font-size:.85rem; }
+    .toggle { position:relative; width:44px; height:24px; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle .slider { position:absolute; inset:0; background:var(--border); border-radius:12px; cursor:pointer; transition:.2s; }
+    .toggle .slider:before { content:''; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.2s; }
+    .toggle input:checked + .slider { background:var(--accent); }
+    .toggle input:checked + .slider:before { transform:translateX(20px); }
+    .btn { padding:10px 20px; border-radius:10px; font-size:.85rem; font-weight:600; cursor:pointer; border:none; background:var(--accent); color:#fff; transition:filter .15s; }
+    .btn:hover { filter:brightness(1.15); }
+    .btn-sm { padding:6px 14px; font-size:.78rem; }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .btn-outline:hover { border-color:var(--accent); }
+    .saved-msg { font-size:.78rem; color:var(--green); margin-top:8px; display:none; }
+    .saved-msg.show { display:block; }
+    .help { font-size:.72rem; color:var(--muted); margin-top:2px; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item active" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <h1>⚙️ Мои настройки</h1>
+  <p class="sub">Персональная конфигурация рабочего пространства</p>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('integrations',this)">🔌 Интеграции</button>
+    <button class="tab" onclick="showTab('rules',this)">📐 Правила работы</button>
+    <button class="tab" onclick="showTab('prefs',this)">🎨 Оформление</button>
+    <button class="tab" onclick="showTab('notifications',this)">🔔 Уведомления</button>
+  </div>
+
+  <!-- Интеграции -->
+  <div id="tab-integrations" class="tab-content active">
+    <div class="section">
+      <h3>🗺️ Merchrules</h3>
+      <div class="field-row">
+        <div class="field"><label>Login</label><input id="mr-login" value="{{ user_settings.merchrules.login or '' }}"></div>
+        <div class="field"><label>Password</label><input id="mr-pass" type="password" value="{{ user_settings.merchrules.password or '' }}"></div>
+      </div>
+    </div>
+    <div class="section">
+      <h3>📊 Airtable</h3>
+      <div class="field-row">
+        <div class="field"><label>Personal Access Token</label><input id="at-pat" value="{{ user_settings.airtable.pat or '' }}"></div>
+        <div class="field"><label>Base ID</label><input id="at-base" value="{{ user_settings.airtable.base_id or '' }}"></div>
+      </div>
+    </div>
+    <div class="section">
+      <h3>📈 Google Sheets</h3>
+      <div class="field-row">
+        <div class="field"><label>Spreadsheet ID</label><input id="gs-id" value="{{ user_settings.sheets.spreadsheet_id or '' }}"></div>
+        <div class="field"><label>Sheet GID</label><input id="gs-gid" value="{{ user_settings.sheets.gid or '374545260' }}"></div>
+      </div>
+    </div>
+    <div class="section">
+      <h3>✈️ Telegram Bot</h3>
+      <div class="field-row">
+        <div class="field"><label>Bot Token</label><input id="tg-token" value="{{ user_settings.telegram.bot_token or '' }}"></div>
+        <div class="field"><label>Chat ID (ваш)</label><input id="tg-chat" value="{{ user_settings.telegram.chat_id or '' }}"></div>
+      </div>
+    </div>
+    <div class="section">
+      <h3>🤖 AI (Groq)</h3>
+      <div class="field-row">
+        <div class="field"><label>API Key</label><input id="ai-key" value="{{ user_settings.groq.api_key or '' }}"></div>
+        <div class="field"><label>Модель</label>
+          <select id="ai-model">
+            <option value="llama-3.3-70b-versatile" {{ 'selected' if user_settings.groq.model == 'llama-3.3-70b-versatile' else '' }}>Llama 3.3 70B</option>
+            <option value="mixtral-8x7b-32768" {{ 'selected' if user_settings.groq.model == 'mixtral-8x7b-32768' else '' }}>Mixtral 8x7B</option>
+            <option value="gemma2-9b-it" {{ 'selected' if user_settings.groq.model == 'gemma2-9b-it' else '' }}>Gemma2 9B</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <h3>💬 Ktalk</h3>
+      <div class="field"><label>Incoming Webhook URL</label><input id="kt-url" value="{{ user_settings.ktalk.webhook_url or '' }}"></div>
+    </div>
+    <div class="section">
+      <h3>🎫 Tbank Time</h3>
+      <div class="field"><label>API Token</label><input id="tm-token" value="{{ user_settings.tbank_time.api_token or '' }}"></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn" onclick="saveIntegrations()">💾 Сохранить интеграции</button>
+      <span class="saved-msg" id="saved-int">✅ Сохранено</span>
+    </div>
+  </div>
+
+  <!-- Правила работы -->
+  <div id="tab-rules" class="tab-content">
+    <div class="section">
+      <h3>📐 Стандарты работы</h3>
+      <div class="field-row">
+        <div class="field">
+          <label>Мин. Health Score (критический)</label>
+          <input type="number" id="rule-min-health" step="0.1" min="0" max="1" value="{{ rules.min_health_score }}">
+          <div class="help">Ниже этого значения — красный статус</div>
+        </div>
+        <div class="field">
+          <label>Интервал чекапов (дней)</label>
+          <input type="number" id="rule-checkup-interval" min="7" max="90" value="{{ rules.checkup_interval_days }}">
+          <div class="help">Как часто проводить чекапы</div>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Предупреждение (дней до)</label>
+          <input type="number" id="rule-warning-days" min="1" max="30" value="{{ rules.warning_days }}">
+          <div class="help">За сколько дней предупреждать о чекапе</div>
+        </div>
+        <div class="field">
+          <label>Активные сегменты</label>
+          <input id="rule-segments" value="{{ rules.segments|join(', ') }}">
+          <div class="help">Через запятую: ENT, SME+, SME-, SMB, SS</div>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <h3>⏰ Расписание</h3>
+      <div class="field-row">
+        <div class="field">
+          <label>Время утреннего плана</label>
+          <input type="time" id="rule-morning-time" value="{{ rules.morning_plan_time }}">
+        </div>
+        <div class="field">
+          <label>День еженедельного дайджеста</label>
+          <select id="rule-digest-day">
+            <option value="monday" {{ 'selected' if rules.weekly_digest_day == 'monday' else '' }}>Понедельник</option>
+            <option value="friday" {{ 'selected' if rules.weekly_digest_day == 'friday' else '' }}>Пятница</option>
+          </select>
+        </div>
+      </div>
+      <div class="toggle-row">
+        <label>Автоматически создавать задачи из чекапов</label>
+        <div class="toggle"><input type="checkbox" id="rule-auto-tasks" {{ 'checked' if rules.auto_create_tasks else '' }}><span class="slider"></span></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn" onclick="saveRules()">💾 Сохранить правила</button>
+      <span class="saved-msg" id="saved-rules">✅ Сохранено</span>
+    </div>
+  </div>
+
+  <!-- Оформление -->
+  <div id="tab-prefs" class="tab-content">
+    <div class="section">
+      <h3>🎨 Оформление</h3>
+      <div class="field">
+        <label>Тема</label>
+        <select id="pref-theme" onchange="toggleTheme()">
+          <option value="dark" {{ 'selected' if prefs.theme == 'dark' else '' }}>🌙 Тёмная</option>
+          <option value="light" {{ 'selected' if prefs.theme == 'light' else '' }}>☀️ Светлая</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Вид дашборда</label>
+        <select id="pref-dashboard-view">
+          <option value="cards" {{ 'selected' if prefs.dashboard_view == 'cards' else '' }}>Карточки</option>
+          <option value="table" {{ 'selected' if prefs.dashboard_view == 'table' else '' }}>Таблица</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn" onclick="savePrefs()">💾 Сохранить</button>
+      <span class="saved-msg" id="saved-prefs">✅ Сохранено</span>
+    </div>
+  </div>
+
+  <!-- Уведомления -->
+  <div id="tab-notifications" class="tab-content">
+    <div class="section">
+      <h3>🔔 Каналы уведомлений</h3>
+      <div class="toggle-row">
+        <label>📧 Email-уведомления</label>
+        <div class="toggle"><input type="checkbox" id="notif-email" {{ 'checked' if prefs.notifications_email else '' }}><span class="slider"></span></div>
+      </div>
+      <div class="toggle-row">
+        <label>✈️ Telegram-уведомления</label>
+        <div class="toggle"><input type="checkbox" id="notif-tg" {{ 'checked' if prefs.notifications_tg else '' }}><span class="slider"></span></div>
+      </div>
+      <div class="toggle-row">
+        <label>💬 Ktalk-уведомления</label>
+        <div class="toggle"><input type="checkbox" id="notif-ktalk" {{ 'checked' if prefs.notifications_ktalk else '' }}><span class="slider"></span></div>
+      </div>
+    </div>
+    <div class="section">
+      <h3>📬 Что уведомлять</h3>
+      <div class="toggle-row">
+        <label>Просроченные чекапы</label>
+        <div class="toggle"><input type="checkbox" id="notif-overdue" {{ 'checked' if prefs.notif_overdue else '' }}><span class="slider"></span></div>
+      </div>
+      <div class="toggle-row">
+        <label>Новые задачи</label>
+        <div class="toggle"><input type="checkbox" id="notif-new-tasks" {{ 'checked' if prefs.notif_new_tasks else '' }}><span class="slider"></span></div>
+      </div>
+      <div class="toggle-row">
+        <label>Заблокированные задачи</label>
+        <div class="toggle"><input type="checkbox" id="notif-blocked" {{ 'checked' if prefs.notif_blocked else '' }}><span class="slider"></span></div>
+      </div>
+      <div class="toggle-row">
+        <label>Утренний план</label>
+        <div class="toggle"><input type="checkbox" id="notif-morning" {{ 'checked' if prefs.notif_morning else '' }}><span class="slider"></span></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn" onclick="saveNotifs()">💾 Сохранить</button>
+      <span class="saved-msg" id="saved-notifs">✅ Сохранено</span>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){
+  const h=document.documentElement;
+  const t=h.getAttribute('data-theme')==='light'?'dark':'light';
+  h.setAttribute('data-theme',t);
+  localStorage.setItem('theme',t);
+  document.getElementById('pref-theme').value=t;
+}
+const s=localStorage.getItem('theme');if(s){document.documentElement.setAttribute('data-theme',s);document.getElementById('pref-theme').value=s;}
+
+function showTab(id,btn){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function showSaved(id){
+  const el=document.getElementById(id);
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),2000);
+}
+
+async function saveIntegrations(){
+  const data={
+    merchrules:{login:document.getElementById('mr-login').value,password:document.getElementById('mr-pass').value},
+    airtable:{pat:document.getElementById('at-pat').value,base_id:document.getElementById('at-base').value},
+    sheets:{spreadsheet_id:document.getElementById('gs-id').value,gid:document.getElementById('gs-gid').value},
+    telegram:{bot_token:document.getElementById('tg-token').value,chat_id:document.getElementById('tg-chat').value},
+    groq:{api_key:document.getElementById('ai-key').value,model:document.getElementById('ai-model').value},
+    ktalk:{webhook_url:document.getElementById('kt-url').value},
+    tbank_time:{api_token:document.getElementById('tm-token').value},
+  };
+  const r=await fetch('/api/settings/integrations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-int');
+}
+
+async function saveRules(){
+  const data={
+    min_health_score:parseFloat(document.getElementById('rule-min-health').value),
+    checkup_interval_days:parseInt(document.getElementById('rule-checkup-interval').value),
+    warning_days:parseInt(document.getElementById('rule-warning-days').value),
+    segments:document.getElementById('rule-segments').value.split(',').map(s=>s.trim()),
+    auto_create_tasks:document.getElementById('rule-auto-tasks').checked,
+    morning_plan_time:document.getElementById('rule-morning-time').value,
+    weekly_digest_day:document.getElementById('rule-digest-day').value,
+  };
+  const r=await fetch('/api/settings/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-rules');
+}
+
+async function savePrefs(){
+  const data={
+    theme:document.getElementById('pref-theme').value,
+    dashboard_view:document.getElementById('pref-dashboard-view').value,
+  };
+  const r=await fetch('/api/settings/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-prefs');
+}
+
+async function saveNotifs(){
+  const data={
+    notifications_email:document.getElementById('notif-email').checked,
+    notifications_tg:document.getElementById('notif-tg').checked,
+    notifications_ktalk:document.getElementById('notif-ktalk').checked,
+    notif_overdue:document.getElementById('notif-overdue').checked,
+    notif_new_tasks:document.getElementById('notif-new-tasks').checked,
+    notif_blocked:document.getElementById('notif-blocked').checked,
+    notif_morning:document.getElementById('notif-morning').checked,
+  };
+  const r=await fetch('/api/settings/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-notifs');
+}
+</script>
+</body>
+</html>
