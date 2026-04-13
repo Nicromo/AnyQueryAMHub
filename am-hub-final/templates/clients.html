@@ -39,11 +39,11 @@
     .dot.y { background:var(--yellow); }
     .dot.r { background:var(--red); }
     .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
-    .b-ENT { background:rgba(59,130,246,.15); color:#60a5fa; }
-    .b-SME\\+ { background:rgba(168,85,247,.15); color:#c084fc; }
-    .b-SME- { background:rgba(168,85,247,.15); color:#a78bfa; }
-    .b-SMB { background:rgba(34,197,94,.15); color:#4ade80; }
-    .b-SS { background:rgba(249,115,22,.15); color:#fb923c; }
+    .badge-ENT { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .badge-SME-plus { background:rgba(168,85,247,.15); color:#c084fc; }
+    .badge-SME-minus { background:rgba(168,85,247,.15); color:#a78bfa; }
+    .badge-SMB { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-SS { background:rgba(249,115,22,.15); color:#fb923c; }
     .btn { padding:6px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; }
     .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
@@ -75,17 +75,19 @@
     <table>
       <thead><tr><th></th><th>Клиент</th><th>Сегмент</th><th>Последняя встреча</th><th></th></tr></thead>
       <tbody id="tbody">
-        {% for c in clients %}
-        <tr data-seg="{{ c.segment or '' }}" data-name="{{ c.name|lower }}">
-          <td><span class="dot {{ 'g' if c.status.color=='green' else 'y' if c.status.color=='yellow' else 'r' }}"></span></td>
-          <td class="c-name"><a href="/client/{{ c.id }}">{{ c.name }}</a></td>
-          <td><span class="badge b-{{ c.segment|replace('+','\\+')|replace('-','\\-') }}">{{ c.segment or '—' }}</span></td>
-          <td style="color:var(--muted);font-size:.78rem;">
-            {% if c.last_meeting_date %}{{ c.last_meeting_date.strftime('%d.%m.%Y') }}{% else %}—{% endif %}
-          </td>
-          <td><a href="/prep/{{ c.id }}" class="btn" style="padding:3px 8px;font-size:.7rem;">📋 Prep</a></td>
-        </tr>
-        {% endfor %}
+          {% for c in clients %}
+          <tr data-seg="{{ c.segment or '' }}" data-name="{{ c.name|lower }}">
+            {% set color = 'g' if c.status.color == 'green' else 'y' if c.status.color == 'yellow' else 'r' %}
+            <td><span class="dot dot-{{ color }}"></span></td>
+            <td class="c-name"><a href="/client/{{ c.id }}">{{ c.name }}</a></td>
+            {% set seg_class = 'badge-' + (c.segment|replace('+','-plus')|replace('-','-minus')|replace(' ','')) %}
+            <td><span class="badge {{ seg_class }}">{{ c.segment or '—' }}</span></td>
+            <td style="color:var(--muted);font-size:.78rem;">
+              {% if c.last_meeting_date %}{{ c.last_meeting_date.strftime('%d.%m.%Y') }}{% else %}—{% endif %}
+            </td>
+            <td><a href="/prep/{{ c.id }}" class="btn" style="padding:3px 8px;font-size:.7rem;">📋 Prep</a></td>
+          </tr>
+          {% endfor %}
       </tbody>
     </table>
   </div>

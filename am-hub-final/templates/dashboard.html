@@ -6,54 +6,32 @@
   <title>Дашборд — AM Hub</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <style>
-    :root {
-      --bg:#0a0e1a; --bg2:#111827; --card:#111827; --card-h:#1a2235;
-      --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b;
-      --accent:#6366f1; --accent-glow:rgba(99,102,241,.12);
-      --green:#22c55e; --red:#ef4444; --yellow:#eab308; --blue:#3b82f6; --purple:#a855f7; --orange:#f97316; --cyan:#06b6d4;
-    }
-    [data-theme="light"] {
-      --bg:#f1f5f9; --bg2:#ffffff; --card:#ffffff; --card-h:#f8fafc;
-      --border:#e2e8f0; --text:#1e293b; --muted:#64748b;
-      --accent-glow:rgba(99,102,241,.08);
-    }
+    :root { --bg:#0a0e1a; --bg2:#111827; --card:#111827; --card-h:#1a2235; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --accent-glow:rgba(99,102,241,.12); --green:#22c55e; --red:#ef4444; --yellow:#eab308; --blue:#3b82f6; --purple:#a855f7; --orange:#f97316; --cyan:#06b6d4; }
+    [data-theme="light"] { --bg:#f1f5f9; --bg2:#ffffff; --card:#ffffff; --card-h:#f8fafc; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; --accent-glow:rgba(99,102,241,.08); }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s, color .3s; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s,color .3s; }
     a { color:var(--accent); text-decoration:none; }
     a:hover { text-decoration:underline; }
-
-    /* Sidebar */
     .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; overflow-y:auto; }
     .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); margin-bottom:12px; }
     .sidebar-logo h1 { font-size:1.1rem; font-weight:700; }
     .sidebar-logo span { font-size:.68rem; color:var(--accent); text-transform:uppercase; letter-spacing:1px; }
-    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; cursor:pointer; transition:all .15s; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
     .nav-item:hover { color:var(--text); background:rgba(255,255,255,.03); text-decoration:none; }
     .nav-item.active { color:var(--accent); background:var(--accent-glow); border-left-color:var(--accent); }
-    .nav-icon { font-size:1rem; width:20px; text-align:center; }
     .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
-    .user-info { font-size:.8rem; }
-    .user-email { color:var(--text); font-weight:500; }
-    .user-role { color:var(--muted); font-size:.72rem; }
     .theme-btn { width:100%; margin-top:10px; padding:6px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; font-size:.78rem; transition:all .15s; }
     .theme-btn:hover { border-color:var(--accent); color:var(--text); }
-
-    /* Main */
-    .main { margin-left:240px; padding:24px 28px; min-height:100vh; }
-
-    /* Top bar */
+    .main { margin-left:240px; padding:24px 28px; }
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
     .topbar h2 { font-size:1.4rem; font-weight:700; }
     .topbar-sub { color:var(--muted); font-size:.82rem; margin-top:2px; }
     .topbar-actions { display:flex; gap:8px; }
     .btn { padding:8px 16px; border-radius:10px; font-size:.8rem; font-weight:500; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
-    .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
+    .btn:hover { border-color:var(--accent); text-decoration:none; }
     .btn-p { background:var(--accent); border-color:var(--accent); color:#fff; }
     .btn-p:hover { filter:brightness(1.15); color:#fff; }
     .btn-sm { padding:6px 12px; font-size:.75rem; }
-    .btn-d { background:rgba(239,68,68,.1); border-color:rgba(239,68,68,.3); color:#f87171; }
-
-    /* KPI */
     .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:24px; }
     .kpi { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; position:relative; overflow:hidden; }
     .kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
@@ -64,33 +42,23 @@
     .kpi-l { font-size:.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
     .kpi-v { font-size:1.7rem; font-weight:700; }
     .kpi-s { font-size:.75rem; color:var(--muted); margin-top:2px; }
-
-    /* Charts */
     .charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; margin-bottom:24px; }
     @media(max-width:900px){ .charts{grid-template-columns:1fr;} }
     .chart-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; }
     .chart-title { font-size:.85rem; font-weight:600; margin-bottom:14px; }
     .chart-wrap { position:relative; height:240px; }
-
-    /* Today section */
     .today-section { margin-bottom:24px; }
-    .section-title { font-size:.9rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
-
-    /* Mini cards for today */
+    .section-title { font-size:.9rem; font-weight:600; margin-bottom:12px; }
     .today-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
-    .today-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; transition:all .15s; }
+    .today-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; transition:border .15s; }
     .today-card:hover { border-color:var(--accent); }
     .tc-client { font-weight:600; font-size:.85rem; margin-bottom:4px; }
     .tc-title { font-size:.82rem; color:var(--muted); margin-bottom:6px; }
     .tc-meta { font-size:.72rem; color:var(--muted); display:flex; gap:12px; }
-
-    /* Filter */
     .filter-bar { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
     .fbtn { padding:5px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
     .fbtn:hover { border-color:var(--accent); color:var(--text); }
     .fbtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-
-    /* Table */
     .tbl-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
     .tbl-head { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
     .tbl-head h3 { font-size:.9rem; font-weight:600; }
@@ -103,22 +71,23 @@
     tr:hover td { background:rgba(255,255,255,.02); }
     .c-name { font-weight:600; }
     .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
-    .b-ENT { background:rgba(59,130,246,.15); color:#60a5fa; }
-    .b-SME\\+ { background:rgba(168,85,247,.15); color:#c084fc; }
-    .b-SME- { background:rgba(168,85,247,.15); color:#a78bfa; }
-    .b-SMB { background:rgba(34,197,94,.15); color:#4ade80; }
-    .b-SS { background:rgba(249,115,22,.15); color:#fb923c; }
+    .badge-ENT { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .badge-SME-plus { background:rgba(168,85,247,.15); color:#c084fc; }
+    .badge-SME-minus { background:rgba(168,85,247,.15); color:#a78bfa; }
+    .badge-SMB { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-SS { background:rgba(249,115,22,.15); color:#fb923c; }
     .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
-    .dot.g { background:var(--green); }
-    .dot.y { background:var(--yellow); }
-    .dot.r { background:var(--red); }
+    .dot-g { background:var(--green); }
+    .dot-y { background:var(--yellow); }
+    .dot-r { background:var(--red); }
     .mbar { width:50px; height:5px; background:var(--border); border-radius:3px; display:inline-block; vertical-align:middle; margin-left:6px; overflow:hidden; }
     .mbar-f { height:100%; border-radius:3px; }
-
+    .bar-green { background:var(--green); }
+    .bar-yellow { background:var(--yellow); }
+    .bar-red { background:var(--red); }
     .empty { text-align:center; padding:60px 20px; color:var(--muted); }
     .empty .ico { font-size:2.5rem; margin-bottom:10px; opacity:.4; }
     .empty h3 { color:var(--text); margin-bottom:6px; }
-
     ::-webkit-scrollbar { width:5px; }
     ::-webkit-scrollbar-track { background:var(--bg); }
     ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
@@ -127,19 +96,16 @@
 <body>
 
 <div class="sidebar">
-  <div class="sidebar-logo">
-    <h1>🎛️ AM Hub</h1>
-    <span>Enterprise</span>
-  </div>
-  <a class="nav-item active" href="/dashboard"><span class="nav-icon">📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span class="nav-icon">📅</span> Мой день</a>
-  <a class="nav-item" href="/clients"><span class="nav-icon">👥</span> Клиенты</a>
-  <a class="nav-item" href="/tasks"><span class="nav-icon">📋</span> Задачи</a>
-  <a class="nav-item" href="/sync"><span class="nav-icon">🔄</span> Синхронизация</a>
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1><span>Enterprise</span></div>
+  <a class="nav-item active" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Синхронизация</a>
   <div class="sidebar-footer">
-    <div class="user-info">
-      <div class="user-email">{{ user.first_name or user.email }}</div>
-      <div class="user-role">{{ user.role }} · {{ clients|length }} клиентов</div>
+    <div style="font-size:.8rem;">
+      <div style="color:var(--text);font-weight:500;">{{ user.first_name or user.email }}</div>
+      <div style="color:var(--muted);font-size:.72rem;">{{ user.role }} · {{ clients|length }}</div>
     </div>
     <button class="theme-btn" onclick="toggleTheme()">🌓 Сменить тему</button>
     <a href="/logout" class="theme-btn" style="display:block;text-align:center;text-decoration:none;margin-top:6px;">→ Выйти</a>
@@ -150,89 +116,50 @@
   <div class="topbar">
     <div>
       <h2>📊 Дашборд</h2>
-      <div class="topbar-sub">Привет, {{ user.first_name or user.email }} · {{ now.strftime('%d %B %Y') }}</div>
+      <div class="topbar-sub">{{ now.strftime('%d %B %Y') }}</div>
     </div>
     <div class="topbar-actions">
-      {% if not has_mr %}
-      <span style="font-size:.78rem;color:var(--yellow);">⚠️ Merchrules не настроен</span>
-      {% endif %}
       <button class="btn btn-sm" onclick="location.reload()">🔄</button>
-      <a class="btn btn-sm btn-p" href="/sync">🔄 Sync</a>
+      <a class="btn btn-sm btn-p" href="/sync">Sync</a>
     </div>
   </div>
 
   {% if clients %}
-  <!-- KPI -->
   <div class="kpi-grid">
-    <div class="kpi c-blue">
-      <div class="kpi-l">Всего клиентов</div>
-      <div class="kpi-v">{{ clients|length }}</div>
-      <div class="kpi-s">Активных</div>
-    </div>
-    <div class="kpi c-green">
-      <div class="kpi-l">Здоровые</div>
-      <div class="kpi-v" style="color:var(--green)">{{ healthy_count }}</div>
-      <div class="kpi-s">Зелёный статус</div>
-    </div>
-    <div class="kpi c-yellow">
-      <div class="kpi-l">Внимание</div>
-      <div class="kpi-v" style="color:var(--yellow)">{{ warning_count }}</div>
-      <div class="kpi-s">Жёлтый статус</div>
-    </div>
-    <div class="kpi c-red">
-      <div class="kpi-l">Критические</div>
-      <div class="kpi-v" style="color:var(--red)">{{ overdue_count }}</div>
-      <div class="kpi-s">Красный статус</div>
-    </div>
-    <div class="kpi c-blue">
-      <div class="kpi-l">Задач всего</div>
-      <div class="kpi-v">{{ total_tasks }}</div>
-      <div class="kpi-s">{{ total_open_tasks }} открытых</div>
-    </div>
+    <div class="kpi c-blue"><div class="kpi-l">Клиентов</div><div class="kpi-v">{{ clients|length }}</div><div class="kpi-s">Активных</div></div>
+    <div class="kpi c-green"><div class="kpi-l">Здоровые</div><div class="kpi-v" style="color:var(--green)">{{ healthy_count }}</div><div class="kpi-s">Зелёный</div></div>
+    <div class="kpi c-yellow"><div class="kpi-l">Внимание</div><div class="kpi-v" style="color:var(--yellow)">{{ warning_count }}</div><div class="kpi-s">Жёлтый</div></div>
+    <div class="kpi c-red"><div class="kpi-l">Критичные</div><div class="kpi-v" style="color:var(--red)">{{ overdue_count }}</div><div class="kpi-s">Красный</div></div>
+    <div class="kpi c-blue"><div class="kpi-l">Задач</div><div class="kpi-v">{{ total_tasks }}</div><div class="kpi-s">{{ total_open_tasks }} открытых</div></div>
   </div>
 
-  <!-- Today -->
   {% if today_meetings or today_tasks %}
   <div class="today-section">
-    <div class="section-title">📅 Сегодня · {{ now.strftime('%d.%m.%Y') }}</div>
+    <div class="section-title">📅 Сегодня</div>
     <div class="today-grid">
       {% for m in today_meetings %}
-      <a href="/client/{{ m.client_id }}" class="today-card" style="text-decoration:none;">
+      <a href="/client/{{ m.client_id }}" class="today-card" style="text-decoration:none;color:inherit;">
         <div class="tc-client">📅 {{ m.client.name if m.client else '—' }}</div>
         <div class="tc-title">{{ m.title or m.type }}</div>
-        <div class="tc-meta">
-          <span>{{ m.date.strftime('%H:%M') if m.date else '' }}</span>
-          <span>{{ m.type }}</span>
-        </div>
+        <div class="tc-meta"><span>{{ m.date.strftime('%H:%M') if m.date else '' }}</span><span>{{ m.type }}</span></div>
       </a>
       {% endfor %}
       {% for t in today_tasks %}
-      <a href="/client/{{ t.client_id }}" class="today-card" style="text-decoration:none;">
+      <a href="/client/{{ t.client_id }}" class="today-card" style="text-decoration:none;color:inherit;">
         <div class="tc-client">📋 {{ t.client.name if t.client else '—' }}</div>
         <div class="tc-title">{{ t.title }}</div>
-        <div class="tc-meta">
-          <span>{{ t.status }}</span>
-          <span>{{ t.priority }}</span>
-        </div>
+        <div class="tc-meta"><span>{{ t.status }}</span><span>{{ t.priority }}</span></div>
       </a>
       {% endfor %}
     </div>
   </div>
   {% endif %}
 
-  <!-- Charts -->
   <div class="charts">
-    <div class="chart-card">
-      <div class="chart-title">Клиенты по сегментам</div>
-      <div class="chart-wrap"><canvas id="segChart"></canvas></div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">Статусы</div>
-      <div class="chart-wrap"><canvas id="stChart"></canvas></div>
-    </div>
+    <div class="chart-card"><div class="chart-title">По сегментам</div><div class="chart-wrap"><canvas id="segChart"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Статусы</div><div class="chart-wrap"><canvas id="stChart"></canvas></div></div>
   </div>
 
-  <!-- Filter -->
   <div class="filter-bar">
     <button class="fbtn active" onclick="filterSeg('')">Все ({{ clients|length }})</button>
     {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
@@ -240,28 +167,25 @@
     {% endfor %}
   </div>
 
-  <!-- Table -->
   <div class="tbl-card">
-    <div class="tbl-head">
-      <h3>👥 Клиенты</h3>
-      <input type="text" class="search" placeholder="🔍 Поиск..." oninput="filterTbl(this.value)">
-    </div>
+    <div class="tbl-head"><h3>Клиенты</h3><input type="text" class="search" placeholder="🔍 Поиск..." oninput="filterTbl(this.value)"></div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr>
-          <th></th><th>Клиент</th><th>Сегмент</th><th>Менеджер</th>
-          <th>Health</th><th>Задачи</th><th>Последняя встреча</th><th></th>
-        </tr></thead>
+        <thead><tr><th></th><th>Клиент</th><th>Сегмент</th><th>Менеджер</th><th>Health</th><th>Задачи</th><th>Встреча</th><th></th></tr></thead>
         <tbody id="tbody">
           {% for c in clients %}
           <tr data-seg="{{ c.segment or '' }}" data-name="{{ c.name|lower }}">
-            <td><span class="dot {{ 'g' if c.status.color=='green' else 'y' if c.status.color=='yellow' else 'r' }}"></span></td>
+            {% set color = 'g' if c.status.color == 'green' else 'y' if c.status.color == 'yellow' else 'r' %}
+            <td><span class="dot dot-{{ color }}"></span></td>
             <td class="c-name"><a href="/client/{{ c.id }}">{{ c.name }}</a></td>
-            <td><span class="badge b-{{ c.segment|replace('+','\\+')|replace('-','\\-') }}">{{ c.segment or '—' }}</span></td>
+            {% set seg_class = 'badge-' + (c.segment|replace('+','-plus')|replace('-','-minus')|replace(' ','')) %}
+            <td><span class="badge {{ seg_class }}">{{ c.segment or '—' }}</span></td>
             <td style="color:var(--muted);font-size:.78rem;">{{ c.manager_email or '—' }}</td>
             <td>
-              {{ (c.health_score*100)|int }}%
-              <span class="mbar"><span class="mbar-f" style="width:{{ c.health_score*100 }}%;background:{{ '#22c55e' if c.health_score>.7 else '#eab308' if c.health_score>.4 else '#ef4444' }}"></span></span>
+              {% set pct = (c.health_score * 100)|int %}
+              {{ pct }}%
+              {% set bar_color = 'bar-green' if c.health_score > 0.7 else 'bar-yellow' if c.health_score > 0.4 else 'bar-red' %}
+              <span class="mbar"><span class="mbar-f {{ bar_color }}" style="width:{{ pct }}%"></span></span>
             </td>
             <td>
               {% if c.open_tasks %}<span style="color:var(--yellow)">📋{{ c.open_tasks }}</span>{% else %}<span style="color:var(--muted)">—</span>{% endif %}
@@ -273,70 +197,27 @@
                 {% if (now - c.last_meeting_date).days > 30 %}<span style="color:var(--red)"> ⚠️</span>{% endif %}
               {% else %}—{% endif %}
             </td>
-            <td><a href="/prep/{{ c.id }}" class="btn btn-sm" style="padding:3px 8px;font-size:.7rem;">📋 Prep</a></td>
+            <td><a href="/prep/{{ c.id }}" class="btn btn-sm" style="padding:3px 8px;font-size:.7rem;">Prep</a></td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
-
   {% else %}
-  <div class="empty">
-    <div class="ico">📋</div>
-    <h3>Нет данных</h3>
-    <p>Синхронизируйте данные из Merchrules</p>
-    <a href="/sync" class="btn btn-p" style="margin-top:14px;">🔄 Синхронизировать</a>
-  </div>
+  <div class="empty"><div class="ico">📋</div><h3>Нет данных</h3><p>Синхронизируйте данные из Merchrules</p><a href="/sync" class="btn btn-p" style="margin-top:14px;">🔄 Sync</a></div>
   {% endif %}
 </div>
 
 <script>
-function toggleTheme(){
-  const h=document.documentElement;
-  const t=h.getAttribute('data-theme')==='light'?'dark':'light';
-  h.setAttribute('data-theme',t);
-  localStorage.setItem('theme',t);
-}
-const s=localStorage.getItem('theme');
-if(s) document.documentElement.setAttribute('data-theme',s);
-
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
 {% if clients %}
-new Chart(document.getElementById('segChart'),{
-  type:'bar',
-  data:{
-    labels:['ENT','SME+','SME-','SMB','SS'],
-    datasets:[{data:[{{ counts['ENT'] or 0 }},{{ counts['SME+'] or 0 }},{{ counts['SME-'] or 0 }},{{ counts['SMB'] or 0 }},{{ counts['SS'] or 0 }}],
-      backgroundColor:['rgba(59,130,246,.6)','rgba(168,85,247,.6)','rgba(168,85,247,.4)','rgba(34,197,94,.6)','rgba(249,115,22,.6)'],
-      borderRadius:6}]
-  },
-  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-    scales:{y:{beginAtZero:true,ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.05)'}},x:{ticks:{color:'#64748b'},grid:{display:false}}}}
-});
-new Chart(document.getElementById('stChart'),{
-  type:'doughnut',
-  data:{labels:['Здоровые','Внимание','Критичные'],
-    datasets:[{data:[{{ healthy_count }},{{ warning_count }},{{ overdue_count }}],
-      backgroundColor:['rgba(34,197,94,.7)','rgba(234,179,8,.7)','rgba(239,68,68,.7)'],borderWidth:0,spacing:4}]
-  },
-  options:{responsive:true,maintainAspectRatio:false,cutout:'70%',
-    plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',padding:12,font:{size:10}}}}}
-});
+new Chart(document.getElementById('segChart'),{type:'bar',data:{labels:['ENT','SME+','SME-','SMB','SS'],datasets:[{data:[{{ counts['ENT'] or 0 }},{{ counts['SME+'] or 0 }},{{ counts['SME-'] or 0 }},{{ counts['SMB'] or 0 }},{{ counts['SS'] or 0 }}],backgroundColor:['rgba(59,130,246,.6)','rgba(168,85,247,.6)','rgba(168,85,247,.4)','rgba(34,197,94,.6)','rgba(249,115,22,.6)'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.05)'}},x:{ticks:{color:'#64748b'},grid:{display:false}}}}});
+new Chart(document.getElementById('stChart'),{type:'doughnut',data:{labels:['Здоровые','Внимание','Критичные'],datasets:[{data:[{{ healthy_count }},{{ warning_count }},{{ overdue_count }}],backgroundColor:['rgba(34,197,94,.7)','rgba(234,179,8,.7)','rgba(239,68,68,.7)'],borderWidth:0,spacing:4}]},options:{responsive:true,maintainAspectRatio:false,cutout:'70%',plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',padding:12,font:{size:10}}}}}});
 {% endif %}
-
-function filterSeg(seg){
-  document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));
-  event.target.classList.add('active');
-  document.querySelectorAll('#tbody tr').forEach(tr=>{
-    tr.style.display=(!seg||tr.dataset.seg===seg)?'':'none';
-  });
-}
-function filterTbl(q){
-  q=q.toLowerCase();
-  document.querySelectorAll('#tbody tr').forEach(tr=>{
-    tr.style.display=tr.dataset.name.includes(q)?'':'none';
-  });
-}
+function filterSeg(seg){document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=(!seg||tr.dataset.seg===seg)?'':'none';});}
+function filterTbl(q){q=q.toLowerCase();document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
 </script>
 </body>
 </html>

@@ -30,7 +30,7 @@
     .card .meta { font-size:.72rem; color:var(--muted); display:flex; gap:12px; flex-wrap:wrap; }
     .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
     .b-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
-    .b-in_progress { background:rgba(168,85,247,.15); color:#c084fc; }
+    .b-in-progress { background:rgba(168,85,247,.15); color:#c084fc; }
     .b-done { background:rgba(34,197,94,.15); color:#4ade80; }
     .b-blocked { background:rgba(239,68,68,.15); color:#f87171; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
@@ -62,7 +62,7 @@
     {% if t.client %}<div class="client">{{ t.client.name }}</div>{% endif %}
     {% if t.description %}<div style="font-size:.8rem;color:var(--muted);margin-bottom:4px;">{{ t.description[:150] }}</div>{% endif %}
     <div class="meta">
-      <span class="badge b-{{ t.status|replace('in_progress','in_progress') }}">{{ t.status }}</span>
+      <span class="badge b-{{ t.status|replace('_','-') }}">{{ t.status }}</span>
       <span>{{ t.priority }}</span>
       {% if t.due_date %}<span>До: {{ t.due_date.strftime('%d.%m') }}</span>{% endif %}
       {% if t.team %}<span>{{ t.team }}</span>{% endif %}

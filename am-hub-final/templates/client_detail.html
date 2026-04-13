@@ -28,7 +28,7 @@
     .card .meta { font-size:.72rem; color:var(--muted); margin-top:4px; display:flex; gap:12px; }
     .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
     .b-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
-    .b-progress { background:rgba(168,85,247,.15); color:#c084fc; }
+    .b-in-progress { background:rgba(168,85,247,.15); color:#c084fc; }
     .b-done { background:rgba(34,197,94,.15); color:#4ade80; }
     .b-blocked { background:rgba(239,68,68,.15); color:#f87171; }
     .btn { padding:6px 12px; border-radius:8px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:4px; }
@@ -64,7 +64,7 @@
       <h3>{{ t.title }}</h3>
       {% if t.description %}<p>{{ t.description[:200] }}</p>{% endif %}
       <div class="meta">
-        <span class="badge b-{{ t.status|replace('in_progress','progress') }}">{{ t.status }}</span>
+        <span class="badge b-{{ t.status|replace('_','-') }}">{{ t.status }}</span>
         <span>{{ t.priority }}</span>
         {% if t.due_date %}<span>До: {{ t.due_date.strftime('%d.%m.%Y') }}</span>{% endif %}
         {% if t.team %}<span>Команда: {{ t.team }}</span>{% endif %}
