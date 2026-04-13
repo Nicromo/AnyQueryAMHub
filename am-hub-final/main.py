@@ -208,6 +208,11 @@ def _run_migrations(db):
         ("clients", "last_meeting_date", "TIMESTAMP"),
         ("clients", "last_sync_at", "TIMESTAMP"),
         # Tasks
+        ("tasks", "title", "VARCHAR NOT NULL"),
+        ("tasks", "description", "TEXT"),
+        ("tasks", "status", "VARCHAR"),
+        ("tasks", "priority", "VARCHAR"),
+        ("tasks", "created_at", "TIMESTAMP"),
         ("tasks", "client_id", "INTEGER REFERENCES clients(id)"),
         ("tasks", "merchrules_task_id", "VARCHAR"),
         ("tasks", "source", "VARCHAR DEFAULT 'manual'"),
