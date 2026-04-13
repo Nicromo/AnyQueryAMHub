@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Синхронизация — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
+    .main { margin-left:240px; padding:24px 28px; max-width:700px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    h1 { font-size:1.4rem; margin-bottom:8px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:24px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .card h2 { font-size:1rem; font-weight:600; margin-bottom:12px; }
+    .form-group { margin-bottom:14px; }
+    label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px; }
+    input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.88rem; outline:none; }
+    input:focus { border-color:var(--accent); }
+    .btn { padding:10px 20px; border-radius:10px; font-size:.85rem; font-weight:600; cursor:pointer; border:none; background:var(--accent); color:#fff; transition:filter .15s; }
+    .btn:hover { filter:brightness(1.15); }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .result { margin-top:12px; padding:12px; border-radius:10px; font-size:.85rem; white-space:pre-wrap; display:none; }
+    .result.ok { background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.3); color:var(--green); display:block; }
+    .result.err { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); color:var(--red); display:block; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item active" href="/sync"><span>🔄</span> Синхронизация</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+<div class="main">
+  <h1>🔄 Синхронизация</h1>
+  <p class="sub">Загрузка данных из Merchrules</p>
+
+  <div class="card">
+    <h2>Синхронизация Merchrules</h2>
+    <div class="form-group">
+      <label>Login</label>
+      <input type="text" id="login" placeholder="your-email@example.com">
+    </div>
+    <div class="form-group">
+      <label>Пароль</label>
+      <input type="password" id="password" placeholder="••••••••">
+    </div>
+    <button class="btn" id="syncBtn" onclick="doSync()">🔄 Синхронизировать</button>
+    <div class="result" id="result"></div>
+  </div>
+</div>
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+async function doSync(){
+  const btn=document.getElementById('syncBtn');
+  const res=document.getElementById('result');
+  btn.disabled=true; btn.textContent='⏳ Синхронизация…';
+  res.className='result'; res.style.display='none';
+  try {
+    const r=await fetch('/api/sync/merchrules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:document.getElementById('login').value,password:document.getElementById('password').value})});
+    const d=await r.json();
+    if(d.ok){res.className='result ok';res.textContent='✅ Синхронизировано: '+d.clients_synced+' клиентов';}
+    else{res.className='result err';res.textContent='❌ '+d.error;}
+  }catch(e){res.className='result err';res.textContent='❌ '+e.message;}
+  res.style.display='block';
+  btn.disabled=false; btn.textContent='🔄 Синхронизировать';
+}
+</script>
+</body>
+</html>

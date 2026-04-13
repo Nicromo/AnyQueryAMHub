@@ -1,168 +1,81 @@
-{% extends "base.html" %}
-{% block title %}Все задачи — AM Hub{% endblock %}
-{% block content %}
-
-<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-  <div>
-    <h1>✅ Все задачи</h1>
-    <p>{{ tasks|length }} задач{% if status != 'open' %} ({{ status }}){% endif %}</p>
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Задачи — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
+    .main { margin-left:240px; padding:24px 28px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    h1 { font-size:1.4rem; margin-bottom:16px; }
+    .filter-bar { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+    .fbtn { padding:5px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; text-decoration:none; display:inline-block; }
+    .fbtn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
+    .fbtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; transition:border .15s; }
+    .card:hover { border-color:var(--accent); }
+    .card h3 { font-size:.88rem; font-weight:600; margin-bottom:2px; }
+    .card .client { font-size:.82rem; color:var(--muted); margin-bottom:4px; }
+    .card .meta { font-size:.72rem; color:var(--muted); display:flex; gap:12px; flex-wrap:wrap; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .b-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .b-in_progress { background:rgba(168,85,247,.15); color:#c084fc; }
+    .b-done { background:rgba(34,197,94,.15); color:#4ade80; }
+    .b-blocked { background:rgba(239,68,68,.15); color:#f87171; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item active" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Синхронизация</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+<div class="main">
+  <h1>📋 Задачи</h1>
+  <div class="filter-bar">
+    <a class="fbtn {% if status_filter == 'all' %}active{% endif %}" href="?status=all">Все ({{ tasks|length }})</a>
+    <a class="fbtn {% if status_filter == 'plan' %}active{% endif %}" href="?status=plan">Plan</a>
+    <a class="fbtn {% if status_filter == 'in_progress' %}active{% endif %}" href="?status=in_progress">In Progress</a>
+    <a class="fbtn {% if status_filter == 'done' %}active{% endif %}" href="?status=done">Done</a>
+    <a class="fbtn {% if status_filter == 'blocked' %}active{% endif %}" href="?status=blocked">Blocked</a>
   </div>
-  <a href="/roadmap" class="btn btn-primary">+ Создать задачи в Merchrules</a>
-</div>
-
-<!-- Подсказка: ритм чекапов -->
-<div class="card" style="background:#1a2030;border-color:#2e3a50;padding:12px 18px;margin-bottom:4px">
-  <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:0.85rem;color:var(--text-muted)">
-    <span>📆 <b style="color:var(--text)">Ритм чекапов:</b></span>
-    <span>🏢 ENT — раз в <b style="color:var(--red)">30 дней</b></span>
-    <span>📊 SME — раз в <b style="color:var(--yellow)">60 дней</b></span>
-    <span>🛒 SMB — раз в <b style="color:var(--green)">90 дней</b></span>
-    <span style="margin-left:auto;color:var(--text-muted)">
-      ⏱ Среднее время встречи: ENT 60 мин · SME 45 мин · SMB 30 мин
-    </span>
-  </div>
-</div>
-
-<!-- Фильтры -->
-<div class="filter-tabs">
-  <a href="/tasks?status=open"   class="tab-btn {% if status=='open'    %}active{% endif %}">🔵 Открытые ({{ total }})</a>
-  <a href="/tasks?status=done"   class="tab-btn {% if status=='done'    %}active{% endif %}">✅ Выполненные</a>
-  <a href="/tasks?status=blocked" class="tab-btn {% if status=='blocked' %}active{% endif %}">🔴 Заблокированные</a>
-  <a href="/tasks?status=open&owner=anyquery{% if segment %}&segment={{ segment }}{% endif %}"
-     class="tab-btn {% if owner=='anyquery' %}active{% endif %}">AnyQuery</a>
-  <a href="/tasks?status=open&owner=client{% if segment %}&segment={{ segment }}{% endif %}"
-     class="tab-btn {% if owner=='client'   %}active{% endif %}">Партнёры</a>
-</div>
-
-<!-- Фильтр по сегменту -->
-<div class="filter-tabs" style="margin-top:-8px">
-  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}"
-     class="tab-btn {% if not segment %}active{% endif %}">Все</a>
-  {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
-  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}&segment={{ seg }}"
-     class="tab-btn {% if segment==seg %}active{% endif %}">{{ seg }}</a>
+  {% for t in tasks %}
+  <a href="/client/{{ t.client_id }}" class="card" style="display:block;text-decoration:none;color:inherit;">
+    <h3>{{ t.title }}</h3>
+    {% if t.client %}<div class="client">{{ t.client.name }}</div>{% endif %}
+    {% if t.description %}<div style="font-size:.8rem;color:var(--muted);margin-bottom:4px;">{{ t.description[:150] }}</div>{% endif %}
+    <div class="meta">
+      <span class="badge b-{{ t.status|replace('in_progress','in_progress') }}">{{ t.status }}</span>
+      <span>{{ t.priority }}</span>
+      {% if t.due_date %}<span>До: {{ t.due_date.strftime('%d.%m') }}</span>{% endif %}
+      {% if t.team %}<span>{{ t.team }}</span>{% endif %}
+    </div>
+  </a>
   {% endfor %}
+  {% if not tasks %}
+  <div style="text-align:center;padding:40px;color:var(--muted);">Нет задач</div>
+  {% endif %}
 </div>
-
-{% if not tasks %}
-<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
-  <div style="font-size:2rem;margin-bottom:8px">🎉</div>
-  <p>Нет задач в статусе «{{ status }}»</p>
-</div>
-{% else %}
-
-<!-- Сводка по времени -->
-{% set total_hours = namespace(val=0) %}
-{% for t in tasks %}
-  {% if t.hours_estimate %}{% set total_hours.val = total_hours.val + t.hours_estimate %}{% endif %}
-{% endfor %}
-{% if total_hours.val > 0 %}
-<div class="card" style="padding:12px 18px;background:#1e1a2e;border-color:#3a2e5a;margin-bottom:4px">
-  <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:0.85rem">
-    <span>⏱ <b style="color:var(--accent)">Итого по оценкам:</b> {{ "%.1f"|format(total_hours.val) }} ч</span>
-    <span style="color:var(--text-muted)">≈ {{ (total_hours.val / 8)|round(1) }} рабочих дней</span>
-  </div>
-</div>
-{% endif %}
-
-<div class="card" style="padding:0;overflow:hidden">
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Клиент</th>
-        <th>Задача</th>
-        <th>Кто</th>
-        <th>⏱ Оценка</th>
-        <th>Дедлайн</th>
-        <th>Статус</th>
-        {% if status == 'open' %}<th></th>{% endif %}
-      </tr>
-    </thead>
-    <tbody>
-    {% for t in tasks %}
-    <tr>
-      <td>
-        <a href="/prep/{{ t.client_id }}" style="font-weight:600">{{ t.client_name }}</a>
-        <span class="badge badge-{{ t.segment|lower }}" style="margin-left:4px;font-size:0.7rem">{{ t.segment }}</span>
-      </td>
-      <td>
-        <span>{{ t.text }}</span>
-        {% if t.is_internal %}
-          <span style="font-size:0.72rem;background:#2a1a3a;color:#a08ad0;border-radius:4px;padding:1px 6px;margin-left:4px">внутр.</span>
-        {% endif %}
-        {% if t.internal_note %}
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">💬 {{ t.internal_note }}</div>
-        {% endif %}
-      </td>
-      <td>
-        <span style="color:{% if t.owner=='anyquery' %}var(--accent){% else %}var(--yellow){% endif %};font-size:0.85rem">
-          {% if t.owner == 'anyquery' %}🔵 AnyQuery{% else %}🟡 Партнёр{% endif %}
-        </span>
-      </td>
-      <td>
-        <!-- Инлайн редактирование оценки времени -->
-        <span class="hours-display" data-id="{{ t.id }}"
-              style="cursor:pointer;color:{% if t.hours_estimate %}var(--accent){% else %}var(--text-muted){% endif %};font-size:0.85rem"
-              onclick="editHours(this, {{ t.id }}, {{ t.hours_estimate or 0 }})">
-          {% if t.hours_estimate %}{{ "%.1f"|format(t.hours_estimate) }}ч{% else %}—{% endif %}
-        </span>
-      </td>
-      <td style="{% if t.due_date and t.due_date < today %}color:var(--red);font-weight:600{% endif %}">
-        {{ t.due_date or '—' }}
-        {% if t.due_date and t.due_date < today %}<span style="font-size:0.75rem"> ⚠️</span>{% endif %}
-      </td>
-      <td>
-        {% if t.status == 'blocked' %}
-          <span style="color:var(--red);font-size:0.82rem">🔴 Блок</span>
-        {% elif t.due_date and t.due_date < today %}
-          <span style="color:var(--red);font-size:0.82rem">⚠️ Просрочена</span>
-        {% else %}
-          <span style="color:var(--green);font-size:0.82rem">✅ В работе</span>
-        {% endif %}
-      </td>
-      {% if status == 'open' %}
-      <td>
-        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
-          <button type="submit" class="btn btn-ghost btn-sm" title="Отметить выполненной">✓</button>
-        </form>
-      </td>
-      {% endif %}
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
-
 <script>
-function editHours(el, taskId, current) {
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.step = '0.5';
-  input.min = '0';
-  input.max = '99';
-  input.value = current || '';
-  input.style.cssText = 'width:60px;padding:2px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.82rem';
-  el.replaceWith(input);
-  input.focus();
-  input.select();
-  async function save() {
-    const val = parseFloat(input.value) || 0;
-    await fetch(`/api/task/${taskId}/hours`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({hours: val})
-    });
-    const span = document.createElement('span');
-    span.className = 'hours-display';
-    span.dataset.id = taskId;
-    span.style.cssText = 'cursor:pointer;font-size:0.85rem;color:' + (val ? 'var(--accent)' : 'var(--text-muted)');
-    span.textContent = val ? val.toFixed(1) + 'ч' : '—';
-    span.onclick = () => editHours(span, taskId, val);
-    input.replaceWith(span);
-  }
-  input.addEventListener('blur', save);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
-}
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
 </script>
-{% endblock %}
+</body>
+</html>

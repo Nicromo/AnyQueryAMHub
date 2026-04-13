@@ -1,89 +1,51 @@
 """
-AM Hub - FastAPI main application with full integration
-Полная интеграция с:
-- Pydantic schemas для валидации
-- JWT authentication
-- Role-based access control
-- Email уведомления
-- File upload/export
-- WebSocket real-time
-- Rate limiting и логирование
+AM Hub — Enterprise Account Manager Dashboard
+Реальные данные из Merchrules · Персональные дашборды · AI-ассистент
 """
-
 import os
-import io
-import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import (
-    FastAPI, Request, Depends, HTTPException, UploadFile, File, 
-    Query, WebSocket, WebSocketDisconnect, status
+    FastAPI, Request, Depends, HTTPException, Query, Cookie,
+    Form, status
 )
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-# Configuration
 from database import engine, get_db, Base, init_db, SessionLocal
-
-# Models
-from models import Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog, Notification
-
-# Schemas
-from schemas import (
-    ClientCreate, ClientUpdate, ClientResponse, ClientFilter,
-    TaskCreate, TaskUpdate, TaskResponse, TaskFilter,
-    MeetingCreate, MeetingUpdate, MeetingResponse, MeetingFilter,
-    CheckupCreate, CheckupUpdate, CheckupResponse,
-    UserCreate, UserResponse,
-    PaginatedResponse, ErrorResponse, StatsResponse,
-)
-
-# Auth & Security
+from models import Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog
 from auth import (
-    get_current_user, get_current_admin, 
-    authenticate_user, create_user, 
-    check_client_access, ensure_client_access,
-    log_audit, create_access_token
+    get_current_user, get_current_admin,
+    authenticate_user, create_user, create_access_token,
+    verify_password, hash_password,
+    log_audit,
 )
-
-# Error handling
-from error_handlers import (
-    ValidationError, ResourceNotFoundError, UnauthorizedError,
-    ForbiddenError, ConflictError, BadRequestError, handle_db_error, log_error
-)
-
-# Middleware
+from error_handlers import log_error, handle_db_error
 from middlewares import (
     LoggingMiddleware, RateLimitMiddleware,
     ErrorHandlingMiddleware, SecurityHeadersMiddleware
 )
 
-# Services
-from email_service import (
-    send_morning_plan, send_overdue_checkup_alert, send_task_created,
-    EmailType, get_email_service
+# Merchrules sync
+from merchrules_sync import (
+    get_auth_token as mr_get_auth_token,
+    fetch_site_tasks, fetch_site_meetings,
+    sync_clients_from_merchrules, get_client_mr_data,
 )
-from file_service import (
-    FileProcessor, BulkImporter, BulkExporter, FileFormat
-)
-from websocket_manager import (
-    ConnectionManager, handle_websocket_connection, emit_task_created,
-    emit_task_updated, emit_client_updated, emit_notification, manager
-)
-from validators import ClientValidator, TaskValidator, MeetingValidator
+from merchrules import push_tasks_csv, sync_meeting_to_merchrules
 
-# Integrations
-from integrations.airtable import get_clients as sync_clients_airtable
-from integrations.merchrules_extended import (
-    fetch_account_analytics, fetch_checkups, fetch_roadmap_tasks,
-    fetch_meetings as fetch_meetings_merchrules
+# AI
+from ai_followup import process_transcript as ai_process_transcript
+from ai_assistant import (
+    generate_prep_brief, generate_smart_followup, detect_account_risks
 )
 
 logger = logging.getLogger(__name__)
@@ -96,217 +58,35 @@ templates = Jinja2Templates(directory="templates")
 # LIFESPAN
 # ============================================================================
 
-def _seed_demo_data(db):
-    """Заполнить БД демо-данными если пусто"""
-    if db.query(Client).count() > 0:
-        return  # Уже есть данные
-
-    import random
-    from datetime import timedelta as td
-
-    logger.info("🌱 Seeding demo data...")
-
-    segments = ["ENT", "SME+", "SME-", "SMB", "SS"]
-    companies = {
-        "ENT": ["Сбербанк", "Яндекс", "МТС", "Ростелеком", "Тинькофф"],
-        "SME+": ["Ozon", "Wildberries", "Lamoda", "DNS", "М.Видео"],
-        "SME-": ["Ситилинк", "Эльдорадо", "Эксперт", "Поларис", "Беру"],
-        "SMB": ["Магазин у дома", "Кофейня №1", "Студия красоты", "Фитнес-клуб", "Автосервис"],
-        "SS": ["ИП Иванов", "ИП Петров", "ИП Сидоров", "ИП Козлов", "ИП Новиков"],
-    }
-    managers = ["ivan@company.ru", "maria@company.ru", "alex@company.ru"]
-    task_titles = [
-        "Настроить трекинг событий", "Проверить качество поиска",
-        "Интегрировать API рекомендаций", "Обновить модель ранжирования",
-        "Провести A/B тест", "Оптимизировать выдачу",
-        "Добавить новые фильтры", "Настроить персонализацию",
-    ]
-    statuses = ["plan", "in_progress", "done", "blocked"]
-    priorities = ["low", "medium", "high"]
-
-    for segment, names in companies.items():
-        for name in names:
-            client = Client(
-                name=name, segment=segment,
-                manager_email=random.choice(managers),
-                health_score=round(random.uniform(0.3, 1.0), 2),
-                activity_level=random.choice(["high", "medium", "low"]),
-                open_tickets=random.randint(0, 5),
-                site_ids=[random.randint(100, 9999)],
-                last_meeting_date=datetime.now() - td(days=random.randint(1, 60)),
-                needs_checkup=random.choice([True, False]),
-                revenue_trend=random.choice(["growing", "stable", "declining"]),
-            )
-            db.add(client)
-            db.flush()
-
-            # Задачи
-            for _ in range(random.randint(2, 5)):
-                db.add(Task(
-                    client_id=client.id,
-                    title=random.choice(task_titles),
-                    description=f"Задача для {name}",
-                    status=random.choice(statuses),
-                    priority=random.choice(priorities),
-                    created_at=datetime.now() - td(days=random.randint(1, 30)),
-                    due_date=datetime.now() + td(days=random.randint(-5, 30)),
-                ))
-
-    db.commit()
-    logger.info(f"✅ Seeded {len(companies)} segments with demo data")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """App startup/shutdown"""
+    """App startup"""
     try:
-        # Пересоздаём таблицы с актуальной схемой
-        Base.metadata.drop_all(bind=engine)
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ Database tables recreated")
-
+        init_db()
+        # Если нет ни одного юзера — создаём админа по умолчанию
         with SessionLocal() as db:
-            db.execute(text("SELECT 1"))
-            _seed_demo_data(db)
-        logger.info("✅ Database connected")
+            if db.query(User).count() == 0:
+                admin = User(
+                    email="admin@company.ru",
+                    first_name="Администратор",
+                    role="admin",
+                    hashed_password=hash_password("admin123"),
+                )
+                db.add(admin)
+                db.commit()
+                logger.info("✅ Default admin created (admin@company.ru / admin123)")
+        logger.info("✅ Database ready")
     except Exception as e:
         logger.error(f"❌ Database error: {e}")
-
     yield
-
-
-def _run_migrations(db):
-    """Добавить отсутствующие колонки в существующие таблицы"""
-    # Получить существующие колонки для каждой таблицы
-    tables_columns = {}
-    for table in ["clients", "tasks", "meetings", "checkups", "users", "accounts",
-                   "audit_logs", "notifications", "sync_logs"]:
-        cols = db.execute(
-            text("""
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = :table
-            """),
-            {"table": table}
-        ).fetchall()
-        tables_columns[table] = {row[0] for row in cols}
-
-    # Список колонок для добавления
-    pending = [
-        # Clients
-        ("clients", "domain", "VARCHAR"),
-        ("clients", "segment", "VARCHAR"),
-        ("clients", "account_id", "INTEGER REFERENCES accounts(id)"),
-        ("clients", "manager_email", "VARCHAR"),
-        ("clients", "merchrules_account_id", "VARCHAR"),
-        ("clients", "site_ids", "JSONB"),
-        ("clients", "health_score", "FLOAT"),
-        ("clients", "revenue_trend", "VARCHAR"),
-        ("clients", "activity_level", "VARCHAR"),
-        ("clients", "open_tickets", "INTEGER DEFAULT 0"),
-        ("clients", "last_ticket_date", "TIMESTAMP"),
-        ("clients", "integration_metadata", "JSONB"),
-        ("clients", "airtable_record_id", "VARCHAR"),
-        ("clients", "last_checkup", "TIMESTAMP"),
-        ("clients", "needs_checkup", "BOOLEAN DEFAULT FALSE"),
-        ("clients", "last_meeting_date", "TIMESTAMP"),
-        ("clients", "last_sync_at", "TIMESTAMP"),
-        # Tasks
-        ("tasks", "title", "VARCHAR NOT NULL"),
-        ("tasks", "description", "TEXT"),
-        ("tasks", "status", "VARCHAR"),
-        ("tasks", "priority", "VARCHAR"),
-        ("tasks", "created_at", "TIMESTAMP"),
-        ("tasks", "client_id", "INTEGER REFERENCES clients(id)"),
-        ("tasks", "merchrules_task_id", "VARCHAR"),
-        ("tasks", "source", "VARCHAR DEFAULT 'manual'"),
-        ("tasks", "created_from_meeting_id", "INTEGER REFERENCES meetings(id)"),
-        ("tasks", "due_date", "TIMESTAMP"),
-        ("tasks", "team", "VARCHAR"),
-        ("tasks", "task_type", "VARCHAR"),
-        # Meetings
-        ("meetings", "client_id", "INTEGER REFERENCES clients(id)"),
-        ("meetings", "source", "VARCHAR DEFAULT 'internal'"),
-        ("meetings", "title", "VARCHAR"),
-        ("meetings", "summary", "TEXT"),
-        ("meetings", "transcript", "TEXT"),
-        ("meetings", "recording_url", "VARCHAR"),
-        ("meetings", "transcript_url", "VARCHAR"),
-        ("meetings", "mood", "VARCHAR"),
-        ("meetings", "sentiment_score", "FLOAT"),
-        ("meetings", "attendees", "JSONB"),
-        ("meetings", "external_id", "VARCHAR"),
-        # Checkups
-        ("checkups", "client_id", "INTEGER REFERENCES clients(id)"),
-        ("checkups", "merchrules_id", "VARCHAR"),
-        ("checkups", "priority", "INTEGER DEFAULT 0"),
-        ("checkups", "completed_date", "TIMESTAMP"),
-        ("checkups", "scheduled_date", "TIMESTAMP"),
-        ("checkups", "status", "VARCHAR"),
-        ("checkups", "type", "VARCHAR"),
-        # Users
-        ("users", "role", "VARCHAR DEFAULT 'manager'"),
-        ("users", "is_active", "BOOLEAN DEFAULT TRUE"),
-        ("users", "hashed_password", "VARCHAR"),
-        ("users", "telegram_id", "VARCHAR"),
-        ("users", "updated_at", "TIMESTAMP"),
-        # Accounts
-        ("accounts", "domain", "VARCHAR"),
-        ("accounts", "airtable_base_id", "VARCHAR"),
-        ("accounts", "merchrules_login", "VARCHAR"),
-        ("accounts", "is_active", "BOOLEAN DEFAULT TRUE"),
-        ("accounts", "account_data", "JSONB"),
-        # Audit logs
-        ("audit_logs", "user_id", "INTEGER REFERENCES users(id)"),
-        ("audit_logs", "ip_address", "VARCHAR"),
-        ("audit_logs", "user_agent", "VARCHAR"),
-        ("audit_logs", "old_values", "JSONB"),
-        ("audit_logs", "new_values", "JSONB"),
-        ("audit_logs", "resource_type", "VARCHAR"),
-        ("audit_logs", "resource_id", "INTEGER"),
-        ("audit_logs", "action", "VARCHAR"),
-        # Notifications
-        ("notifications", "user_id", "INTEGER REFERENCES users(id)"),
-        ("notifications", "title", "VARCHAR"),
-        ("notifications", "message", "TEXT"),
-        ("notifications", "type", "VARCHAR"),
-        ("notifications", "is_read", "BOOLEAN DEFAULT FALSE"),
-        ("notifications", "related_resource_type", "VARCHAR"),
-        ("notifications", "related_resource_id", "INTEGER"),
-        ("notifications", "read_at", "TIMESTAMP"),
-        # Sync logs
-        ("sync_logs", "sync_data", "JSONB"),
-    ]
-
-    applied = 0
-    for table, col, col_type in pending:
-        existing = tables_columns.get(table, set())
-        if col not in existing:
-            try:
-                db.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-                db.commit()
-                applied += 1
-                logger.info(f"  + {table}.{col}")
-            except Exception as e:
-                logger.warning(f"  ! {table}.{col}: {e}")
-
-    if applied:
-        logger.info(f"✅ Applied {applied} column migrations")
-    else:
-        logger.info("✅ Schema up to date")
 
 
 # ============================================================================
 # APP SETUP
 # ============================================================================
 
-app = FastAPI(
-    title="AM Hub",
-    description="Account Manager Hub - Complete platform",
-    version="1.0.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="AM Hub", version="2.0.0", lifespan=lifespan)
 
-# Middleware
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(ErrorHandlingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
@@ -319,90 +99,139 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # ============================================================================
-# HEALTH & ROOT
+# MERCHRULES HELPERS
 # ============================================================================
 
-@app.get("/health")
-async def health():
-    """Health check"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "websockets": manager.get_connection_count(),
-    }
+def _get_merchrules_clients(db: Session, login: str, password: str) -> List[dict]:
+    """Загрузить клиентов из Merchrules через sync module"""
+    try:
+        token = mr_get_auth_token(login, password)
+        # fetch clients via existing sync
+        from merchrules_sync import sync_clients_from_merchrules
+        clients_data = sync_clients_from_merchrules(db, login)
+        return clients_data or []
+    except Exception as e:
+        logger.error(f"Merchrules sync error: {e}")
+        return []
 
 
-@app.get("/health/detailed")
-async def health_detailed():
-    """Detailed health check"""
-    from monitoring import get_startup_checks
-    return get_startup_checks()
+def _get_client_tasks(db: Session, site_ids: list, login: str, password: str) -> dict:
+    """Задачи из Merchrules по site_id"""
+    result = {}
+    token = mr_get_auth_token(login, password)
+    for sid in site_ids:
+        try:
+            tasks = fetch_site_tasks(str(sid), token)
+            result[sid] = tasks or []
+        except Exception:
+            result[sid] = []
+    return result
 
 
-@app.get("/health/integrations")
-async def health_integrations():
-    """Check integration status"""
-    from monitoring import get_integration_status
-    return get_integration_status()
+def _get_client_meetings(db: Session, site_ids: list, login: str, password: str) -> dict:
+    """Встречи из Merchrules"""
+    result = {}
+    token = mr_get_auth_token(login, password)
+    for sid in site_ids:
+        try:
+            meetings = fetch_site_meetings(str(sid), token)
+            result[sid] = meetings or []
+        except Exception:
+            result[sid] = []
+    return result
 
 
-@app.get("/metrics")
-async def metrics():
-    """Prometheus metrics"""
-    from monitoring import metrics as metrics_collector
-    return metrics_collector.get_prometheus_metrics()
+def _get_user_cred(user: User) -> tuple:
+    """Получить креды пользователя из профиля или env"""
+    login = os.environ.get("MERCHRULES_LOGIN", "")
+    password = os.environ.get("MERCHRULES_PASSWORD", "")
+    return login, password
 
 
-@app.get("/api/health/metrics")
-async def metrics_json():
-    """JSON metrics"""
-    from monitoring import metrics as metrics_collector
-    return metrics_collector.get_health_metrics()
+# ============================================================================
+# AUTH PAGES
+# ============================================================================
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
 
-@app.get("/", response_class=HTMLResponse)
-async def root(request: Request, db: Session = Depends(get_db)):
-    """Root page"""
+@app.post("/login")
+async def login_submit(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = authenticate_user(db, email, password)
+    if not user:
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Неверный email или пароль"})
+
+    token = create_access_token({"sub": str(user.id)})
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(key="auth_token", value=token, httponly=True, samesite="lax", max_age=86400 * 30)
+    return response
+
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(key="auth_token")
+    return response
+
+
+# ============================================================================
+# DASHBOARD
+# ============================================================================
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user_id = payload.get("sub")
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    # Для админа — все клиенты, для менеджера — только его
     query = db.query(Client)
+    if user.role == "manager":
+        query = query.filter(Client.manager_email == user.email)
     clients = query.all()
 
-    # Подсчёт по сегментам
+    # Обогащаем данными из Merchrules если есть креды
+    mr_login, mr_password = _get_user_cred(user)
+    has_mr = bool(mr_login and mr_password)
+
+    # Статистика
+    now = datetime.now()
     counts = {"ENT": 0, "SME+": 0, "SME-": 0, "SME": 0, "SMB": 0, "SS": 0}
+    healthy = warning = overdue = total_open = total_tasks = 0
+
     for c in clients:
         seg = c.segment or ""
         if seg in counts:
             counts[seg] += 1
 
-    # Обогащаем клиентов
-    now = datetime.now()
-    healthy = 0
-    warning = 0
-    overdue = 0
-    total_open = 0
+        open_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status.in_(["plan", "in_progress"])).count()
+        blocked_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status == "blocked").count()
+        total_client_tasks = db.query(Task).filter(Task.client_id == c.id).count()
+        total_open += open_tasks
+        total_tasks += total_client_tasks
 
-    for c in clients:
-        open_tasks = db.query(Task).filter(
-            Task.client_id == c.id,
-            Task.status.in_(["plan", "in_progress"])
-        ).count()
-        blocked_tasks = db.query(Task).filter(
-            Task.client_id == c.id,
-            Task.status == "blocked"
-        ).count()
-
-        is_overdue = c.needs_checkup and (
-            not c.last_meeting_date or
-            (now - c.last_meeting_date).days > 30
-        )
-        is_warning = c.needs_checkup and (
-            c.last_meeting_date and
-            14 < (now - c.last_meeting_date).days <= 30
-        )
+        is_overdue = c.needs_checkup and (not c.last_meeting_date or (now - c.last_meeting_date).days > 30)
+        is_warning = c.needs_checkup and c.last_meeting_date and 14 < (now - c.last_meeting_date).days <= 30
 
         if is_overdue:
             overdue += 1
@@ -411,1059 +240,468 @@ async def root(request: Request, db: Session = Depends(get_db)):
         else:
             healthy += 1
 
-        total_open += open_tasks
-
         c.open_tasks = open_tasks
         c.blocked_tasks = blocked_tasks
-        c.status = {
-            "color": "red" if is_overdue else ("yellow" if is_warning else "green"),
-        }
+        c.total_tasks = total_client_tasks
+        c.status = {"color": "red" if is_overdue else ("yellow" if is_warning else "green")}
+
+    # Задачи на сегодня
+    today = now.date()
+    today_tasks = db.query(Task).filter(
+        Task.due_date >= datetime.combine(today, datetime.min.time()),
+        Task.due_date < datetime.combine(today + timedelta(days=1), datetime.min.time()),
+        Task.status.in_(["plan", "in_progress"]),
+    ).all()
+
+    if user.role == "manager":
+        today_tasks = [t for t in today_tasks if t.client and t.client.manager_email == user.email]
+
+    # Встречи на сегодня
+    today_meetings = db.query(Meeting).filter(
+        Meeting.date >= datetime.combine(today, datetime.min.time()),
+        Meeting.date < datetime.combine(today + timedelta(days=1), datetime.min.time()),
+    ).all()
 
     return templates.TemplateResponse(
-        "index.html",
-        {
+        "dashboard.html", {
             "request": request,
+            "user": user,
             "clients": clients,
             "counts": counts,
             "healthy_count": healthy,
             "warning_count": warning,
             "overdue_count": overdue,
             "total_open_tasks": total_open,
+            "total_tasks": total_tasks,
+            "today_tasks": today_tasks,
+            "today_meetings": today_meetings,
             "now": now,
+            "has_mr": has_mr,
         },
     )
 
 
 # ============================================================================
-# AUTH ENDPOINTS
+# MY DAY
 # ============================================================================
 
-@app.post("/api/auth/register", response_model=UserResponse)
-async def register(user: UserCreate, db: Session = Depends(get_db)):
-    """Register new user"""
-    try:
-        # Check if user exists
-        existing = db.query(User).filter(User.email == user.email).first()
-        if existing:
-            raise ConflictError("User with this email already exists")
-        
-        # Create user
-        new_user = create_user(user, db)
-        
-        return UserResponse.from_orm(new_user)
-    
-    except ConflictError:
-        raise
-    except Exception as e:
-        log_error(e, "register")
-        raise BadRequestError(str(e))
+@app.get("/today", response_class=HTMLResponse)
+async def my_day(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
 
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
 
-@app.post("/api/auth/login")
-async def login(email: str, password: str, db: Session = Depends(get_db)):
-    """Login user"""
-    try:
-        user = authenticate_user(db, email, password)
-        if not user:
-            raise UnauthorizedError("Invalid email or password")
-        
-        token = create_access_token({"sub": str(user.id)})
-        
-        # Log audit
-        await log_audit(
-            db, user.id, "LOGIN", "User logged in",
-            {"email": email}
-        )
-        
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "user": UserResponse.from_orm(user)
-        }
-    
-    except UnauthorizedError:
-        raise
-    except Exception as e:
-        log_error(e, "login")
-        raise BadRequestError("Login failed")
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    today = datetime.now().date()
+    start = datetime.combine(today, datetime.min.time())
+    end = datetime.combine(today + timedelta(days=1), datetime.min.time())
+
+    # Задачи на сегодня
+    q = db.query(Task).filter(Task.due_date >= start, Task.due_date < end)
+    if user.role == "manager":
+        q = q.join(Client).filter(Client.manager_email == user.email)
+    today_tasks = q.all()
+
+    # Встречи на сегодня
+    q2 = db.query(Meeting).filter(Meeting.date >= start, Meeting.date < end)
+    if user.role == "manager":
+        q2 = q2.join(Client).filter(Client.manager_email == user.email)
+    today_meetings = q2.all()
+
+    # Просроченные задачи
+    q3 = db.query(Task).filter(
+        Task.due_date < start,
+        Task.status.in_(["plan", "in_progress"]),
+    )
+    if user.role == "manager":
+        q3 = q3.join(Client).filter(Client.manager_email == user.email)
+    overdue_tasks = q3.all()
+
+    return templates.TemplateResponse("today.html", {
+        "request": request, "user": user,
+        "today_tasks": today_tasks,
+        "today_meetings": today_meetings,
+        "overdue_tasks": overdue_tasks,
+        "now": datetime.now(),
+    })
 
 
 # ============================================================================
-# PROFILE ENDPOINTS
+# CLIENTS LIST
 # ============================================================================
 
-@app.get("/api/me", response_model=UserResponse)
-async def get_profile(current_user: User = Depends(get_current_user)):
-    """Get current user profile"""
-    return UserResponse.from_orm(current_user)
+@app.get("/clients", response_class=HTMLResponse)
+async def clients_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
 
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
 
-@app.put("/api/me")
-async def update_profile(
-    name: Optional[str] = None,
-    phone: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Update user profile"""
-    try:
-        if name:
-            current_user.name = name
-        if phone:
-            current_user.phone = phone
-        
-        db.commit()
-        
-        await log_audit(
-            db, current_user.id, "PROFILE_UPDATE",
-            "User updated profile", {"name": name, "phone": phone}
-        )
-        
-        return UserResponse.from_orm(current_user)
-    
-    except Exception as e:
-        db.rollback()
-        log_error(e, "update_profile")
-        raise handle_db_error(e)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
 
+    segment = request.query_params.get("segment")
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    if segment:
+        q = q.filter(Client.segment == segment)
+    clients = q.all()
 
-# ============================================================================
-# CLIENTS ENDPOINTS
-# ============================================================================
+    counts = {"ENT": 0, "SME+": 0, "SME-": 0, "SME": 0, "SMB": 0, "SS": 0}
+    all_c = db.query(Client).all() if user.role == "admin" else db.query(Client).filter(Client.manager_email == user.email).all()
+    for c in all_c:
+        seg = c.segment or ""
+        if seg in counts:
+            counts[seg] += 1
 
-@app.get("/api/clients", response_model=PaginatedResponse)
-async def list_clients(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    segment: Optional[str] = None,
-    manager_email: Optional[str] = None,
-    health_min: Optional[float] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """List clients with filters and pagination"""
-    try:
-        query = db.query(Client)
-        
-        # Фильтровать по доступу пользователя
-        if current_user.role == "manager":
-            query = query.filter(
-                (Client.manager_email == current_user.email) |
-                (Client.account_id == current_user.account_id)
-            )
-        elif current_user.role == "viewer":
-            raise ForbiddenError("Viewers cannot list clients")
-        
-        # Применить фильтры
-        if segment:
-            query = query.filter(Client.segment == segment)
-        
-        if manager_email:
-            query = query.filter(Client.manager_email == manager_email)
-        
-        if health_min is not None:
-            query = query.filter(Client.health_score >= health_min)
-        
-        # Получить total count
-        total = query.count()
-        
-        # Pagination
-        clients = query.offset(skip).limit(limit).all()
-        
-        return PaginatedResponse(
-            data=[ClientResponse.from_orm(c) for c in clients],
-            total=total,
-            skip=skip,
-            limit=limit,
-            has_more=skip + limit < total,
-        )
-    
-    except ForbiddenError:
-        raise
-    except Exception as e:
-        log_error(e, "list_clients")
-        raise handle_db_error(e)
-
-
-@app.post("/api/clients", response_model=ClientResponse, status_code=201)
-async def create_client(
-    client: ClientCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Create new client"""
-    try:
-        # Валидировать данные
-        validator = ClientValidator(
-            name=client.name,
-            email=client.email,
-            phone=client.phone or "",
-            segment=client.segment or "smb"
-        )
-        
-        # Check for duplicates
-        existing = db.query(Client).filter(Client.email == client.email).first()
-        if existing:
-            raise ConflictError(f"Client with email {client.email} already exists")
-        
-        # Create
-        new_client = Client(
-            name=client.name,
-            email=client.email,
-            phone=client.phone,
-            segment=client.segment,
-            manager_email=current_user.email,
-            account_id=current_user.account_id,
-            status="active",
-            health_score=75,
-            created_at=datetime.now(),
-        )
-        
-        db.add(new_client)
-        db.commit()
-        db.refresh(new_client)
-        
-        # Audit
-        await log_audit(
-            db, current_user.id, "CLIENT_CREATE",
-            f"Created client {new_client.name}",
-            {"client_id": new_client.id}
-        )
-        
-        # WebSocket notification
-        await emit_task_created(current_user.id, {
-            "id": new_client.id,
-            "name": new_client.name,
-        })
-        
-        # Email to team
-        try:
-            await send_task_created(
-                current_user.email,
-                f"New Client: {new_client.name}",
-                new_client.name,
-            )
-        except:
-            pass
-        
-        return ClientResponse.from_orm(new_client)
-    
-    except (ValidationError, ConflictError):
-        raise
-    except Exception as e:
-        db.rollback()
-        log_error(e, "create_client")
-        raise handle_db_error(e)
-
-
-@app.get("/api/clients/{client_id}", response_model=ClientResponse)
-async def get_client(
-    client_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get client details"""
-    try:
-        client = db.query(Client).filter(Client.id == client_id).first()
-        
-        if not client:
-            raise ResourceNotFoundError("Client", client_id)
-        
-        # Check access
-        ensure_client_access(current_user, client, db)
-        
-        return ClientResponse.from_orm(client)
-    
-    except ResourceNotFoundError:
-        raise
-    except ForbiddenError:
-        raise
-    except Exception as e:
-        log_error(e, "get_client")
-        raise handle_db_error(e)
-
-
-@app.put("/api/clients/{client_id}", response_model=ClientResponse)
-async def update_client(
-    client_id: int,
-    update: ClientUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Update client"""
-    try:
-        client = db.query(Client).filter(Client.id == client_id).first()
-        
-        if not client:
-            raise ResourceNotFoundError("Client", client_id)
-        
-        # Check access
-        ensure_client_access(current_user, client, db)
-        
-        # Update fields
-        update_data = update.dict(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(client, field, value)
-        
-        client.updated_at = datetime.now()
-        db.commit()
-        db.refresh(client)
-        
-        # Audit
-        await log_audit(
-            db, current_user.id, "CLIENT_UPDATE",
-            f"Updated client {client.name}",
-            {"client_id": client_id, "updates": update_data}
-        )
-        
-        # WebSocket
-        await emit_client_updated(current_user.id, client_id, update_data)
-        
-        return ClientResponse.from_orm(client)
-    
-    except (ResourceNotFoundError, ForbiddenError):
-        raise
-    except Exception as e:
-        db.rollback()
-        log_error(e, "update_client")
-        raise handle_db_error(e)
-
-
-@app.delete("/api/clients/{client_id}")
-async def delete_client(
-    client_id: int,
-    current_user: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
-    """Delete client (admin only)"""
-    try:
-        client = db.query(Client).filter(Client.id == client_id).first()
-        
-        if not client:
-            raise ResourceNotFoundError("Client", client_id)
-        
-        db.delete(client)
-        db.commit()
-        
-        # Audit
-        await log_audit(
-            db, current_user.id, "CLIENT_DELETE",
-            f"Deleted client {client.name}",
-            {"client_id": client_id}
-        )
-        
-        return {"status": "deleted"}
-    
-    except Exception as e:
-        db.rollback()
-        log_error(e, "delete_client")
-        raise handle_db_error(e)
+    return templates.TemplateResponse("clients.html", {
+        "request": request, "user": user, "clients": clients,
+        "counts": counts, "segment": segment, "now": datetime.now(),
+    })
 
 
 # ============================================================================
-# TASKS ENDPOINTS
+# CLIENT DETAIL + PREP
 # ============================================================================
 
-@app.get("/api/clients/{client_id}/tasks", response_model=PaginatedResponse)
-async def list_tasks(
-    client_id: int,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    status: Optional[str] = None,
-    priority: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """List tasks for client"""
+@app.get("/client/{client_id}", response_class=HTMLResponse)
+async def client_detail(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.due_date.desc()).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).all()
+
+    return templates.TemplateResponse("client_detail.html", {
+        "request": request, "user": user, "client": client,
+        "tasks": tasks, "meetings": meetings, "now": datetime.now(),
+    })
+
+
+@app.get("/prep/{client_id}", response_class=HTMLResponse)
+async def prep_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    tasks = db.query(Task).filter(Task.client_id == client_id, Task.status.in_(["plan", "in_progress"])).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(5).all()
+
+    # AI-подготовка
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
-        if not client:
-            raise ResourceNotFoundError("Client", client_id)
-        
-        # Check access
-        ensure_client_access(current_user, client, db)
-        
-        query = db.query(Task).filter(Task.client_id == client_id)
-        
-        if status:
-            query = query.filter(Task.status == status)
-        
-        if priority:
-            query = query.filter(Task.priority == priority)
-        
-        total = query.count()
-        tasks = query.offset(skip).limit(limit).all()
-        
-        return PaginatedResponse(
-            data=[TaskResponse.from_orm(t) for t in tasks],
-            total=total,
-            skip=skip,
-            limit=limit,
-            has_more=skip + limit < total,
-        )
-    
-    except ResourceNotFoundError:
-        raise
-    except ForbiddenError:
-        raise
+        prep_text = generate_prep_brief(client, tasks, meetings)
     except Exception as e:
-        log_error(e, "list_tasks")
-        raise handle_db_error(e)
+        prep_text = f"AI недоступен: {e}"
+
+    return templates.TemplateResponse("prep.html", {
+        "request": request, "user": user, "client": client,
+        "tasks": tasks, "meetings": meetings, "prep_text": prep_text,
+        "now": datetime.now(),
+    })
 
 
-@app.post("/api/clients/{client_id}/tasks", response_model=TaskResponse, status_code=201)
-async def create_task(
-    client_id: int,
-    task: TaskCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Create task for client"""
+# ============================================================================
+# FOLLOWUP
+# ============================================================================
+
+@app.get("/followup/{client_id}", response_class=HTMLResponse)
+async def followup_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(3).all()
+
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
-        if not client:
-            raise ResourceNotFoundError("Client", client_id)
-        
-        # Check access
-        ensure_client_access(current_user, client, db)
-        
-        # Validate
-        validator = TaskValidator(
-            title=task.title,
-            priority=task.priority,
-            status=task.status,
-            due_date=task.due_date,
-        )
-        
-        new_task = Task(
-            client_id=client_id,
-            title=task.title,
-            description=task.description,
-            priority=task.priority,
-            status=task.status,
-            due_date=task.due_date,
-            source=task.source or "manual",
-            created_at=datetime.now(),
-        )
-        
-        db.add(new_task)
-        db.commit()
-        db.refresh(new_task)
-        
-        # Audit
-        await log_audit(
-            db, current_user.id, "TASK_CREATE",
-            f"Created task {new_task.title}",
-            {"task_id": new_task.id, "client_id": client_id}
-        )
-        
-        # Email
-        try:
-            await send_task_created(current_user.email, new_task.title, client.name)
-        except:
-            pass
-        
-        return TaskResponse.from_orm(new_task)
-    
-    except (ResourceNotFoundError, ForbiddenError, ValidationError):
-        raise
+        followup_text = generate_smart_followup(client, tasks, meetings)
     except Exception as e:
-        db.rollback()
-        log_error(e, "create_task")
-        raise handle_db_error(e)
+        followup_text = f"AI недоступен: {e}"
+
+    return templates.TemplateResponse("followup.html", {
+        "request": request, "user": user, "client": client,
+        "tasks": tasks, "meetings": meetings, "followup_text": followup_text,
+        "now": datetime.now(),
+    })
 
 
 # ============================================================================
-# MEETINGS ENDPOINTS
+# TASKS
 # ============================================================================
 
-@app.get("/api/clients/{client_id}/meetings", response_model=PaginatedResponse)
-async def list_meetings(
-    client_id: int,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    meeting_type: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+@app.get("/tasks", response_class=HTMLResponse)
+async def tasks_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    status_filter = request.query_params.get("status")
+    q = db.query(Task)
+    if user.role == "manager":
+        q = q.join(Client).filter(Client.manager_email == user.email)
+    if status_filter and status_filter != "all":
+        q = q.filter(Task.status == status_filter)
+    tasks = q.order_by(Task.due_date.desc()).limit(100).all()
+
+    return templates.TemplateResponse("tasks.html", {
+        "request": request, "user": user, "tasks": tasks,
+        "status_filter": status_filter or "all", "now": datetime.now(),
+    })
+
+
+# ============================================================================
+# SYNC
+# ============================================================================
+
+@app.get("/sync", response_class=HTMLResponse)
+async def sync_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("sync.html", {"request": request, "user": user})
+
+
+# ============================================================================
+# API: MERCHRULES SYNC
+# ============================================================================
+
+@app.post("/api/sync/merchrules")
+async def api_sync_merchrules(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
 ):
-    """List meetings for client"""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    body = await request.json()
+    login = body.get("login", os.environ.get("MERCHRULES_LOGIN", ""))
+    password = body.get("password", os.environ.get("MERCHRULES_PASSWORD", ""))
+
+    if not login or not password:
+        return {"error": "Need Merchrules credentials"}
+
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
-        if not client:
-            raise ResourceNotFoundError("Client", client_id)
-        
-        ensure_client_access(current_user, client, db)
-        
-        query = db.query(Meeting).filter(Meeting.client_id == client_id)
-        
-        if meeting_type:
-            query = query.filter(Meeting.meeting_type == meeting_type)
-        
-        total = query.count()
-        meetings = query.order_by(Meeting.meeting_date.desc()).offset(skip).limit(limit).all()
-        
-        return PaginatedResponse(
-            data=[MeetingResponse.from_orm(m) for m in meetings],
-            total=total,
-            skip=skip,
-            limit=limit,
-            has_more=skip + limit < total,
-        )
-    
-    except (ResourceNotFoundError, ForbiddenError):
-        raise
+        token = mr_get_auth_token(login, password)
+        # Load all clients for this account
+        from merchrules_sync import sync_clients_from_merchrules
+        data = sync_clients_from_merchrules(db, login)
+        return {"ok": True, "clients_synced": len(data) if data else 0}
     except Exception as e:
-        log_error(e, "list_meetings")
-        raise handle_db_error(e)
+        return {"error": str(e)}
 
 
-@app.post("/api/clients/{client_id}/meetings", response_model=MeetingResponse, status_code=201)
-async def create_meeting(
-    client_id: int,
-    meeting: MeetingCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+@app.post("/api/sync/client/{client_id}")
+async def api_sync_client(
+    client_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
 ):
-    """Create meeting for client"""
-    try:
-        client = db.query(Client).filter(Client.id == client_id).first()
-        if not client:
-            raise ResourceNotFoundError("Client", client_id)
-        
-        ensure_client_access(current_user, client, db)
-        
-        # Validate
-        validator = MeetingValidator(
-            meeting_type=meeting.meeting_type,
-            duration_minutes=meeting.duration_minutes,
-            meeting_date=meeting.meeting_date,
-        )
-        
-        new_meeting = Meeting(
-            client_id=client_id,
-            meeting_type=meeting.meeting_type,
-            meeting_date=meeting.meeting_date,
-            duration_minutes=meeting.duration_minutes,
-            notes=meeting.notes,
-            transcript=meeting.transcript,
-            recording_url=meeting.recording_url,
-            created_at=datetime.now(),
-        )
-        
-        db.add(new_meeting)
-        
-        # Update client's last_meeting_date
-        client.last_meeting_date = meeting.meeting_date
-        
-        db.commit()
-        db.refresh(new_meeting)
-        
-        # Audit
-        await log_audit(
-            db, current_user.id, "MEETING_CREATE",
-            f"Created {meeting.meeting_type} meeting",
-            {"meeting_id": new_meeting.id, "client_id": client_id}
-        )
-        
-        return MeetingResponse.from_orm(new_meeting)
-    
-    except (ResourceNotFoundError, ForbiddenError, ValidationError):
-        raise
-    except Exception as e:
-        db.rollback()
-        log_error(e, "create_meeting")
-        raise handle_db_error(e)
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
 
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client or not client.site_ids:
+        return {"error": "No site_ids"}
 
-# ============================================================================
-# SYNC ENDPOINTS
-# ============================================================================
+    body = await request.json()
+    login = body.get("login", os.environ.get("MERCHRULES_LOGIN", ""))
+    password = body.get("password", os.environ.get("MERCHRULES_PASSWORD", ""))
 
-@app.post("/api/sync/clients")
-async def sync_clients(
-    current_user: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
-    """Sync clients from Airtable"""
-    try:
-        # Fetch from Airtable
-        clients_data = await sync_clients_airtable()
-        
-        synced = 0
-        for client_data in clients_data:
-            existing = db.query(Client).filter(
-                Client.email == client_data.get("email")
+    tasks = _get_client_tasks(db, client.site_ids, login, password)
+    meetings = _get_client_meetings(db, client.site_ids, login, password)
+
+    # Sync to local DB
+    for sid, mr_tasks in tasks.items():
+        for t in mr_tasks:
+            existing = db.query(Task).filter(
+                Task.client_id == client_id,
+                Task.merchrules_task_id == str(t.get("id"))
             ).first()
-            
             if not existing:
-                new_client = Client(
-                    name=client_data.get("name"),
-                    email=client_data.get("email"),
-                    phone=client_data.get("phone"),
-                    segment=client_data.get("segment", "smb"),
-                    account_id=current_user.account_id,
-                    status="active",
-                    created_at=datetime.now(),
-                )
-                db.add(new_client)
-                synced += 1
-        
-        db.commit()
-        
-        # Create sync log
-        log = SyncLog(
-            source="airtable",
-            status="success",
-            count=synced,
-            user_id=current_user.id,
-            created_at=datetime.now(),
-        )
-        db.add(log)
-        db.commit()
-        
-        logger.info(f"✅ Synced {synced} clients from Airtable")
-        
-        return {"status": "success", "synced": synced}
-    
-    except Exception as e:
-        db.rollback()
-        log_error(e, "sync_clients")
-        
-        log = SyncLog(
-            source="airtable",
-            status="error",
-            error_message=str(e),
-            user_id=current_user.id,
-            created_at=datetime.now(),
-        )
-        db.add(log)
-        db.commit()
-        
-        raise BadRequestError(f"Sync error: {str(e)}")
+                db.add(Task(
+                    client_id=client_id,
+                    merchrules_task_id=str(t.get("id")),
+                    title=t.get("title", ""),
+                    description=t.get("description", ""),
+                    status=t.get("status", "plan"),
+                    priority=t.get("priority", "medium"),
+                    team=t.get("team", ""),
+                    task_type=t.get("task_type", ""),
+                    created_at=datetime.fromisoformat(t["created_at"]) if t.get("created_at") else datetime.now(),
+                    due_date=None,
+                ))
+
+    db.commit()
+    return {"ok": True, "tasks": sum(len(v) for v in tasks.values())}
 
 
 # ============================================================================
-# FILE UPLOAD/EXPORT
+# API: TASK CRUD
 # ============================================================================
 
-@app.post("/api/files/upload/clients")
-async def upload_clients(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
+@app.post("/api/tasks")
+async def api_create_task(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
 ):
-    """Upload and import clients from CSV/Excel"""
-    try:
-        content = await file.read()
-        
-        # Import
-        success, msg, data = BulkImporter.import_clients(content, file.filename)
-        
-        if not success:
-            raise ValidationError(msg)
-        
-        # Create clients
-        created = 0
-        for row in data:
-            existing = db.query(Client).filter(
-                Client.email == row.get("email")
-            ).first()
-            
-            if not existing:
-                new_client = Client(
-                    name=row.get("name"),
-                    email=row.get("email"),
-                    phone=row.get("phone"),
-                    segment=row.get("segment", "smb"),
-                    account_id=current_user.account_id,
-                    status="active",
-                    created_at=datetime.now(),
-                )
-                db.add(new_client)
-                created += 1
-        
-        db.commit()
-        
-        return {"status": "success", "created": created}
-    
-    except ValidationError:
-        raise
-    except Exception as e:
-        db.rollback()
-        log_error(e, "upload_clients")
-        raise BadRequestError(str(e))
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
 
-
-@app.get("/api/clients/export/{format}")
-async def export_clients(
-    format: str = "excel",
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Export clients to CSV/Excel/PDF"""
-    try:
-        query = db.query(Client)
-        
-        if current_user.role == "manager":
-            query = query.filter(Client.manager_email == current_user.email)
-        
-        clients = query.all()
-        
-        # Prepare data
-        export_data = [
-            {
-                "name": c.name,
-                "email": c.email,
-                "phone": c.phone or "",
-                "segment": c.segment,
-                "health_score": c.health_score,
-                "manager_name": c.manager_email,
-            }
-            for c in clients
-        ]
-        
-        # Export
-        if format == "csv":
-            content = FileProcessor.to_csv(export_data)
-            filename = f"clients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        elif format == "pdf":
-            content = FileProcessor.to_pdf(export_data, title="Clients")
-            filename = f"clients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        else:  # excel
-            content = FileProcessor.to_excel(export_data, sheet_name="Clients")
-            filename = f"clients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
-        return FileResponse(
-            io.BytesIO(content),
-            filename=filename,
-            media_type="application/octet-stream"
-        )
-    
-    except Exception as e:
-        log_error(e, "export_clients")
-        raise BadRequestError(str(e))
-
-
-# ============================================================================
-# WEBSOCKET
-# ============================================================================
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = None):
-    """WebSocket endpoint for real-time updates"""
-    try:
-        # Verify token and get user
-        if not token:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-        
-        # Simple token validation (implement full JWT validation in production)
-        await handle_websocket_connection(websocket, None)  # In production, get user from token
-    
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-
-
-# ============================================================================
-# STATS & ANALYTICS
-# ============================================================================
-
-@app.get("/api/stats")
-async def get_stats(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get dashboard statistics"""
-    try:
-        query = db.query(Client)
-        
-        if current_user.role == "manager":
-            query = query.filter(Client.manager_email == current_user.email)
-        
-        clients = query.all()
-        
-        total_clients = len(clients)
-        avg_health = sum(c.health_score or 0 for c in clients) / total_clients if total_clients > 0 else 0
-        
-        # Tasks
-        task_query = db.query(Task).filter(
-            Task.client_id.in_([c.id for c in clients])
-        )
-        total_tasks = task_query.count()
-        open_tasks = task_query.filter(Task.status == "open").count()
-        
-        # Meetings
-        meeting_query = db.query(Meeting).filter(
-            Meeting.client_id.in_([c.id for c in clients])
-        )
-        total_meetings = meeting_query.count()
-        
-        return {
-            "total_clients": total_clients,
-            "avg_health_score": round(avg_health, 2),
-            "total_tasks": total_tasks,
-            "open_tasks": open_tasks,
-            "total_meetings": total_meetings,
-            "websocket_connections": manager.get_connection_count(),
-        }
-    
-    except Exception as e:
-        log_error(e, "get_stats")
-        return {}
-
-
-# ============================================================================
-# DASHBOARD ENDPOINTS
-# ============================================================================
-
-@app.get("/api/dashboard/clients-summary")
-async def dashboard_clients_summary(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get detailed clients summary for dashboard"""
-    try:
-        query = db.query(Client)
-        
-        if current_user.role == "manager":
-            query = query.filter(Client.manager_email == current_user.email)
-        
-        clients = query.all()
-        
-        # Enrich clients with task and meeting counts
-        result = []
-        for client in clients:
-            tasks_count = db.query(Task).filter(Task.client_id == client.id).count()
-            meetings_count = db.query(Meeting).filter(Meeting.client_id == client.id).count()
-            open_tasks = db.query(Task).filter(
-                Task.client_id == client.id,
-                Task.status.in_(["plan", "in_progress"])
-            ).count()
-            
-            result.append({
-                "id": client.id,
-                "name": client.name,
-                "email": client.email,
-                "segment": client.segment,
-                "health_score": client.health_score or 0,
-                "manager_email": client.manager_email,
-                "tasks_count": tasks_count,
-                "open_tasks": open_tasks,
-                "meetings_count": meetings_count,
-                "last_meeting_date": client.last_meeting_date.isoformat() if client.last_meeting_date else None,
-                "last_checkup": client.last_checkup.isoformat() if client.last_checkup else None,
-            })
-        
-        return {"data": result, "total": len(result)}
-    
-    except Exception as e:
-        log_error(e, "dashboard_clients_summary")
-        raise BadRequestError(str(e))
-
-
-@app.get("/api/dashboard/health-report")
-async def dashboard_health_report(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get health status report for all clients"""
-    try:
-        query = db.query(Client)
-        
-        if current_user.role == "manager":
-            query = query.filter(Client.manager_email == current_user.email)
-        
-        clients = query.all()
-        
-        # Categorize by health
-        critical = []  # < 50
-        warning = []   # 50-75
-        healthy = []   # 75+
-        
-        for client in clients:
-            score = client.health_score or 0
-            item = {
-                "id": client.id,
-                "name": client.name,
-                "score": score,
-                "segment": client.segment,
-            }
-            
-            if score < 50:
-                critical.append(item)
-            elif score < 75:
-                warning.append(item)
-            else:
-                healthy.append(item)
-        
-        return {
-            "critical": critical,
-            "warning": warning,
-            "healthy": healthy,
-            "summary": {
-                "total": len(clients),
-                "critical_count": len(critical),
-                "warning_count": len(warning),
-                "healthy_count": len(healthy),
-                "avg_health": round(sum(c.health_score or 0 for c in clients) / len(clients), 2) if clients else 0,
-            }
-        }
-    
-    except Exception as e:
-        log_error(e, "dashboard_health_report")
-        raise BadRequestError(str(e))
-
-
-@app.get("/api/dashboard/tasks-summary")
-async def dashboard_tasks_summary(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get tasks summary and breakdown"""
-    try:
-        query = db.query(Client)
-        
-        if current_user.role == "manager":
-            query = query.filter(Client.manager_email == current_user.email)
-        
-        clients = query.all()
-        client_ids = [c.id for c in clients]
-        
-        # Get all tasks
-        tasks_query = db.query(Task).filter(Task.client_id.in_(client_ids))
-        
-        # Count by status
-        statuses = {}
-        for status in ["plan", "in_progress", "blocked", "done"]:
-            count = tasks_query.filter(Task.status == status).count()
-            statuses[status] = count
-        
-        # Count by priority
-        priorities = {}
-        for priority in ["low", "medium", "high", "critical"]:
-            count = tasks_query.filter(Task.priority == priority).count()
-            priorities[priority] = count
-        
-        # Get recent tasks
-        from sqlalchemy import desc
-        recent_tasks = tasks_query.order_by(desc(Task.created_at)).limit(10).all()
-        
-        return {
-            "total_tasks": tasks_query.count(),
-            "by_status": statuses,
-            "by_priority": priorities,
-            "recent": [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "status": t.status,
-                    "priority": t.priority,
-                    "client_id": t.client_id,
-                    "created_at": t.created_at.isoformat() if t.created_at else None,
-                }
-                for t in recent_tasks
-            ],
-        }
-    
-    except Exception as e:
-        log_error(e, "dashboard_tasks_summary")
-        raise BadRequestError(str(e))
-
-
-@app.get("/api/dashboard/timeline")
-async def dashboard_timeline(
-    current_user: User = Depends(get_current_user),
-    days: int = Query(7, ge=1, le=30),
-    db: Session = Depends(get_db),
-):
-    """Get timeline of recent activities"""
-    try:
-        query = db.query(Client)
-        
-        if current_user.role == "manager":
-            query = query.filter(Client.manager_email == current_user.email)
-        
-        clients = query.all()
-        client_ids = [c.id for c in clients]
-        
-        # Get recent meetings
-        from datetime import timedelta
-        from sqlalchemy import desc
-        cutoff = datetime.now() - timedelta(days=days)
-        
-        meetings = db.query(Meeting).filter(
-            Meeting.client_id.in_(client_ids),
-            Meeting.meeting_date >= cutoff
-        ).order_by(desc(Meeting.meeting_date)).limit(20).all()
-        
-        meetings_data = [
-            {
-                "type": "meeting",
-                "title": f"{m.meeting_type} - {m.client.name}",
-                "date": m.meeting_date.isoformat() if m.meeting_date else None,
-                "client_id": m.client_id,
-                "client_name": m.client.name,
-            }
-            for m in meetings
-        ]
-        
-        # Get recent tasks
-        tasks = db.query(Task).filter(
-            Task.client_id.in_(client_ids),
-            Task.created_at >= cutoff
-        ).order_by(desc(Task.created_at)).limit(20).all()
-        
-        tasks_data = [
-            {
-                "type": "task",
-                "title": f"{t.title} ({t.status})",
-                "date": t.created_at.isoformat() if t.created_at else None,
-                "client_id": t.client_id,
-                "priority": t.priority,
-            }
-            for t in tasks
-        ]
-        
-        # Merge and sort by date
-        timeline = sorted(
-            meetings_data + tasks_data,
-            key=lambda x: x["date"],
-            reverse=True
-        )
-        
-        return {"timeline": timeline[:30]}
-    
-    except Exception as e:
-        log_error(e, "dashboard_timeline")
-        raise BadRequestError(str(e))
-
-
-# ============================================================================
-# ERROR HANDLERS
-# ============================================================================
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": exc.detail} if isinstance(exc.detail, str) else exc.detail,
+    data = await request.json()
+    task = Task(
+        client_id=data["client_id"],
+        title=data["title"],
+        description=data.get("description", ""),
+        status=data.get("status", "plan"),
+        priority=data.get("priority", "medium"),
+        team=data.get("team", ""),
+        task_type=data.get("task_type", ""),
+        due_date=datetime.fromisoformat(data["due_date"]) if data.get("due_date") else None,
     )
+    db.add(task)
+    db.commit()
+    return {"ok": True, "id": task.id}
 
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error"},
-    )
+@app.put("/api/tasks/{task_id}")
+async def api_update_task(task_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404)
+    for k, v in data.items():
+        if hasattr(task, k):
+            setattr(task, k, v)
+    db.commit()
+    return {"ok": True}
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        reload=os.getenv("ENV", "dev") == "dev",
-    )
+# ============================================================================
+# API: AI PROCESSING
+# ============================================================================
+
+@app.post("/api/ai/process-transcript")
+async def api_process_transcript(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    transcript = data.get("transcript", "")
+    try:
+        result = ai_process_transcript(transcript)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/ai/generate-followup")
+async def api_generate_followup(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    client_id = data.get("client_id")
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        return {"error": "Client not found"}
+    tasks = db.query(Task).filter(Task.client_id == client_id).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(3).all()
+    try:
+        text = generate_smart_followup(client, tasks, meetings)
+        return {"text": text}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# ROOT
+# ============================================================================
+
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request, auth_token: Optional[str] = Cookie(None)):
+    if auth_token:
+        from auth import decode_access_token
+        payload = decode_access_token(auth_token)
+        if payload:
+            return RedirectResponse(url="/dashboard", status_code=303)
+    return RedirectResponse(url="/login", status_code=303)
+
+
+# ============================================================================
+# HEALTH
+# ============================================================================
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "2.0.0"}

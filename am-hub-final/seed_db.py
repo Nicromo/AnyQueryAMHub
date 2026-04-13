@@ -10,7 +10,18 @@ from datetime import datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from database import Base, engine, SessionLocal
+from database import Base, SessionLocal
+
+# Override engine if DATABASE_URL is set
+import os
+_db_url = os.environ.get("DATABASE_URL")
+if _db_url:
+    if _db_url.startswith("postgres://"):
+        _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    engine = create_engine(_db_url)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 from models import Client, Task, Meeting, CheckUp, User, Account
 
 # Sample data

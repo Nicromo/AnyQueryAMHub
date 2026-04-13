@@ -1,131 +1,105 @@
-{% extends "base.html" %}
-{% block title %}Сегодня — AM Hub{% endblock %}
-{% block content %}
-
-<div class="page-header">
-  <h1>☀️ {{ weekday }}, {{ today }}</h1>
-  <p style="color:var(--text-muted)">Ежедневный план CSM</p>
-</div>
-
-<!-- Статус дня -->
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
-  <div class="card" style="padding:16px;text-align:center;border-color:{% if overdue %}var(--red){% else %}var(--border){% endif %}">
-    <div style="font-size:2rem;margin-bottom:4px">🔴</div>
-    <div style="font-size:1.6rem;font-weight:700;color:{% if overdue %}var(--red){% else %}var(--text-muted){% endif %}">{{ overdue|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Просроченных чекапов</div>
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Мой день — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; --blue:#3b82f6; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
+    .main { max-width:900px; margin:0 auto; padding:24px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+    h1 { font-size:1.4rem; }
+    .sub { color:var(--muted); font-size:.82rem; }
+    a { color:var(--accent); text-decoration:none; }
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    .back:hover { color:var(--text); }
+    .section { margin-bottom:24px; }
+    .section h2 { font-size:1rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; transition:border .15s; }
+    .card:hover { border-color:var(--accent); }
+    .card.overdue { border-color:rgba(239,68,68,.4); }
+    .cc { font-weight:600; font-size:.85rem; margin-bottom:2px; }
+    .ct { font-size:.82rem; color:var(--muted); margin-bottom:4px; }
+    .cm { font-size:.72rem; color:var(--muted); display:flex; gap:12px; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; background:rgba(99,102,241,.15); color:var(--accent); }
+    .badge-red { background:rgba(239,68,68,.15); color:var(--red); }
+    .empty { text-align:center; padding:40px; color:var(--muted); font-size:.85rem; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="main">
+  <a href="/dashboard" class="back">← Назад</a>
+  <div class="topbar">
+    <div>
+      <h1>📅 Мой день</h1>
+      <div class="sub">{{ now.strftime('%A, %d %B %Y') }}</div>
+    </div>
   </div>
-  <div class="card" style="padding:16px;text-align:center;border-color:{% if warning %}var(--yellow){% else %}var(--border){% endif %}">
-    <div style="font-size:2rem;margin-bottom:4px">🟡</div>
-    <div style="font-size:1.6rem;font-weight:700;color:{% if warning %}var(--yellow){% else %}var(--text-muted){% endif %}">{{ warning|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Скоро просрочится</div>
-  </div>
-  <div class="card" style="padding:16px;text-align:center;border-color:{% if urgent_tasks %}var(--red){% else %}var(--border){% endif %}">
-    <div style="font-size:2rem;margin-bottom:4px">📋</div>
-    <div style="font-size:1.6rem;font-weight:700;color:{% if urgent_tasks %}var(--red){% else %}var(--text-muted){% endif %}">{{ urgent_tasks|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Задач просрочено/сегодня</div>
-  </div>
-  <div class="card" style="padding:16px;text-align:center">
-    <div style="font-size:2rem;margin-bottom:4px">📅</div>
-    <div style="font-size:1.6rem;font-weight:700;color:var(--accent)">{{ week_tasks|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Задач на этой неделе</div>
-  </div>
-</div>
 
-<!-- Просроченные чекапы -->
-{% if overdue %}
-<div class="card" style="border-color:var(--red);margin-bottom:16px">
-  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--red)">🔴 Требуют чекапа прямо сейчас ({{ overdue|length }})</h2>
-  <table class="table">
-    <thead><tr><th>Клиент</th><th>Сегмент</th><th>Статус</th><th>Действие</th></tr></thead>
-    <tbody>
-    {% for c in overdue %}
-    <tr>
-      <td class="client-name">{{ c.name }}</td>
-      <td><span class="badge badge-{{ c.segment|lower }}">{{ c.segment }}</span></td>
-      <td style="color:var(--red)">{{ c.status.label }}</td>
-      <td style="white-space:nowrap">
-        <a href="/prep/{{ c.id }}" class="btn btn-ghost btn-sm">📋 Подготовка</a>
-        <a href="/followup/{{ c.id }}" class="btn btn-primary btn-sm" style="margin-left:4px">✍️ Фолоуап</a>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
-
-<!-- Скоро -->
-{% if warning %}
-<div class="card" style="border-color:var(--yellow);margin-bottom:16px">
-  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--yellow)">🟡 Скоро истекает ({{ warning|length }})</h2>
-  <div style="display:flex;flex-wrap:wrap;gap:8px">
-    {% for c in warning %}
-    <a href="/prep/{{ c.id }}" style="text-decoration:none">
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:0.85rem">
-        <b>{{ c.name }}</b>
-        <span class="badge badge-{{ c.segment|lower }}" style="margin-left:6px">{{ c.segment }}</span>
-        <div style="color:var(--yellow);font-size:0.78rem;margin-top:2px">{{ c.status.label }}</div>
+  {% if overdue_tasks %}
+  <div class="section">
+    <h2>🔴 Просроченные задачи</h2>
+    {% for t in overdue_tasks %}
+    <div class="card overdue">
+      <div class="cc"><a href="/client/{{ t.client_id }}">{{ t.client.name if t.client else '—' }}</a></div>
+      <div class="ct">{{ t.title }}</div>
+      <div class="cm">
+        <span class="badge badge-red">{{ t.status }}</span>
+        <span>{{ t.priority }}</span>
+        {% if t.due_date %}<span>До: {{ t.due_date.strftime('%d.%m') }}</span>{% endif %}
       </div>
-    </a>
+    </div>
     {% endfor %}
   </div>
-</div>
-{% endif %}
+  {% endif %}
 
-<!-- Задачи просрочены/сегодня -->
-{% if urgent_tasks %}
-<div class="card" style="margin-bottom:16px">
-  <h2 style="font-size:1rem;margin-bottom:14px">📋 Задачи — просрочены или дедлайн сегодня</h2>
-  <table class="table">
-    <thead><tr><th>Клиент</th><th>Задача</th><th>Кто</th><th>Дедлайн</th><th></th></tr></thead>
-    <tbody>
-    {% for t in urgent_tasks %}
-    <tr>
-      <td><a href="/prep/{{ t.client_id }}">{{ t.client_name }}</a>
-        <span class="badge badge-{{ t.segment|lower }}" style="margin-left:4px;font-size:0.7rem">{{ t.segment }}</span>
-      </td>
-      <td>{{ t.text }}</td>
-      <td><span style="color:{% if t.owner == 'anyquery' %}var(--accent){% else %}var(--yellow){% endif %}">
-        {{ 'AnyQuery' if t.owner == 'anyquery' else 'Партнёр' }}</span></td>
-      <td style="color:var(--red)">{{ t.due_date or '—' }}</td>
-      <td>
-        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
-          <button type="submit" class="btn btn-ghost btn-sm">✓ Готово</button>
-        </form>
-      </td>
-    </tr>
+  {% if today_meetings %}
+  <div class="section">
+    <h2>📅 Встречи сегодня</h2>
+    {% for m in today_meetings %}
+    <div class="card">
+      <div class="cc"><a href="/client/{{ m.client_id }}">{{ m.client.name if m.client else '—' }}</a></div>
+      <div class="ct">{{ m.title or m.type }}</div>
+      <div class="cm">
+        <span>{{ m.date.strftime('%H:%M') if m.date else '' }}</span>
+        <span class="badge">{{ m.type }}</span>
+      </div>
+    </div>
     {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+  </div>
+  {% endif %}
 
-<!-- Задачи на неделю -->
-{% if week_tasks %}
-<div class="card">
-  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--text-muted)">📅 На этой неделе</h2>
-  <table class="table">
-    <thead><tr><th>Клиент</th><th>Задача</th><th>Кто</th><th>Дедлайн</th></tr></thead>
-    <tbody>
-    {% for t in week_tasks %}
-    <tr>
-      <td><a href="/prep/{{ t.client_id }}">{{ t.client_name }}</a></td>
-      <td>{{ t.text }}</td>
-      <td style="color:{% if t.owner == 'anyquery' %}var(--accent){% else %}var(--yellow){% endif %}">
-        {{ 'AQ' if t.owner == 'anyquery' else 'Партнёр' }}</td>
-      <td>{{ t.due_date or '—' }}</td>
-    </tr>
+  {% if today_tasks %}
+  <div class="section">
+    <h2>📋 Задачи на сегодня</h2>
+    {% for t in today_tasks %}
+    <div class="card">
+      <div class="cc"><a href="/client/{{ t.client_id }}">{{ t.client.name if t.client else '—' }}</a></div>
+      <div class="ct">{{ t.title }}</div>
+      <div class="cm">
+        <span class="badge">{{ t.status }}</span>
+        <span>{{ t.priority }}</span>
+      </div>
+    </div>
     {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+  </div>
+  {% endif %}
 
-{% if not overdue and not urgent_tasks and not week_tasks %}
-<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
-  <div style="font-size:3rem;margin-bottom:12px">✅</div>
-  <p style="font-size:1.1rem">Всё под контролем — просроченных задач и чекапов нет!</p>
+  {% if not overdue_tasks and not today_meetings and not today_tasks %}
+  <div class="empty">
+    <div style="font-size:2rem;margin-bottom:8px;">✅</div>
+    <p>На сегодня нет задач и встреч. Отличная работа!</p>
+  </div>
+  {% endif %}
 </div>
-{% endif %}
-
-{% endblock %}
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+</script>
+</body>
+</html>
