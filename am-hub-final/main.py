@@ -537,7 +537,6 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
         return RedirectResponse(url="/login", status_code=303)
 
     mr_login = os.environ.get("MERCHRULES_LOGIN", "")
-    # Глобальные интеграции (админ настраивает через env vars)
     airtable_active = bool(os.environ.get("AIRTABLE_PAT"))
     sheets_active = bool(os.environ.get("SHEETS_SPREADSHEET_ID"))
     ai_active = bool(os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ") or os.environ.get("QWEN_API_KEY"))
@@ -558,111 +557,72 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
 
 
 # ============================================================================
-# API: INTEGRATION TESTS
+# SETTINGS API
 # ============================================================================
 
-@app.get("/api/integrations/test/airtable")
-async def test_airtable(token: str = ""):
-    if not token:
-        return {"error": "No token"}
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.get("https://api.airtable.com/v0/meta/bases", headers={"Authorization": f"Bearer {token}"})
-        if resp.status_code == 200:
-            return {"ok": True, "bases": len(resp.json().get("bases", []))}
-        return {"error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"error": str(e)}
+@app.post("/api/settings/creds")
+async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить персональные креды пользователя."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
 
-@app.get("/api/integrations/test/sheets")
-async def test_sheets(spreadsheet_id: str = ""):
-    if not spreadsheet_id:
-        return {"error": "No spreadsheet ID"}
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.get(f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv", follow_redirects=True)
-        if resp.status_code == 200:
-            lines = resp.text.count('\n')
-            return {"ok": True, "rows": lines}
-        return {"error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"error": str(e)}
+    data = await request.json()
+    settings = user.settings or {}
+    for service in ["merchrules", "telegram", "ktalk", "tbank_time"]:
+        if service in data:
+            settings[service] = data[service]
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
 
-@app.get("/api/integrations/test/telegram")
-async def test_telegram(token: str = ""):
-    if not token:
-        return {"error": "No token"}
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.get(f"https://api.telegram.org/bot{token}/getMe")
-        data = resp.json()
-        if data.get("ok"):
-            return {"ok": True, "bot": data["result"].get("first_name")}
-        return {"error": data.get("description")}
-    except Exception as e:
-        return {"error": str(e)}
 
-@app.get("/api/integrations/test/ai")
-async def test_ai(key: str = ""):
-    if not key:
-        return {"error": "No key"}
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=15) as hx:
-            resp = await hx.post("https://api.groq.com/openai/v1/chat/completions",
-                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5},
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-        if resp.status_code == 200:
-            return {"ok": True, "model": resp.json().get("model")}
-        return {"error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
-    except Exception as e:
-        return {"error": str(e)}
+@app.post("/api/settings/rules")
+async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
 
-@app.get("/api/integrations/test/email")
-async def test_email(key: str = ""):
-    if not key:
-        return {"error": "No key"}
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.get("https://api.sendgrid.com/v3/user/profile", headers={"Authorization": f"Bearer {key}"})
-        if resp.status_code == 200:
-            return {"ok": True, "user": resp.json().get("username")}
-        return {"error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"error": str(e)}
+    data = await request.json()
+    settings = user.settings or {}
+    settings["rules"] = data
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
 
-@app.get("/api/integrations/test/ktalk")
-async def test_ktalk(url: str = ""):
-    if not url:
-        return {"error": "No URL"}
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.post(url, json={"text": "🔔 AM Hub: тест подключения"})
-        if resp.status_code in (200, 201, 204):
-            return {"ok": True}
-        return {"error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"error": str(e)}
 
-@app.get("/api/integrations/test/tbank")
-async def test_tbank(token: str = ""):
-    if not token:
-        return {"error": "No token"}
-    import httpx
-    try:
-        time_url = os.environ.get("TIME_BASE_URL", "https://time.tbank.ru")
-        async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.get(f"{time_url}/api/v1/tickets", params={"limit": 1}, headers={"Authorization": f"Bearer {token}"})
-        if resp.status_code == 200:
-            return {"ok": True}
-        return {"error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"error": str(e)}
+@app.post("/api/settings/prefs")
+async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    if "preferences" not in settings:
+        settings["preferences"] = {}
+    settings["preferences"].update(data)
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
 
 
 # ============================================================================
