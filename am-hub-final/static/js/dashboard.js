@@ -252,6 +252,22 @@ class Dashboard {
         }
     }
 
+    async load360Dashboard() {
+        try {
+            // Load enriched client data with task and meeting counts
+            const response = await this.apiCall(
+                `/api/dashboard/clients-summary`,
+                'GET'
+            );
+            this.clients = response.data || response;
+            return this.clients;
+        } catch (err) {
+            console.error('Failed to load 360 dashboard:', err);
+            // Fallback to regular clients load
+            return this.loadClients();
+        }
+    }
+
     async loadClientDetails(clientId) {
         try {
             const client = await this.apiCall(`/api/clients/${clientId}`, 'GET');
@@ -422,7 +438,12 @@ class Dashboard {
 
     switchView(view) {
         this.currentView = view;
-        this.render();
+        // Load additional data for specific views
+        if (view === 'dashboard') {
+            this.load360Dashboard().then(() => this.render());
+        } else {
+            this.render();
+        }
     }
 
     render() {
@@ -450,63 +471,170 @@ class Dashboard {
     renderDashboardView() {
         const { total_clients = 0, avg_health_score = 0, total_tasks = 0, open_tasks = 0, total_meetings = 0 } = this.stats;
         
+        // Categorize clients by health
+        const critical = this.clients.filter(c => (c.health_score || 0) < 50).length;
+        const warning = this.clients.filter(c => (c.health_score || 0) >= 50 && (c.health_score || 0) < 75).length;
+        const healthy = this.clients.filter(c => (c.health_score || 0) >= 75).length;
+        
+        // Categorize tasks by status
+        const tasksByStatus = {
+            done: 0,
+            in_progress: 0,
+            plan: 0,
+            blocked: 0
+        };
+        
         return `
-            <div class="view-header">
-                <h1>📊 Dashboard</h1>
-                <p>Quick overview of your account management hub</p>
-            </div>
+            <div class="dashboard-360">
+                <!-- ГЛАВНАЯ ПЛИТКА - ОБЩИЙ СТАТУС -->
+                <div class="hero-section-360">
+                    <div class="hero-title">🎛️ 360° Account Overview</div>
+                    <p class="hero-subtitle">Real-time view of all accounts and their status</p>
+                </div>
 
-            <div class="kpi-grid">
-                <div class="kpi-card">
-                    <div class="kpi-value">${total_clients}</div>
-                    <div class="kpi-label">Clients</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-value" style="color: #f59e0b;">${avg_health_score.toFixed(1)}%</div>
-                    <div class="kpi-label">Avg Health Score</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-value">${total_tasks}</div>
-                    <div class="kpi-label">Total Tasks</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-value" style="color: #ef4444;">${open_tasks}</div>
-                    <div class="kpi-label">Open Tasks</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-value">${total_meetings}</div>
-                    <div class="kpi-label">Meetings</div>
-                </div>
-            </div>
-
-            <div class="dashboard-grid">
-                <div class="dashboard-section">
-                    <h2>📈 Recent Clients</h2>
-                    <div class="client-list-mini">
-                        ${this.clients.slice(0, 5).map(c => `
-                            <div class="client-item-mini" onclick="dashboard.viewClientDetails(${c.id})">
-                                <div class="client-info-mini">
-                                    <strong>${c.name}</strong>
-                                    <span class="client-segment">${c.segment || 'N/A'}</span>
-                                </div>
-                                <div class="health-badge" style="background: ${this.getHealthColor(c.health_score)}">
-                                    ${c.health_score || 0}%
-                                </div>
-                            </div>
-                        `).join('')}
+                <!-- TOP KPIs - 5 главных показателей -->
+                <div class="kpi-row-360">
+                    <div class="kpi-card-360">
+                        <div class="kpi-icon">👥</div>
+                        <div class="kpi-content">
+                            <div class="kpi-value-360">${total_clients}</div>
+                            <div class="kpi-label-360">Total Clients</div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-360">
+                        <div class="kpi-icon">💚</div>
+                        <div class="kpi-content">
+                            <div class="kpi-value-360" style="color: #10b981;">${avg_health_score.toFixed(1)}%</div>
+                            <div class="kpi-label-360">Health Score</div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-360">
+                        <div class="kpi-icon">📋</div>
+                        <div class="kpi-content">
+                            <div class="kpi-value-360">${total_tasks}</div>
+                            <div class="kpi-label-360">Total Tasks</div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-360">
+                        <div class="kpi-icon">⚡</div>
+                        <div class="kpi-content">
+                            <div class="kpi-value-360" style="color: #f59e0b;">${open_tasks}</div>
+                            <div class="kpi-label-360">In Progress</div>
+                        </div>
+                    </div>
+                    <div class="kpi-card-360">
+                        <div class="kpi-icon">📅</div>
+                        <div class="kpi-content">
+                            <div class="kpi-value-360">${total_meetings}</div>
+                            <div class="kpi-label-360">Meetings</div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="dashboard-section">
-                    <h2>🔔 Quick Actions</h2>
-                    <div class="quick-actions">
-                        <button onclick="dashboard.switchView('clients'); dashboard.showCreateClientForm()" class="btn btn-primary">
-                            ➕ Add Client
+                <!-- HEALTH BREAKDOWN - Визуальное распределение здоровья -->
+                <div class="grid-360-2">
+                    <!-- Health Status -->
+                    <div class="card-360">
+                        <div class="card-title-360">🏥 Health Status</div>
+                        <div class="health-breakdown">
+                            <div class="health-item">
+                                <div class="health-bar health-bar-critical" style="width: ${healthy > 0 ? (healthy/total_clients*100) : 0}%"></div>
+                                <span style="color: #10b981;">✓ Healthy: ${healthy}</span>
+                            </div>
+                            <div class="health-item">
+                                <div class="health-bar health-bar-warning" style="width: ${warning > 0 ? (warning/total_clients*100) : 0}%"></div>
+                                <span style="color: #f59e0b;">⚠ Warning: ${warning}</span>
+                            </div>
+                            <div class="health-item">
+                                <div class="health-bar health-bar-danger" style="width: ${critical > 0 ? (critical/total_clients*100) : 0}%"></div>
+                                <span style="color: #ef4444;">🔴 Critical: ${critical}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Activity Gauge -->
+                    <div class="card-360">
+                        <div class="card-title-360">⚙️ Activity Gauge</div>
+                        <div class="gauge-container">
+                            <div class="gauge-circle" style="background: conic-gradient(#6366f1 0deg ${(avg_health_score/100)*360}deg, #e2e8f0 ${(avg_health_score/100)*360}deg 360deg)">
+                                <div class="gauge-inner">
+                                    <div class="gauge-value">${avg_health_score.toFixed(0)}%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CLIENT GRID - Все клиенты в виде плиток -->
+                <div class="card-360 full-width">
+                    <div class="card-title-360">👥 All Clients Status</div>
+                    <div class="clients-360-grid">
+                        ${this.clients.length > 0 ? this.clients.map((c, idx) => {
+                            const health = c.health_score || 0;
+                            const healthColor = this.getHealthColor(health);
+                            const healthStatus = health >= 75 ? '✓' : health >= 50 ? '⚠' : '🔴';
+                            return `
+                                <div class="client-tile-360" onclick="dashboard.viewClientDetails(${c.id})" style="border-left: 4px solid ${healthColor};">
+                                    <div class="client-tile-header">
+                                        <div class="client-tile-name">${c.name}</div>
+                                        <div class="health-score-small" style="background: ${healthColor};">${health}%</div>
+                                    </div>
+                                    <div class="client-tile-meta">
+                                        <span class="badge-small">${c.segment || 'N/A'}</span>
+                                        <span class="badge-small">${healthStatus}</span>
+                                    </div>
+                                    <div class="client-tile-stats">
+                                        <span>📋 ${c.tasks_count || 0}</span>
+                                        <span>📅 ${c.meetings_count || 0}</span>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('') : '<p style="padding: 2rem; text-align: center; color: #94a3b8;">No clients yet</p>'}
+                    </div>
+                </div>
+
+                <!-- BOTTOM INSIGHTS -->
+                <div class="grid-360-2">
+                    <!-- Top Performers -->
+                    <div class="card-360">
+                        <div class="card-title-360">🌟 Top Performers</div>
+                        <div class="insights-list">
+                            ${this.clients.sort((a, b) => (b.health_score || 0) - (a.health_score || 0)).slice(0, 3).map((c, idx) => `
+                                <div class="insight-item">
+                                    <span class="insight-rank">#${idx + 1}</span>
+                                    <span class="insight-name">${c.name}</span>
+                                    <span class="insight-value" style="color: ${this.getHealthColor(c.health_score)};">${c.health_score || 0}%</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Needs Attention -->
+                    <div class="card-360">
+                        <div class="card-title-360">⚠️ Needs Attention</div>
+                        <div class="insights-list">
+                            ${this.clients.filter(c => (c.health_score || 0) < 60).slice(0, 3).map((c, idx) => `
+                                <div class="insight-item">
+                                    <span class="insight-rank">!</span>
+                                    <span class="insight-name">${c.name}</span>
+                                    <span class="insight-value" style="color: ${this.getHealthColor(c.health_score)};">${c.health_score || 0}%</span>
+                                </div>
+                            `).join('') || '<p style="color: #94a3b8; font-size: 0.9rem;">All healthy!</p>'}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QUICK ACTIONS -->
+                <div class="card-360 full-width">
+                    <div class="card-title-360">🚀 Quick Actions</div>
+                    <div class="action-buttons-360">
+                        <button onclick="dashboard.switchView('clients'); dashboard.showCreateClientForm()" class="action-btn-360 btn-primary-360">
+                            ➕ Add New Client
                         </button>
-                        <button onclick="dashboard.switchView('tasks')" class="btn btn-secondary">
-                            📋 View Tasks
+                        <button onclick="dashboard.switchView('tasks')" class="action-btn-360 btn-secondary-360">
+                            📋 View All Tasks
                         </button>
-                        <button onclick="dashboard.switchView('meetings')" class="btn btn-secondary">
+                        <button onclick="dashboard.switchView('meetings')" class="action-btn-360 btn-secondary-360">
                             📅 Schedule Meeting
                         </button>
                     </div>
@@ -885,6 +1013,322 @@ class Dashboard {
                 overflow-y: auto;
             }
 
+            /* 360 DASHBOARD STYLES */
+            .dashboard-360 {
+                display: flex;
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+
+            .hero-section-360 {
+                padding: 2rem;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 16px;
+                color: white;
+                text-align: center;
+            }
+
+            .hero-title {
+                font-size: 2rem;
+                font-weight: bold;
+                margin-bottom: 0.5rem;
+            }
+
+            .hero-subtitle {
+                font-size: 1rem;
+                opacity: 0.9;
+            }
+
+            /* KPI Row */
+            .kpi-row-360 {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 1rem;
+            }
+
+            .kpi-card-360 {
+                background: white;
+                padding: 1.5rem;
+                border-radius: 12px;
+                border: 1px solid #e2e8f0;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                transition: all 0.2s ease;
+            }
+
+            .kpi-card-360:hover {
+                border-color: #6366f1;
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+            }
+
+            .kpi-icon {
+                font-size: 2rem;
+            }
+
+            .kpi-content {
+                display: flex;
+                flex-direction: column;
+            }
+
+            .kpi-value-360 {
+                font-size: 1.8rem;
+                font-weight: bold;
+                color: #6366f1;
+                line-height: 1;
+            }
+
+            .kpi-label-360 {
+                font-size: 0.75rem;
+                color: #64748b;
+                margin-top: 0.25rem;
+                font-weight: 500;
+            }
+
+            /* Grid Layouts */
+            .grid-360-2 {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 1.5rem;
+            }
+
+            .card-360 {
+                background: white;
+                padding: 1.5rem;
+                border-radius: 12px;
+                border: 1px solid #e2e8f0;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+
+            .card-360.full-width {
+                grid-column: 1 / -1;
+            }
+
+            .card-title-360 {
+                font-size: 1.1rem;
+                font-weight: 600;
+                color: #1e293b;
+                margin-bottom: 1rem;
+            }
+
+            /* Health Breakdown */
+            .health-breakdown {
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .health-item {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+
+            .health-bar {
+                flex: 1;
+                height: 24px;
+                border-radius: 6px;
+                transition: width 0.3s ease;
+                min-width: 20px;
+            }
+
+            .health-bar-critical {
+                background: linear-gradient(90deg, #10b981, #34d399);
+            }
+
+            .health-bar-warning {
+                background: linear-gradient(90deg, #f59e0b, #fbbf24);
+            }
+
+            .health-bar-danger {
+                background: linear-gradient(90deg, #ef4444, #f87171);
+            }
+
+            /* Gauge */
+            .gauge-container {
+                display: flex;
+                justify-content: center;
+                padding: 1rem 0;
+            }
+
+            .gauge-circle {
+                width: 120px;
+                height: 120px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.3s ease;
+            }
+
+            .gauge-inner {
+                width: 100px;
+                height: 100px;
+                border-radius: 50%;
+                background: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-direction: column;
+            }
+
+            .gauge-value {
+                font-size: 1.8rem;
+                font-weight: bold;
+                color: #6366f1;
+            }
+
+            /* Clients Grid 360 */
+            .clients-360-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+                gap: 1rem;
+            }
+
+            .client-tile-360 {
+                background: #f8fafc;
+                padding: 1rem;
+                border-radius: 10px;
+                border: 1px solid #e2e8f0;
+                cursor: pointer;
+                transition: all 0.2s ease;
+            }
+
+            .client-tile-360:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+                background: white;
+            }
+
+            .client-tile-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 0.75rem;
+            }
+
+            .client-tile-name {
+                font-weight: 600;
+                color: #1e293b;
+                font-size: 0.95rem;
+                flex: 1;
+            }
+
+            .health-score-small {
+                width: 40px;
+                height: 40px;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                font-size: 0.85rem;
+                flex-shrink: 0;
+            }
+
+            .client-tile-meta {
+                display: flex;
+                gap: 0.5rem;
+                margin-bottom: 0.75rem;
+            }
+
+            .badge-small {
+                font-size: 0.7rem;
+                padding: 2px 6px;
+                border-radius: 4px;
+                background: #e2e8f0;
+                color: #64748b;
+                font-weight: 500;
+            }
+
+            .client-tile-stats {
+                display: flex;
+                gap: 0.75rem;
+                font-size: 0.8rem;
+                color: #64748b;
+            }
+
+            /* Insights */
+            .insights-list {
+                display: flex;
+                flex-direction: column;
+                gap: 0.75rem;
+            }
+
+            .insight-item {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                padding: 0.75rem;
+                background: #f8fafc;
+                border-radius: 8px;
+            }
+
+            .insight-rank {
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: #6366f1;
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: bold;
+                font-size: 0.85rem;
+                flex-shrink: 0;
+            }
+
+            .insight-name {
+                flex: 1;
+                font-weight: 500;
+                color: #1e293b;
+            }
+
+            .insight-value {
+                font-weight: bold;
+                font-size: 0.95rem;
+            }
+
+            /* Action Buttons */
+            .action-buttons-360 {
+                display: flex;
+                gap: 1rem;
+                flex-wrap: wrap;
+            }
+
+            .action-btn-360 {
+                padding: 0.75rem 1.5rem;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                font-size: 0.95rem;
+            }
+
+            .btn-primary-360 {
+                background: #6366f1;
+                color: white;
+            }
+
+            .btn-primary-360:hover {
+                background: #4f46e5;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+            }
+
+            .btn-secondary-360 {
+                background: #e2e8f0;
+                color: #1e293b;
+            }
+
+            .btn-secondary-360:hover {
+                background: #cbd5e1;
+                transform: translateY(-2px);
+            }
+
             /* View */
             .view-header {
                 display: flex;
@@ -1253,6 +1697,22 @@ class Dashboard {
 
                 .clients-grid {
                     grid-template-columns: 1fr;
+                }
+
+                .kpi-row-360 {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+
+                .clients-360-grid {
+                    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                }
+
+                .action-buttons-360 {
+                    flex-direction: column;
+                }
+
+                .action-btn-360 {
+                    width: 100%;
                 }
             }
         `;
