@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import engine, get_db, Base, init_db, SessionLocal
-from models import Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog
+from models import Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog, Notification, QBR, AccountPlan
 from auth import (
     get_current_user, get_current_admin,
     authenticate_user, create_user, create_access_token,
@@ -56,10 +56,9 @@ async def lifespan(app: FastAPI):
     """App startup"""
     try:
         init_db()
-        # Добавляем отсутствующие колонки
+        # Добавляем отсутствующие колонки и таблицы
         with SessionLocal() as db:
             try:
-                # Проверка и добавление колонки settings в users
                 cols = db.execute(
                     text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")
                 ).fetchall()
@@ -69,7 +68,94 @@ async def lifespan(app: FastAPI):
                     db.commit()
                     logger.info("✅ Added users.settings column")
             except Exception as e:
-                logger.warning(f"Migration check: {e}")
+                logger.warning(f"Migration users.settings: {e}")
+
+            # Добавляем колонки Meeting
+            try:
+                mcols = db.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'meetings'")
+                ).fetchall()
+                mcol_names = {row[0] for row in mcols}
+                for col, default in [("followup_status", "'pending'"), ("followup_text", "NULL"),
+                                      ("followup_sent_at", "NULL"), ("followup_skipped", "FALSE"),
+                                      ("is_qbr", "FALSE")]:
+                    if col not in mcol_names:
+                        db.execute(text(f"ALTER TABLE meetings ADD COLUMN {col} VARCHAR DEFAULT {default}" if col != "followup_skipped" and col != "is_qbr" else f"ALTER TABLE meetings ADD COLUMN {col} BOOLEAN DEFAULT {default}"))
+                        db.commit()
+                        logger.info(f"✅ Added meetings.{col}")
+            except Exception as e:
+                logger.warning(f"Migration meetings: {e}")
+
+            # Добавляем колонки Task
+            try:
+                tcols = db.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'tasks'")
+                ).fetchall()
+                tcol_names = {row[0] for row in tcols}
+                for col, col_type in [("confirmed_at", "TIMESTAMP"), ("confirmed_by", "VARCHAR"),
+                                       ("pushed_to_roadmap", "BOOLEAN DEFAULT FALSE"), ("roadmap_pushed_at", "TIMESTAMP")]:
+                    if col not in tcol_names:
+                        db.execute(text(f"ALTER TABLE tasks ADD COLUMN {col} {col_type}"))
+                        db.commit()
+                        logger.info(f"✅ Added tasks.{col}")
+            except Exception as e:
+                logger.warning(f"Migration tasks: {e}")
+
+            # Добавляем колонки Client
+            try:
+                ccols = db.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'clients'")
+                ).fetchall()
+                ccol_names = {row[0] for row in ccols}
+                for col, col_type in [("last_qbr_date", "TIMESTAMP"), ("next_qbr_date", "TIMESTAMP"),
+                                       ("account_plan", "JSONB")]:
+                    if col not in ccol_names:
+                        db.execute(text(f"ALTER TABLE clients ADD COLUMN {col} {col_type}"))
+                        db.commit()
+                        logger.info(f"✅ Added clients.{col}")
+            except Exception as e:
+                logger.warning(f"Migration clients: {e}")
+
+            # Создаём новые таблицы
+            try:
+                db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS qbrs (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        quarter VARCHAR NOT NULL,
+                        year INTEGER NOT NULL,
+                        date TIMESTAMP,
+                        status VARCHAR DEFAULT 'draft',
+                        metrics JSONB DEFAULT '{}',
+                        summary TEXT,
+                        achievements JSONB DEFAULT '[]',
+                        issues JSONB DEFAULT '[]',
+                        next_quarter_goals JSONB DEFAULT '[]',
+                        meeting_id INTEGER REFERENCES meetings(id)
+                    )
+                """))
+                db.commit()
+                logger.info("✅ Created qbrs table")
+            except Exception as e:
+                logger.warning(f"Migration qbrs: {e}")
+
+            try:
+                db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS account_plans (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id) UNIQUE,
+                        quarterly_goals JSONB DEFAULT '[]',
+                        action_items JSONB DEFAULT '[]',
+                        notes TEXT,
+                        strategy TEXT,
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        updated_by VARCHAR
+                    )
+                """))
+                db.commit()
+                logger.info("✅ Created account_plans table")
+            except Exception as e:
+                logger.warning(f"Migration account_plans: {e}")
 
             if db.query(User).count() == 0:
                 admin = User(
@@ -1062,7 +1148,484 @@ async def root(request: Request, auth_token: Optional[str] = Cookie(None)):
 
 
 # ============================================================================
-# HEALTH
+# WORKFLOW: FOLLOWUP
+# ============================================================================
+
+@app.post("/api/meetings/{meeting_id}/followup/generate")
+async def api_generate_followup(meeting_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """AI-генерация фолоуапа для встречи."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404)
+
+    client = db.query(Client).filter(Client.id == meeting.client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    tasks = db.query(Task).filter(Task.client_id == client.id, Task.status.in_(["plan", "in_progress"])).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client.id).order_by(Meeting.date.desc()).limit(3).all()
+
+    try:
+        text = generate_smart_followup(client, tasks, meetings)
+        meeting.followup_text = text
+        meeting.followup_status = "filled"
+        db.commit()
+        return {"ok": True, "text": text}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/meetings/{meeting_id}/followup/send")
+async def api_send_followup(meeting_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Подтверждение отправки фолоуапа → создаётся задача done."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404)
+
+    data = await request.json()
+    followup_text = data.get("text", meeting.followup_text)
+
+    meeting.followup_status = "sent"
+    meeting.followup_text = followup_text
+    meeting.followup_sent_at = datetime.now()
+
+    # Создаём задачу "Фолоуап отправлен" со статусом done
+    task = Task(
+        client_id=meeting.client_id,
+        title=f"📧 Фолоуап: {meeting.title or meeting.type}",
+        description=followup_text[:500] if followup_text else "",
+        status="done",
+        priority="medium",
+        source="followup",
+        created_from_meeting_id=meeting.id,
+        confirmed_at=datetime.now(),
+        confirmed_by=user.email if user else None,
+    )
+    db.add(task)
+
+    # Обновляем last_meeting_date у клиента
+    client = db.query(Client).filter(Client.id == meeting.client_id).first()
+    if client:
+        client.last_meeting_date = meeting.date or datetime.now()
+
+    db.commit()
+    return {"ok": True, "task_id": task.id}
+
+
+@app.post("/api/meetings/{meeting_id}/followup/skip")
+async def api_skip_followup(meeting_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Пропустить фолоуап → создаётся задача plan."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404)
+
+    meeting.followup_status = "skipped"
+    meeting.followup_skipped = True
+
+    # Создаём задачу "Фолоуап" со статусом plan
+    task = Task(
+        client_id=meeting.client_id,
+        title=f"📧 Фолоуап: {meeting.title or meeting.type}",
+        description="Фолоуап пропущен — требуется заполнить позже",
+        status="plan",
+        priority="medium",
+        source="followup",
+        created_from_meeting_id=meeting.id,
+    )
+    db.add(task)
+    db.commit()
+    return {"ok": True, "task_id": task.id}
+
+
+# ============================================================================
+# WORKFLOW: TASK CONFIRMATION
+# ============================================================================
+
+@app.post("/api/tasks/{task_id}/confirm")
+async def api_confirm_task(task_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Подтверждение выполнения задачи."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404)
+
+    task.status = "done"
+    task.confirmed_at = datetime.now()
+    task.confirmed_by = user.email if user else None
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# WORKFLOW: ROADMAP PUSH
+# ============================================================================
+
+@app.post("/api/tasks/{task_id}/push-roadmap")
+async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Отправка задачи в Merchrules Roadmap."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404)
+
+    # Получаем креды пользователя
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    settings = user.settings or {} if user else {}
+    mr = settings.get("merchrules", {})
+    login = mr.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
+    password = mr.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
+
+    if not login or not password:
+        return {"error": "Нужны креды Merchrules (настройки → креды)"}
+
+    client = db.query(Client).filter(Client.id == task.client_id).first()
+    if not client or not client.merchrules_account_id:
+        return {"error": "У клиента нет merchrules_account_id"}
+
+    # Push via CSV (one task)
+    import httpx, io
+    csv_content = f"title,description,status,priority,team,task_type,assignee,product,link,due_date\n"
+    csv_content += f'"{task.title}","{task.description or ""}",{task.status},{task.priority},{task.team or ""},{task.task_type or ""},any,,,'
+    try:
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token_resp = await hx.post(
+                "https://merchrules-qa.any-platform.ru/backend-v2/auth/login",
+                json={"username": login, "password": password},
+            )
+            if token_resp.status_code != 200:
+                return {"error": "Ошибка авторизации Merchrules"}
+            token = token_resp.json().get("token")
+
+            files = {"file": ("task.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
+            resp = await hx.post(
+                "https://merchrules-qa.any-platform.ru/backend-v2/import/tasks/csv",
+                data={"site_id": client.merchrules_account_id},
+                files=files,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code == 200:
+            task.pushed_to_roadmap = True
+            task.roadmap_pushed_at = datetime.now()
+            db.commit()
+            return {"ok": True, "roadmap": resp.json()}
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# WORKFLOW: QBR
+# ============================================================================
+
+@app.get("/api/clients/{client_id}/qbr")
+async def api_get_qbr(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить QBR данные клиента."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    qbr = db.query(QBR).filter(QBR.client_id == client_id).order_by(QBR.date.desc()).first()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id, Meeting.is_qbr == True).order_by(Meeting.date.desc()).limit(5).all()
+    tasks = db.query(Task).filter(Task.client_id == client_id, Task.status == "done").order_by(Task.confirmed_at.desc()).limit(20).all()
+
+    return {
+        "client": {"id": client.id, "name": client.name, "segment": client.segment},
+        "current_qbr": {
+            "id": qbr.id if qbr else None,
+            "quarter": qbr.quarter if qbr else None,
+            "status": qbr.status if qbr else "draft",
+            "metrics": qbr.metrics if qbr else {},
+            "summary": qbr.summary if qbr else None,
+            "achievements": qbr.achievements if qbr else [],
+            "issues": qbr.issues if qbr else [],
+            "next_goals": qbr.next_quarter_goals if qbr else [],
+        } if qbr else None,
+        "qbr_meetings": [{"id": m.id, "date": m.date.isoformat() if m.date else None, "title": m.title} for m in meetings],
+        "completed_tasks": [{"id": t.id, "title": t.title, "confirmed_at": t.confirmed_at.isoformat() if t.confirmed_at else None} for t in tasks],
+        "last_qbr_date": client.last_qbr_date.isoformat() if client.last_qbr_date else None,
+        "next_qbr_date": client.next_qbr_date.isoformat() if client.next_qbr_date else None,
+    }
+
+
+@app.post("/api/clients/{client_id}/qbr")
+async def api_create_qbr(client_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Создать/обновить QBR."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    data = await request.json()
+
+    qbr = db.query(QBR).filter(QBR.client_id == client_id).order_by(QBR.date.desc()).first()
+    if not qbr:
+        qbr = QBR(client_id=client_id, year=datetime.now().year, quarter=f"{datetime.now().year}-Q{(datetime.now().month-1)//3+1}")
+        db.add(qbr)
+
+    qbr.status = data.get("status", qbr.status)
+    qbr.metrics = data.get("metrics", qbr.metrics)
+    qbr.summary = data.get("summary", qbr.summary)
+    qbr.achievements = data.get("achievements", qbr.achievements)
+    qbr.issues = data.get("issues", qbr.issues)
+    qbr.next_quarter_goals = data.get("next_quarter_goals", qbr.next_quarter_goals)
+    if data.get("date"):
+        qbr.date = datetime.fromisoformat(data["date"])
+
+    # Обновляем клиента
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if client:
+        client.last_qbr_date = qbr.date
+        # Следующий QBR через 3 месяца
+        client.next_qbr_date = qbr.date + timedelta(days=90) if qbr.date else None
+
+    db.commit()
+    return {"ok": True, "qbr_id": qbr.id}
+
+
+# ============================================================================
+# WORKFLOW: ACCOUNT PLAN
+# ============================================================================
+
+@app.get("/api/clients/{client_id}/plan")
+async def api_get_plan(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить план работы по клиенту."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    plan = db.query(AccountPlan).filter(AccountPlan.client_id == client_id).first()
+    if not plan:
+        plan = AccountPlan(client_id=client_id)
+        db.add(plan)
+        db.commit()
+
+    return {
+        "quarterly_goals": plan.quarterly_goals or [],
+        "action_items": plan.action_items or [],
+        "notes": plan.notes,
+        "strategy": plan.strategy,
+        "updated_at": plan.updated_at.isoformat() if plan.updated_at else None,
+        "updated_by": plan.updated_by,
+    }
+
+
+@app.post("/api/clients/{client_id}/plan")
+async def api_save_plan(client_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить план работы по клиенту."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    data = await request.json()
+
+    plan = db.query(AccountPlan).filter(AccountPlan.client_id == client_id).first()
+    if not plan:
+        plan = AccountPlan(client_id=client_id)
+        db.add(plan)
+
+    plan.quarterly_goals = data.get("quarterly_goals", plan.quarterly_goals or [])
+    plan.action_items = data.get("action_items", plan.action_items or [])
+    plan.notes = data.get("notes", plan.notes)
+    plan.strategy = data.get("strategy", plan.strategy)
+    plan.updated_at = datetime.now()
+    plan.updated_by = user.email if user else None
+
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# WORKFLOW: TBANK TICKETS
+# ============================================================================
+
+@app.get("/api/tbank/tickets/{client_name}")
+async def api_tbank_tickets(client_name: str, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить тикеты Tbank Time для клиента."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    time_token = os.environ.get("TIME_API_TOKEN", "")
+    if not time_token:
+        return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
+
+    from integrations.tbank_time import sync_tickets_for_client
+    try:
+        result = await sync_tickets_for_client(client_name)
+        return result
+    except Exception as e:
+        return {"error": str(e), "open_count": 0, "total_count": 0, "last_ticket": None}
+
+
+@app.get("/api/tbank/tickets")
+async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить все открытые тикеты."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    time_token = os.environ.get("TIME_API_TOKEN", "")
+    if not time_token:
+        return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
+
+    from integrations.tbank_time import get_support_tickets
+    try:
+        clients = db.query(Client).all()
+        all_tickets = []
+        for c in clients:
+            if c.name:
+                tickets = await get_support_tickets(c.name)
+                for t in tickets:
+                    t["client"] = c.name
+                all_tickets.extend(tickets)
+        return {"tickets": all_tickets, "total": len(all_tickets)}
+    except Exception as e:
+        return {"error": str(e), "tickets": [], "total": 0}
+
+
+# ============================================================================
+# WORKFLOW: DASHBOARD ACTIONS
+# ============================================================================
+
+@app.get("/api/dashboard/actions")
+async def api_dashboard_actions(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить карточки действий для дашборда."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    now = datetime.now()
+
+    actions = []
+
+    # 1. Фолоуапы pending
+    pending_followups = db.query(Meeting).filter(
+        Meeting.followup_status == "pending",
+        Meeting.date < now,
+    ).all()
+    for m in pending_followups:
+        client = db.query(Client).filter(Client.id == m.client_id).first()
+        actions.append({
+            "type": "followup",
+            "priority": "high",
+            "meeting_id": m.id,
+            "client_name": client.name if client else "—",
+            "meeting_title": m.title or m.type,
+            "meeting_date": m.date.isoformat() if m.date else None,
+            "days_ago": (now - m.date).days if m.date else 0,
+        })
+
+    # 2. Prep до встречи
+    upcoming = db.query(Meeting).filter(
+        Meeting.date >= now,
+        Meeting.date < now + timedelta(days=2),
+    ).all()
+    for m in upcoming:
+        client = db.query(Client).filter(Client.id == m.client_id).first()
+        actions.append({
+            "type": "prep",
+            "priority": "medium",
+            "meeting_id": m.id,
+            "client_name": client.name if client else "—",
+            "meeting_title": m.title or m.type,
+            "meeting_date": m.date.isoformat() if m.date else None,
+            "hours_until": int((m.date - now).total_seconds() / 3600) if m.date else 0,
+        })
+
+    # 3. Chekups overdue
+    overdue_checkups = db.query(CheckUp).filter(CheckUp.status == "overdue").all()
+    for c in overdue_checkups:
+        client = db.query(Client).filter(Client.id == c.client_id).first()
+        actions.append({
+            "type": "checkup",
+            "priority": "high",
+            "checkup_id": c.id,
+            "client_name": client.name if client else "—",
+            "checkup_type": c.type,
+            "scheduled_date": c.scheduled_date.isoformat() if c.scheduled_date else None,
+        })
+
+    # 4. QBR overdue
+    clients_qbr = db.query(Client).filter(
+        Client.next_qbr_date != None,
+        Client.next_qbr_date < now,
+    ).all()
+    for c in clients_qbr:
+        actions.append({
+            "type": "qbr",
+            "priority": "high",
+            "client_id": c.id,
+            "client_name": c.name,
+            "next_qbr_date": c.next_qbr_date.isoformat() if c.next_qbr_date else None,
+        })
+
+    return {"actions": actions, "total": len(actions)}
+
+
+# ============================================================================
+# ROOT
 # ============================================================================
 
 @app.get("/health")
