@@ -8,8 +8,8 @@
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
-    .main { margin-left:240px; padding:24px 28px; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; max-width:1100px; }
     .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
     .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
     .sidebar-logo h1 { font-size:1.1rem; }
@@ -19,16 +19,24 @@
     .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
     a { color:var(--accent); text-decoration:none; }
     h1 { font-size:1.4rem; margin-bottom:4px; }
-    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; position:relative; overflow:hidden; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:24px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:14px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; }
     .card .icon { font-size:2rem; margin-bottom:10px; }
     .card h3 { font-size:.95rem; font-weight:600; margin-bottom:4px; }
-    .card p { font-size:.8rem; color:var(--muted); margin-bottom:12px; }
+    .card p { font-size:.78rem; color:var(--muted); margin-bottom:12px; }
     .status { display:inline-block; padding:3px 10px; border-radius:6px; font-size:.7rem; font-weight:600; }
     .status-active { background:rgba(34,197,94,.15); color:var(--green); }
     .status-config { background:rgba(234,179,8,.15); color:var(--yellow); }
-    .status-stub { background:rgba(239,68,68,.1); color:var(--red); }
+    .config { margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+    .config label { display:block; font-size:.72rem; color:var(--muted); margin-bottom:3px; }
+    .config input { width:100%; padding:7px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.8rem; outline:none; margin-bottom:8px; }
+    .config input:focus { border-color:var(--accent); }
+    .config .btn { width:100%; padding:7px; border-radius:8px; border:none; background:var(--accent); color:#fff; font-size:.78rem; cursor:pointer; }
+    .config .btn:hover { filter:brightness(1.15); }
+    .config .result { margin-top:6px; font-size:.72rem; padding:4px 8px; border-radius:6px; display:none; }
+    .config .result.ok { display:block; background:rgba(34,197,94,.1); color:var(--green); }
+    .config .result.err { display:block; background:rgba(239,68,68,.1); color:var(--red); }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
   </style>
 </head>
@@ -40,34 +48,179 @@
   <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
   <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
   <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Синхронизация</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
   <a class="nav-item active" href="/integrations"><span>🔌</span> Интеграции</a>
   <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
 </div>
 <div class="main">
   <h1>🔌 Интеграции</h1>
-  <p class="sub">Все подключённые системы и их статус</p>
+  <p class="sub">Настройка подключений ко всем системам</p>
   <div class="grid">
-    {% for i in integrations %}
+
+    <!-- Merchrules -->
     <div class="card">
-      <div class="icon">{{ i.icon }}</div>
-      <h3>{{ i.name }}</h3>
-      <p>{{ i.desc }}</p>
-      <span class="status status-{{ i.status }}">
-        {% if i.status == 'active' %}✅ Подключено
-        {% elif i.status == 'config' %}⚙️ Нужна настройка
-        {% else %}🚧 Заглушка{% endif %}
-      </span>
-      {% if i.env %}
-      <div style="margin-top:8px;font-size:.7rem;color:var(--muted);">Env: {{ i.env }}</div>
-      {% endif %}
+      <div class="icon">🗺️</div>
+      <h3>Merchrules</h3>
+      <p>Задачи и аналитика дорожной карты</p>
+      {% if mr_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>Login</label>
+        <input id="mr-login" type="text" value="{{ mr_login or '' }}">
+        <label>Password</label>
+        <input id="mr-pass" type="password">
+        <button class="btn" onclick="testMR()">Проверить</button>
+        <div class="result" id="mr-result"></div>
+      </div>{% endif %}
     </div>
-    {% endfor %}
+
+    <!-- Airtable -->
+    <div class="card">
+      <div class="icon">📊</div>
+      <h3>Airtable</h3>
+      <p>База клиентов и синхронизация чекапов</p>
+      {% if airtable_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>Personal Access Token</label>
+        <input id="at-token" type="password" placeholder="patXXXXXXXXXXXX">
+        <button class="btn" onclick="testAT()">Проверить</button>
+        <div class="result" id="at-result"></div>
+      </div>{% endif %}
+    </div>
+
+    <!-- Google Sheets -->
+    <div class="card">
+      <div class="icon">📈</div>
+      <h3>Google Sheets</h3>
+      <p>Top-50 рейтинг клиентов</p>
+      {% if sheets_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>Spreadsheet ID</label>
+        <input id="gs-id" type="text" value="{{ sheets_id or '' }}">
+        <button class="btn" onclick="testGS()">Проверить</button>
+        <div class="result" id="gs-result"></div>
+      </div>{% endif %}
+    </div>
+
+    <!-- Telegram Bot -->
+    <div class="card">
+      <div class="icon">✈️</div>
+      <h3>Telegram Bot</h3>
+      <p>Уведомления, команды /status, /checkups, /top50</p>
+      {% if tg_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>Bot Token</label>
+        <input id="tg-token" type="password" placeholder="123456:ABC-DEF...">
+        <button class="btn" onclick="testTG()">Проверить</button>
+        <div class="result" id="tg-result"></div>
+      </div>{% endif %}
+    </div>
+
+    <!-- AI Groq -->
+    <div class="card">
+      <div class="icon">🤖</div>
+      <h3>AI (Groq)</h3>
+      <p>AI-подготовка к встречам и фолоуапы</p>
+      {% if ai_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>API Key</label>
+        <input id="ai-key" type="password" placeholder="gsk_...">
+        <button class="btn" onclick="testAI()">Проверить</button>
+        <div class="result" id="ai-result"></div>
+      </div>{% endif %}
+    </div>
+
+    <!-- Email -->
+    <div class="card">
+      <div class="icon">📧</div>
+      <h3>Email (SendGrid)</h3>
+      <p>Утренние планы и алерты по email</p>
+      {% if email_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>SendGrid API Key</label>
+        <input id="em-key" type="password" placeholder="SG.xxxxx">
+        <button class="btn" onclick="testEM()">Проверить</button>
+        <div class="result" id="em-result"></div>
+      </div>{% endif %}
+    </div>
+
+    <!-- Ktalk -->
+    <div class="card">
+      <div class="icon">💬</div>
+      <h3>Ktalk</h3>
+      <p>Уведомления в канал через Incoming Webhook</p>
+      {% if ktalk_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>Webhook URL</label>
+        <input id="kt-url" type="text" placeholder="https://...">
+        <button class="btn" onclick="testKT()">Проверить</button>
+        <div class="result" id="kt-result"></div>
+      </div>{% endif %}
+    </div>
+
+    <!-- Tbank Time -->
+    <div class="card">
+      <div class="icon">🎫</div>
+      <h3>Tbank Time</h3>
+      <p>Тикеты поддержки и обращения клиентов</p>
+      {% if time_active %}<span class="status status-active">✅ Подключено</span>
+      {% else %}<span class="status status-config">⚙️ Настройка</span>
+      <div class="config">
+        <label>API Token</label>
+        <input id="tm-token" type="password" placeholder="token...">
+        <button class="btn" onclick="testTM()">Проверить</button>
+        <div class="result" id="tm-result"></div>
+      </div>{% endif %}
+    </div>
+
   </div>
 </div>
+
 <script>
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+async function test(url, resultId){
+  const r=document.getElementById(resultId);
+  r.className='result'; r.style.display='none';
+  try{
+    const res=await fetch(url);
+    const d=await res.json();
+    if(d.ok||d.error===undefined||d.clients!==undefined){
+      r.className='result ok'; r.textContent='✅ OK';
+    } else {
+      r.className='result err'; r.textContent='❌ '+d.error;
+    }
+  }catch(e){r.className='result err';r.textContent='❌ '+e.message;}
+  r.style.display='block';
+}
+
+function testMR(){
+  const l=document.getElementById('mr-login').value;
+  const p=document.getElementById('mr-pass').value;
+  if(!l||!p){alert('Введите login и password');return;}
+  const r=document.getElementById('mr-result');
+  r.className='result';r.style.display='none';
+  fetch('/api/sync/merchrules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:l,password:p})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){r.className='result ok';r.textContent='✅ '+d.clients_synced+' клиентов';}
+      else{r.className='result err';r.textContent='❌ '+d.error;}
+      r.style.display='block';
+    });
+}
+function testAT(){test('/api/integrations/test/airtable?token='+encodeURIComponent(document.getElementById('at-token').value),'at-result');}
+function testGS(){test('/api/integrations/test/sheets?spreadsheet_id='+encodeURIComponent(document.getElementById('gs-id').value),'gs-result');}
+function testTG(){test('/api/integrations/test/telegram?token='+encodeURIComponent(document.getElementById('tg-token').value),'tg-result');}
+function testAI(){test('/api/integrations/test/ai?key='+encodeURIComponent(document.getElementById('ai-key').value),'ai-result');}
+function testEM(){test('/api/integrations/test/email?key='+encodeURIComponent(document.getElementById('em-key').value),'em-result');}
+function testKT(){test('/api/integrations/test/ktalk?url='+encodeURIComponent(document.getElementById('kt-url').value),'kt-result');}
+function testTM(){test('/api/integrations/test/tbank?token='+encodeURIComponent(document.getElementById('tm-token').value),'tm-result');}
 </script>
 </body>
 </html>

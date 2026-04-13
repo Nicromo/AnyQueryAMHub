@@ -56,7 +56,6 @@ async def lifespan(app: FastAPI):
     """App startup"""
     try:
         init_db()
-        # Если нет ни одного юзера — создаём админа по умолчанию
         with SessionLocal() as db:
             if db.query(User).count() == 0:
                 admin = User(
@@ -67,10 +66,29 @@ async def lifespan(app: FastAPI):
                 )
                 db.add(admin)
                 db.commit()
-                logger.info("✅ Default admin created (admin@company.ru / admin123)")
+                logger.info("✅ Default admin created")
         logger.info("✅ Database ready")
+
+        # Start scheduler
+        try:
+            from scheduler import start_scheduler
+            start_scheduler()
+            logger.info("✅ Scheduler started")
+        except Exception as e:
+            logger.warning(f"Scheduler: {e}")
+
+        # Register Telegram webhook
+        try:
+            from tg_bot import set_webhook, BOT_TOKEN as TG_TOKEN
+            if TG_TOKEN:
+                domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", os.environ.get("APP_URL", ""))
+                if domain:
+                    await set_webhook(f"{domain}/webhook/telegram")
+                    logger.info(f"✅ TG webhook: {domain}/webhook/telegram")
+        except Exception as e:
+            logger.warning(f"TG webhook: {e}")
     except Exception as e:
-        logger.error(f"❌ Database error: {e}")
+        logger.error(f"Startup error: {e}")
     yield
 
 
@@ -503,17 +521,289 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
-    integrations = [
-        {"name": "Merchrules", "icon": "🗺️", "desc": "Задачи и аналитика дорожной карты", "status": "active" if os.environ.get("MERCHRULES_LOGIN") else "config", "env": "MERCHRULES_LOGIN"},
-        {"name": "Airtable", "icon": "📊", "desc": "База клиентов и чекапы", "status": "config" if not os.environ.get("AIRTABLE_PAT") else "active", "env": "AIRTABLE_PAT"},
-        {"name": "Google Sheets", "icon": "📈", "desc": "Top-50 рейтинг клиентов", "status": "config" if not os.environ.get("SHEETS_SPREADSHEET_ID") else "active", "env": "SHEETS_SPREADSHEET_ID"},
-        {"name": "Telegram Bot", "icon": "✈️", "desc": "Уведомления и команды боту", "status": "config" if not os.environ.get("TG_BOT_TOKEN") else "active", "env": "TG_BOT_TOKEN"},
-        {"name": "AI (Groq)", "icon": "🤖", "desc": "AI-подготовка и фолоуапы", "status": "config" if not os.environ.get("GROQ_API_KEY") else "active", "env": "GROQ_API_KEY"},
-        {"name": "Email (SendGrid)", "icon": "📧", "desc": "Утренние планы и алерты", "status": "config" if not os.environ.get("SENDGRID_API_KEY") else "active", "env": "SENDGRID_API_KEY"},
-        {"name": "Ktalk", "icon": "💬", "desc": "Уведомления в канал", "status": "stub"},
-        {"name": "Tbank Time", "icon": "🎫", "desc": "Тикеты поддержки", "status": "stub"},
-    ]
-    return templates.TemplateResponse("integrations.html", {"request": request, "user": user, "integrations": integrations})
+    mr_login = os.environ.get("MERCHRULES_LOGIN", "")
+    integrations_data = {
+        "mr_active": bool(os.environ.get("MERCHRULES_LOGIN") and os.environ.get("MERCHRULES_PASSWORD")),
+        "mr_login": mr_login,
+        "airtable_active": bool(os.environ.get("AIRTABLE_PAT")),
+        "sheets_active": bool(os.environ.get("SHEETS_SPREADSHEET_ID")),
+        "sheets_id": os.environ.get("SHEETS_SPREADSHEET_ID", ""),
+        "tg_active": bool(os.environ.get("TG_BOT_TOKEN")),
+        "ai_active": bool(os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ")),
+        "email_active": bool(os.environ.get("SENDGRID_API_KEY")),
+        "ktalk_active": bool(os.environ.get("KTALK_WEBHOOK_URL")),
+        "time_active": bool(os.environ.get("TIME_API_TOKEN")),
+    }
+    return templates.TemplateResponse("integrations.html", {"request": request, "user": user, **integrations_data})
+
+
+# ============================================================================
+# API: INTEGRATION TESTS
+# ============================================================================
+
+@app.get("/api/integrations/test/airtable")
+async def test_airtable(token: str = ""):
+    if not token:
+        return {"error": "No token"}
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.get("https://api.airtable.com/v0/meta/bases", headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code == 200:
+            return {"ok": True, "bases": len(resp.json().get("bases", []))}
+        return {"error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/integrations/test/sheets")
+async def test_sheets(spreadsheet_id: str = ""):
+    if not spreadsheet_id:
+        return {"error": "No spreadsheet ID"}
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.get(f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv", follow_redirects=True)
+        if resp.status_code == 200:
+            lines = resp.text.count('\n')
+            return {"ok": True, "rows": lines}
+        return {"error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/integrations/test/telegram")
+async def test_telegram(token: str = ""):
+    if not token:
+        return {"error": "No token"}
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.get(f"https://api.telegram.org/bot{token}/getMe")
+        data = resp.json()
+        if data.get("ok"):
+            return {"ok": True, "bot": data["result"].get("first_name")}
+        return {"error": data.get("description")}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/integrations/test/ai")
+async def test_ai(key: str = ""):
+    if not key:
+        return {"error": "No key"}
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            resp = await hx.post("https://api.groq.com/openai/v1/chat/completions",
+                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5},
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        if resp.status_code == 200:
+            return {"ok": True, "model": resp.json().get("model")}
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/integrations/test/email")
+async def test_email(key: str = ""):
+    if not key:
+        return {"error": "No key"}
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.get("https://api.sendgrid.com/v3/user/profile", headers={"Authorization": f"Bearer {key}"})
+        if resp.status_code == 200:
+            return {"ok": True, "user": resp.json().get("username")}
+        return {"error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/integrations/test/ktalk")
+async def test_ktalk(url: str = ""):
+    if not url:
+        return {"error": "No URL"}
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.post(url, json={"text": "🔔 AM Hub: тест подключения"})
+        if resp.status_code in (200, 201, 204):
+            return {"ok": True}
+        return {"error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/integrations/test/tbank")
+async def test_tbank(token: str = ""):
+    if not token:
+        return {"error": "No token"}
+    import httpx
+    try:
+        time_url = os.environ.get("TIME_BASE_URL", "https://time.tbank.ru")
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.get(f"{time_url}/api/v1/tickets", params={"limit": 1}, headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code == 200:
+            return {"ok": True}
+        return {"error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# TELEGRAM WEBHOOK
+# ============================================================================
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
+    """Handle incoming Telegram updates"""
+    from tg_bot import handle_update, send_message
+    from sheets import get_top50_data
+
+    update = await request.json()
+    user_id = (update.get("message", {}) or {}).get("from", {}).get("id", 0)
+
+    # Get clients for this user
+    def get_clients_fn():
+        # For now, return all clients (can filter by user later)
+        return [{"id": c.id, "name": c.name, "segment": c.segment or "",
+                 "last_checkup": c.last_checkup, "last_meeting": c.last_meeting_date}
+                for c in db.query(Client).all()]
+
+    async def get_top50_fn():
+        my_clients = [c.name for c in db.query(Client).all()]
+        return await get_top50_data(my_clients)
+
+    try:
+        await handle_update(update, get_clients_fn, get_top50_fn)
+    except Exception as e:
+        logger.error(f"TG webhook error: {e}")
+        try:
+            chat_id = (update.get("message", {}) or {}).get("chat", {}).get("id")
+            if chat_id:
+                await send_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+        except Exception:
+            pass
+
+    return {"ok": True}
+
+
+# ============================================================================
+# API: KTALK
+# ============================================================================
+
+@app.post("/api/ktalk/notify")
+async def api_ktalk_notify(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Send notification to Ktalk channel"""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    webhook_url = os.environ.get("KTALK_WEBHOOK_URL", "")
+    if not webhook_url:
+        return {"error": "KTALK_WEBHOOK_URL not set"}
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            await hx.post(webhook_url, json={"text": data.get("text", "")})
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/ktalk/followup")
+async def api_ktalk_followup(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Send meeting followup to Ktalk"""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    client_name = data.get("client", "")
+    summary = data.get("summary", "")
+    tasks = data.get("tasks", [])
+
+    webhook_url = os.environ.get("KTALK_WEBHOOK_URL", "")
+    if not webhook_url:
+        return {"error": "KTALK_WEBHOOK_URL not set"}
+
+    text = f"📋 **Followup: {client_name}**\n\n{summary}"
+    if tasks:
+        text += "\n\n**Задачи:**\n" + "\n".join(f"• {t}" for t in tasks)
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            await hx.post(webhook_url, json={"text": text})
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================================
+# API: TBANK TIME (tickets)
+# ============================================================================
+
+@app.get("/api/tbank/tickets/{client_name}")
+async def api_tbank_tickets(
+    client_name: str, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Get support tickets for a client from Tbank Time"""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    time_token = os.environ.get("TIME_API_TOKEN", "")
+    if not time_token:
+        return {"error": "TIME_API_TOKEN not set", "tickets": []}
+
+    from integrations.tbank_time import sync_tickets_for_client
+    try:
+        result = await sync_tickets_for_client(client_name)
+        return result
+    except Exception as e:
+        return {"error": str(e), "open_count": 0, "total_count": 0, "last_ticket": None}
+
+
+@app.get("/api/tbank/tickets")
+async def api_tbank_all_tickets(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Get all open support tickets"""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    time_token = os.environ.get("TIME_API_TOKEN", "")
+    if not time_token:
+        return {"error": "TIME_API_TOKEN not set", "tickets": []}
+
+    from integrations.tbank_time import get_support_tickets
+    try:
+        clients = db.query(Client).all()
+        all_tickets = []
+        for c in clients:
+            if c.name:
+                tickets = await get_support_tickets(c.name)
+                for t in tickets:
+                    t["client"] = c.name
+                all_tickets.extend(tickets)
+        return {"tickets": all_tickets, "total": len(all_tickets)}
+    except Exception as e:
+        return {"error": str(e), "tickets": [], "total": 0}
 
 
 # ============================================================================
