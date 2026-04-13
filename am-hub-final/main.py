@@ -181,9 +181,36 @@ async def metrics_json():
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
+async def root(request: Request, db: Session = Depends(get_db)):
     """Root page"""
-    return templates.TemplateResponse("index.html", {"request": request})
+    segment = request.query_params.get("segment")
+    sort = request.query_params.get("sort")
+
+    # Получаем всех клиентов
+    query = db.query(Client)
+    clients = query.all()
+
+    # Подсчёт по сегментам
+    counts = {"ENT": 0, "SME+": 0, "SME-": 0, "SME": 0, "SMB": 0, "SS": 0}
+    for c in clients:
+        seg = c.segment or ""
+        if seg in counts:
+            counts[seg] += 1
+
+    # Фильтрация по сегменту
+    if segment:
+        clients = [c for c in clients if c.segment == segment]
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "clients": clients,
+            "counts": counts,
+            "segment": segment,
+            "sort": sort,
+        },
+    )
 
 
 # ============================================================================
