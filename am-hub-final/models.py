@@ -147,7 +147,7 @@ class SyncLog(Base):
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     
-    metadata = Column(JSONB, default=dict)
+    sync_data = Column(JSONB, default=dict)
 
 
 class User(Base):
@@ -201,7 +201,7 @@ class Account(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Metadata
-    metadata = Column(JSONB, default=dict)
+    account_data = Column(JSONB, default=dict)
 
 
 class AuditLog(Base):
