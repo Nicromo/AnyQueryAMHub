@@ -488,6 +488,35 @@ async def sync_page(request: Request, db: Session = Depends(get_db), auth_token:
 
 
 # ============================================================================
+# INTEGRATIONS
+# ============================================================================
+
+@app.get("/integrations", response_class=HTMLResponse)
+async def integrations_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    integrations = [
+        {"name": "Merchrules", "icon": "🗺️", "desc": "Задачи и аналитика дорожной карты", "status": "active" if os.environ.get("MERCHRULES_LOGIN") else "config", "env": "MERCHRULES_LOGIN"},
+        {"name": "Airtable", "icon": "📊", "desc": "База клиентов и чекапы", "status": "config" if not os.environ.get("AIRTABLE_PAT") else "active", "env": "AIRTABLE_PAT"},
+        {"name": "Google Sheets", "icon": "📈", "desc": "Top-50 рейтинг клиентов", "status": "config" if not os.environ.get("SHEETS_SPREADSHEET_ID") else "active", "env": "SHEETS_SPREADSHEET_ID"},
+        {"name": "Telegram Bot", "icon": "✈️", "desc": "Уведомления и команды боту", "status": "config" if not os.environ.get("TG_BOT_TOKEN") else "active", "env": "TG_BOT_TOKEN"},
+        {"name": "AI (Groq)", "icon": "🤖", "desc": "AI-подготовка и фолоуапы", "status": "config" if not os.environ.get("GROQ_API_KEY") else "active", "env": "GROQ_API_KEY"},
+        {"name": "Email (SendGrid)", "icon": "📧", "desc": "Утренние планы и алерты", "status": "config" if not os.environ.get("SENDGRID_API_KEY") else "active", "env": "SENDGRID_API_KEY"},
+        {"name": "Ktalk", "icon": "💬", "desc": "Уведомления в канал", "status": "stub"},
+        {"name": "Tbank Time", "icon": "🎫", "desc": "Тикеты поддержки", "status": "stub"},
+    ]
+    return templates.TemplateResponse("integrations.html", {"request": request, "user": user, "integrations": integrations})
+
+
+# ============================================================================
 # API: MERCHRULES SYNC
 # ============================================================================
 
