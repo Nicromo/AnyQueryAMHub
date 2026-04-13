@@ -9,7 +9,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from fastapi import Request, HTTPException, Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -182,7 +182,7 @@ def create_user(
 
 
 async def get_current_user(
-    credentials: HTTPAuthCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     """Получить текущего аутентифицированного пользователя"""
