@@ -711,7 +711,8 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
         "tg_active": bool(os.environ.get("TG_BOT_TOKEN")),
         "ai_active": ai_active,
         "ai_type": ai_type,
-        "ktalk_active": bool(os.environ.get("KTALK_WEBHOOK_URL")),
+        "ktalk_active": bool(os.environ.get("KTALK_API_TOKEN") and os.environ.get("KTALK_SPACE")),
+        "ktalk_space": os.environ.get("KTALK_SPACE", ""),
         "time_active": bool(os.environ.get("TIME_API_TOKEN")),
     }
     return templates.TemplateResponse("integrations.html", {"request": request, "user": user, **integrations_data})
@@ -787,8 +788,61 @@ async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_t
 
 
 # ============================================================================
-# TELEGRAM WEBHOOK
+# API: INTEGRATION TESTS
 # ============================================================================
+
+@app.get("/api/integrations/test/merchrules")
+async def test_merchrules(login: str = "", password: str = ""):
+    if not login or not password:
+        return {"error": "Need login and password"}
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            resp = await hx.post(
+                "https://merchrules-qa.any-platform.ru/backend-v2/auth/login",
+                json={"username": login, "password": password},
+            )
+        if resp.status_code == 200:
+            return {"ok": True}
+        return {"error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/integrations/test/ktalk")
+async def test_ktalk(space: str = "", token: str = ""):
+    if not space or not token:
+        return {"error": "Need space and token"}
+    import httpx
+    try:
+        base = f"https://{space}.ktalk.ru"
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.get(f"{base}/api/v1/spaces/{space}/users",
+                headers={"Content-Type": "application/json", "X-Auth-Token": token},
+                params={"limit": 1})
+        if resp.status_code == 200:
+            return {"ok": True, "space": space}
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/integrations/test/tbank")
+async def test_tbank(token: str = ""):
+    if not token:
+        return {"error": "Need token"}
+    time_url = os.environ.get("TIME_BASE_URL", "https://time.tbank.ru")
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as hx:
+            resp = await hx.get(f"{time_url}/api/v1/tickets",
+                params={"limit": 1},
+                headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code == 200:
+            return {"ok": True}
+        return {"error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request, db: Session = Depends(get_db)):

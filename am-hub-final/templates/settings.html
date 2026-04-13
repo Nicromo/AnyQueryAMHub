@@ -93,57 +93,12 @@
     {% set kt = user_settings.get('ktalk', {}) %}
     {% set tm = user_settings.get('tbank_time', {}) %}
     <div class="section">
-      <h3>🗺️ Merchrules</h3>
-      <p class="help" style="margin-bottom:10px;">Логин и пароль для синхронизации задач и встреч.</p>
+      <h3>💬 Контур.Толк (Ktalk)</h3>
+      <p class="help" style="margin-bottom:10px;">API-ключ из панели администрирования Толка. Space — ваш домен (без .ktalk.ru).</p>
       <div class="field-row">
-        <div class="field"><label>Login</label><input id="mr-login" value="{{ mr.get('login', '') }}"></div>
-        <div class="field"><label>Password</label><input id="mr-pass" type="password" value="{{ mr.get('password', '') }}"></div>
+        <div class="field"><label>Space (домен)</label><input id="kt-space" value="{{ kt.get('space', '') }}" placeholder="company"></div>
+        <div class="field"><label>API Token</label><input id="kt-token" type="password" value="{{ kt.get('api_token', '') }}" placeholder="API-ключ"></div>
       </div>
-    </div>
-
-    <div class="section">
-      <h3>✈️ Telegram Bot</h3>
-      <p class="help" style="margin-bottom:10px;">Для уведомлений. Token — от @BotFather, Chat ID — ваш (через @userinfobot).</p>
-      <div class="field-row">
-        <div class="field"><label>Bot Token</label><input id="tg-token" value="{{ tg.get('bot_token', '') }}"></div>
-        <div class="field"><label>Chat ID</label><input id="tg-chat" value="{{ tg.get('chat_id', '') }}"></div>
-      </div>
-    </div>
-
-    <div class="section">
-      <h3>💬 Ktalk (Incoming Webhook)</h3>
-      <p class="help" style="margin-bottom:10px;">Для отправки фолоуапов в канал.</p>
-      <div class="step">
-        <span class="step-num">1</span>
-        <div class="step-text">Откройте Ktalk → нужный канал</div>
-      </div>
-      <div class="step">
-        <span class="step-num">2</span>
-        <div class="step-text">⚙️ Настройки → <b>Интеграции</b> → Добавить Incoming Webhook</div>
-      </div>
-      <div class="step">
-        <span class="step-num">3</span>
-        <div class="step-text">Скопируйте URL</div>
-      </div>
-      <div class="field"><label>Webhook URL</label><input id="kt-url" value="{{ kt.get('webhook_url', '') }}" placeholder="https://tbank.ktalk.ru/hooks/..."></div>
-    </div>
-
-    <div class="section">
-      <h3>🎫 Tbank Time</h3>
-      <p class="help" style="margin-bottom:10px;">Для просмотра тикетов поддержки.</p>
-      <div class="step">
-        <span class="step-num">1</span>
-        <div class="step-text">Откройте <b>time.tbank.ru</b></div>
-      </div>
-      <div class="step">
-        <span class="step-num">2</span>
-        <div class="step-text">Настройки → API (или обратитесь к админу Time)</div>
-      </div>
-      <div class="step">
-        <span class="step-num">3</span>
-        <div class="step-text">Создайте API Token с правом <b>read:tickets</b></div>
-      </div>
-      <div class="field"><label>API Token</label><input id="tm-token" type="password" value="{{ tm.get('api_token', '') }}" placeholder="tbank_time_xxx..."></div>
     </div>
 
     <div style="display:flex;gap:10px;align-items:center;">
@@ -302,10 +257,7 @@ function showSaved(id){
 
 async function saveCreds(){
   const data={
-    merchrules:{login:document.getElementById('mr-login').value,password:document.getElementById('mr-pass').value},
-    telegram:{bot_token:document.getElementById('tg-token').value,chat_id:document.getElementById('tg-chat').value},
-    ktalk:{webhook_url:document.getElementById('kt-url').value},
-    tbank_time:{api_token:document.getElementById('tm-token').value},
+    ktalk:{space:document.getElementById('kt-space').value,api_token:document.getElementById('kt-token').value},
   };
   const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   if(r.ok) showSaved('saved-creds');

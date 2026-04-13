@@ -1,360 +1,352 @@
 """
-Ktalk/Tbank Integration
-Получение данных о встречах, транскрипций и записей
+Контур.Толк (Ktalk) Integration
+Получение данных о встречах, транскрипций и записей через официальное API
 
-https://tbank.ktalk.ru - встречи
-https://tbank.ktalk.ru/content/artifacts - записи
-
-Требуется: Tbank API token (если есть API) или парсинг веб-интерфейса
+Docs: https://docs.ktalk.ru/
+API Key: панель администрирования → API-ключи
+Space: ваш домен (например "company" для company.ktalk.ru)
 """
-
 import os
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
+
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# Configuration
-KTALK_BASE_URL = os.getenv("KTALK_BASE_URL", "https://tbank.ktalk.ru")
+# ── Настройки ─────────────────────────────────────────────────────────────────
+
+KTALK_SPACE = os.getenv("KTALK_SPACE", "")  # e.g. "company" для company.ktalk.ru
 KTALK_API_TOKEN = os.getenv("KTALK_API_TOKEN", "")
+KTALK_BASE_URL = f"https://{KTALK_SPACE}.ktalk.ru" if KTALK_SPACE else ""
 
 CACHE_TTL_SECONDS = 3600  # 1 час
 
-# Cache
-_meetings_cache: Dict[str, Any] = {}
-_artifacts_cache: Dict[str, Any] = {}
+# Кэш
+_events_cache: Dict[str, Any] = {}
+_transcripts_cache: Dict[str, Any] = {}
 
 
 def _headers() -> dict:
-    """Ktalk API headers"""
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "AM Hub Client",
-    }
+    """Ktalk API headers — API-ключ в X-Auth-Token."""
+    headers = {"Content-Type": "application/json"}
     if KTALK_API_TOKEN:
-        headers["Authorization"] = f"Bearer {KTALK_API_TOKEN}"
+        headers["X-Auth-Token"] = KTALK_API_TOKEN
     return headers
 
 
-# ============================================================================
-# PLACEHOLDER: Функции для интеграции Ktalk
-# ============================================================================
+# ── Встречи (Events) ──────────────────────────────────────────────────────────
 
-
-async def get_meetings(
-    account_id: Optional[str] = None,
+async def get_events(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    limit: int = 100,
     use_cache: bool = True,
 ) -> List[Dict[str, Any]]:
     """
-    Получить список встреч из Ktalk
-    
-    Args:
-        account_id: Фильтр по аккаунту (optional)
-        date_from: Начало периода (optional)
-        date_to: Конец периода (optional)
-        use_cache: Использовать кэш (default: True)
-    
-    Returns:
-        List: Встречи с полями:
-            {
-                "id": str,
-                "title": str,
-                "date": datetime,
-                "duration": int,  # минуты
-                "attendees": list,
-                "recording_url": str,  # если есть
-                "status": str,  # scheduled/in_progress/completed/cancelled
-            }
-    """
-    cache_key = f"meetings_{account_id or 'all'}"
+    Получить список встреч (событий) из Контур.Толк.
 
-    if use_cache and cache_key in _meetings_cache:
-        cached = _meetings_cache[cache_key]
+    Returns:
+        List событий:
+        {
+            "id": str,
+            "title": str,
+            "start": datetime,
+            "end": datetime,
+            "status": str,  # scheduled/in_progress/completed/cancelled
+            "room_name": str,
+            "organizer": {"name": str, "email": str},
+            "participants": [{"name": str, "email": str}],
+            "recording_available": bool,
+        }
+    """
+    if not KTALK_BASE_URL or not KTALK_API_TOKEN:
+        return []
+
+    cache_key = f"events_{date_from}_{date_to}"
+    if use_cache and cache_key in _events_cache:
+        cached = _events_cache[cache_key]
         if datetime.now() - cached["timestamp"] < timedelta(seconds=CACHE_TTL_SECONDS):
             return cached["data"]
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            # Попробовать получить встречи через API
-            params = {}
-            if date_from:
-                params["date_from"] = date_from.isoformat()
-            if date_to:
-                params["date_to"] = date_to.isoformat()
-            if account_id:
-                params["account_id"] = account_id
+        params = {"limit": limit, "withCanceled": "false"}
+        if date_from:
+            params["dateFrom"] = date_from.isoformat()
+        if date_to:
+            params["dateTo"] = date_to.isoformat()
 
-            response = await client.get(
-                f"{KTALK_BASE_URL}/api/v1/meetings",
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{KTALK_BASE_URL}/api/v1/spaces/{KTALK_SPACE}/events",
                 headers=_headers(),
                 params=params,
-                timeout=10,
             )
 
-            if response.status_code == 200:
-                data = response.json()
-                meetings = data.get("meetings", [])
-                
-                # Нормализовать данные
+            if resp.status_code == 200:
+                data = resp.json()
+                events = data.get("events") or data.get("items") or []
                 normalized = []
-                for m in meetings:
-                    normalized.append({
-                        "id": m.get("id"),
-                        "title": m.get("title", ""),
-                        "date": datetime.fromisoformat(m["date"]) if "date" in m else None,
-                        "duration": m.get("duration", 0),
-                        "attendees": m.get("attendees", []),
-                        "recording_url": m.get("recording_url"),
-                        "status": m.get("status", "completed"),
-                    })
-                
-                _meetings_cache[cache_key] = {
-                    "data": normalized,
-                    "timestamp": datetime.now(),
-                }
-                
-                logger.info(f"✅ Loaded {len(normalized)} meetings from Ktalk")
-                return normalized
-            else:
-                logger.warning(f"Ktalk API error: {response.status_code}")
-    
-    except Exception as e:
-        logger.error(f"❌ Failed to fetch Ktalk meetings: {e}")
 
-    # Fallback: возвращаем пустой список
+                for e in events:
+                    normalized.append({
+                        "id": e.get("id", ""),
+                        "title": e.get("title", "") or e.get("name", ""),
+                        "start": e.get("start") or e.get("startDate"),
+                        "end": e.get("end") or e.get("endDate"),
+                        "status": e.get("status", "scheduled"),
+                        "room_name": e.get("room", {}).get("name", ""),
+                        "organizer": e.get("organizer", {}),
+                        "participants": e.get("participants", []),
+                        "recording_available": e.get("recordingAvailable", False),
+                    })
+
+                _events_cache[cache_key] = {"data": normalized, "timestamp": datetime.now()}
+                logger.info(f"✅ Loaded {len(normalized)} events from Ktalk")
+                return normalized
+
+            else:
+                logger.warning(f"Ktalk events API error: {resp.status_code} {resp.text[:200]}")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch Ktalk events: {e}")
+
     return []
 
 
-async def get_meeting_recording(meeting_id: str) -> Optional[str]:
-    """
-    Получить URL записи встречи
-    
-    Args:
-        meeting_id: ID встречи
-    
-    Returns:
-        str: URL на запись или None
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{KTALK_BASE_URL}/api/v1/meetings/{meeting_id}/recording",
-                headers=_headers(),
-                timeout=10,
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                recording_url = data.get("url")
-                logger.info(f"✅ Got recording for meeting {meeting_id}")
-                return recording_url
-            else:
-                logger.warning(f"No recording for meeting {meeting_id}")
-    
-    except Exception as e:
-        logger.error(f"❌ Failed to fetch recording: {e}")
-    
-    return None
+# ── Транскрипция ──────────────────────────────────────────────────────────────
 
+async def get_transcript(event_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Получить транскрипцию встречи.
 
-async def get_meeting_transcript(meeting_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Получить транскрипцию встречи
-    
-    Args:
-        meeting_id: ID встречи
-    
     Returns:
-        Dict: Транскрипция с полями:
-            {
-                "id": str,
-                "text": str,  # полный текст
-                "segments": [  # по спикерам
-                    {
-                        "speaker": str,
-                        "text": str,
-                        "timestamp": int,  # секунды
-                    },
-                    ...
-                ],
-                "language": str,
-                "duration": int,  # секунды
-            }
+        {
+            "text": str,           # полный текст
+            "segments": [          # по спикерам
+                {"speaker": str, "text": str, "start_ms": int, "end_ms": int}
+            ],
+            "language": str,
+        }
     """
+    if not KTALK_BASE_URL or not KTALK_API_TOKEN:
+        return None
+
+    cache_key = f"transcript_{event_id}"
+    if cache_key in _transcripts_cache:
+        return _transcripts_cache[cache_key]
+
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{KTALK_BASE_URL}/api/v1/meetings/{meeting_id}/transcript",
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{KTALK_BASE_URL}/api/v1/spaces/{KTALK_SPACE}/events/{event_id}/transcript",
                 headers=_headers(),
-                timeout=10,
             )
-            
-            if response.status_code == 200:
-                transcript = response.json()
-                logger.info(f"✅ Got transcript for meeting {meeting_id}")
-                return transcript
+
+            if resp.status_code == 200:
+                data = resp.json()
+                result = {
+                    "text": data.get("text", ""),
+                    "segments": data.get("segments", []),
+                    "language": data.get("language", "ru"),
+                }
+                _transcripts_cache[cache_key] = result
+                logger.info(f"✅ Got transcript for event {event_id}")
+                return result
+            elif resp.status_code == 404:
+                logger.info(f"No transcript for event {event_id}")
             else:
-                logger.warning(f"No transcript for meeting {meeting_id}")
-    
+                logger.warning(f"Ktalk transcript API error: {resp.status_code}")
+
     except Exception as e:
         logger.error(f"❌ Failed to fetch transcript: {e}")
-    
+
     return None
 
 
-async def sync_meetings_for_client(
-    account_id: str, merchrules_meetings: List[Dict] = None
+# ── Запись встречи ────────────────────────────────────────────────────────────
+
+async def get_recording_url(event_id: str) -> Optional[str]:
+    """Получить URL записи встречи."""
+    if not KTALK_BASE_URL or not KTALK_API_TOKEN:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{KTALK_BASE_URL}/api/v1/spaces/{KTALK_SPACE}/events/{event_id}/recordings",
+                headers=_headers(),
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                recordings = data.get("recordings") or data.get("items") or []
+                if recordings:
+                    url = recordings[0].get("url") or recordings[0].get("downloadUrl", "")
+                    logger.info(f"✅ Got recording URL for event {event_id}")
+                    return url
+
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch recording: {e}")
+
+    return None
+
+
+# ── Комнаты ───────────────────────────────────────────────────────────────────
+
+async def get_rooms() -> List[Dict[str, Any]]:
+    """Получить список комнат (переговорок)."""
+    if not KTALK_BASE_URL or not KTALK_API_TOKEN:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{KTALK_BASE_URL}/api/v1/spaces/{KTALK_SPACE}/rooms",
+                headers=_headers(),
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                rooms = data.get("rooms") or data.get("items") or []
+                return [{"id": r.get("id"), "name": r.get("name")} for r in rooms]
+
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch rooms: {e}")
+
+    return []
+
+
+# ── Пользователи ──────────────────────────────────────────────────────────────
+
+async def get_users() -> List[Dict[str, Any]]:
+    """Получить список пользователей пространства."""
+    if not KTALK_BASE_URL or not KTALK_API_TOKEN:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{KTALK_BASE_URL}/api/v1/spaces/{KTALK_SPACE}/users",
+                headers=_headers(),
+                params={"limit": 200},
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                users = data.get("users") or data.get("items") or []
+                return [{
+                    "key": u.get("key"),
+                    "name": u.get("name", ""),
+                    "email": u.get("email", ""),
+                    "active": u.get("active", False),
+                } for u in users]
+
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch users: {e}")
+
+    return []
+
+
+# ── Аудит-лог ─────────────────────────────────────────────────────────────────
+
+async def get_audit_log(
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    limit: int = 100,
 ) -> List[Dict[str, Any]]:
     """
-    Синхронизировать встречи Ktalk с Merchrules встречами
-    
-    Логика:
-    1. Получить встречи из Ktalk
-    2. Получить встречи из Merchrules (параметр)
-    3. Маппировать и обновить встречи в БД
-    4. Загрузить транскрипции для новых встреч
-    
-    Args:
-        account_id: ID аккаунта
-        merchrules_meetings: Встречи из Merchrules (для маппирования)
-    
-    Returns:
-        List: Синхронизированные встречи
+    Получить аудит-лог действий пользователей.
+
+    eventType: login, logout, userRoleChanged, updateUser, addRole, ...
     """
-    logger.info(f"🔄 Syncing Ktalk meetings for account {account_id}")
-    
+    if not KTALK_BASE_URL or not KTALK_API_TOKEN:
+        return []
+
     try:
-        # Получить встречи из Ktalk за последние 90 дней
-        date_from = datetime.now() - timedelta(days=90)
-        ktalk_meetings = await get_meetings(
-            account_id=account_id,
-            date_from=date_from,
-            use_cache=False,
-        )
-        
-        # Получить транскрипции для встреч без них
-        for meeting in ktalk_meetings:
-            if not meeting.get("transcript"):
-                transcript = await get_meeting_transcript(meeting["id"])
-                if transcript:
-                    meeting["transcript"] = transcript["text"]
-                    meeting["transcript_segments"] = transcript.get("segments", [])
-            
-            if not meeting.get("recording_url"):
-                recording_url = await get_meeting_recording(meeting["id"])
-                if recording_url:
-                    meeting["recording_url"] = recording_url
-        
-        logger.info(f"✅ Synced {len(ktalk_meetings)} meetings from Ktalk")
-        return ktalk_meetings
-    
+        params = {"limit": limit}
+        if date_from:
+            params["dateFrom"] = date_from.isoformat()
+        if date_to:
+            params["dateTo"] = date_to.isoformat()
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{KTALK_BASE_URL}/api/v1/spaces/{KTALK_SPACE}/audit-log",
+                headers=_headers(),
+                params=params,
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("events") or data.get("items") or []
+
     except Exception as e:
-        logger.error(f"❌ Failed to sync Ktalk meetings: {e}")
-        return []
+        logger.error(f"❌ Failed to fetch audit log: {e}")
+
+    return []
 
 
-class KtalkWebScraper:
-    """Парсер веб-интерфейса Ktalk (если API недоступен)"""
+# ── Sync helper ───────────────────────────────────────────────────────────────
 
-    BASE_URL = "https://tbank.ktalk.ru"
+async def sync_meetings_for_client(
+    client_name: str,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """
+    Синхронизировать встречи Толка для конкретного клиента.
+    Ищет встречи где клиент упомянут в названии или среди участников.
 
-    async def login(self, username: str, password: str) -> bool:
-        """Авторизоваться в Ktalk"""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.BASE_URL}/login",
-                    data={
-                        "username": username,
-                        "password": password,
-                    },
-                    timeout=10,
-                )
-                
-                if response.status_code == 200:
-                    logger.info("✅ Ktalk login successful")
-                    return True
-                else:
-                    logger.warning("❌ Ktalk login failed")
-                    return False
-        
-        except Exception as e:
-            logger.error(f"❌ Ktalk login error: {e}")
-            return False
+    Returns:
+        {
+            "meetings": [...],
+            "total": int,
+        }
+    """
+    events = await get_events(date_from=date_from, date_to=date_to, limit=200)
 
-    async def get_meetings_page(self, page: int = 1) -> List[Dict]:
-        """Получить встречи со страницы (парсинг HTML)"""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.BASE_URL}/meetings",
-                    params={"page": page},
-                    timeout=10,
-                )
-                
-                if response.status_code == 200:
-                    # Здесь нужно парсить HTML с использованием BeautifulSoup
-                    # Для примера возвращаем пустой список
-                    logger.info(f"📄 Fetched meetings page {page}")
-                    return []
-        
-        except Exception as e:
-            logger.error(f"❌ Failed to fetch meetings page: {e}")
-        
-        return []
+    # Фильтруем по имени клиента
+    client_lower = client_name.lower()
+    client_meetings = []
 
-    async def get_meeting_details(self, meeting_id: str) -> Dict:
-        """Получить детали встречи (парсинг HTML)"""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.BASE_URL}/meetings/{meeting_id}",
-                    timeout=10,
-                )
-                
-                if response.status_code == 200:
-                    # Здесь нужно парсить HTML
-                    logger.info(f"📋 Fetched details for meeting {meeting_id}")
-                    return {}
-        
-        except Exception as e:
-            logger.error(f"❌ Failed to fetch meeting details: {e}")
-        
-        return {}
+    for e in events:
+        # Проверяем название встречи
+        if client_lower in e.get("title", "").lower():
+            client_meetings.append(e)
+            continue
 
-    async def download_recording(self, meeting_id: str, output_path: str) -> bool:
-        """Скачать запись встречи"""
-        try:
-            recording_url = await get_meeting_recording(meeting_id)
-            
-            if not recording_url:
-                logger.warning(f"No recording URL for meeting {meeting_id}")
-                return False
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(recording_url, timeout=30)
-                
-                if response.status_code == 200:
-                    with open(output_path, "wb") as f:
-                        f.write(response.content)
-                    logger.info(f"✅ Downloaded recording to {output_path}")
-                    return True
-        
-        except Exception as e:
-            logger.error(f"❌ Failed to download recording: {e}")
-        
-        return False
+        # Проверяем участников
+        for p in e.get("participants", []):
+            if client_lower in p.get("name", "").lower() or client_lower in p.get("email", "").lower():
+                client_meetings.append(e)
+                break
+
+    # Добавляем транскрипции для встреч с записью
+    for m in client_meetings:
+        if m.get("recording_available"):
+            transcript = await get_transcript(m["id"])
+            if transcript:
+                m["transcript"] = transcript["text"]
+                m["transcript_segments"] = transcript.get("segments", [])
+
+    return {"meetings": client_meetings, "total": len(client_meetings)}
+
+
+def invalidate_cache():
+    """Сбросить весь кэш."""
+    _events_cache.clear()
+    _transcripts_cache.clear()
 
 
 if __name__ == "__main__":
     import asyncio
 
     async def test():
-        meetings = await get_meetings()
-        print(f"Loaded {len(meetings)} meetings")
+        events = await get_events()
+        print(f"Loaded {len(events)} events")
+        if events:
+            print(f"First event: {events[0].get('title')}")
 
     asyncio.run(test())

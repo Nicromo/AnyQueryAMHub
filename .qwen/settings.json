@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(c:\\Users\\dimaa\\OneDrive\\Desktop/**)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(python *)",
+      "Bash(del *)",
+      "Bash(git reset *)",
+      "Bash(do *)",
+      "Bash(done)"
+    ]
+  },
+  "$version": 3
+}

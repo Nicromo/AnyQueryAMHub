@@ -95,11 +95,22 @@
 
     <div class="card">
       <div class="icon">💬</div>
-      <h3>Ktalk</h3>
-      <p>Уведомления в канал</p>
-      {% if ktalk_active %}<span class="status status-active">✅ Подключено</span>
-      {% else %}<span class="status status-off">⛔ Не подключено</span>{% endif %}
-      <div class="config-link"><a href="/settings">⚙️ Настроить в настройках</a></div>
+      <h3>Контур.Толк (Ktalk)</h3>
+      <p>Встречи, транскрипции, записи. API-ключ из панели администрирования.</p>
+      {% if ktalk_active %}
+      <span class="status status-active">✅ Подключено ({{ ktalk_space }}.ktalk.ru)</span>
+      {% else %}
+      <span class="status status-off">⛔ Не подключено</span>
+      <div style="margin-top:10px;font-size:.78rem;color:var(--muted);">
+        <b>Настройка (администратор):</b><br>
+        1. Панель администрирования → <b>API-ключи</b> → Добавить<br>
+        2. Разрешения: <b>Встречи</b>, <b>Записи</b><br>
+        3. Сохраните API-ключ<br>
+        4. В Railway Variables добавьте:<br>
+        &nbsp;&nbsp;<code class="code-block" style="display:inline;padding:2px 6px;">KTALK_SPACE=ваш-домен</code><br>
+        &nbsp;&nbsp;<code class="code-block" style="display:inline;padding:2px 6px;">KTALK_API_TOKEN=ключ</code>
+      </div>
+      {% endif %}
     </div>
 
     <div class="card">
