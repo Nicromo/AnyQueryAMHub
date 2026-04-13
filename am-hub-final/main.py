@@ -92,8 +92,11 @@ async def lifespan(app: FastAPI):
                     text("SELECT column_name FROM information_schema.columns WHERE table_name = 'tasks'")
                 ).fetchall()
                 tcol_names = {row[0] for row in tcols}
-                for col, col_type in [("confirmed_at", "TIMESTAMP"), ("confirmed_by", "VARCHAR"),
-                                       ("pushed_to_roadmap", "BOOLEAN DEFAULT FALSE"), ("roadmap_pushed_at", "TIMESTAMP")]:
+                for col, col_type in [
+                    ("confirmed_at", "TIMESTAMP"), ("confirmed_by", "VARCHAR"),
+                    ("pushed_to_roadmap", "BOOLEAN DEFAULT FALSE"), ("roadmap_pushed_at", "TIMESTAMP"),
+                    ("team", "VARCHAR"), ("task_type", "VARCHAR"), ("source", "VARCHAR DEFAULT 'manual'"),
+                ]:
                     if col not in tcol_names:
                         db.execute(text(f"ALTER TABLE tasks ADD COLUMN {col} {col_type}"))
                         db.commit()
