@@ -965,6 +965,232 @@ async def get_stats(
 
 
 # ============================================================================
+# DASHBOARD ENDPOINTS
+# ============================================================================
+
+@app.get("/api/dashboard/clients-summary")
+async def dashboard_clients_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get detailed clients summary for dashboard"""
+    try:
+        query = db.query(Client)
+        
+        if current_user.role == "manager":
+            query = query.filter(Client.manager_email == current_user.email)
+        
+        clients = query.all()
+        
+        # Enrich clients with task and meeting counts
+        result = []
+        for client in clients:
+            tasks_count = db.query(Task).filter(Task.client_id == client.id).count()
+            meetings_count = db.query(Meeting).filter(Meeting.client_id == client.id).count()
+            open_tasks = db.query(Task).filter(
+                Task.client_id == client.id,
+                Task.status.in_(["plan", "in_progress"])
+            ).count()
+            
+            result.append({
+                "id": client.id,
+                "name": client.name,
+                "email": client.email,
+                "segment": client.segment,
+                "health_score": client.health_score or 0,
+                "manager_email": client.manager_email,
+                "tasks_count": tasks_count,
+                "open_tasks": open_tasks,
+                "meetings_count": meetings_count,
+                "last_meeting_date": client.last_meeting_date.isoformat() if client.last_meeting_date else None,
+                "last_checkup": client.last_checkup.isoformat() if client.last_checkup else None,
+            })
+        
+        return {"data": result, "total": len(result)}
+    
+    except Exception as e:
+        log_error(e, "dashboard_clients_summary")
+        raise BadRequestError(str(e))
+
+
+@app.get("/api/dashboard/health-report")
+async def dashboard_health_report(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get health status report for all clients"""
+    try:
+        query = db.query(Client)
+        
+        if current_user.role == "manager":
+            query = query.filter(Client.manager_email == current_user.email)
+        
+        clients = query.all()
+        
+        # Categorize by health
+        critical = []  # < 50
+        warning = []   # 50-75
+        healthy = []   # 75+
+        
+        for client in clients:
+            score = client.health_score or 0
+            item = {
+                "id": client.id,
+                "name": client.name,
+                "score": score,
+                "segment": client.segment,
+            }
+            
+            if score < 50:
+                critical.append(item)
+            elif score < 75:
+                warning.append(item)
+            else:
+                healthy.append(item)
+        
+        return {
+            "critical": critical,
+            "warning": warning,
+            "healthy": healthy,
+            "summary": {
+                "total": len(clients),
+                "critical_count": len(critical),
+                "warning_count": len(warning),
+                "healthy_count": len(healthy),
+                "avg_health": round(sum(c.health_score or 0 for c in clients) / len(clients), 2) if clients else 0,
+            }
+        }
+    
+    except Exception as e:
+        log_error(e, "dashboard_health_report")
+        raise BadRequestError(str(e))
+
+
+@app.get("/api/dashboard/tasks-summary")
+async def dashboard_tasks_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get tasks summary and breakdown"""
+    try:
+        query = db.query(Client)
+        
+        if current_user.role == "manager":
+            query = query.filter(Client.manager_email == current_user.email)
+        
+        clients = query.all()
+        client_ids = [c.id for c in clients]
+        
+        # Get all tasks
+        tasks_query = db.query(Task).filter(Task.client_id.in_(client_ids))
+        
+        # Count by status
+        statuses = {}
+        for status in ["plan", "in_progress", "blocked", "done"]:
+            count = tasks_query.filter(Task.status == status).count()
+            statuses[status] = count
+        
+        # Count by priority
+        priorities = {}
+        for priority in ["low", "medium", "high", "critical"]:
+            count = tasks_query.filter(Task.priority == priority).count()
+            priorities[priority] = count
+        
+        # Get recent tasks
+        from sqlalchemy import desc
+        recent_tasks = tasks_query.order_by(desc(Task.created_at)).limit(10).all()
+        
+        return {
+            "total_tasks": tasks_query.count(),
+            "by_status": statuses,
+            "by_priority": priorities,
+            "recent": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority,
+                    "client_id": t.client_id,
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                }
+                for t in recent_tasks
+            ],
+        }
+    
+    except Exception as e:
+        log_error(e, "dashboard_tasks_summary")
+        raise BadRequestError(str(e))
+
+
+@app.get("/api/dashboard/timeline")
+async def dashboard_timeline(
+    current_user: User = Depends(get_current_user),
+    days: int = Query(7, ge=1, le=30),
+    db: Session = Depends(get_db),
+):
+    """Get timeline of recent activities"""
+    try:
+        query = db.query(Client)
+        
+        if current_user.role == "manager":
+            query = query.filter(Client.manager_email == current_user.email)
+        
+        clients = query.all()
+        client_ids = [c.id for c in clients]
+        
+        # Get recent meetings
+        from datetime import timedelta
+        from sqlalchemy import desc
+        cutoff = datetime.now() - timedelta(days=days)
+        
+        meetings = db.query(Meeting).filter(
+            Meeting.client_id.in_(client_ids),
+            Meeting.meeting_date >= cutoff
+        ).order_by(desc(Meeting.meeting_date)).limit(20).all()
+        
+        meetings_data = [
+            {
+                "type": "meeting",
+                "title": f"{m.meeting_type} - {m.client.name}",
+                "date": m.meeting_date.isoformat() if m.meeting_date else None,
+                "client_id": m.client_id,
+                "client_name": m.client.name,
+            }
+            for m in meetings
+        ]
+        
+        # Get recent tasks
+        tasks = db.query(Task).filter(
+            Task.client_id.in_(client_ids),
+            Task.created_at >= cutoff
+        ).order_by(desc(Task.created_at)).limit(20).all()
+        
+        tasks_data = [
+            {
+                "type": "task",
+                "title": f"{t.title} ({t.status})",
+                "date": t.created_at.isoformat() if t.created_at else None,
+                "client_id": t.client_id,
+                "priority": t.priority,
+            }
+            for t in tasks
+        ]
+        
+        # Merge and sort by date
+        timeline = sorted(
+            meetings_data + tasks_data,
+            key=lambda x: x["date"],
+            reverse=True
+        )
+        
+        return {"timeline": timeline[:30]}
+    
+    except Exception as e:
+        log_error(e, "dashboard_timeline")
+        raise BadRequestError(str(e))
+
+
+# ============================================================================
 # ERROR HANDLERS
 # ============================================================================
 
