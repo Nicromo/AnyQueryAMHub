@@ -970,61 +970,73 @@ async def api_sync_merchrules(
         return {"error": "Нужны креды Merchrules"}
 
     import httpx
-    import asyncio
     try:
         async with httpx.AsyncClient(timeout=30) as hx:
-            from merchrules_sync import get_auth_token as mr_auth, fetch_account_analytics, fetch_checkups, fetch_roadmap_tasks
-            token = await mr_auth(hx, login, password)
+            from merchrules_sync import get_auth_token, fetch_site_tasks, fetch_site_meetings
+            token = await get_auth_token(hx, login, password)
             if not token:
                 return {"error": "Ошибка авторизации Merchrules"}
-            # Fetch accounts
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Получаем список клиентов из API
             r = await hx.get(
                 "https://merchrules-qa.any-platform.ru/backend-v2/accounts",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=headers,
             )
             accounts = r.json().get("accounts", []) if r.status_code == 200 else []
-            # For each account, fetch data and save
+            if not accounts:
+                return {"error": "Нет аккаунтов в Merchrules"}
+
             synced = 0
-            for acc in accounts[:20]:  # limit
+            for acc in accounts[:30]:
                 aid = acc.get("id")
                 if not aid:
                     continue
-                # Check if client exists
-                existing = db.query(Client).filter(Client.merchrules_account_id == str(aid)).first()
+                site_id = str(aid)
+
+                # Проверяем есть ли клиент
+                existing = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
                 if existing:
                     existing.name = acc.get("name") or existing.name
                     synced += 1
                     continue
-                # Create new client
-                analytics = await fetch_account_analytics(hx, token, str(aid))
+
+                # Fetch tasks & meetings
+                tasks_data = await fetch_site_tasks(hx, headers, site_id)
+                meetings_data = await fetch_site_meetings(hx, headers, site_id)
+
+                # Определяем сегмент по кол-ву задач
+                open_count = tasks_data.get("open_tasks", 0)
+                segment = "SMB" if open_count < 10 else "SME" if open_count < 30 else "ENT"
+
                 client = Client(
-                    name=acc.get("name", f"Account {aid}"),
-                    merchrules_account_id=str(aid),
-                    health_score=float(analytics.get("health_score", 0) if analytics else 0),
-                    revenue_trend=analytics.get("revenue_trend") if analytics else None,
-                    activity_level=analytics.get("activity_level") if analytics else None,
-                    manager_email=acc.get("manager_email") or login,
-                    segment="SMB",
+                    name=acc.get("name", f"Account {site_id}"),
+                    merchrules_account_id=site_id,
+                    health_score=0.7,  # Default пока не получим аналитику
+                    manager_email=login,
+                    segment=segment,
+                    open_tasks=tasks_data.get("open_tasks", 0),
+                    last_meeting_date=datetime.fromisoformat(meetings_data["last_meeting"]) if meetings_data.get("last_meeting") else None,
                 )
                 db.add(client)
                 db.flush()
-                # Fetch and create tasks
-                tasks_data = await fetch_roadmap_tasks(hx, token, str(aid))
-                for t in (tasks_data or [])[:10]:
+
+                # Создаём задачи из Merchrules
+                for t in tasks_data.get("tasks", [])[:15]:
                     db.add(Task(
                         client_id=client.id,
                         title=t.get("title", ""),
-                        description=t.get("description", ""),
                         status=t.get("status", "plan"),
                         priority=t.get("priority", "medium"),
-                        team=t.get("team", ""),
-                        task_type=t.get("task_type", ""),
+                        source="roadmap",
                     ))
+
                 synced += 1
             db.commit()
         return {"ok": True, "clients_synced": synced}
     except Exception as e:
         db.rollback()
+        logger.error(f"Merchrules sync error: {e}")
         return {"error": str(e)}
 
 
@@ -1735,6 +1747,30 @@ async def api_complete_onboarding(db: Session = Depends(get_db), auth_token: Opt
     user.settings = settings
     db.commit()
     return {"ok": True}
+
+
+@app.post("/api/admin/reset-data")
+async def api_reset_data(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Удалить все тестовые данные (только для админа)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403)
+
+    # Удаляем в правильном порядке (из-за FK)
+    db.query(Task).delete()
+    db.query(Meeting).delete()
+    db.query(CheckUp).delete()
+    db.query(QBR).delete()
+    db.query(AccountPlan).delete()
+    db.query(Client).delete()
+    db.commit()
+    return {"ok": True, "message": "Все данные очищены"}
 
 
 @app.get("/api/onboarding/status")
