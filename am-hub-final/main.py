@@ -56,13 +56,28 @@ async def lifespan(app: FastAPI):
     """App startup"""
     try:
         init_db()
+        # Добавляем отсутствующие колонки
         with SessionLocal() as db:
+            try:
+                # Проверка и добавление колонки settings в users
+                cols = db.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")
+                ).fetchall()
+                col_names = {row[0] for row in cols}
+                if "settings" not in col_names:
+                    db.execute(text("ALTER TABLE users ADD COLUMN settings JSONB"))
+                    db.commit()
+                    logger.info("✅ Added users.settings column")
+            except Exception as e:
+                logger.warning(f"Migration check: {e}")
+
             if db.query(User).count() == 0:
                 admin = User(
                     email="admin@company.ru",
                     first_name="Администратор",
                     role="admin",
                     hashed_password=hash_password("admin123"),
+                    settings={},
                 )
                 db.add(admin)
                 db.commit()
@@ -522,15 +537,20 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
         return RedirectResponse(url="/login", status_code=303)
 
     mr_login = os.environ.get("MERCHRULES_LOGIN", "")
+    # Глобальные интеграции (админ настраивает через env vars)
+    airtable_active = bool(os.environ.get("AIRTABLE_PAT"))
+    sheets_active = bool(os.environ.get("SHEETS_SPREADSHEET_ID"))
+    ai_active = bool(os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ") or os.environ.get("QWEN_API_KEY"))
+    ai_type = "qwen" if os.environ.get("QWEN_API_KEY") else ("groq" if (os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ")) else "")
     integrations_data = {
         "mr_active": bool(os.environ.get("MERCHRULES_LOGIN") and os.environ.get("MERCHRULES_PASSWORD")),
         "mr_login": mr_login,
-        "airtable_active": bool(os.environ.get("AIRTABLE_PAT")),
-        "sheets_active": bool(os.environ.get("SHEETS_SPREADSHEET_ID")),
+        "airtable_active": airtable_active,
+        "sheets_active": sheets_active,
         "sheets_id": os.environ.get("SHEETS_SPREADSHEET_ID", ""),
         "tg_active": bool(os.environ.get("TG_BOT_TOKEN")),
-        "ai_active": bool(os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ")),
-        "email_active": bool(os.environ.get("SENDGRID_API_KEY")),
+        "ai_active": ai_active,
+        "ai_type": ai_type,
         "ktalk_active": bool(os.environ.get("KTALK_WEBHOOK_URL")),
         "time_active": bool(os.environ.get("TIME_API_TOKEN")),
     }
@@ -1002,8 +1022,9 @@ async def settings_page(request: Request, db: Session = Depends(get_db), auth_to
     })
 
 
-@app.post("/api/settings/integrations")
-async def api_save_integrations(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+@app.post("/api/settings/creds")
+async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить персональные креды пользователя."""
     if not auth_token:
         raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -1016,7 +1037,7 @@ async def api_save_integrations(request: Request, db: Session = Depends(get_db),
 
     data = await request.json()
     settings = user.settings or {}
-    for service in ["merchrules", "airtable", "sheets", "telegram", "groq", "ktalk", "tbank_time"]:
+    for service in ["merchrules", "telegram", "ktalk", "tbank_time"]:
         if service in data:
             settings[service] = data[service]
     user.settings = settings

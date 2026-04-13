@@ -33,6 +33,16 @@
     .field input, .field select { width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; }
     .field input:focus, .field select:focus { border-color:var(--accent); }
     .field-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .status-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.03); }
+    .status-row:last-child { border-bottom:none; }
+    .status-label { font-size:.85rem; display:flex; align-items:center; gap:8px; }
+    .status-badge { font-size:.7rem; padding:3px 10px; border-radius:6px; font-weight:600; }
+    .status-on { background:rgba(34,197,94,.15); color:var(--green); }
+    .status-off { background:rgba(239,68,68,.1); color:var(--red); }
+    .help { font-size:.72rem; color:var(--muted); margin-top:2px; }
+    .step { display:flex; gap:10px; margin-bottom:10px; }
+    .step-num { width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:.72rem; font-weight:700; flex-shrink:0; }
+    .step-text { font-size:.82rem; line-height:1.5; }
     .toggle-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.03); }
     .toggle-row:last-child { border-bottom:none; }
     .toggle-row label { font-size:.85rem; }
@@ -44,13 +54,14 @@
     .toggle input:checked + .slider:before { transform:translateX(20px); }
     .btn { padding:10px 20px; border-radius:10px; font-size:.85rem; font-weight:600; cursor:pointer; border:none; background:var(--accent); color:#fff; transition:filter .15s; }
     .btn:hover { filter:brightness(1.15); }
-    .btn-sm { padding:6px 14px; font-size:.78rem; }
-    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
-    .btn-outline:hover { border-color:var(--accent); }
     .saved-msg { font-size:.78rem; color:var(--green); margin-top:8px; display:none; }
     .saved-msg.show { display:block; }
-    .help { font-size:.72rem; color:var(--muted); margin-top:2px; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .info-box { background:rgba(99,102,241,.08); border:1px solid rgba(99,102,241,.2); border-radius:10px; padding:12px 16px; margin-bottom:12px; font-size:.82rem; }
+    .info-box b { color:var(--accent); }
+    .seg-table { width:100%; border-collapse:collapse; margin-top:8px; }
+    .seg-table th, .seg-table td { padding:8px 12px; text-align:left; border-bottom:1px solid var(--border); font-size:.82rem; }
+    .seg-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; }
   </style>
 </head>
 <body>
@@ -72,96 +83,108 @@
   <p class="sub">Персональная конфигурация рабочего пространства</p>
 
   <div class="tabs">
-    <button class="tab active" onclick="showTab('integrations',this)">🔌 Интеграции</button>
+    <button class="tab active" onclick="showTab('creds',this)">🔐 Мои креды</button>
     <button class="tab" onclick="showTab('rules',this)">📐 Правила работы</button>
     <button class="tab" onclick="showTab('prefs',this)">🎨 Оформление</button>
-    <button class="tab" onclick="showTab('notifications',this)">🔔 Уведомления</button>
+    <button class="tab" onclick="showTab('notifs',this)">🔔 Уведомления</button>
   </div>
 
-  <!-- Интеграции -->
-  <div id="tab-integrations" class="tab-content active">
+  <!-- Креды -->
+  <div id="tab-creds" class="tab-content active">
+    <div class="info-box">
+      <b>ℹ️ Только вы видите эти данные.</b> Они используются для синхронизации и AI-помощника.
+    </div>
     <div class="section">
       <h3>🗺️ Merchrules</h3>
+      <p class="help" style="margin-bottom:10px;">Логин и пароль для синхронизации задач и встреч.</p>
       <div class="field-row">
         <div class="field"><label>Login</label><input id="mr-login" value="{{ user_settings.merchrules.login or '' }}"></div>
         <div class="field"><label>Password</label><input id="mr-pass" type="password" value="{{ user_settings.merchrules.password or '' }}"></div>
       </div>
     </div>
-    <div class="section">
-      <h3>📊 Airtable</h3>
-      <div class="field-row">
-        <div class="field"><label>Personal Access Token</label><input id="at-pat" value="{{ user_settings.airtable.pat or '' }}"></div>
-        <div class="field"><label>Base ID</label><input id="at-base" value="{{ user_settings.airtable.base_id or '' }}"></div>
-      </div>
-    </div>
-    <div class="section">
-      <h3>📈 Google Sheets</h3>
-      <div class="field-row">
-        <div class="field"><label>Spreadsheet ID</label><input id="gs-id" value="{{ user_settings.sheets.spreadsheet_id or '' }}"></div>
-        <div class="field"><label>Sheet GID</label><input id="gs-gid" value="{{ user_settings.sheets.gid or '374545260' }}"></div>
-      </div>
-    </div>
+
     <div class="section">
       <h3>✈️ Telegram Bot</h3>
+      <p class="help" style="margin-bottom:10px;">Для уведомлений. Token — от @BotFather, Chat ID — ваш (через @userinfobot).</p>
       <div class="field-row">
         <div class="field"><label>Bot Token</label><input id="tg-token" value="{{ user_settings.telegram.bot_token or '' }}"></div>
-        <div class="field"><label>Chat ID (ваш)</label><input id="tg-chat" value="{{ user_settings.telegram.chat_id or '' }}"></div>
+        <div class="field"><label>Chat ID</label><input id="tg-chat" value="{{ user_settings.telegram.chat_id or '' }}"></div>
       </div>
     </div>
+
     <div class="section">
-      <h3>🤖 AI (Groq)</h3>
-      <div class="field-row">
-        <div class="field"><label>API Key</label><input id="ai-key" value="{{ user_settings.groq.api_key or '' }}"></div>
-        <div class="field"><label>Модель</label>
-          <select id="ai-model">
-            <option value="llama-3.3-70b-versatile" {{ 'selected' if user_settings.groq.model == 'llama-3.3-70b-versatile' else '' }}>Llama 3.3 70B</option>
-            <option value="mixtral-8x7b-32768" {{ 'selected' if user_settings.groq.model == 'mixtral-8x7b-32768' else '' }}>Mixtral 8x7B</option>
-            <option value="gemma2-9b-it" {{ 'selected' if user_settings.groq.model == 'gemma2-9b-it' else '' }}>Gemma2 9B</option>
-          </select>
-        </div>
+      <h3>💬 Ktalk (Incoming Webhook)</h3>
+      <p class="help" style="margin-bottom:10px;">Для отправки фолоуапов в канал.</p>
+      <div class="step">
+        <span class="step-num">1</span>
+        <div class="step-text">Откройте Ktalk → нужный канал</div>
       </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <div class="step-text">⚙️ Настройки → <b>Интеграции</b> → Добавить Incoming Webhook</div>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <div class="step-text">Скопируйте URL</div>
+      </div>
+      <div class="field"><label>Webhook URL</label><input id="kt-url" value="{{ user_settings.ktalk.webhook_url or '' }}" placeholder="https://tbank.ktalk.ru/hooks/..."></div>
     </div>
-    <div class="section">
-      <h3>💬 Ktalk</h3>
-      <div class="field"><label>Incoming Webhook URL</label><input id="kt-url" value="{{ user_settings.ktalk.webhook_url or '' }}"></div>
-    </div>
+
     <div class="section">
       <h3>🎫 Tbank Time</h3>
-      <div class="field"><label>API Token</label><input id="tm-token" value="{{ user_settings.tbank_time.api_token or '' }}"></div>
+      <p class="help" style="margin-bottom:10px;">Для просмотра тикетов поддержки.</p>
+      <div class="step">
+        <span class="step-num">1</span>
+        <div class="step-text">Откройте <b>time.tbank.ru</b></div>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <div class="step-text">Настройки → API (или обратитесь к админу Time)</div>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <div class="step-text">Создайте API Token с правом <b>read:tickets</b></div>
+      </div>
+      <div class="field"><label>API Token</label><input id="tm-token" type="password" value="{{ user_settings.tbank_time.api_token or '' }}" placeholder="tbank_time_xxx..."></div>
     </div>
+
     <div style="display:flex;gap:10px;align-items:center;">
-      <button class="btn" onclick="saveIntegrations()">💾 Сохранить интеграции</button>
-      <span class="saved-msg" id="saved-int">✅ Сохранено</span>
+      <button class="btn" onclick="saveCreds()">💾 Сохранить</button>
+      <span class="saved-msg" id="saved-creds">✅ Сохранено</span>
     </div>
   </div>
 
-  <!-- Правила работы -->
+  <!-- Правила -->
   <div id="tab-rules" class="tab-content">
+    <div class="info-box">
+      <b>📐 Стандарты отдела.</b> Интервалы чекапов предзаданы по сегментам и не изменяются.
+    </div>
     <div class="section">
-      <h3>📐 Стандарты работы</h3>
-      <div class="field-row">
-        <div class="field">
-          <label>Мин. Health Score (критический)</label>
-          <input type="number" id="rule-min-health" step="0.1" min="0" max="1" value="{{ rules.min_health_score }}">
-          <div class="help">Ниже этого значения — красный статус</div>
-        </div>
-        <div class="field">
-          <label>Интервал чекапов (дней)</label>
-          <input type="number" id="rule-checkup-interval" min="7" max="90" value="{{ rules.checkup_interval_days }}">
-          <div class="help">Как часто проводить чекапы</div>
-        </div>
+      <h3>📅 Интервалы чекапов (предзаданы)</h3>
+      <table class="seg-table">
+        <thead><tr><th>Сегмент</th><th>Сумма</th><th>Интервал</th></tr></thead>
+        <tbody>
+          <tr><td>🟠 SS</td><td>до 15 000 ₽</td><td>1 раз в 6 мес.</td></tr>
+          <tr><td>🟢 SMB</td><td>15 000 – 29 999 ₽</td><td>1 раз в 3 мес.</td></tr>
+          <tr><td>🟣 SME</td><td>30 000 – 99 999 ₽</td><td>1 раз в 2 мес.</td></tr>
+          <tr><td>🔵 ENT</td><td>от 100 000 ₽</td><td>1 раз в месяц</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="section">
+      <h3>⚠️ Предупреждения</h3>
+      <div class="field">
+        <label>За сколько дней предупреждать о чекапе</label>
+        <select id="rule-warning-days">
+          <option value="7" {{ 'selected' if rules.warning_days == 7 else '' }}>7 дней</option>
+          <option value="14" {{ 'selected' if rules.warning_days == 14 else '' }}>14 дней</option>
+          <option value="21" {{ 'selected' if rules.warning_days == 21 else '' }}>21 день</option>
+          <option value="30" {{ 'selected' if rules.warning_days == 30 else '' }}>30 дней</option>
+        </select>
       </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Предупреждение (дней до)</label>
-          <input type="number" id="rule-warning-days" min="1" max="30" value="{{ rules.warning_days }}">
-          <div class="help">За сколько дней предупреждать о чекапе</div>
-        </div>
-        <div class="field">
-          <label>Активные сегменты</label>
-          <input id="rule-segments" value="{{ rules.segments|join(', ') }}">
-          <div class="help">Через запятую: ENT, SME+, SME-, SMB, SS</div>
-        </div>
+      <div class="toggle-row">
+        <label>Автоматически создавать задачи из чекапов</label>
+        <div class="toggle"><input type="checkbox" id="rule-auto-tasks" {{ 'checked' if rules.auto_create_tasks else '' }}><span class="slider"></span></div>
       </div>
     </div>
     <div class="section">
@@ -179,13 +202,9 @@
           </select>
         </div>
       </div>
-      <div class="toggle-row">
-        <label>Автоматически создавать задачи из чекапов</label>
-        <div class="toggle"><input type="checkbox" id="rule-auto-tasks" {{ 'checked' if rules.auto_create_tasks else '' }}><span class="slider"></span></div>
-      </div>
     </div>
     <div style="display:flex;gap:10px;align-items:center;">
-      <button class="btn" onclick="saveRules()">💾 Сохранить правила</button>
+      <button class="btn" onclick="saveRules()">💾 Сохранить</button>
       <span class="saved-msg" id="saved-rules">✅ Сохранено</span>
     </div>
   </div>
@@ -216,7 +235,7 @@
   </div>
 
   <!-- Уведомления -->
-  <div id="tab-notifications" class="tab-content">
+  <div id="tab-notifs" class="tab-content">
     <div class="section">
       <h3>🔔 Каналы уведомлений</h3>
       <div class="toggle-row">
@@ -264,9 +283,11 @@ function toggleTheme(){
   const t=h.getAttribute('data-theme')==='light'?'dark':'light';
   h.setAttribute('data-theme',t);
   localStorage.setItem('theme',t);
-  document.getElementById('pref-theme').value=t;
+  const el=document.getElementById('pref-theme');
+  if(el) el.value=t;
 }
-const s=localStorage.getItem('theme');if(s){document.documentElement.setAttribute('data-theme',s);document.getElementById('pref-theme').value=s;}
+const s=localStorage.getItem('theme');
+if(s){document.documentElement.setAttribute('data-theme',s);const el=document.getElementById('pref-theme');if(el)el.value=s;}
 
 function showTab(id,btn){
   document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
@@ -281,26 +302,20 @@ function showSaved(id){
   setTimeout(()=>el.classList.remove('show'),2000);
 }
 
-async function saveIntegrations(){
+async function saveCreds(){
   const data={
     merchrules:{login:document.getElementById('mr-login').value,password:document.getElementById('mr-pass').value},
-    airtable:{pat:document.getElementById('at-pat').value,base_id:document.getElementById('at-base').value},
-    sheets:{spreadsheet_id:document.getElementById('gs-id').value,gid:document.getElementById('gs-gid').value},
     telegram:{bot_token:document.getElementById('tg-token').value,chat_id:document.getElementById('tg-chat').value},
-    groq:{api_key:document.getElementById('ai-key').value,model:document.getElementById('ai-model').value},
     ktalk:{webhook_url:document.getElementById('kt-url').value},
     tbank_time:{api_token:document.getElementById('tm-token').value},
   };
-  const r=await fetch('/api/settings/integrations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  if(r.ok) showSaved('saved-int');
+  const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-creds');
 }
 
 async function saveRules(){
   const data={
-    min_health_score:parseFloat(document.getElementById('rule-min-health').value),
-    checkup_interval_days:parseInt(document.getElementById('rule-checkup-interval').value),
     warning_days:parseInt(document.getElementById('rule-warning-days').value),
-    segments:document.getElementById('rule-segments').value.split(',').map(s=>s.trim()),
     auto_create_tasks:document.getElementById('rule-auto-tasks').checked,
     morning_plan_time:document.getElementById('rule-morning-time').value,
     weekly_digest_day:document.getElementById('rule-digest-day').value,
