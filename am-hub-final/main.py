@@ -35,18 +35,11 @@ from middlewares import (
 )
 
 # Merchrules sync
-from merchrules_sync import (
-    get_auth_token as mr_get_auth_token,
-    fetch_site_tasks, fetch_site_meetings,
-    sync_clients_from_merchrules, get_client_mr_data,
-)
-from merchrules import push_tasks_csv, sync_meeting_to_merchrules
+from merchrules_sync import get_auth_token as mr_get_auth_token
 
 # AI
 from ai_followup import process_transcript as ai_process_transcript
-from ai_assistant import (
-    generate_prep_brief, generate_smart_followup, detect_account_risks
-)
+from ai_assistant import generate_prep_brief, generate_smart_followup, detect_account_risks
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -106,50 +99,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # MERCHRULES HELPERS
 # ============================================================================
 
-def _get_merchrules_clients(db: Session, login: str, password: str) -> List[dict]:
-    """Загрузить клиентов из Merchrules через sync module"""
-    try:
-        token = mr_get_auth_token(login, password)
-        # fetch clients via existing sync
-        from merchrules_sync import sync_clients_from_merchrules
-        clients_data = sync_clients_from_merchrules(db, login)
-        return clients_data or []
-    except Exception as e:
-        logger.error(f"Merchrules sync error: {e}")
-        return []
-
-
-def _get_client_tasks(db: Session, site_ids: list, login: str, password: str) -> dict:
-    """Задачи из Merchrules по site_id"""
-    result = {}
-    token = mr_get_auth_token(login, password)
-    for sid in site_ids:
-        try:
-            tasks = fetch_site_tasks(str(sid), token)
-            result[sid] = tasks or []
-        except Exception:
-            result[sid] = []
-    return result
-
-
-def _get_client_meetings(db: Session, site_ids: list, login: str, password: str) -> dict:
-    """Встречи из Merchrules"""
-    result = {}
-    token = mr_get_auth_token(login, password)
-    for sid in site_ids:
-        try:
-            meetings = fetch_site_meetings(str(sid), token)
-            result[sid] = meetings or []
-        except Exception:
-            result[sid] = []
-    return result
-
-
 def _get_user_cred(user: User) -> tuple:
-    """Получить креды пользователя из профиля или env"""
-    login = os.environ.get("MERCHRULES_LOGIN", "")
-    password = os.environ.get("MERCHRULES_PASSWORD", "")
-    return login, password
+    """Получить креды пользователя из env"""
+    return os.environ.get("MERCHRULES_LOGIN", ""), os.environ.get("MERCHRULES_PASSWORD", "")
 
 
 # ============================================================================
@@ -289,12 +241,10 @@ async def dashboard(request: Request, db: Session = Depends(get_db), auth_token:
 async def my_day(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token:
         return RedirectResponse(url="/login", status_code=303)
-
     from auth import decode_access_token
     payload = decode_access_token(auth_token)
     if not payload:
         return RedirectResponse(url="/login", status_code=303)
-
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
@@ -316,19 +266,25 @@ async def my_day(request: Request, db: Session = Depends(get_db), auth_token: Op
     today_meetings = q2.all()
 
     # Просроченные задачи
-    q3 = db.query(Task).filter(
-        Task.due_date < start,
-        Task.status.in_(["plan", "in_progress"]),
-    )
+    q3 = db.query(Task).filter(Task.due_date < start, Task.status.in_(["plan", "in_progress"]))
     if user.role == "manager":
         q3 = q3.join(Client).filter(Client.manager_email == user.email)
     overdue_tasks = q3.all()
+
+    # Общая статистика
+    total_open = db.query(Task).filter(Task.status.in_(["plan", "in_progress"])).count()
+    if user.role == "manager":
+        total_open = db.query(Task).join(Client).filter(
+            Task.status.in_(["plan", "in_progress"]),
+            Client.manager_email == user.email
+        ).count()
 
     return templates.TemplateResponse("today.html", {
         "request": request, "user": user,
         "today_tasks": today_tasks,
         "today_meetings": today_meetings,
         "overdue_tasks": overdue_tasks,
+        "total_open": total_open,
         "now": datetime.now(),
     })
 
@@ -341,17 +297,16 @@ async def my_day(request: Request, db: Session = Depends(get_db), auth_token: Op
 async def clients_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token:
         return RedirectResponse(url="/login", status_code=303)
-
     from auth import decode_access_token
     payload = decode_access_token(auth_token)
     if not payload:
         return RedirectResponse(url="/login", status_code=303)
-
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
     segment = request.query_params.get("segment")
+    now = datetime.now()
     q = db.query(Client)
     if user.role == "manager":
         q = q.filter(Client.manager_email == user.email)
@@ -360,15 +315,23 @@ async def clients_page(request: Request, db: Session = Depends(get_db), auth_tok
     clients = q.all()
 
     counts = {"ENT": 0, "SME+": 0, "SME-": 0, "SME": 0, "SMB": 0, "SS": 0}
-    all_c = db.query(Client).all() if user.role == "admin" else db.query(Client).filter(Client.manager_email == user.email).all()
-    for c in all_c:
+    for c in clients:
         seg = c.segment or ""
         if seg in counts:
             counts[seg] += 1
 
+    for c in clients:
+        open_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status.in_(["plan", "in_progress"])).count()
+        blocked_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status == "blocked").count()
+        is_overdue = c.needs_checkup and (not c.last_meeting_date or (now - c.last_meeting_date).days > 30)
+        is_warning = c.needs_checkup and c.last_meeting_date and 14 < (now - c.last_meeting_date).days <= 30
+        c.open_tasks = open_tasks
+        c.blocked_tasks = blocked_tasks
+        c.status = {"color": "red" if is_overdue else ("yellow" if is_warning else "green")}
+
     return templates.TemplateResponse("clients.html", {
         "request": request, "user": user, "clients": clients,
-        "counts": counts, "segment": segment, "now": datetime.now(),
+        "counts": counts, "segment": segment, "now": now,
     })
 
 
@@ -521,7 +484,7 @@ async def sync_page(request: Request, db: Session = Depends(get_db), auth_token:
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("sync.html", {"request": request, "user": user})
+    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": os.environ.get("MERCHRULES_LOGIN", "")})
 
 
 # ============================================================================
@@ -540,67 +503,69 @@ async def api_sync_merchrules(
         raise HTTPException(status_code=401)
 
     body = await request.json()
-    login = body.get("login", os.environ.get("MERCHRULES_LOGIN", ""))
-    password = body.get("password", os.environ.get("MERCHRULES_PASSWORD", ""))
+    login = body.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
+    password = body.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
 
     if not login or not password:
-        return {"error": "Need Merchrules credentials"}
+        return {"error": "Нужны креды Merchrules"}
 
+    import httpx
+    import asyncio
     try:
-        token = mr_get_auth_token(login, password)
-        # Load all clients for this account
-        from merchrules_sync import sync_clients_from_merchrules
-        data = sync_clients_from_merchrules(db, login)
-        return {"ok": True, "clients_synced": len(data) if data else 0}
+        async with httpx.AsyncClient(timeout=30) as hx:
+            from merchrules_sync import get_auth_token as mr_auth, fetch_account_analytics, fetch_checkups, fetch_roadmap_tasks
+            token = await mr_auth(hx, login, password)
+            if not token:
+                return {"error": "Ошибка авторизации Merchrules"}
+            # Fetch accounts
+            r = await hx.get(
+                "https://merchrules-qa.any-platform.ru/backend-v2/accounts",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            accounts = r.json().get("accounts", []) if r.status_code == 200 else []
+            # For each account, fetch data and save
+            synced = 0
+            for acc in accounts[:20]:  # limit
+                aid = acc.get("id")
+                if not aid:
+                    continue
+                # Check if client exists
+                existing = db.query(Client).filter(Client.merchrules_account_id == str(aid)).first()
+                if existing:
+                    existing.name = acc.get("name") or existing.name
+                    synced += 1
+                    continue
+                # Create new client
+                analytics = await fetch_account_analytics(hx, token, str(aid))
+                client = Client(
+                    name=acc.get("name", f"Account {aid}"),
+                    merchrules_account_id=str(aid),
+                    health_score=float(analytics.get("health_score", 0) if analytics else 0),
+                    revenue_trend=analytics.get("revenue_trend") if analytics else None,
+                    activity_level=analytics.get("activity_level") if analytics else None,
+                    manager_email=acc.get("manager_email") or login,
+                    segment="SMB",
+                )
+                db.add(client)
+                db.flush()
+                # Fetch and create tasks
+                tasks_data = await fetch_roadmap_tasks(hx, token, str(aid))
+                for t in (tasks_data or [])[:10]:
+                    db.add(Task(
+                        client_id=client.id,
+                        title=t.get("title", ""),
+                        description=t.get("description", ""),
+                        status=t.get("status", "plan"),
+                        priority=t.get("priority", "medium"),
+                        team=t.get("team", ""),
+                        task_type=t.get("task_type", ""),
+                    ))
+                synced += 1
+            db.commit()
+        return {"ok": True, "clients_synced": synced}
     except Exception as e:
+        db.rollback()
         return {"error": str(e)}
-
-
-@app.post("/api/sync/client/{client_id}")
-async def api_sync_client(
-    client_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
-):
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client or not client.site_ids:
-        return {"error": "No site_ids"}
-
-    body = await request.json()
-    login = body.get("login", os.environ.get("MERCHRULES_LOGIN", ""))
-    password = body.get("password", os.environ.get("MERCHRULES_PASSWORD", ""))
-
-    tasks = _get_client_tasks(db, client.site_ids, login, password)
-    meetings = _get_client_meetings(db, client.site_ids, login, password)
-
-    # Sync to local DB
-    for sid, mr_tasks in tasks.items():
-        for t in mr_tasks:
-            existing = db.query(Task).filter(
-                Task.client_id == client_id,
-                Task.merchrules_task_id == str(t.get("id"))
-            ).first()
-            if not existing:
-                db.add(Task(
-                    client_id=client_id,
-                    merchrules_task_id=str(t.get("id")),
-                    title=t.get("title", ""),
-                    description=t.get("description", ""),
-                    status=t.get("status", "plan"),
-                    priority=t.get("priority", "medium"),
-                    team=t.get("team", ""),
-                    task_type=t.get("task_type", ""),
-                    created_at=datetime.fromisoformat(t["created_at"]) if t.get("created_at") else datetime.now(),
-                    due_date=None,
-                ))
-
-    db.commit()
-    return {"ok": True, "tasks": sum(len(v) for v in tasks.values())}
 
 
 # ============================================================================
