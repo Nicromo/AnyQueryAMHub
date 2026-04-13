@@ -3,11 +3,12 @@
 Храним в ~/.am-hub-users.json — один файл на всех.
 """
 import json
+import os
 from pathlib import Path
 
 CREDS_PATH = Path.home() / ".am-hub-users.json"
-MERCHRULES_BASE_URL = "https://merchrules-qa.any-platform.ru"
-COPY_API_BASE_URL = "https://api.merchrules-qa.any-platform.ru"
+MERCHRULES_BASE_URL = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+COPY_API_BASE_URL = os.getenv("MERCHRULES_COPY_API_URL", "https://api.merchrules.any-platform.ru")
 
 
 def _read_all() -> dict:

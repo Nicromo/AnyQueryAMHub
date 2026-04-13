@@ -111,7 +111,7 @@ async def lifespan(app: FastAPI):
                 ).fetchall()
                 ccol_names = {row[0] for row in ccols}
                 for col, col_type in [("last_qbr_date", "TIMESTAMP"), ("next_qbr_date", "TIMESTAMP"),
-                                       ("account_plan", "JSONB")]:
+                                       ("account_plan", "JSONB"), ("open_tasks", "INTEGER DEFAULT 0")]:
                     if col not in ccol_names:
                         db.execute(text(f"ALTER TABLE clients ADD COLUMN {col} {col_type}"))
                         db.commit()
@@ -180,7 +180,7 @@ async def lifespan(app: FastAPI):
                     email="admin@company.ru",
                     first_name="Администратор",
                     role="admin",
-                    hashed_password=hash_password("admin123"),
+                    hashed_password=hash_password(os.getenv("ADMIN_DEFAULT_PASSWORD", "admin123")),
                     settings={},
                 )
                 db.add(admin)
@@ -889,65 +889,6 @@ async def api_ktalk_followup(
 
 
 # ============================================================================
-# API: TBANK TIME (tickets)
-# ============================================================================
-
-@app.get("/api/tbank/tickets/{client_name}")
-async def api_tbank_tickets(
-    client_name: str, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
-):
-    """Get support tickets for a client from Tbank Time"""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    time_token = os.environ.get("TIME_API_TOKEN", "")
-    if not time_token:
-        return {"error": "TIME_API_TOKEN not set", "tickets": []}
-
-    from integrations.tbank_time import sync_tickets_for_client
-    try:
-        result = await sync_tickets_for_client(client_name)
-        return result
-    except Exception as e:
-        return {"error": str(e), "open_count": 0, "total_count": 0, "last_ticket": None}
-
-
-@app.get("/api/tbank/tickets")
-async def api_tbank_all_tickets(
-    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
-):
-    """Get all open support tickets"""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    time_token = os.environ.get("TIME_API_TOKEN", "")
-    if not time_token:
-        return {"error": "TIME_API_TOKEN not set", "tickets": []}
-
-    from integrations.tbank_time import get_support_tickets
-    try:
-        clients = db.query(Client).all()
-        all_tickets = []
-        for c in clients:
-            if c.name:
-                tickets = await get_support_tickets(c.name)
-                for t in tickets:
-                    t["client"] = c.name
-                all_tickets.extend(tickets)
-        return {"tickets": all_tickets, "total": len(all_tickets)}
-    except Exception as e:
-        return {"error": str(e), "tickets": [], "total": 0}
-
-
-# ============================================================================
 # API: MERCHRULES SYNC
 # ============================================================================
 
@@ -1114,7 +1055,7 @@ async def api_process_transcript(request: Request, db: Session = Depends(get_db)
 
 
 @app.post("/api/ai/generate-followup")
-async def api_generate_followup(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+async def api_generate_followup_by_client(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token:
         raise HTTPException(status_code=401)
     data = await request.json()
@@ -1163,71 +1104,6 @@ async def settings_page(request: Request, db: Session = Depends(get_db), auth_to
         "user_settings": settings,
         "rules": rules, "prefs": prefs,
     })
-
-
-@app.post("/api/settings/creds")
-async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Сохранить персональные креды пользователя."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    for service in ["merchrules", "telegram", "ktalk", "tbank_time"]:
-        if service in data:
-            settings[service] = data[service]
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
-
-
-@app.post("/api/settings/rules")
-async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    settings["rules"] = data
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
-
-
-@app.post("/api/settings/prefs")
-async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    if "preferences" not in settings:
-        settings["preferences"] = {}
-    settings["preferences"].update(data)
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
 
 
 # ============================================================================

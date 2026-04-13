@@ -27,6 +27,7 @@ class Client(Base):
     last_meeting_date = Column(DateTime, nullable=True)
     last_checkup = Column(DateTime, nullable=True)
     needs_checkup = Column(Boolean, default=False)
+    open_tasks = Column(Integer, default=0)   # кол-во открытых задач (обновляется при загрузке дашборда)
     open_tickets = Column(Integer, default=0)
     last_ticket_date = Column(DateTime, nullable=True)
     last_sync_at = Column(DateTime, nullable=True)

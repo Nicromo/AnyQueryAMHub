@@ -11,13 +11,15 @@
 import os
 import asyncio
 import logging
+import httpx
 from datetime import date, datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from database import SessionLocal
 from models import Client, Task, Meeting, CheckUp, SyncLog
-from integrations import airtable, merchrules
+from integrations import airtable
+from merchrules_sync import get_auth_token, fetch_site_tasks, fetch_site_meetings
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +85,8 @@ async def job_sync_airtable_clients():
 
 
 async def job_sync_merchrules_analytics():
-    """Каждый час: синхронизировать аналитику из Merchrules"""
+    """Каждый час: синхронизировать данные задач и встреч из Merchrules"""
+    import httpx
     db = SessionLocal()
     sync_log = SyncLog(
         integration="merchrules",
@@ -91,49 +94,60 @@ async def job_sync_merchrules_analytics():
         action="sync",
         status="in_progress",
     )
-    
+
     try:
         logger.info("🔄 Syncing Merchrules analytics...")
-        clients = db.query(Client).all()
-        
+        login = os.getenv("MERCHRULES_LOGIN", "")
+        password = os.getenv("MERCHRULES_PASSWORD", "")
+        if not login or not password:
+            sync_log.status = "skipped"
+            sync_log.message = "MERCHRULES_LOGIN/PASSWORD не заданы"
+            return
+
+        clients = db.query(Client).filter(Client.merchrules_account_id.isnot(None)).all()
+        if not clients:
+            sync_log.status = "success"
+            sync_log.records_processed = 0
+            return
+
         updated = 0
-        for client in clients:
-            if not client.merchrules_account_id:
-                continue
-            
-            # Получить аналитику
-            analytics = await merchrules.fetch_account_analytics(client.merchrules_account_id)
-            if analytics:
-                client.health_score = analytics.get('health_score', 0)
-                client.revenue_trend = analytics.get('revenue_trend')
-                client.activity_level = analytics.get('activity_level', 'low')
-                updated += 1
-            
-            # Получить чекапы
-            checkups = await merchrules.fetch_checkups(client.merchrules_account_id)
-            for checkup_data in checkups:
-                checkup = db.query(CheckUp).filter(
-                    CheckUp.merchrules_id == checkup_data.get('id')
-                ).first()
-                
-                if not checkup:
-                    checkup = CheckUp(
-                        client_id=client.id,
-                        merchrules_id=checkup_data.get('id'),
-                        type=checkup_data.get('type'),
-                        status=checkup_data.get('status'),
-                        scheduled_date=checkup_data.get('date'),
-                        priority=checkup_data.get('priority', 0),
-                    )
-                    db.add(checkup)
-            
-            client.last_sync_at = datetime.utcnow()
-        
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                sync_log.status = "error"
+                sync_log.message = "Ошибка авторизации Merchrules"
+                return
+            headers = {"Authorization": f"Bearer {token}"}
+
+            for client in clients:
+                try:
+                    tasks_data = await fetch_site_tasks(hx, headers, client.merchrules_account_id)
+                    meetings_data = await fetch_site_meetings(hx, headers, client.merchrules_account_id)
+
+                    open_count = tasks_data.get("open_tasks", 0)
+                    if open_count < 10:
+                        client.segment = client.segment or "SMB"
+                    elif open_count < 30:
+                        client.segment = client.segment or "SME"
+                    else:
+                        client.segment = client.segment or "ENT"
+
+                    if meetings_data.get("last_meeting"):
+                        try:
+                            client.last_meeting_date = datetime.fromisoformat(meetings_data["last_meeting"])
+                        except Exception:
+                            pass
+
+                    client.last_sync_at = datetime.utcnow()
+                    updated += 1
+                except Exception as exc:
+                    logger.warning("MR analytics skip client %s: %s", client.id, exc)
+
         db.commit()
         sync_log.status = "success"
         sync_log.records_processed = updated
         logger.info(f"✅ Updated {updated} clients from Merchrules")
-        
+
     except Exception as e:
         logger.error(f"❌ Merchrules sync error: {e}")
         db.rollback()
@@ -147,6 +161,7 @@ async def job_sync_merchrules_analytics():
 
 async def job_sync_roadmap_tasks():
     """Каждый час: синхронизировать задачи из Merchrules Roadmap"""
+    import httpx
     db = SessionLocal()
     sync_log = SyncLog(
         integration="merchrules",
@@ -154,46 +169,56 @@ async def job_sync_roadmap_tasks():
         action="sync",
         status="in_progress",
     )
-    
+
     try:
         logger.info("🔄 Syncing Roadmap tasks...")
-        clients = db.query(Client).all()
-        
+        login = os.getenv("MERCHRULES_LOGIN", "")
+        password = os.getenv("MERCHRULES_PASSWORD", "")
+        if not login or not password:
+            sync_log.status = "skipped"
+            sync_log.message = "MERCHRULES_LOGIN/PASSWORD не заданы"
+            return
+
+        clients = db.query(Client).filter(Client.merchrules_account_id.isnot(None)).all()
         synced = 0
-        for client in clients:
-            if not client.merchrules_account_id:
-                continue
-            
-            # Получить задачи
-            tasks = await merchrules.fetch_roadmap_tasks(client.merchrules_account_id)
-            
-            for task_data in tasks:
-                task = db.query(Task).filter(
-                    Task.merchrules_task_id == task_data.get('id')
-                ).first()
-                
-                if not task:
-                    task = Task(
-                        client_id=client.id,
-                        merchrules_task_id=task_data.get('id'),
-                        title=task_data.get('title'),
-                        description=task_data.get('description'),
-                        status=task_data.get('status', 'plan'),
-                        priority=task_data.get('priority', 'medium'),
-                        source='roadmap',
-                    )
-                    db.add(task)
-                    synced += 1
-                else:
-                    # Обновить статус если изменился
-                    task.status = task_data.get('status', task.status)
-                    task.priority = task_data.get('priority', task.priority)
-        
+
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                sync_log.status = "error"
+                sync_log.message = "Ошибка авторизации Merchrules"
+                return
+            headers = {"Authorization": f"Bearer {token}"}
+
+            for client in clients:
+                try:
+                    tasks_data = await fetch_site_tasks(hx, headers, client.merchrules_account_id)
+                    for task_data in tasks_data.get("tasks", []):
+                        mr_id = str(task_data.get("id", ""))
+                        if not mr_id:
+                            continue
+                        task = db.query(Task).filter(Task.merchrules_task_id == mr_id).first()
+                        if not task:
+                            db.add(Task(
+                                client_id=client.id,
+                                merchrules_task_id=mr_id,
+                                title=task_data.get("title", ""),
+                                status=task_data.get("status", "plan"),
+                                priority=task_data.get("priority", "medium"),
+                                source="roadmap",
+                            ))
+                            synced += 1
+                        else:
+                            task.status = task_data.get("status", task.status)
+                            task.priority = task_data.get("priority", task.priority)
+                except Exception as exc:
+                    logger.warning("MR tasks skip client %s: %s", client.id, exc)
+
         db.commit()
         sync_log.status = "success"
         sync_log.records_processed = synced
         logger.info(f"✅ Synced {synced} roadmap tasks")
-        
+
     except Exception as e:
         logger.error(f"❌ Roadmap sync error: {e}")
         db.rollback()
@@ -207,6 +232,7 @@ async def job_sync_roadmap_tasks():
 
 async def job_sync_meetings():
     """Каждый час: синхронизировать встречи из Merchrules"""
+    import httpx
     db = SessionLocal()
     sync_log = SyncLog(
         integration="merchrules",
@@ -214,44 +240,44 @@ async def job_sync_meetings():
         action="sync",
         status="in_progress",
     )
-    
+
     try:
         logger.info("🔄 Syncing meetings...")
-        clients = db.query(Client).all()
-        
+        login = os.getenv("MERCHRULES_LOGIN", "")
+        password = os.getenv("MERCHRULES_PASSWORD", "")
+        if not login or not password:
+            sync_log.status = "skipped"
+            sync_log.message = "MERCHRULES_LOGIN/PASSWORD не заданы"
+            return
+
+        clients = db.query(Client).filter(Client.merchrules_account_id.isnot(None)).all()
         synced = 0
-        for client in clients:
-            if not client.merchrules_account_id:
-                continue
-            
-            # Получить встречи
-            meetings = await merchrules.fetch_meetings(client.merchrules_account_id)
-            
-            for meeting_data in meetings:
-                meeting = db.query(Meeting).filter(
-                    Meeting.external_id == meeting_data.get('id')
-                ).first()
-                
-                if not meeting:
-                    meeting = Meeting(
-                        client_id=client.id,
-                        external_id=meeting_data.get('id'),
-                        date=meeting_data.get('date'),
-                        type=meeting_data.get('type', 'sync'),
-                        source='merchrules',
-                        attendees=meeting_data.get('attendees', []),
-                    )
-                    db.add(meeting)
-                    synced += 1
-                
-                # Обновить last_meeting_date клиента
-                client.last_meeting_date = meeting_data.get('date')
-        
+
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                sync_log.status = "error"
+                sync_log.message = "Ошибка авторизации Merchrules"
+                return
+            headers = {"Authorization": f"Bearer {token}"}
+
+            for client in clients:
+                try:
+                    meetings_data = await fetch_site_meetings(hx, headers, client.merchrules_account_id)
+                    if meetings_data.get("last_meeting"):
+                        try:
+                            client.last_meeting_date = datetime.fromisoformat(meetings_data["last_meeting"])
+                            synced += 1
+                        except Exception:
+                            pass
+                except Exception as exc:
+                    logger.warning("MR meetings skip client %s: %s", client.id, exc)
+
         db.commit()
         sync_log.status = "success"
         sync_log.records_processed = synced
-        logger.info(f"✅ Synced {synced} meetings")
-        
+        logger.info(f"✅ Synced meetings for {synced} clients")
+
     except Exception as e:
         logger.error(f"❌ Meetings sync error: {e}")
         db.rollback()
