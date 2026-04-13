@@ -970,6 +970,7 @@ async def api_sync_merchrules(
         return {"error": "Нужны креды Merchrules"}
 
     import httpx
+    mr_base_url = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
     try:
         async with httpx.AsyncClient(timeout=30) as hx:
             from merchrules_sync import get_auth_token, fetch_site_tasks, fetch_site_meetings
@@ -980,10 +981,13 @@ async def api_sync_merchrules(
 
             # Получаем список клиентов из API
             r = await hx.get(
-                "https://merchrules-qa.any-platform.ru/backend-v2/accounts",
+                f"{mr_base_url}/backend-v2/accounts",
                 headers=headers,
             )
-            accounts = r.json().get("accounts", []) if r.status_code == 200 else []
+            if r.status_code != 200:
+                return {"error": f"Merchrules вернул {r.status_code}: {r.text[:200]}"}
+            body = r.json()
+            accounts = body if isinstance(body, list) else body.get("accounts") or body.get("items") or []
             if not accounts:
                 return {"error": "Нет аккаунтов в Merchrules"}
 
@@ -994,29 +998,35 @@ async def api_sync_merchrules(
                     continue
                 site_id = str(aid)
 
+                # Fetch tasks & meetings для всех (и новых, и существующих)
+                tasks_data = await fetch_site_tasks(hx, headers, site_id)
+                meetings_data = await fetch_site_meetings(hx, headers, site_id)
+                open_count = tasks_data.get("open_tasks", 0)
+                last_meeting = (
+                    datetime.fromisoformat(meetings_data["last_meeting"])
+                    if meetings_data.get("last_meeting") else None
+                )
+
                 # Проверяем есть ли клиент
                 existing = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
                 if existing:
                     existing.name = acc.get("name") or existing.name
+                    existing.last_meeting_date = last_meeting or existing.last_meeting_date
+                    existing.last_sync_at = datetime.utcnow()
                     synced += 1
                     continue
 
-                # Fetch tasks & meetings
-                tasks_data = await fetch_site_tasks(hx, headers, site_id)
-                meetings_data = await fetch_site_meetings(hx, headers, site_id)
-
                 # Определяем сегмент по кол-ву задач
-                open_count = tasks_data.get("open_tasks", 0)
                 segment = "SMB" if open_count < 10 else "SME" if open_count < 30 else "ENT"
 
                 client = Client(
                     name=acc.get("name", f"Account {site_id}"),
                     merchrules_account_id=site_id,
-                    health_score=0.7,  # Default пока не получим аналитику
+                    health_score=0.7,
                     manager_email=login,
                     segment=segment,
-                    open_tasks=tasks_data.get("open_tasks", 0),
-                    last_meeting_date=datetime.fromisoformat(meetings_data["last_meeting"]) if meetings_data.get("last_meeting") else None,
+                    last_meeting_date=last_meeting,
+                    last_sync_at=datetime.utcnow(),
                 )
                 db.add(client)
                 db.flush()
@@ -1406,12 +1416,13 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
 
     # Push via CSV (one task)
     import httpx, io
+    mr_base_url = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
     csv_content = f"title,description,status,priority,team,task_type,assignee,product,link,due_date\n"
     csv_content += f'"{task.title}","{task.description or ""}",{task.status},{task.priority},{task.team or ""},{task.task_type or ""},any,,,'
     try:
         async with httpx.AsyncClient(timeout=30) as hx:
             token_resp = await hx.post(
-                "https://merchrules-qa.any-platform.ru/backend-v2/auth/login",
+                f"{mr_base_url}/backend-v2/auth/login",
                 json={"username": login, "password": password},
             )
             if token_resp.status_code != 200:
@@ -1420,7 +1431,7 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
 
             files = {"file": ("task.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
             resp = await hx.post(
-                "https://merchrules-qa.any-platform.ru/backend-v2/import/tasks/csv",
+                f"{mr_base_url}/backend-v2/import/tasks/csv",
                 data={"site_id": client.merchrules_account_id},
                 files=files,
                 headers={"Authorization": f"Bearer {token}"},
