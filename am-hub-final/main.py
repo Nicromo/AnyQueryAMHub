@@ -363,7 +363,6 @@ async def root(request: Request, db: Session = Depends(get_db)):
     segment = request.query_params.get("segment")
     sort = request.query_params.get("sort")
 
-    # Получаем всех клиентов
     query = db.query(Client)
     clients = query.all()
 
@@ -374,9 +373,36 @@ async def root(request: Request, db: Session = Depends(get_db)):
         if seg in counts:
             counts[seg] += 1
 
-    # Фильтрация по сегменту
     if segment:
         clients = [c for c in clients if c.segment == segment]
+
+    # Обогащаем клиентов вычисляемыми полями для шаблона
+    for c in clients:
+        open_tasks = db.query(Task).filter(
+            Task.client_id == c.id,
+            Task.status.in_(["plan", "in_progress"])
+        ).count()
+        blocked_tasks = db.query(Task).filter(
+            Task.client_id == c.id,
+            Task.status == "blocked"
+        ).count()
+
+        # Определяем статус-цвет
+        is_overdue = c.needs_checkup and (
+            not c.last_meeting_date or
+            (datetime.now() - c.last_meeting_date).days > 30
+        )
+        is_warning = c.needs_checkup and (
+            c.last_meeting_date and
+            14 < (datetime.now() - c.last_meeting_date).days <= 30
+        )
+
+        c.open_tasks = open_tasks
+        c.blocked_tasks = blocked_tasks
+        c.status = {
+            "color": "red" if is_overdue else ("yellow" if is_warning else "green"),
+            "next_date": None,
+        }
 
     return templates.TemplateResponse(
         "index.html",
