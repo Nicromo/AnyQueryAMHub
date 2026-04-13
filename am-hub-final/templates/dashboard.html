@@ -126,6 +126,12 @@
     </div>
   </div>
 
+  <!-- Action Cards -->
+  <div id="action-cards" style="margin-bottom:24px;">
+    <div class="section-title" style="margin-bottom:10px;">⚡ Действия</div>
+    <div id="actions-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;"></div>
+  </div>
+
   {% if clients %}
   <div class="kpi-grid">
     <div class="kpi c-blue"><div class="kpi-l">Клиентов</div><div class="kpi-v">{{ clients|length }}</div><div class="kpi-s">Активных</div></div>
@@ -220,6 +226,42 @@ new Chart(document.getElementById('stChart'),{type:'doughnut',data:{labels:['З�
 {% endif %}
 function filterSeg(seg){document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=(!seg||tr.dataset.seg===seg)?'':'none';});}
 function filterTbl(q){q=q.toLowerCase();document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+
+// Load action cards
+async function loadActions(){
+  try{
+    const r=await fetch('/api/dashboard/actions');
+    if(!r.ok) return;
+    const d=await r.json();
+    const grid=document.getElementById('actions-grid');
+    if(!d.actions||!d.actions.length){grid.innerHTML='<div style="color:var(--muted);font-size:.82rem;">Нет действий</div>';return;}
+    grid.innerHTML=d.actions.map(a=>{
+      let icon='',title='',desc='',btn='',color='';
+      if(a.type==='followup'){
+        icon='✍️';title='Фолоуап: '+a.client_name;desc=a.meeting_title+' · '+a.days_ago+' дн. назад';
+        btn='<a href="/followup/'+a.meeting_id+'" class="btn btn-sm btn-p" style="margin-top:8px;">Заполнить</a>';
+        color='var(--accent)';
+      }else if(a.type==='prep'){
+        icon='📋';title='Подготовка: '+a.client_name;desc=a.meeting_title+' · через '+a.hours_until+' ч.';
+        btn='<a href="/prep/'+a.meeting_id+'" class="btn btn-sm btn-p" style="margin-top:8px;">Подготовиться</a>';
+        color='var(--yellow)';
+      }else if(a.type==='checkup'){
+        icon='📅';title='Чекап: '+a.client_name;desc=a.checkup_type+' · просрочен';
+        btn='<a href="/client/'+a.checkup_id+'" class="btn btn-sm btn-p" style="margin-top:8px;">Запланировать</a>';
+        color='var(--red)';
+      }else if(a.type==='qbr'){
+        icon='📊';title='QBR: '+a.client_name;desc='Просрочен';
+        btn='<a href="/client/'+a.client_id+'/qbr" class="btn btn-sm btn-p" style="margin-top:8px;">Провести</a>';
+        color='var(--red)';
+      }
+      return '<div style="background:var(--card);border:1px solid '+color+'33;border-radius:12px;padding:14px 16px;">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:1.2rem;">'+icon+'</span>'+
+        '<span style="font-weight:600;font-size:.85rem;">'+title+'</span></div>'+
+        '<div style="font-size:.78rem;color:var(--muted);margin-bottom:4px;">'+desc+'</div>'+btn+'</div>';
+    }).join('');
+  }catch(e){console.error(e);}
+}
+loadActions();
 </script>
 </body>
 </html>

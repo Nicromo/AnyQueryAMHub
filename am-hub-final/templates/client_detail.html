@@ -46,9 +46,11 @@
       <h1>{{ client.name }}</h1>
       <div class="meta">{{ client.segment or '—' }} · {{ client.manager_email or '—' }}</div>
     </div>
-    <div style="display:flex;gap:8px;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <a href="/prep/{{ client.id }}" class="btn btn-p">📋 Prep</a>
       <a href="/followup/{{ client.id }}" class="btn">✍️ Followup</a>
+      <a href="/client/{{ client.id }}/plan" class="btn">📐 План</a>
+      <a href="/client/{{ client.id }}/qbr" class="btn">📊 QBR</a>
     </div>
   </div>
 
