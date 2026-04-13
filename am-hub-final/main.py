@@ -96,6 +96,66 @@ templates = Jinja2Templates(directory="templates")
 # LIFESPAN
 # ============================================================================
 
+def _seed_demo_data(db):
+    """Заполнить БД демо-данными если пусто"""
+    if db.query(Client).count() > 0:
+        return  # Уже есть данные
+
+    import random
+    from datetime import timedelta as td
+
+    logger.info("🌱 Seeding demo data...")
+
+    segments = ["ENT", "SME+", "SME-", "SMB", "SS"]
+    companies = {
+        "ENT": ["Сбербанк", "Яндекс", "МТС", "Ростелеком", "Тинькофф"],
+        "SME+": ["Ozon", "Wildberries", "Lamoda", "DNS", "М.Видео"],
+        "SME-": ["Ситилинк", "Эльдорадо", "Эксперт", "Поларис", "Беру"],
+        "SMB": ["Магазин у дома", "Кофейня №1", "Студия красоты", "Фитнес-клуб", "Автосервис"],
+        "SS": ["ИП Иванов", "ИП Петров", "ИП Сидоров", "ИП Козлов", "ИП Новиков"],
+    }
+    managers = ["ivan@company.ru", "maria@company.ru", "alex@company.ru"]
+    task_titles = [
+        "Настроить трекинг событий", "Проверить качество поиска",
+        "Интегрировать API рекомендаций", "Обновить модель ранжирования",
+        "Провести A/B тест", "Оптимизировать выдачу",
+        "Добавить новые фильтры", "Настроить персонализацию",
+    ]
+    statuses = ["plan", "in_progress", "done", "blocked"]
+    priorities = ["low", "medium", "high"]
+
+    for segment, names in companies.items():
+        for name in names:
+            client = Client(
+                name=name, segment=segment,
+                manager_email=random.choice(managers),
+                health_score=round(random.uniform(0.3, 1.0), 2),
+                activity_level=random.choice(["high", "medium", "low"]),
+                open_tickets=random.randint(0, 5),
+                site_ids=[random.randint(100, 9999)],
+                last_meeting_date=datetime.now() - td(days=random.randint(1, 60)),
+                needs_checkup=random.choice([True, False]),
+                revenue_trend=random.choice(["growing", "stable", "declining"]),
+            )
+            db.add(client)
+            db.flush()
+
+            # Задачи
+            for _ in range(random.randint(2, 5)):
+                db.add(Task(
+                    client_id=client.id,
+                    title=random.choice(task_titles),
+                    description=f"Задача для {name}",
+                    status=random.choice(statuses),
+                    priority=random.choice(priorities),
+                    created_at=datetime.now() - td(days=random.randint(1, 30)),
+                    due_date=datetime.now() + td(days=random.randint(-5, 30)),
+                ))
+
+    db.commit()
+    logger.info(f"✅ Seeded {len(companies)} segments with demo data")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """App startup/shutdown"""
@@ -103,10 +163,11 @@ async def lifespan(app: FastAPI):
         init_db()
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
+            _seed_demo_data(db)  # Автозаполнение демо-данными
         logger.info("✅ Database connected")
     except Exception as e:
         logger.error(f"❌ Database error: {e}")
-    
+
     yield
 
 
