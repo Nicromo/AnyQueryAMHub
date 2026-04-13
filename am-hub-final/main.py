@@ -163,12 +163,125 @@ async def lifespan(app: FastAPI):
         init_db()
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-            _seed_demo_data(db)  # Автозаполнение демо-данными
+            _run_migrations(db)
+            _seed_demo_data(db)
         logger.info("✅ Database connected")
     except Exception as e:
         logger.error(f"❌ Database error: {e}")
 
     yield
+
+
+def _run_migrations(db):
+    """Добавить отсутствующие колонки в существующие таблицы"""
+    # Получить существующие колонки для каждой таблицы
+    tables_columns = {}
+    for table in ["clients", "tasks", "meetings", "checkups", "users", "accounts",
+                   "audit_logs", "notifications", "sync_logs"]:
+        cols = db.execute(
+            text("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = :table
+            """),
+            {"table": table}
+        ).fetchall()
+        tables_columns[table] = {row[0] for row in cols}
+
+    # Список колонок для добавления
+    pending = [
+        # Clients
+        ("clients", "account_id", "INTEGER REFERENCES accounts(id)"),
+        ("clients", "merchrules_account_id", "VARCHAR"),
+        ("clients", "site_ids", "JSONB"),
+        ("clients", "health_score", "FLOAT"),
+        ("clients", "revenue_trend", "VARCHAR"),
+        ("clients", "activity_level", "VARCHAR"),
+        ("clients", "open_tickets", "INTEGER DEFAULT 0"),
+        ("clients", "last_ticket_date", "TIMESTAMP"),
+        ("clients", "integration_metadata", "JSONB"),
+        ("clients", "airtable_record_id", "VARCHAR"),
+        ("clients", "last_checkup", "TIMESTAMP"),
+        ("clients", "needs_checkup", "BOOLEAN DEFAULT FALSE"),
+        ("clients", "last_meeting_date", "TIMESTAMP"),
+        ("clients", "last_sync_at", "TIMESTAMP"),
+        # Tasks
+        ("tasks", "client_id", "INTEGER REFERENCES clients(id)"),
+        ("tasks", "merchrules_task_id", "VARCHAR"),
+        ("tasks", "source", "VARCHAR DEFAULT 'manual'"),
+        ("tasks", "created_from_meeting_id", "INTEGER REFERENCES meetings(id)"),
+        ("tasks", "due_date", "TIMESTAMP"),
+        ("tasks", "team", "VARCHAR"),
+        ("tasks", "task_type", "VARCHAR"),
+        # Meetings
+        ("meetings", "client_id", "INTEGER REFERENCES clients(id)"),
+        ("meetings", "source", "VARCHAR DEFAULT 'internal'"),
+        ("meetings", "title", "VARCHAR"),
+        ("meetings", "summary", "TEXT"),
+        ("meetings", "transcript", "TEXT"),
+        ("meetings", "recording_url", "VARCHAR"),
+        ("meetings", "transcript_url", "VARCHAR"),
+        ("meetings", "mood", "VARCHAR"),
+        ("meetings", "sentiment_score", "FLOAT"),
+        ("meetings", "attendees", "JSONB"),
+        ("meetings", "external_id", "VARCHAR"),
+        # Checkups
+        ("checkups", "client_id", "INTEGER REFERENCES clients(id)"),
+        ("checkups", "merchrules_id", "VARCHAR"),
+        ("checkups", "priority", "INTEGER DEFAULT 0"),
+        ("checkups", "completed_date", "TIMESTAMP"),
+        ("checkups", "scheduled_date", "TIMESTAMP"),
+        ("checkups", "status", "VARCHAR"),
+        ("checkups", "type", "VARCHAR"),
+        # Users
+        ("users", "role", "VARCHAR DEFAULT 'manager'"),
+        ("users", "is_active", "BOOLEAN DEFAULT TRUE"),
+        ("users", "hashed_password", "VARCHAR"),
+        ("users", "telegram_id", "VARCHAR"),
+        ("users", "updated_at", "TIMESTAMP"),
+        # Accounts
+        ("accounts", "domain", "VARCHAR"),
+        ("accounts", "airtable_base_id", "VARCHAR"),
+        ("accounts", "merchrules_login", "VARCHAR"),
+        ("accounts", "is_active", "BOOLEAN DEFAULT TRUE"),
+        ("accounts", "account_data", "JSONB"),
+        # Audit logs
+        ("audit_logs", "user_id", "INTEGER REFERENCES users(id)"),
+        ("audit_logs", "ip_address", "VARCHAR"),
+        ("audit_logs", "user_agent", "VARCHAR"),
+        ("audit_logs", "old_values", "JSONB"),
+        ("audit_logs", "new_values", "JSONB"),
+        ("audit_logs", "resource_type", "VARCHAR"),
+        ("audit_logs", "resource_id", "INTEGER"),
+        ("audit_logs", "action", "VARCHAR"),
+        # Notifications
+        ("notifications", "user_id", "INTEGER REFERENCES users(id)"),
+        ("notifications", "title", "VARCHAR"),
+        ("notifications", "message", "TEXT"),
+        ("notifications", "type", "VARCHAR"),
+        ("notifications", "is_read", "BOOLEAN DEFAULT FALSE"),
+        ("notifications", "related_resource_type", "VARCHAR"),
+        ("notifications", "related_resource_id", "INTEGER"),
+        ("notifications", "read_at", "TIMESTAMP"),
+        # Sync logs
+        ("sync_logs", "sync_data", "JSONB"),
+    ]
+
+    applied = 0
+    for table, col, col_type in pending:
+        existing = tables_columns.get(table, set())
+        if col not in existing:
+            try:
+                db.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                db.commit()
+                applied += 1
+                logger.info(f"  + {table}.{col}")
+            except Exception as e:
+                logger.warning(f"  ! {table}.{col}: {e}")
+
+    if applied:
+        logger.info(f"✅ Applied {applied} column migrations")
+    else:
+        logger.info("✅ Schema up to date")
 
 
 # ============================================================================
