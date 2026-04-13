@@ -12,3 +12,13 @@ requests==2.31.0
 aiofiles==24.1.0
 python-multipart==0.0.9
 aiosqlalchemy==0.2.1
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.1
+email-validator==2.1.0
+pandas==2.1.4
+reportlab==4.0.9
+sendgrid==6.11.0
+python-telegram-bot==20.6

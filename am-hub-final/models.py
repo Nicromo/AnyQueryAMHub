@@ -9,6 +9,7 @@ class Client(Base):
     
     # Основные поля
     id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"))  # Многотенантность
     name = Column(String, index=True)
     domain = Column(String, nullable=True)
     segment = Column(String, nullable=True)
@@ -147,3 +148,96 @@ class SyncLog(Base):
     completed_at = Column(DateTime, nullable=True)
     
     metadata = Column(JSONB, default=dict)
+
+
+class User(Base):
+    """Пользователи системы"""
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    role = Column(String, default="manager")  # manager, admin, viewer
+    is_active = Column(Boolean, default=True)
+    
+    hashed_password = Column(String, nullable=True)  # Для email/pass auth
+    telegram_id = Column(String, nullable=True, unique=True)  # Для Telegram auth
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Связь с назначенными клиентами (менеджер видит своих клиентов)
+    assigned_clients = relationship(
+        "Client",
+        secondary="user_client_assignment",
+        backref="assigned_managers"
+    )
+
+
+class UserClientAssignment(Base):
+    """Связь: какой менеджер отвечает за каких клиентов"""
+    __tablename__ = "user_client_assignment"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), index=True)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Account(Base):
+    """Аккаунт/организация (для многотенантности)"""
+    __tablename__ = "accounts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    domain = Column(String, nullable=True)
+    
+    # Интеграции для этого аккаунта
+    airtable_base_id = Column(String, nullable=True)
+    merchrules_login = Column(String, nullable=True)  # Encrypted
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Metadata
+    metadata = Column(JSONB, default=dict)
+
+
+class AuditLog(Base):
+    """Логирование всех изменений для аудита"""
+    __tablename__ = "audit_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String)  # create, update, delete
+    resource_type = Column(String)  # client, task, meeting, etc
+    resource_id = Column(Integer)
+    
+    old_values = Column(JSONB, nullable=True)
+    new_values = Column(JSONB)
+    
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class Notification(Base):
+    """In-app уведомления"""
+    __tablename__ = "notifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    
+    title = Column(String)
+    message = Column(Text)
+    type = Column(String)  # info, warning, alert, success
+    
+    is_read = Column(Boolean, default=False)
+    
+    related_resource_type = Column(String, nullable=True)  # client, task, meeting
+    related_resource_id = Column(Integer, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    read_at = Column(DateTime, nullable=True)

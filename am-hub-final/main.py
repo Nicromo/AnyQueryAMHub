@@ -1,360 +1,967 @@
-﻿import os
+"""
+AM Hub - FastAPI main application with full integration
+Полная интеграция с:
+- Pydantic schemas для валидации
+- JWT authentication
+- Role-based access control
+- Email уведомления
+- File upload/export
+- WebSocket real-time
+- Rate limiting и логирование
+"""
+
+import os
+import io
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request
-from fastapi.templating import Jinja2Templates
+from typing import List, Optional
+
+from fastapi import (
+    FastAPI, Request, Depends, HTTPException, UploadFile, File, 
+    Query, WebSocket, WebSocketDisconnect, status
+)
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-from database import engine, get_db, Base, init_db, SessionLocal
-from models import Client, Task, Meeting, CheckUp
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+# Configuration
+from database import engine, get_db, Base, init_db, SessionLocal
+
+# Models
+from models import Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog, Notification
+
+# Schemas
+from schemas import (
+    ClientCreate, ClientUpdate, ClientResponse, ClientFilter,
+    TaskCreate, TaskUpdate, TaskResponse, TaskFilter,
+    MeetingCreate, MeetingUpdate, MeetingResponse, MeetingFilter,
+    CheckupCreate, CheckupUpdate, CheckupResponse,
+    UserCreate, UserResponse,
+    PaginatedResponse, ErrorResponse, StatsResponse,
+)
+
+# Auth & Security
+from auth import (
+    get_current_user, get_current_admin, 
+    authenticate_user, create_user, 
+    check_client_access, ensure_client_access,
+    log_audit, create_access_token
+)
+
+# Error handling
+from error_handlers import (
+    ValidationError, ResourceNotFoundError, UnauthorizedError,
+    ForbiddenError, ConflictError, BadRequestError, handle_db_error, log_error
+)
+
+# Middleware
+from middlewares import (
+    LoggingMiddleware, RateLimitMiddleware, CORSMiddleware, 
+    ErrorHandlingMiddleware, SecurityHeadersMiddleware
+)
+
+# Services
+from email_service import (
+    send_morning_plan, send_overdue_checkup_alert, send_task_created,
+    EmailType, get_email_service
+)
+from file_service import (
+    FileProcessor, BulkImporter, BulkExporter, FileFormat
+)
+from websocket_manager import (
+    ConnectionManager, handle_websocket_connection, emit_task_created,
+    emit_task_updated, emit_client_updated, emit_notification, manager
+)
+from validators import ClientValidator, TaskValidator, MeetingValidator
+
 # Integrations
-from integrations import airtable, merchrules
+from integrations.airtable import get_clients as sync_clients_airtable
+from integrations.merchrules_extended import (
+    fetch_account_analytics, fetch_checkups, fetch_roadmap_tasks,
+    fetch_meetings as fetch_meetings_merchrules
+)
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 templates = Jinja2Templates(directory="templates")
-app = FastAPI(title="AM Hub")
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
+# ============================================================================
+# LIFESPAN
+# ============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """App startup/shutdown"""
     try:
         init_db()
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-        print("✅ DB Connected")
+        logger.info("✅ Database connected")
     except Exception as e:
-        print(f"⚠️ DB Error: {e}")
+        logger.error(f"❌ Database error: {e}")
+    
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+# ============================================================================
+# APP SETUP
+# ============================================================================
+
+app = FastAPI(
+    title="AM Hub",
+    description="Account Manager Hub - Complete platform",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Middleware
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # ============================================================================
-# PAGES
+# HEALTH & ROOT
 # ============================================================================
-
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
-    return templates.TemplateResponse("workspace.html", {"request": request})
-
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    """Health check"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "websockets": manager.get_connection_count(),
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    """Root page"""
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 # ============================================================================
-# API: CLIENTS
+# AUTH ENDPOINTS
 # ============================================================================
 
-
-@app.get("/api/clients")
-async def list_clients():
-    """Получить список всех клиентов с аналитикой"""
+@app.post("/api/auth/register", response_model=UserResponse)
+async def register(user: UserCreate, db: Session = Depends(get_db)):
+    """Register new user"""
     try:
-        db = SessionLocal()
-        clients = db.query(Client).limit(100).all()
+        # Check if user exists
+        existing = db.query(User).filter(User.email == user.email).first()
+        if existing:
+            raise ConflictError("User with this email already exists")
         
-        result = []
-        for client in clients:
-            result.append({
-                "id": client.id,
-                "name": client.name,
-                "segment": client.segment,
-                "manager_email": client.manager_email,
-                "health_score": client.health_score,
-                "revenue_trend": client.revenue_trend,
-                "open_tickets": client.open_tickets,
-                "last_meeting_date": client.last_meeting_date.isoformat() if client.last_meeting_date else None,
-                "needs_checkup": client.needs_checkup,
-            })
+        # Create user
+        new_user = create_user(user, db)
         
-        return result
+        return UserResponse.from_orm(new_user)
+    
+    except ConflictError:
+        raise
     except Exception as e:
-        logger.error(f"Error listing clients: {e}")
-        return []
-    finally:
-        db.close()
+        log_error(e, "register")
+        raise BadRequestError(str(e))
 
 
-@app.get("/api/clients/{client_id}")
-async def get_client_detail(client_id: int):
-    """Получить детали клиента"""
+@app.post("/api/auth/login")
+async def login(email: str, password: str, db: Session = Depends(get_db)):
+    """Login user"""
     try:
-        db = SessionLocal()
+        user = authenticate_user(db, email, password)
+        if not user:
+            raise UnauthorizedError("Invalid email or password")
+        
+        token = create_access_token({"sub": str(user.id)})
+        
+        # Log audit
+        await log_audit(
+            db, user.id, "LOGIN", "User logged in",
+            {"email": email}
+        )
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": UserResponse.from_orm(user)
+        }
+    
+    except UnauthorizedError:
+        raise
+    except Exception as e:
+        log_error(e, "login")
+        raise BadRequestError("Login failed")
+
+
+# ============================================================================
+# PROFILE ENDPOINTS
+# ============================================================================
+
+@app.get("/api/me", response_model=UserResponse)
+async def get_profile(current_user: User = Depends(get_current_user)):
+    """Get current user profile"""
+    return UserResponse.from_orm(current_user)
+
+
+@app.put("/api/me")
+async def update_profile(
+    name: Optional[str] = None,
+    phone: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update user profile"""
+    try:
+        if name:
+            current_user.name = name
+        if phone:
+            current_user.phone = phone
+        
+        db.commit()
+        
+        await log_audit(
+            db, current_user.id, "PROFILE_UPDATE",
+            "User updated profile", {"name": name, "phone": phone}
+        )
+        
+        return UserResponse.from_orm(current_user)
+    
+    except Exception as e:
+        db.rollback()
+        log_error(e, "update_profile")
+        raise handle_db_error(e)
+
+
+# ============================================================================
+# CLIENTS ENDPOINTS
+# ============================================================================
+
+@app.get("/api/clients", response_model=PaginatedResponse)
+async def list_clients(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    segment: Optional[str] = None,
+    manager_email: Optional[str] = None,
+    health_min: Optional[float] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List clients with filters and pagination"""
+    try:
+        query = db.query(Client)
+        
+        # Фильтровать по доступу пользователя
+        if current_user.role == "manager":
+            query = query.filter(
+                (Client.manager_email == current_user.email) |
+                (Client.account_id == current_user.account_id)
+            )
+        elif current_user.role == "viewer":
+            raise ForbiddenError("Viewers cannot list clients")
+        
+        # Применить фильтры
+        if segment:
+            query = query.filter(Client.segment == segment)
+        
+        if manager_email:
+            query = query.filter(Client.manager_email == manager_email)
+        
+        if health_min is not None:
+            query = query.filter(Client.health_score >= health_min)
+        
+        # Получить total count
+        total = query.count()
+        
+        # Pagination
+        clients = query.offset(skip).limit(limit).all()
+        
+        return PaginatedResponse(
+            data=[ClientResponse.from_orm(c) for c in clients],
+            total=total,
+            skip=skip,
+            limit=limit,
+            has_more=skip + limit < total,
+        )
+    
+    except ForbiddenError:
+        raise
+    except Exception as e:
+        log_error(e, "list_clients")
+        raise handle_db_error(e)
+
+
+@app.post("/api/clients", response_model=ClientResponse, status_code=201)
+async def create_client(
+    client: ClientCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create new client"""
+    try:
+        # Валидировать данные
+        validator = ClientValidator(
+            name=client.name,
+            email=client.email,
+            phone=client.phone or "",
+            segment=client.segment or "smb"
+        )
+        
+        # Check for duplicates
+        existing = db.query(Client).filter(Client.email == client.email).first()
+        if existing:
+            raise ConflictError(f"Client with email {client.email} already exists")
+        
+        # Create
+        new_client = Client(
+            name=client.name,
+            email=client.email,
+            phone=client.phone,
+            segment=client.segment,
+            manager_email=current_user.email,
+            account_id=current_user.account_id,
+            status="active",
+            health_score=75,
+            created_at=datetime.now(),
+        )
+        
+        db.add(new_client)
+        db.commit()
+        db.refresh(new_client)
+        
+        # Audit
+        await log_audit(
+            db, current_user.id, "CLIENT_CREATE",
+            f"Created client {new_client.name}",
+            {"client_id": new_client.id}
+        )
+        
+        # WebSocket notification
+        await emit_task_created(current_user.id, {
+            "id": new_client.id,
+            "name": new_client.name,
+        })
+        
+        # Email to team
+        try:
+            await send_task_created(
+                current_user.email,
+                f"New Client: {new_client.name}",
+                new_client.name,
+            )
+        except:
+            pass
+        
+        return ClientResponse.from_orm(new_client)
+    
+    except (ValidationError, ConflictError):
+        raise
+    except Exception as e:
+        db.rollback()
+        log_error(e, "create_client")
+        raise handle_db_error(e)
+
+
+@app.get("/api/clients/{client_id}", response_model=ClientResponse)
+async def get_client(
+    client_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get client details"""
+    try:
         client = db.query(Client).filter(Client.id == client_id).first()
         
         if not client:
-            return {"error": "Client not found"}
+            raise ResourceNotFoundError("Client", client_id)
         
-        return {
-            "id": client.id,
-            "name": client.name,
-            "segment": client.segment,
-            "manager_email": client.manager_email,
-            "health_score": client.health_score,
-            "revenue_trend": client.revenue_trend,
-            "activity_level": client.activity_level,
-            "open_tickets": client.open_tickets,
-            "last_meeting_date": client.last_meeting_date.isoformat() if client.last_meeting_date else None,
-            "last_checkup": client.last_checkup.isoformat() if client.last_checkup else None,
-            "needs_checkup": client.needs_checkup,
-            "site_ids": client.site_ids,
-            "airtable_record_id": client.airtable_record_id,
-            "merchrules_account_id": client.merchrules_account_id,
-            "last_sync_at": client.last_sync_at.isoformat() if client.last_sync_at else None,
-        }
+        # Check access
+        ensure_client_access(current_user, client, db)
+        
+        return ClientResponse.from_orm(client)
+    
+    except ResourceNotFoundError:
+        raise
+    except ForbiddenError:
+        raise
     except Exception as e:
-        logger.error(f"Error getting client detail: {e}")
-        return {"error": str(e)}
-    finally:
-        db.close()
+        log_error(e, "get_client")
+        raise handle_db_error(e)
 
 
-# ============================================================================
-# API: TASKS
-# ============================================================================
-
-
-@app.get("/api/clients/{client_id}/tasks")
-async def get_client_tasks(client_id: int):
-    """Получить задачи клиента"""
+@app.put("/api/clients/{client_id}", response_model=ClientResponse)
+async def update_client(
+    client_id: int,
+    update: ClientUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update client"""
     try:
-        db = SessionLocal()
-        tasks = db.query(Task).filter(Task.client_id == client_id).all()
+        client = db.query(Client).filter(Client.id == client_id).first()
         
-        result = []
-        for task in tasks:
-            result.append({
-                "id": task.id,
-                "title": task.title,
-                "description": task.description,
-                "status": task.status,
-                "priority": task.priority,
-                "source": task.source,
-                "created_at": task.created_at.isoformat(),
-                "due_date": task.due_date.isoformat() if task.due_date else None,
-            })
+        if not client:
+            raise ResourceNotFoundError("Client", client_id)
         
-        return result
+        # Check access
+        ensure_client_access(current_user, client, db)
+        
+        # Update fields
+        update_data = update.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(client, field, value)
+        
+        client.updated_at = datetime.now()
+        db.commit()
+        db.refresh(client)
+        
+        # Audit
+        await log_audit(
+            db, current_user.id, "CLIENT_UPDATE",
+            f"Updated client {client.name}",
+            {"client_id": client_id, "updates": update_data}
+        )
+        
+        # WebSocket
+        await emit_client_updated(current_user.id, client_id, update_data)
+        
+        return ClientResponse.from_orm(client)
+    
+    except (ResourceNotFoundError, ForbiddenError):
+        raise
     except Exception as e:
-        logger.error(f"Error getting client tasks: {e}")
-        return []
-    finally:
-        db.close()
+        db.rollback()
+        log_error(e, "update_client")
+        raise handle_db_error(e)
 
 
-# ============================================================================
-# API: MEETINGS
-# ============================================================================
-
-
-@app.get("/api/clients/{client_id}/meetings")
-async def get_client_meetings(client_id: int):
-    """Получить встречи клиента"""
+@app.delete("/api/clients/{client_id}")
+async def delete_client(
+    client_id: int,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete client (admin only)"""
     try:
-        db = SessionLocal()
-        meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).all()
+        client = db.query(Client).filter(Client.id == client_id).first()
         
-        result = []
-        for meeting in meetings:
-            result.append({
-                "id": meeting.id,
-                "date": meeting.date.isoformat(),
-                "type": meeting.type,
-                "source": meeting.source,
-                "title": meeting.title,
-                "summary": meeting.summary,
-                "recording_url": meeting.recording_url,
-                "mood": meeting.mood,
-                "attendees": meeting.attendees,
-            })
+        if not client:
+            raise ResourceNotFoundError("Client", client_id)
         
-        return result
+        db.delete(client)
+        db.commit()
+        
+        # Audit
+        await log_audit(
+            db, current_user.id, "CLIENT_DELETE",
+            f"Deleted client {client.name}",
+            {"client_id": client_id}
+        )
+        
+        return {"status": "deleted"}
+    
     except Exception as e:
-        logger.error(f"Error getting client meetings: {e}")
-        return []
-    finally:
-        db.close()
+        db.rollback()
+        log_error(e, "delete_client")
+        raise handle_db_error(e)
 
 
 # ============================================================================
-# API: CHECKUPS
+# TASKS ENDPOINTS
 # ============================================================================
 
-
-@app.get("/api/clients/{client_id}/checkups")
-async def get_client_checkups(client_id: int):
-    """Получить чекапы клиента"""
+@app.get("/api/clients/{client_id}/tasks", response_model=PaginatedResponse)
+async def list_tasks(
+    client_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List tasks for client"""
     try:
-        db = SessionLocal()
-        checkups = db.query(CheckUp).filter(CheckUp.client_id == client_id).all()
+        client = db.query(Client).filter(Client.id == client_id).first()
+        if not client:
+            raise ResourceNotFoundError("Client", client_id)
         
-        result = []
-        for checkup in checkups:
-            days_overdue = (datetime.utcnow() - checkup.scheduled_date).days if checkup.status == "overdue" else 0
-            
-            result.append({
-                "id": checkup.id,
-                "type": checkup.type,
-                "status": checkup.status,
-                "scheduled_date": checkup.scheduled_date.isoformat(),
-                "completed_date": checkup.completed_date.isoformat() if checkup.completed_date else None,
-                "priority": checkup.priority,
-                "days_overdue": max(0, days_overdue),
-            })
+        # Check access
+        ensure_client_access(current_user, client, db)
         
-        return result
+        query = db.query(Task).filter(Task.client_id == client_id)
+        
+        if status:
+            query = query.filter(Task.status == status)
+        
+        if priority:
+            query = query.filter(Task.priority == priority)
+        
+        total = query.count()
+        tasks = query.offset(skip).limit(limit).all()
+        
+        return PaginatedResponse(
+            data=[TaskResponse.from_orm(t) for t in tasks],
+            total=total,
+            skip=skip,
+            limit=limit,
+            has_more=skip + limit < total,
+        )
+    
+    except ResourceNotFoundError:
+        raise
+    except ForbiddenError:
+        raise
     except Exception as e:
-        logger.error(f"Error getting client checkups: {e}")
-        return []
-    finally:
-        db.close()
+        log_error(e, "list_tasks")
+        raise handle_db_error(e)
 
 
-@app.get("/api/checkups/overdue")
-async def get_overdue_checkups():
-    """Получить все просроченные чекапы"""
+@app.post("/api/clients/{client_id}/tasks", response_model=TaskResponse, status_code=201)
+async def create_task(
+    client_id: int,
+    task: TaskCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create task for client"""
     try:
-        db = SessionLocal()
-        checkups = db.query(CheckUp).filter(CheckUp.status == "overdue").all()
+        client = db.query(Client).filter(Client.id == client_id).first()
+        if not client:
+            raise ResourceNotFoundError("Client", client_id)
         
-        result = []
-        for checkup in checkups:
-            client = db.query(Client).filter(Client.id == checkup.client_id).first()
-            
-            result.append({
-                "id": checkup.id,
-                "client_id": checkup.client_id,
-                "client_name": client.name if client else "Unknown",
-                "type": checkup.type,
-                "scheduled_date": checkup.scheduled_date.isoformat(),
-                "priority": checkup.priority,
-                "days_overdue": (datetime.utcnow() - checkup.scheduled_date).days,
-            })
+        # Check access
+        ensure_client_access(current_user, client, db)
         
-        # Сортировать по priorityи дням просрочки
-        result.sort(key=lambda x: (-x["priority"], -x["days_overdue"]))
+        # Validate
+        validator = TaskValidator(
+            title=task.title,
+            priority=task.priority,
+            status=task.status,
+            due_date=task.due_date,
+        )
         
-        return result
+        new_task = Task(
+            client_id=client_id,
+            title=task.title,
+            description=task.description,
+            priority=task.priority,
+            status=task.status,
+            due_date=task.due_date,
+            source=task.source or "manual",
+            created_at=datetime.now(),
+        )
+        
+        db.add(new_task)
+        db.commit()
+        db.refresh(new_task)
+        
+        # Audit
+        await log_audit(
+            db, current_user.id, "TASK_CREATE",
+            f"Created task {new_task.title}",
+            {"task_id": new_task.id, "client_id": client_id}
+        )
+        
+        # Email
+        try:
+            await send_task_created(current_user.email, new_task.title, client.name)
+        except:
+            pass
+        
+        return TaskResponse.from_orm(new_task)
+    
+    except (ResourceNotFoundError, ForbiddenError, ValidationError):
+        raise
     except Exception as e:
-        logger.error(f"Error getting overdue checkups: {e}")
-        return []
-    finally:
-        db.close()
+        db.rollback()
+        log_error(e, "create_task")
+        raise handle_db_error(e)
 
 
 # ============================================================================
-# API: SYNC & MANAGEMENT
+# MEETINGS ENDPOINTS
 # ============================================================================
 
+@app.get("/api/clients/{client_id}/meetings", response_model=PaginatedResponse)
+async def list_meetings(
+    client_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    meeting_type: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List meetings for client"""
+    try:
+        client = db.query(Client).filter(Client.id == client_id).first()
+        if not client:
+            raise ResourceNotFoundError("Client", client_id)
+        
+        ensure_client_access(current_user, client, db)
+        
+        query = db.query(Meeting).filter(Meeting.client_id == client_id)
+        
+        if meeting_type:
+            query = query.filter(Meeting.meeting_type == meeting_type)
+        
+        total = query.count()
+        meetings = query.order_by(Meeting.meeting_date.desc()).offset(skip).limit(limit).all()
+        
+        return PaginatedResponse(
+            data=[MeetingResponse.from_orm(m) for m in meetings],
+            total=total,
+            skip=skip,
+            limit=limit,
+            has_more=skip + limit < total,
+        )
+    
+    except (ResourceNotFoundError, ForbiddenError):
+        raise
+    except Exception as e:
+        log_error(e, "list_meetings")
+        raise handle_db_error(e)
+
+
+@app.post("/api/clients/{client_id}/meetings", response_model=MeetingResponse, status_code=201)
+async def create_meeting(
+    client_id: int,
+    meeting: MeetingCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create meeting for client"""
+    try:
+        client = db.query(Client).filter(Client.id == client_id).first()
+        if not client:
+            raise ResourceNotFoundError("Client", client_id)
+        
+        ensure_client_access(current_user, client, db)
+        
+        # Validate
+        validator = MeetingValidator(
+            meeting_type=meeting.meeting_type,
+            duration_minutes=meeting.duration_minutes,
+            meeting_date=meeting.meeting_date,
+        )
+        
+        new_meeting = Meeting(
+            client_id=client_id,
+            meeting_type=meeting.meeting_type,
+            meeting_date=meeting.meeting_date,
+            duration_minutes=meeting.duration_minutes,
+            notes=meeting.notes,
+            transcript=meeting.transcript,
+            recording_url=meeting.recording_url,
+            created_at=datetime.now(),
+        )
+        
+        db.add(new_meeting)
+        
+        # Update client's last_meeting_date
+        client.last_meeting_date = meeting.meeting_date
+        
+        db.commit()
+        db.refresh(new_meeting)
+        
+        # Audit
+        await log_audit(
+            db, current_user.id, "MEETING_CREATE",
+            f"Created {meeting.meeting_type} meeting",
+            {"meeting_id": new_meeting.id, "client_id": client_id}
+        )
+        
+        return MeetingResponse.from_orm(new_meeting)
+    
+    except (ResourceNotFoundError, ForbiddenError, ValidationError):
+        raise
+    except Exception as e:
+        db.rollback()
+        log_error(e, "create_meeting")
+        raise handle_db_error(e)
+
+
+# ============================================================================
+# SYNC ENDPOINTS
+# ============================================================================
 
 @app.post("/api/sync/clients")
-async def sync_clients_from_airtable():
-    """Синхронизировать клиентов из Airtable"""
+async def sync_clients(
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Sync clients from Airtable"""
     try:
-        db = SessionLocal()
-        airtable_clients = await airtable.get_clients(use_cache=False)
-        logger.info(f"Syncing {len(airtable_clients)} clients from Airtable")
+        # Fetch from Airtable
+        clients_data = await sync_clients_airtable()
         
         synced = 0
-        for at_client in airtable_clients:
-            # Найти или создать клиента
-            client = db.query(Client).filter(
-                Client.airtable_record_id == at_client['id']
+        for client_data in clients_data:
+            existing = db.query(Client).filter(
+                Client.email == client_data.get("email")
             ).first()
             
-            if not client:
-                client = Client(
-                    airtable_record_id=at_client['id'],
-                    name=at_client['name'],
-                    manager_email=at_client['manager'],
-                    segment=at_client['segment'],
+            if not existing:
+                new_client = Client(
+                    name=client_data.get("name"),
+                    email=client_data.get("email"),
+                    phone=client_data.get("phone"),
+                    segment=client_data.get("segment", "smb"),
+                    account_id=current_user.account_id,
+                    status="active",
+                    created_at=datetime.now(),
                 )
-                db.add(client)
-            else:
-                client.name = at_client['name']
-                client.manager_email = at_client['manager']
-                client.segment = at_client['segment']
-            
-            client.last_sync_at = datetime.utcnow()
-            synced += 1
+                db.add(new_client)
+                synced += 1
         
         db.commit()
-        logger.info(f"✅ Synced {synced} clients")
+        
+        # Create sync log
+        log = SyncLog(
+            source="airtable",
+            status="success",
+            count=synced,
+            user_id=current_user.id,
+            created_at=datetime.now(),
+        )
+        db.add(log)
+        db.commit()
+        
+        logger.info(f"✅ Synced {synced} clients from Airtable")
         
         return {"status": "success", "synced": synced}
+    
     except Exception as e:
-        logger.error(f"Error syncing clients: {e}")
         db.rollback()
-        return {"status": "error", "message": str(e)}
-    finally:
-        db.close()
-
-
-@app.post("/api/sync/analytics")
-async def sync_analytics():
-    """Синхронизировать аналитику из Merchrules"""
-    try:
-        db = SessionLocal()
-        clients = db.query(Client).all()
+        log_error(e, "sync_clients")
         
-        updated = 0
-        for client in clients:
-            if not client.merchrules_account_id:
-                continue
-            
-            # Получить аналитику
-            analytics = await merchrules.fetch_account_analytics(client.merchrules_account_id)
-            if analytics:
-                client.health_score = analytics.get('health_score', 0)
-                client.revenue_trend = analytics.get('revenue_trend')
-                client.activity_level = analytics.get('activity_level', 'low')
-                updated += 1
-        
-        client.last_sync_at = datetime.utcnow()
+        log = SyncLog(
+            source="airtable",
+            status="error",
+            error_message=str(e),
+            user_id=current_user.id,
+            created_at=datetime.now(),
+        )
+        db.add(log)
         db.commit()
-        logger.info(f"✅ Updated analytics for {updated} clients")
         
-        return {"status": "success", "updated": updated}
-    except Exception as e:
-        logger.error(f"Error syncing analytics: {e}")
-        db.rollback()
-        return {"status": "error", "message": str(e)}
-    finally:
-        db.close()
+        raise BadRequestError(f"Sync error: {str(e)}")
 
+
+# ============================================================================
+# FILE UPLOAD/EXPORT
+# ============================================================================
+
+@app.post("/api/files/upload/clients")
+async def upload_clients(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Upload and import clients from CSV/Excel"""
+    try:
+        content = await file.read()
+        
+        # Import
+        success, msg, data = BulkImporter.import_clients(content, file.filename)
+        
+        if not success:
+            raise ValidationError(msg)
+        
+        # Create clients
+        created = 0
+        for row in data:
+            existing = db.query(Client).filter(
+                Client.email == row.get("email")
+            ).first()
+            
+            if not existing:
+                new_client = Client(
+                    name=row.get("name"),
+                    email=row.get("email"),
+                    phone=row.get("phone"),
+                    segment=row.get("segment", "smb"),
+                    account_id=current_user.account_id,
+                    status="active",
+                    created_at=datetime.now(),
+                )
+                db.add(new_client)
+                created += 1
+        
+        db.commit()
+        
+        return {"status": "success", "created": created}
+    
+    except ValidationError:
+        raise
+    except Exception as e:
+        db.rollback()
+        log_error(e, "upload_clients")
+        raise BadRequestError(str(e))
+
+
+@app.get("/api/clients/export/{format}")
+async def export_clients(
+    format: str = "excel",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Export clients to CSV/Excel/PDF"""
+    try:
+        query = db.query(Client)
+        
+        if current_user.role == "manager":
+            query = query.filter(Client.manager_email == current_user.email)
+        
+        clients = query.all()
+        
+        # Prepare data
+        export_data = [
+            {
+                "name": c.name,
+                "email": c.email,
+                "phone": c.phone or "",
+                "segment": c.segment,
+                "health_score": c.health_score,
+                "manager_name": c.manager_email,
+            }
+            for c in clients
+        ]
+        
+        # Export
+        if format == "csv":
+            content = FileProcessor.to_csv(export_data)
+            filename = f"clients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        elif format == "pdf":
+            content = FileProcessor.to_pdf(export_data, title="Clients")
+            filename = f"clients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        else:  # excel
+            content = FileProcessor.to_excel(export_data, sheet_name="Clients")
+            filename = f"clients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return FileResponse(
+            io.BytesIO(content),
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+    
+    except Exception as e:
+        log_error(e, "export_clients")
+        raise BadRequestError(str(e))
+
+
+# ============================================================================
+# WEBSOCKET
+# ============================================================================
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str = None):
+    """WebSocket endpoint for real-time updates"""
+    try:
+        # Verify token and get user
+        if not token:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        
+        # Simple token validation (implement full JWT validation in production)
+        await handle_websocket_connection(websocket, None)  # In production, get user from token
+    
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+
+
+# ============================================================================
+# STATS & ANALYTICS
+# ============================================================================
 
 @app.get("/api/stats")
-async def get_stats():
-    """Получить статистику системы"""
+async def get_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get dashboard statistics"""
     try:
-        db = SessionLocal()
+        query = db.query(Client)
         
-        total_clients = db.query(Client).count()
-        total_tasks = db.query(Task).count()
-        total_meetings = db.query(Meeting).count()
-        overdue_checkups = db.query(CheckUp).filter(CheckUp.status == "overdue").count()
+        if current_user.role == "manager":
+            query = query.filter(Client.manager_email == current_user.email)
         
-        avg_health_score = db.query(Client).filter(Client.health_score > 0).count()
+        clients = query.all()
+        
+        total_clients = len(clients)
+        avg_health = sum(c.health_score or 0 for c in clients) / total_clients if total_clients > 0 else 0
+        
+        # Tasks
+        task_query = db.query(Task).filter(
+            Task.client_id.in_([c.id for c in clients])
+        )
+        total_tasks = task_query.count()
+        open_tasks = task_query.filter(Task.status == "open").count()
+        
+        # Meetings
+        meeting_query = db.query(Meeting).filter(
+            Meeting.client_id.in_([c.id for c in clients])
+        )
+        total_meetings = meeting_query.count()
         
         return {
             "total_clients": total_clients,
+            "avg_health_score": round(avg_health, 2),
             "total_tasks": total_tasks,
+            "open_tasks": open_tasks,
             "total_meetings": total_meetings,
-            "overdue_checkups": overdue_checkups,
-            "clients_with_health_score": avg_health_score,
+            "websocket_connections": manager.get_connection_count(),
         }
+    
     except Exception as e:
-        logger.error(f"Error getting stats: {e}")
+        log_error(e, "get_stats")
         return {}
-    finally:
-        db.close()
+
+
+# ============================================================================
+# ERROR HANDLERS
+# ============================================================================
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail} if isinstance(exc.detail, str) else exc.detail,
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.exception(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error"},
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        reload=os.getenv("ENV", "dev") == "dev",
+    )
