@@ -11,3 +11,4 @@ openpyxl==3.1.2
 requests==2.31.0
 aiofiles==24.1.0
 python-multipart==0.0.9
+aiosqlalchemy==0.2.1
