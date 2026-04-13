@@ -61,7 +61,7 @@ from error_handlers import (
 
 # Middleware
 from middlewares import (
-    LoggingMiddleware, RateLimitMiddleware, CORSMiddleware, 
+    LoggingMiddleware, RateLimitMiddleware,
     ErrorHandlingMiddleware, SecurityHeadersMiddleware
 )
 
