@@ -160,10 +160,13 @@ def _seed_demo_data(db):
 async def lifespan(app: FastAPI):
     """App startup/shutdown"""
     try:
-        init_db()
+        # Пересоздаём таблицы с актуальной схемой
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Database tables recreated")
+
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-            _run_migrations(db)
             _seed_demo_data(db)
         logger.info("✅ Database connected")
     except Exception as e:
