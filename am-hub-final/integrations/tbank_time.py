@@ -51,7 +51,7 @@ async def get_support_tickets(
     Получить обращения в саппорт по названию клиента/аккаунта
     
     Args:
-        account_name: Название аккаунта/клиента (для поиска в チケтах)
+        account_name: Название аккаунта/клиента (для поиска в чикетах)
         status: Статусы для фильтра (default: открыто/в работе)
         use_cache: Использовать кэш (default: True)
     
@@ -77,23 +77,53 @@ async def get_support_tickets(
         if datetime.now() - cached["timestamp"] < timedelta(seconds=CACHE_TTL_SECONDS):
             return cached["data"]
 
-    # TODO: Реализовать получение обращений из Tbank Time
-    # Варианты:
-    # 1. REST API (если есть):
-    #    GET /api/tickets?account=<NAME>&status=<STATUS>
-    # 2. GraphQL (если есть)
-    # 3. Парсинг веб-интерфейса (если нет API)
-    #
-    # Для пока возвращаем пустой список
-    tickets = []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{TIME_BASE_URL}/api/v1/tickets",
+                headers=_headers(),
+                params={
+                    "account": account_name,
+                    "status": status,
+                    "limit": 100,
+                },
+                timeout=10,
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                tickets = data.get("tickets", [])
+                
+                # Нормализовать данные
+                normalized = []
+                for t in tickets:
+                    normalized.append({
+                        "id": t.get("id"),
+                        "account": t.get("account", account_name),
+                        "title": t.get("title", ""),
+                        "description": t.get("description", ""),
+                        "status": t.get("status", "open"),
+                        "priority": t.get("priority", "normal"),
+                        "created_at": datetime.fromisoformat(t["created_at"]) if "created_at" in t else None,
+                        "updated_at": datetime.fromisoformat(t["updated_at"]) if "updated_at" in t else None,
+                        "assigned_to": t.get("assigned_to"),
+                        "messages_count": t.get("messages_count", 0),
+                    })
+                
+                _tickets_cache[cache_key] = {
+                    "data": normalized,
+                    "timestamp": datetime.now(),
+                }
+                
+                logger.info(f"✅ Loaded {len(normalized)} tickets for {account_name}")
+                return normalized
+            else:
+                logger.warning(f"Tbank Time API error: {response.status_code}")
+    
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch Tbank Time tickets: {e}")
 
-    _tickets_cache[cache_key] = {
-        "data": tickets,
-        "timestamp": datetime.now(),
-    }
-
-    logger.info(f"Loaded {len(tickets)} support tickets for {account_name}")
-    return tickets
+    return []
 
 
 async def get_ticket_details(ticket_id: str) -> Optional[Dict[str, Any]]:
@@ -123,9 +153,39 @@ async def get_ticket_details(ticket_id: str) -> Optional[Dict[str, Any]]:
                 ...
             }
     """
-    # TODO: Получить детали обращения
-    # GET /api/tickets/<ID>
-    pass
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{TIME_BASE_URL}/api/v1/tickets/{ticket_id}",
+                headers=_headers(),
+                timeout=10,
+            )
+            
+            if response.status_code == 200:
+                ticket = response.json()
+                
+                # Нормализовать сообщения
+                messages = ticket.get("messages", [])
+                normalized_messages = []
+                for msg in messages:
+                    normalized_messages.append({
+                        "id": msg.get("id"),
+                        "author": msg.get("author", ""),
+                        "text": msg.get("text", ""),
+                        "created_at": datetime.fromisoformat(msg["created_at"]) if "created_at" in msg else None,
+                        "attachments": msg.get("attachments", []),
+                    })
+                
+                ticket["messages"] = normalized_messages
+                logger.info(f"✅ Loaded details for ticket {ticket_id}")
+                return ticket
+            else:
+                logger.warning(f"Ticket not found: {ticket_id}")
+    
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch ticket details: {e}")
+    
+    return None
 
 
 async def get_ticket_history(
@@ -142,9 +202,32 @@ async def get_ticket_history(
     Returns:
         List: Все обращения (открытые + закрытые) за период
     """
-    # TODO: Получить historry
-    # GET /api/tickets/history?account=<NAME>&days=<N>
-    pass
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{TIME_BASE_URL}/api/v1/tickets/history",
+                headers=_headers(),
+                params={
+                    "account": account_name,
+                    "days": days,
+                    "limit": 1000,
+                },
+                timeout=10,
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                tickets = data.get("tickets", [])
+                
+                logger.info(f"✅ Loaded {len(tickets)} tickets from history for {account_name}")
+                return tickets
+            else:
+                logger.warning(f"Failed to load ticket history")
+    
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch ticket history: {e}")
+    
+    return []
 
 
 async def count_open_tickets(account_name: str) -> int:
@@ -181,8 +264,40 @@ async def sync_tickets_for_client(account_name: str) -> Dict[str, Any]:
                 "last_ticket": Dict,
             }
     """
-    # TODO: Реализовать синхронизацию
-    pass
+    logger.info(f"🔄 Syncing Tbank Time tickets for {account_name}")
+    
+    try:
+        # Получить открытые обращения
+        open_tickets = await get_support_tickets(
+            account_name,
+            status="open,in_progress",
+            use_cache=False,
+        )
+        
+        # Получить историю за 30 дней
+        history_tickets = await get_ticket_history(account_name, days=30)
+        
+        # Получить детали для последнего (если есть)
+        last_ticket = None
+        if open_tickets:
+            last_ticket = await get_ticket_details(open_tickets[0]["id"])
+        
+        result = {
+            "open_count": len(open_tickets),
+            "total_count": len(history_tickets),
+            "last_ticket": last_ticket,
+        }
+        
+        logger.info(f"✅ Synced Tbank Time tickets: {result}")
+        return result
+    
+    except Exception as e:
+        logger.error(f"❌ Failed to sync Tbank Time tickets: {e}")
+        return {
+            "open_count": 0,
+            "total_count": 0,
+            "last_ticket": None,
+        }
 
 
 class TimeChannelMonitor:
@@ -201,9 +316,25 @@ class TimeChannelMonitor:
         Returns:
             List: Сообщения для анализа
         """
-        # TODO: Получить сообщения из канала
-        # GET /api/channels/<CHANNEL>/messages
-        pass
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(
+                    f"{TIME_BASE_URL}/api/v1/channels/{channel}/messages",
+                    headers=_headers(),
+                    params={"limit": limit},
+                    timeout=10,
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    messages = data.get("messages", [])
+                    logger.info(f"✅ Loaded {len(messages)} messages from {channel}")
+                    return messages
+        
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch channel messages: {e}")
+        
+        return []
 
     async def parse_tickets_from_channel(self) -> List[Dict]:
         """
@@ -212,8 +343,28 @@ class TimeChannelMonitor:
         Returns:
             List: Выделенные обращения
         """
-        # TODO: Парсить структурированные сообщения обращений
-        pass
+        try:
+            messages = await self.get_channel_messages()
+            
+            # Простой парсинг: ищем сообщения с структурой вида "Ticket: ..."
+            tickets = []
+            for msg in messages:
+                text = msg.get("text", "")
+                if "ticket" in text.lower() or "обращение" in text.lower():
+                    tickets.append({
+                        "source": "channel",
+                        "message": text,
+                        "author": msg.get("author"),
+                        "created_at": msg.get("created_at"),
+                    })
+            
+            logger.info(f"📊 Parsed {len(tickets)} tickets from channel")
+            return tickets
+        
+        except Exception as e:
+            logger.error(f"❌ Failed to parse channel tickets: {e}")
+        
+        return []
 
 
 if __name__ == "__main__":

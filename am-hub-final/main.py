@@ -152,6 +152,34 @@ async def health():
     }
 
 
+@app.get("/health/detailed")
+async def health_detailed():
+    """Detailed health check"""
+    from monitoring import get_startup_checks
+    return get_startup_checks()
+
+
+@app.get("/health/integrations")
+async def health_integrations():
+    """Check integration status"""
+    from monitoring import get_integration_status
+    return get_integration_status()
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics"""
+    from monitoring import metrics as metrics_collector
+    return metrics_collector.get_prometheus_metrics()
+
+
+@app.get("/api/health/metrics")
+async def metrics_json():
+    """JSON metrics"""
+    from monitoring import metrics as metrics_collector
+    return metrics_collector.get_health_metrics()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """Root page"""
