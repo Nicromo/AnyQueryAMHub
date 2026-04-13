@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QBR: {{ client.name }} — AM Hub</title>
+  <title>План: {{ client.name }} — AM Hub</title>
   <style>
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
@@ -26,7 +26,7 @@
     .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
     .field { margin-bottom:12px; }
     .field label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px; }
-    .field input, .field textarea { width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; }
+    .field input, .field textarea, .field select { width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; }
     .field textarea { min-height:80px; resize:vertical; }
     .field input:focus, .field textarea:focus { border-color:var(--accent); }
     .item-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
@@ -39,9 +39,6 @@
     .saved-msg { font-size:.78rem; color:var(--green); margin-top:8px; display:none; }
     .saved-msg.show { display:block; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-    .badge { display:inline-block; padding:3px 10px; border-radius:6px; font-size:.7rem; font-weight:600; }
-    .badge-draft { background:rgba(99,102,241,.15); color:var(--accent); }
-    .badge-completed { background:rgba(34,197,94,.15); color:var(--green); }
   </style>
 </head>
 <body>
@@ -60,77 +57,86 @@
 
 <div class="main">
   <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
-  <h1>📊 QBR: {{ client.name }}</h1>
-  <p class="sub">{{ client.segment or '' }} · {% if qbr %}{{ qbr.quarter }}{% else %}Новый QBR{% endif %}</p>
+  <h1>📐 План работы: {{ client.name }}</h1>
+  <p class="sub">{{ client.segment or '' }} · Обновлено: {{ plan.updated_at.strftime('%d.%m.%Y') if plan.updated_at else '—' }}</p>
 
   <div class="section">
-    <h3>📅 Дата проведения</h3>
-    <div class="field">
-      <input type="date" id="qbr-date" value="{{ qbr.date.strftime('%Y-%m-%d') if qbr and qbr.date else '' }}">
-    </div>
-  </div>
-
-  <div class="section">
-    <h3>🏆 Достижения за квартал</h3>
-    <div id="achievements-list">
-      {% for a in qbr.achievements or [] %}
-      <div class="item-row"><input type="text" value="{{ a }}" placeholder="Достижение..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
-      {% endfor %}
-    </div>
-    <button class="btn btn-sm btn-outline" onclick="addItem('achievements-list','Достижение...')">+ Добавить</button>
-  </div>
-
-  <div class="section">
-    <h3>⚠️ Проблемы</h3>
-    <div id="issues-list">
-      {% for i in qbr.issues or [] %}
-      <div class="item-row"><input type="text" value="{{ i }}" placeholder="Проблема..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
-      {% endfor %}
-    </div>
-    <button class="btn btn-sm btn-outline" onclick="addItem('issues-list','Проблема...')">+ Добавить</button>
-  </div>
-
-  <div class="section">
-    <h3>🎯 Цели на следующий квартал</h3>
+    <h3>🎯 Цели на квартал</h3>
     <div id="goals-list">
-      {% for g in qbr.next_quarter_goals or [] %}
-      <div class="item-row"><input type="text" value="{{ g }}" placeholder="Цель..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% for g in plan.quarterly_goals or [] %}
+      <div class="item-row">
+        <input type="text" value="{{ g.goal or '' }}" placeholder="Цель..." class="goal-input">
+        <input type="text" value="{{ g.target or '' }}" placeholder="Метрика..." class="goal-target" style="max-width:150px;">
+        <span class="remove" onclick="this.parentElement.remove()">✕</span>
+      </div>
       {% endfor %}
     </div>
-    <button class="btn btn-sm btn-outline" onclick="addItem('goals-list','Цель...')">+ Добавить</button>
+    <button class="btn btn-sm btn-outline" onclick="addGoal()">+ Добавить цель</button>
   </div>
 
   <div class="section">
-    <h3>📝 Итоги</h3>
+    <h3>✅ Действия</h3>
+    <div id="actions-list">
+      {% for a in plan.action_items or [] %}
+      <div class="item-row">
+        <input type="text" value="{{ a.action or '' }}" placeholder="Действие..." class="action-input">
+        <input type="text" value="{{ a.assignee or '' }}" placeholder="Кто..." class="action-assignee" style="max-width:120px;">
+        <input type="date" value="{{ a.due or '' }}" class="action-due" style="max-width:140px;">
+        <span class="remove" onclick="this.parentElement.remove()">✕</span>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addAction()">+ Добавить действие</button>
+  </div>
+
+  <div class="section">
+    <h3>📝 Стратегия</h3>
     <div class="field">
-      <textarea id="summary" placeholder="Краткое резюме QBR...">{{ qbr.summary or '' }}</textarea>
+      <textarea id="strategy" placeholder="Общая стратегия по клиенту...">{{ plan.strategy or '' }}</textarea>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>📋 Заметки</h3>
+    <div class="field">
+      <textarea id="notes" placeholder="Заметки, наблюдения, контекст...">{{ plan.notes or '' }}</textarea>
     </div>
   </div>
 
   <div style="display:flex;gap:10px;align-items:center;">
-    <button class="btn" onclick="saveQBR()">💾 Сохранить QBR</button>
+    <button class="btn" onclick="savePlan()">💾 Сохранить план</button>
     <span class="saved-msg" id="saved">✅ Сохранено</span>
   </div>
 </div>
 
 <script>
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-function addItem(listId,placeholder){
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+function addGoal(){
   const d=document.createElement('div');d.className='item-row';
-  d.innerHTML='<input type="text" placeholder="'+placeholder+'"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
-  document.getElementById(listId).appendChild(d);
+  d.innerHTML='<input type="text" placeholder="Цель..." class="goal-input"><input type="text" placeholder="Метрика..." class="goal-target" style="max-width:150px;"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('goals-list').appendChild(d);
 }
-function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
-async function saveQBR(){
-  const data={
-    date:document.getElementById('qbr-date').value,
-    achievements:getListValues('achievements-list'),
-    issues:getListValues('issues-list'),
-    next_quarter_goals:getListValues('goals-list'),
-    summary:document.getElementById('summary').value,
-    status:'draft'
-  };
-  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+function addAction(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Действие..." class="action-input"><input type="text" placeholder="Кто..." class="action-assignee" style="max-width:120px;"><input type="date" class="action-due" style="max-width:140px;"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('actions-list').appendChild(d);
+}
+
+async function savePlan(){
+  const goals=[];
+  document.querySelectorAll('#goals-list .item-row').forEach(row=>{
+    const g=row.querySelector('.goal-input').value;
+    if(g) goals.push({goal:g, target:row.querySelector('.goal-target').value, status:'active'});
+  });
+  const actions=[];
+  document.querySelectorAll('#actions-list .item-row').forEach(row=>{
+    const a=row.querySelector('.action-input').value;
+    if(a) actions.push({action:a, assignee:row.querySelector('.action-assignee').value, due:row.querySelector('.action-due').value, done:false});
+  });
+  const data={quarterly_goals:goals, action_items:actions, strategy:document.getElementById('strategy').value, notes:document.getElementById('notes').value};
+  const r=await fetch('/api/clients/{{ client.id }}/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
 }
 </script>

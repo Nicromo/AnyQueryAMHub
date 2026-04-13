@@ -607,6 +607,58 @@ async def sync_page(request: Request, db: Session = Depends(get_db), auth_token:
 
 
 # ============================================================================
+# PLAN & QBR PAGES
+# ============================================================================
+
+@app.get("/client/{client_id}/plan", response_class=HTMLResponse)
+async def plan_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    plan = db.query(AccountPlan).filter(AccountPlan.client_id == client_id).first()
+    if not plan:
+        plan = AccountPlan(client_id=client_id)
+
+    return templates.TemplateResponse("plan.html", {
+        "request": request, "user": user, "client": client, "plan": plan,
+    })
+
+
+@app.get("/client/{client_id}/qbr", response_class=HTMLResponse)
+async def qbr_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    qbr = db.query(QBR).filter(QBR.client_id == client_id).order_by(QBR.date.desc()).first()
+
+    return templates.TemplateResponse("qbr.html", {
+        "request": request, "user": user, "client": client, "qbr": qbr,
+    })
+
+
+# ============================================================================
 # INTEGRATIONS
 # ============================================================================
 
