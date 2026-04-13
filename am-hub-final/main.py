@@ -368,9 +368,6 @@ async def metrics_json():
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, db: Session = Depends(get_db)):
     """Root page"""
-    segment = request.query_params.get("segment")
-    sort = request.query_params.get("sort")
-
     query = db.query(Client)
     clients = query.all()
 
@@ -381,10 +378,13 @@ async def root(request: Request, db: Session = Depends(get_db)):
         if seg in counts:
             counts[seg] += 1
 
-    if segment:
-        clients = [c for c in clients if c.segment == segment]
+    # Обогащаем клиентов
+    now = datetime.now()
+    healthy = 0
+    warning = 0
+    overdue = 0
+    total_open = 0
 
-    # Обогащаем клиентов вычисляемыми полями для шаблона
     for c in clients:
         open_tasks = db.query(Task).filter(
             Task.client_id == c.id,
@@ -395,21 +395,28 @@ async def root(request: Request, db: Session = Depends(get_db)):
             Task.status == "blocked"
         ).count()
 
-        # Определяем статус-цвет
         is_overdue = c.needs_checkup and (
             not c.last_meeting_date or
-            (datetime.now() - c.last_meeting_date).days > 30
+            (now - c.last_meeting_date).days > 30
         )
         is_warning = c.needs_checkup and (
             c.last_meeting_date and
-            14 < (datetime.now() - c.last_meeting_date).days <= 30
+            14 < (now - c.last_meeting_date).days <= 30
         )
+
+        if is_overdue:
+            overdue += 1
+        elif is_warning:
+            warning += 1
+        else:
+            healthy += 1
+
+        total_open += open_tasks
 
         c.open_tasks = open_tasks
         c.blocked_tasks = blocked_tasks
         c.status = {
             "color": "red" if is_overdue else ("yellow" if is_warning else "green"),
-            "next_date": None,
         }
 
     return templates.TemplateResponse(
@@ -418,8 +425,11 @@ async def root(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "clients": clients,
             "counts": counts,
-            "segment": segment,
-            "sort": sort,
+            "healthy_count": healthy,
+            "warning_count": warning,
+            "overdue_count": overdue,
+            "total_open_tasks": total_open,
+            "now": now,
         },
     )
 
