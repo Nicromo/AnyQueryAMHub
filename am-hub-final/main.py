@@ -190,7 +190,10 @@ def _run_migrations(db):
     # Список колонок для добавления
     pending = [
         # Clients
+        ("clients", "domain", "VARCHAR"),
+        ("clients", "segment", "VARCHAR"),
         ("clients", "account_id", "INTEGER REFERENCES accounts(id)"),
+        ("clients", "manager_email", "VARCHAR"),
         ("clients", "merchrules_account_id", "VARCHAR"),
         ("clients", "site_ids", "JSONB"),
         ("clients", "health_score", "FLOAT"),
