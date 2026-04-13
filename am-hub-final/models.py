@@ -140,6 +140,12 @@ class QBR(Base):
     issues = Column(JSONB, default=list)
     next_quarter_goals = Column(JSONB, default=list)
 
+    # Презентация и выжимка
+    presentation_url = Column(String, nullable=True)  # Ссылка на презентацию
+    executive_summary = Column(Text, nullable=True)  # Краткая выжимка для руководства
+    future_work = Column(JSONB, default=list)  # [{"task": "...", "quarter": "...", "priority": "..."}]
+    key_insights = Column(JSONB, default=list)  # Ключевые инсайты
+
     # Связанная встреча
     meeting_id = Column(Integer, ForeignKey("meetings.id"), nullable=True)
 

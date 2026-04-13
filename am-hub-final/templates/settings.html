@@ -88,12 +88,16 @@
     <div class="info-box">
       <b>ℹ️ Только вы видите эти данные.</b> Они используются для синхронизации и AI-помощника.
     </div>
+    {% set mr = user_settings.get('merchrules', {}) %}
+    {% set tg = user_settings.get('telegram', {}) %}
+    {% set kt = user_settings.get('ktalk', {}) %}
+    {% set tm = user_settings.get('tbank_time', {}) %}
     <div class="section">
       <h3>🗺️ Merchrules</h3>
       <p class="help" style="margin-bottom:10px;">Логин и пароль для синхронизации задач и встреч.</p>
       <div class="field-row">
-        <div class="field"><label>Login</label><input id="mr-login" value="{{ user_settings.merchrules.login or '' }}"></div>
-        <div class="field"><label>Password</label><input id="mr-pass" type="password" value="{{ user_settings.merchrules.password or '' }}"></div>
+        <div class="field"><label>Login</label><input id="mr-login" value="{{ mr.get('login', '') }}"></div>
+        <div class="field"><label>Password</label><input id="mr-pass" type="password" value="{{ mr.get('password', '') }}"></div>
       </div>
     </div>
 
@@ -101,8 +105,8 @@
       <h3>✈️ Telegram Bot</h3>
       <p class="help" style="margin-bottom:10px;">Для уведомлений. Token — от @BotFather, Chat ID — ваш (через @userinfobot).</p>
       <div class="field-row">
-        <div class="field"><label>Bot Token</label><input id="tg-token" value="{{ user_settings.telegram.bot_token or '' }}"></div>
-        <div class="field"><label>Chat ID</label><input id="tg-chat" value="{{ user_settings.telegram.chat_id or '' }}"></div>
+        <div class="field"><label>Bot Token</label><input id="tg-token" value="{{ tg.get('bot_token', '') }}"></div>
+        <div class="field"><label>Chat ID</label><input id="tg-chat" value="{{ tg.get('chat_id', '') }}"></div>
       </div>
     </div>
 
@@ -121,7 +125,7 @@
         <span class="step-num">3</span>
         <div class="step-text">Скопируйте URL</div>
       </div>
-      <div class="field"><label>Webhook URL</label><input id="kt-url" value="{{ user_settings.ktalk.webhook_url or '' }}" placeholder="https://tbank.ktalk.ru/hooks/..."></div>
+      <div class="field"><label>Webhook URL</label><input id="kt-url" value="{{ kt.get('webhook_url', '') }}" placeholder="https://tbank.ktalk.ru/hooks/..."></div>
     </div>
 
     <div class="section">
@@ -139,7 +143,7 @@
         <span class="step-num">3</span>
         <div class="step-text">Создайте API Token с правом <b>read:tickets</b></div>
       </div>
-      <div class="field"><label>API Token</label><input id="tm-token" type="password" value="{{ user_settings.tbank_time.api_token or '' }}" placeholder="tbank_time_xxx..."></div>
+      <div class="field"><label>API Token</label><input id="tm-token" type="password" value="{{ tm.get('api_token', '') }}" placeholder="tbank_time_xxx..."></div>
     </div>
 
     <div style="display:flex;gap:10px;align-items:center;">
@@ -170,15 +174,15 @@
       <div class="field">
         <label>За сколько дней предупреждать о чекапе</label>
         <select id="rule-warning-days">
-          <option value="7" {{ 'selected' if rules.warning_days == 7 else '' }}>7 дней</option>
-          <option value="14" {{ 'selected' if rules.warning_days == 14 else '' }}>14 дней</option>
-          <option value="21" {{ 'selected' if rules.warning_days == 21 else '' }}>21 день</option>
-          <option value="30" {{ 'selected' if rules.warning_days == 30 else '' }}>30 дней</option>
+          <option value="7" {{ 'selected' if rules.get('warning_days') == 7 else '' }}>7 дней</option>
+          <option value="14" {{ 'selected' if rules.get('warning_days') == 14 else '' }}>14 дней</option>
+          <option value="21" {{ 'selected' if rules.get('warning_days') == 21 else '' }}>21 день</option>
+          <option value="30" {{ 'selected' if rules.get('warning_days') == 30 else '' }}>30 дней</option>
         </select>
       </div>
       <div class="toggle-row">
         <label>Автоматически создавать задачи из чекапов</label>
-        <div class="toggle"><input type="checkbox" id="rule-auto-tasks" {{ 'checked' if rules.auto_create_tasks else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="rule-auto-tasks" {{ 'checked' if rules.get('auto_create_tasks') else '' }}><span class="slider"></span></div>
       </div>
     </div>
     <div class="section">
@@ -186,13 +190,13 @@
       <div class="field-row">
         <div class="field">
           <label>Время утреннего плана</label>
-          <input type="time" id="rule-morning-time" value="{{ rules.morning_plan_time }}">
+          <input type="time" id="rule-morning-time" value="{{ rules.get('morning_plan_time', '09:00') }}">
         </div>
         <div class="field">
           <label>День еженедельного дайджеста</label>
           <select id="rule-digest-day">
-            <option value="monday" {{ 'selected' if rules.weekly_digest_day == 'monday' else '' }}>Понедельник</option>
-            <option value="friday" {{ 'selected' if rules.weekly_digest_day == 'friday' else '' }}>Пятница</option>
+            <option value="monday" {{ 'selected' if rules.get('weekly_digest_day') == 'monday' else '' }}>Понедельник</option>
+            <option value="friday" {{ 'selected' if rules.get('weekly_digest_day') == 'friday' else '' }}>Пятница</option>
           </select>
         </div>
       </div>
@@ -210,15 +214,15 @@
       <div class="field">
         <label>Тема</label>
         <select id="pref-theme" onchange="toggleTheme()">
-          <option value="dark" {{ 'selected' if prefs.theme == 'dark' else '' }}>🌙 Тёмная</option>
-          <option value="light" {{ 'selected' if prefs.theme == 'light' else '' }}>☀️ Светлая</option>
+          <option value="dark" {{ 'selected' if prefs.get('theme') == 'dark' else '' }}>🌙 Тёмная</option>
+          <option value="light" {{ 'selected' if prefs.get('theme') == 'light' else '' }}>☀️ Светлая</option>
         </select>
       </div>
       <div class="field">
         <label>Вид дашборда</label>
         <select id="pref-dashboard-view">
-          <option value="cards" {{ 'selected' if prefs.dashboard_view == 'cards' else '' }}>Карточки</option>
-          <option value="table" {{ 'selected' if prefs.dashboard_view == 'table' else '' }}>Таблица</option>
+          <option value="cards" {{ 'selected' if prefs.get('dashboard_view') == 'cards' else '' }}>Карточки</option>
+          <option value="table" {{ 'selected' if prefs.get('dashboard_view') == 'table' else '' }}>Таблица</option>
         </select>
       </div>
     </div>
@@ -234,34 +238,34 @@
       <h3>🔔 Каналы уведомлений</h3>
       <div class="toggle-row">
         <label>📧 Email-уведомления</label>
-        <div class="toggle"><input type="checkbox" id="notif-email" {{ 'checked' if prefs.notifications_email else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="notif-email" {{ 'checked' if prefs.get('notifications_email') else '' }}><span class="slider"></span></div>
       </div>
       <div class="toggle-row">
         <label>✈️ Telegram-уведомления</label>
-        <div class="toggle"><input type="checkbox" id="notif-tg" {{ 'checked' if prefs.notifications_tg else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="notif-tg" {{ 'checked' if prefs.get('notifications_tg') else '' }}><span class="slider"></span></div>
       </div>
       <div class="toggle-row">
         <label>💬 Ktalk-уведомления</label>
-        <div class="toggle"><input type="checkbox" id="notif-ktalk" {{ 'checked' if prefs.notifications_ktalk else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="notif-ktalk" {{ 'checked' if prefs.get('notifications_ktalk') else '' }}><span class="slider"></span></div>
       </div>
     </div>
     <div class="section">
       <h3>📬 Что уведомлять</h3>
       <div class="toggle-row">
         <label>Просроченные чекапы</label>
-        <div class="toggle"><input type="checkbox" id="notif-overdue" {{ 'checked' if prefs.notif_overdue else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="notif-overdue" {{ 'checked' if prefs.get('notif_overdue') else '' }}><span class="slider"></span></div>
       </div>
       <div class="toggle-row">
         <label>Новые задачи</label>
-        <div class="toggle"><input type="checkbox" id="notif-new-tasks" {{ 'checked' if prefs.notif_new_tasks else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="notif-new-tasks" {{ 'checked' if prefs.get('notif_new_tasks') else '' }}><span class="slider"></span></div>
       </div>
       <div class="toggle-row">
         <label>Заблокированные задачи</label>
-        <div class="toggle"><input type="checkbox" id="notif-blocked" {{ 'checked' if prefs.notif_blocked else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="notif-blocked" {{ 'checked' if prefs.get('notif_blocked') else '' }}><span class="slider"></span></div>
       </div>
       <div class="toggle-row">
         <label>Утренний план</label>
-        <div class="toggle"><input type="checkbox" id="notif-morning" {{ 'checked' if prefs.notif_morning else '' }}><span class="slider"></span></div>
+        <div class="toggle"><input type="checkbox" id="notif-morning" {{ 'checked' if prefs.get('notif_morning') else '' }}><span class="slider"></span></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:center;">

@@ -42,6 +42,13 @@
     .badge { display:inline-block; padding:3px 10px; border-radius:6px; font-size:.7rem; font-weight:600; }
     .badge-draft { background:rgba(99,102,241,.15); color:var(--accent); }
     .badge-completed { background:rgba(34,197,94,.15); color:var(--green); }
+    /* Modal */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); backdrop-filter:blur(4px); z-index:200; align-items:center; justify-content:center; }
+    .modal-overlay.visible { display:flex; }
+    .modal { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:28px; max-width:600px; width:90%; max-height:85vh; overflow-y:auto; }
+    .modal h3 { margin-bottom:16px; font-size:1.1rem; }
+    .modal-close { float:right; cursor:pointer; font-size:1.2rem; color:var(--muted); background:none; border:none; }
+    .modal-close:hover { color:var(--text); }
   </style>
 </head>
 <body>
@@ -61,7 +68,9 @@
 <div class="main">
   <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
   <h1>📊 QBR: {{ client.name }}</h1>
-  <p class="sub">{{ client.segment or '' }} · {% if qbr %}{{ qbr.quarter }}{% else %}Новый QBR{% endif %}</p>
+  <p class="sub">{{ client.segment or '' }} · {% if qbr %}{{ qbr.quarter }}{% else %}Новый QBR{% endif %}
+    {% if qbr %}<span class="badge badge-{{ qbr.status }}">{{ qbr.status }}</span>{% endif %}
+  </p>
 
   <div class="section">
     <h3>📅 Дата проведения</h3>
@@ -91,6 +100,16 @@
   </div>
 
   <div class="section">
+    <h3> Ключевые инсайты</h3>
+    <div id="insights-list">
+      {% for ins in qbr.key_insights or [] %}
+      <div class="item-row"><input type="text" value="{{ ins }}" placeholder="Инсайт..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addItem('insights-list','Инсайт...')">+ Добавить</button>
+  </div>
+
+  <div class="section">
     <h3>🎯 Цели на следующий квартал</h3>
     <div id="goals-list">
       {% for g in qbr.next_quarter_goals or [] %}
@@ -101,15 +120,71 @@
   </div>
 
   <div class="section">
+    <h3>📋 Будущие работы</h3>
+    <div id="future-list">
+      {% for fw in qbr.future_work or [] %}
+      <div class="item-row">
+        <input type="text" value="{{ fw.task or '' }}" placeholder="Задача..." class="fw-task">
+        <input type="text" value="{{ fw.quarter or '' }}" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;">
+        <select class="fw-priority" style="max-width:100px;">
+          <option value="high" {{ 'selected' if fw.priority == 'high' else '' }}>Высокий</option>
+          <option value="medium" {{ 'selected' if fw.priority == 'medium' else '' }}>Средний</option>
+          <option value="low" {{ 'selected' if fw.priority == 'low' else '' }}>Низкий</option>
+        </select>
+        <span class="remove" onclick="this.parentElement.remove()">✕</span>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addFutureWork()">+ Добавить работу</button>
+  </div>
+
+  <div class="section">
     <h3>📝 Итоги</h3>
     <div class="field">
       <textarea id="summary" placeholder="Краткое резюме QBR...">{{ qbr.summary or '' }}</textarea>
     </div>
   </div>
 
-  <div style="display:flex;gap:10px;align-items:center;">
+  <div class="section">
+    <h3>📄 Презентация</h3>
+    <div class="field">
+      <label>Ссылка на презентацию (Google Slides, Figma, etc.)</label>
+      <input type="url" id="presentation-url" value="{{ qbr.presentation_url or '' }}" placeholder="https://docs.google.com/presentation/...">
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>📊 Выжимка для руководства</h3>
+    <div class="field">
+      <textarea id="exec-summary" placeholder="Краткая выжимка ключевых метрик и решений для руководства...">{{ qbr.executive_summary or '' }}</textarea>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
     <button class="btn" onclick="saveQBR()">💾 Сохранить QBR</button>
+    <button class="btn btn-outline" onclick="openStatusModal()">📊 Изменить статус</button>
     <span class="saved-msg" id="saved">✅ Сохранено</span>
+  </div>
+</div>
+
+<!-- Status Modal -->
+<div class="modal-overlay" id="statusModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeStatusModal()">✕</button>
+    <h3>📊 Статус QBR</h3>
+    <div class="field">
+      <label>Текущий статус</label>
+      <select id="qbr-status">
+        <option value="draft" {{ 'selected' if qbr and qbr.status == 'draft' else '' }}>📝 Черновик</option>
+        <option value="scheduled" {{ 'selected' if qbr and qbr.status == 'scheduled' else '' }}>📅 Запланирован</option>
+        <option value="completed" {{ 'selected' if qbr and qbr.status == 'completed' else '' }}>✅ Завершён</option>
+        <option value="cancelled" {{ 'selected' if qbr and qbr.status == 'cancelled' else '' }}>❌ Отменён</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn" onclick="saveStatus()">Сохранить</button>
+      <button class="btn btn-outline" onclick="closeStatusModal()">Отмена</button>
+    </div>
   </div>
 </div>
 
@@ -120,18 +195,42 @@ function addItem(listId,placeholder){
   d.innerHTML='<input type="text" placeholder="'+placeholder+'"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
   document.getElementById(listId).appendChild(d);
 }
+function addFutureWork(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Задача..." class="fw-task"><input type="text" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;"><select class="fw-priority" style="max-width:100px;"><option value="high">Высокий</option><option value="medium" selected>Средний</option><option value="low">Низкий</option></select><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('future-list').appendChild(d);
+}
 function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
+function getFutureWork(){
+  const items=[];
+  document.querySelectorAll('#future-list .item-row').forEach(row=>{
+    const task=row.querySelector('.fw-task').value;
+    if(task) items.push({task, quarter:row.querySelector('.fw-quarter').value, priority:row.querySelector('.fw-priority').value});
+  });
+  return items;
+}
 async function saveQBR(){
   const data={
     date:document.getElementById('qbr-date').value,
     achievements:getListValues('achievements-list'),
     issues:getListValues('issues-list'),
+    key_insights:getListValues('insights-list'),
     next_quarter_goals:getListValues('goals-list'),
+    future_work:getFutureWork(),
     summary:document.getElementById('summary').value,
+    presentation_url:document.getElementById('presentation-url').value,
+    executive_summary:document.getElementById('exec-summary').value,
     status:'draft'
   };
   const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+}
+function openStatusModal(){document.getElementById('statusModal').classList.add('visible');}
+function closeStatusModal(){document.getElementById('statusModal').classList.remove('visible');}
+async function saveStatus(){
+  const status=document.getElementById('qbr-status').value;
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  if(r.ok){closeStatusModal();location.reload();}
 }
 </script>
 </body>

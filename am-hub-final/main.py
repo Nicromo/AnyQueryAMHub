@@ -136,6 +136,21 @@ async def lifespan(app: FastAPI):
                 """))
                 db.commit()
                 logger.info("✅ Created qbrs table")
+
+                # Добавляем новые колонки в qbrs если их нет
+                try:
+                    qcols = db.execute(
+                        text("SELECT column_name FROM information_schema.columns WHERE table_name = 'qbrs'")
+                    ).fetchall()
+                    qcol_names = {row[0] for row in qcols}
+                    for col, col_type in [("presentation_url", "VARCHAR"), ("executive_summary", "TEXT"),
+                                           ("future_work", "JSONB DEFAULT '[]'"), ("key_insights", "JSONB DEFAULT '[]'")]:
+                        if col not in qcol_names:
+                            db.execute(text(f"ALTER TABLE qbrs ADD COLUMN {col} {col_type}"))
+                            db.commit()
+                            logger.info(f"✅ Added qbrs.{col}")
+                except Exception as e:
+                    logger.warning(f"Migration qbrs columns: {e}")
             except Exception as e:
                 logger.warning(f"Migration qbrs: {e}")
 
@@ -274,6 +289,11 @@ async def dashboard(request: Request, db: Session = Depends(get_db), auth_token:
     user = db.query(User).filter(User.id == int(user_id)).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+
+    # Проверка онбординга
+    settings = user.settings or {}
+    if not settings.get("onboarding_complete"):
+        return RedirectResponse(url="/onboarding", status_code=303)
 
     # Для админа — все клиенты, для менеджера — только его
     query = db.query(Client)
@@ -1465,6 +1485,10 @@ async def api_create_qbr(client_id: int, request: Request, db: Session = Depends
     qbr.achievements = data.get("achievements", qbr.achievements)
     qbr.issues = data.get("issues", qbr.issues)
     qbr.next_quarter_goals = data.get("next_quarter_goals", qbr.next_quarter_goals)
+    qbr.key_insights = data.get("key_insights", qbr.key_insights or [])
+    qbr.future_work = data.get("future_work", qbr.future_work or [])
+    qbr.presentation_url = data.get("presentation_url", qbr.presentation_url)
+    qbr.executive_summary = data.get("executive_summary", qbr.executive_summary)
     if data.get("date"):
         qbr.date = datetime.fromisoformat(data["date"])
 
@@ -1674,6 +1698,56 @@ async def api_dashboard_actions(db: Session = Depends(get_db), auth_token: Optio
         })
 
     return {"actions": actions, "total": len(actions)}
+
+
+# ============================================================================
+# ONBOARDING
+# ============================================================================
+
+@app.get("/onboarding", response_class=HTMLResponse)
+async def onboarding_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("onboarding.html", {"request": request})
+
+
+@app.post("/api/onboarding/complete")
+async def api_complete_onboarding(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Отметить что онбординг пройден."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    settings = user.settings or {}
+    settings["onboarding_complete"] = True
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/onboarding/status")
+async def api_onboarding_status(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Проверить, пройден ли онбординг."""
+    if not auth_token:
+        return {"onboarding_complete": True}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"onboarding_complete": True}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"onboarding_complete": True}
+    settings = user.settings or {}
+    return {"onboarding_complete": settings.get("onboarding_complete", False)}
 
 
 # ============================================================================
