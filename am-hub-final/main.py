@@ -787,29 +787,6 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
 # SETTINGS API
 # ============================================================================
 
-@app.post("/api/settings/creds")
-async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Сохранить персональные креды пользователя."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    for service in ["merchrules", "telegram", "ktalk", "tbank_time"]:
-        if service in data:
-            settings[service] = data[service]
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
-
-
 @app.post("/api/settings/rules")
 async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token:
@@ -1074,6 +1051,7 @@ async def api_tbank_all_tickets(
 async def api_sync_merchrules(
     request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
 ):
+    """Синхронизация с Merchrules — берёт креды из настроек пользователя."""
     if not auth_token:
         raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -1081,12 +1059,29 @@ async def api_sync_merchrules(
     if not payload:
         raise HTTPException(status_code=401)
 
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    # Креды: из тела запроса → из настроек пользователя → из env
     body = await request.json()
-    login = body.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
-    password = body.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
+    settings = user.settings or {}
+    mr = settings.get("merchrules", {})
+    login = body.get("login") or mr.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
+    password = body.get("password") or mr.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
+    site_ids_input = body.get("site_ids") or settings.get("merchrules_site_ids", [])
 
     if not login or not password:
-        return {"error": "Нужны креды Merchrules"}
+        return {"error": "Нужны креды Merchrules. Введите на странице /settings → Интеграции"}
+
+    # Сохраняем креды в настройки пользователя
+    mr["login"] = login
+    mr["password"] = password
+    if site_ids_input:
+        settings["merchrules_site_ids"] = site_ids_input
+    settings["merchrules"] = mr
+    user.settings = settings
+    db.commit()
 
     import httpx
     try:
@@ -1094,69 +1089,102 @@ async def api_sync_merchrules(
             from merchrules_sync import get_auth_token, fetch_site_tasks, fetch_site_meetings
             token = await get_auth_token(hx, login, password)
             if not token:
-                return {"error": "Ошибка авторизации Merchrules"}
+                return {"error": "Ошибка авторизации Merchrules. Проверьте логин/пароль."}
             headers = {"Authorization": f"Bearer {token}"}
 
-            # Получаем список клиентов из API
-            r = await hx.get(
-                "https://merchrules-qa.any-platform.ru/backend-v2/accounts",
-                headers=headers,
-            )
-            accounts = r.json().get("accounts", []) if r.status_code == 200 else []
-            if not accounts:
-                return {"error": "Нет аккаунтов в Merchrules"}
+            synced_clients = 0
+            synced_tasks = 0
 
-            synced = 0
-            for acc in accounts[:30]:
-                aid = acc.get("id")
-                if not aid:
-                    continue
-                site_id = str(aid)
+            # Если указаны site_id — используем их
+            if site_ids_input:
+                for sid in site_ids_input:
+                    sid = str(sid).strip()
+                    if not sid:
+                        continue
+                    c = db.query(Client).filter(Client.merchrules_account_id == sid).first()
+                    if not c:
+                        c = Client(merchrules_account_id=sid, name=f"Site {sid}", manager_email=user.email, segment="SMB")
+                        db.add(c)
+                        db.flush()
 
-                # Проверяем есть ли клиент
-                existing = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
-                if existing:
-                    existing.name = acc.get("name") or existing.name
-                    synced += 1
-                    continue
+                    td = await fetch_site_tasks(hx, headers, sid)
+                    md = await fetch_site_meetings(hx, headers, sid)
 
-                # Fetch tasks & meetings
-                tasks_data = await fetch_site_tasks(hx, headers, site_id)
-                meetings_data = await fetch_site_meetings(hx, headers, site_id)
+                    for t in td.get("tasks", [])[:20]:
+                        existing = db.query(Task).filter(Task.merchrules_task_id == str(t.get("id"))).first()
+                        if not existing:
+                            db.add(Task(client_id=c.id, merchrules_task_id=str(t.get("id")),
+                                title=t.get("title",""), status=t.get("status","plan"),
+                                priority=t.get("priority","medium"), source="roadmap"))
+                            synced_tasks += 1
 
-                # Определяем сегмент по кол-ву задач
-                open_count = tasks_data.get("open_tasks", 0)
-                segment = "SMB" if open_count < 10 else "SME" if open_count < 30 else "ENT"
+                    if md.get("last_meeting"):
+                        try:
+                            c.last_meeting_date = datetime.fromisoformat(md["last_meeting"])
+                        except:
+                            pass
+                    synced_clients += 1
+            else:
+                # Без site_ids — пробуем получить accounts
+                r = await hx.get("https://merchrules-qa.any-platform.ru/backend-v2/accounts", headers=headers)
+                accounts = r.json().get("accounts", []) if r.status_code == 200 else []
+                if not accounts:
+                    return {"error": "Нет аккаунтов. Укажите site_id в настройках (через запятую)."}
 
-                client = Client(
-                    name=acc.get("name", f"Account {site_id}"),
-                    merchrules_account_id=site_id,
-                    health_score=0.7,  # Default пока не получим аналитику
-                    manager_email=login,
-                    segment=segment,
-                    open_tasks=tasks_data.get("open_tasks", 0),
-                    last_meeting_date=datetime.fromisoformat(meetings_data["last_meeting"]) if meetings_data.get("last_meeting") else None,
-                )
-                db.add(client)
-                db.flush()
+                for acc in accounts[:30]:
+                    aid = acc.get("id")
+                    if not aid:
+                        continue
+                    site_id = str(aid)
+                    c = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
+                    if not c:
+                        c = Client(merchrules_account_id=site_id, name=acc.get("name",f"Account {site_id}"), manager_email=user.email)
+                        db.add(c)
+                        db.flush()
+                    else:
+                        c.name = acc.get("name") or c.name
 
-                # Создаём задачи из Merchrules
-                for t in tasks_data.get("tasks", [])[:15]:
-                    db.add(Task(
-                        client_id=client.id,
-                        title=t.get("title", ""),
-                        status=t.get("status", "plan"),
-                        priority=t.get("priority", "medium"),
-                        source="roadmap",
-                    ))
+                    td = await fetch_site_tasks(hx, headers, site_id)
+                    md = await fetch_site_meetings(hx, headers, site_id)
 
-                synced += 1
+                    for t in td.get("tasks", [])[:20]:
+                        existing = db.query(Task).filter(Task.merchrules_task_id == str(t.get("id"))).first()
+                        if not existing:
+                            db.add(Task(client_id=c.id, merchrules_task_id=str(t.get("id")),
+                                title=t.get("title",""), status=t.get("status","plan"),
+                                priority=t.get("priority","medium"), source="roadmap"))
+                            synced_tasks += 1
+
+                    if md.get("last_meeting"):
+                        try:
+                            c.last_meeting_date = datetime.fromisoformat(md["last_meeting"])
+                        except:
+                            pass
+                    synced_clients += 1
+
             db.commit()
-        return {"ok": True, "clients_synced": synced}
+            return {"ok": True, "clients_synced": synced_clients, "tasks_synced": synced_tasks}
     except Exception as e:
         db.rollback()
         logger.error(f"Merchrules sync error: {e}")
         return {"error": str(e)}
+
+
+@app.get("/api/sync/merchrules-creds")
+async def api_get_mr_creds(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить сохранённые креды Merchrules пользователя."""
+    if not auth_token:
+        return {}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {}
+    settings = user.settings or {}
+    mr = settings.get("merchrules", {})
+    return {"login": mr.get("login", ""), "site_ids": settings.get("merchrules_site_ids", [])}
 
 
 # ============================================================================
@@ -1276,7 +1304,7 @@ async def settings_page(request: Request, db: Session = Depends(get_db), auth_to
 
 @app.post("/api/settings/creds")
 async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Сохранить персональные креды пользователя."""
+    """Сохранить персональные креды пользователя для ВСЕХ сервисов."""
     if not auth_token:
         raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -1289,9 +1317,14 @@ async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_t
 
     data = await request.json()
     settings = user.settings or {}
-    for service in ["merchrules", "telegram", "ktalk", "tbank_time"]:
+
+    # Сохраняем все сервисы: merchrules, telegram, ktalk, tbank_time, airtable, sheets, groq
+    for service in ["merchrules", "telegram", "ktalk", "tbank_time", "airtable", "sheets", "groq"]:
         if service in data:
-            settings[service] = data[service]
+            if service not in settings:
+                settings[service] = {}
+            settings[service].update(data[service])
+
     user.settings = settings
     db.commit()
     return {"ok": True}
