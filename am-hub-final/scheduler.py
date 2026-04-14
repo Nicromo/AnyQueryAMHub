@@ -289,6 +289,159 @@ async def job_sync_meetings():
         db.close()
 
 
+async def job_sync_tbank_tickets():
+    """Каждый час: синхронизировать тикеты из Tbank Time"""
+    db = SessionLocal()
+    sync_log = SyncLog(integration="tbank_time", resource_type="tickets", action="sync", status="in_progress")
+    try:
+        if not os.getenv("TIME_API_TOKEN"):
+            sync_log.status = "skipped"
+            sync_log.message = "TIME_API_TOKEN не задан"
+            return
+        from integrations.tbank_time import get_support_tickets
+        clients = db.query(Client).filter(Client.name.isnot(None)).all()
+        updated = 0
+        now = datetime.utcnow()
+        for client in clients:
+            try:
+                tickets = await get_support_tickets(client.name, use_cache=False)
+                client.open_tickets = len(tickets)
+                if tickets:
+                    # Дата последнего тикета
+                    dates = [t.get("created_at") for t in tickets if t.get("created_at")]
+                    if dates:
+                        client.last_ticket_date = max(d if isinstance(d, datetime) else datetime.fromisoformat(str(d)) for d in dates)
+                    # Флаг: есть тикеты без ответа > 3 дней
+                    stale = [t for t in tickets if t.get("created_at") and
+                             (now - (t["created_at"] if isinstance(t["created_at"], datetime) else datetime.fromisoformat(str(t["created_at"])))).days > 3]
+                    if stale:
+                        # Сигнал через Telegram
+                        try:
+                            from tg_bot import send_message
+                            user = db.query(User).filter(User.manager_email == client.manager_email).first()
+                            tg_id = user.settings.get("telegram", {}).get("chat_id") if user and user.settings else None
+                            if tg_id:
+                                await send_message(int(tg_id),
+                                    f"🎫 <b>Tbank Time: {client.name}</b>\n"
+                                    f"{len(stale)} тикетов без ответа более 3 дней!\n"
+                                    f"Всего открытых: {len(tickets)}")
+                        except Exception:
+                            pass
+                updated += 1
+            except Exception as exc:
+                logger.warning("TbankTime skip %s: %s", client.id, exc)
+        db.commit()
+        sync_log.status = "success"
+        sync_log.records_processed = updated
+    except Exception as e:
+        db.rollback()
+        sync_log.status = "error"
+        sync_log.message = str(e)
+        logger.error(f"TbankTime sync error: {e}")
+    finally:
+        db.add(sync_log)
+        db.commit()
+        db.close()
+
+
+async def job_check_upcoming_meetings():
+    """Каждые 30 мин: напоминание о встречах через 60 минут"""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        remind_from = now + timedelta(minutes=55)
+        remind_to = now + timedelta(minutes=65)
+        meetings = db.query(Meeting).filter(
+            Meeting.date >= remind_from,
+            Meeting.date <= remind_to,
+            Meeting.source.in_(["ktalk", "internal", "merchrules"]),
+        ).all()
+        for meeting in meetings:
+            client = db.query(Client).filter(Client.id == meeting.client_id).first()
+            if not client:
+                continue
+            user = db.query(User).filter(User.manager_email == client.manager_email).first()
+            tg_id = None
+            if user and user.settings:
+                tg_id = user.settings.get("telegram", {}).get("chat_id") or user.telegram_id
+            if not tg_id and user:
+                tg_id = user.telegram_id
+            if not tg_id:
+                continue
+            # Готовим саммари клиента
+            open_tasks = db.query(Task).filter(Task.client_id == client.id, Task.status.in_(["plan","in_progress"])).limit(5).all()
+            last_meeting = db.query(Meeting).filter(Meeting.client_id == client.id, Meeting.id != meeting.id).order_by(Meeting.date.desc()).first()
+            health_emoji = "🟢" if (client.health_score or 0) >= 0.7 else "🟡" if (client.health_score or 0) >= 0.5 else "🔴"
+            msg_lines = [
+                f"⏰ <b>Через час встреча с {client.name}</b>",
+                f"{meeting.title or meeting.type} · {meeting.date.strftime('%H:%M')}",
+                "",
+                f"{health_emoji} Health: {int((client.health_score or 0)*100)}%  📋 {len(open_tasks)} открытых задач",
+            ]
+            if last_meeting and last_meeting.summary:
+                msg_lines += ["", f"📝 <b>Прошлая встреча ({last_meeting.date.strftime('%d.%m') if last_meeting.date else ''}):</b>",
+                              last_meeting.summary[:200] + ("…" if len(last_meeting.summary or '') > 200 else "")]
+            if open_tasks:
+                msg_lines += ["", "<b>Открытые задачи:</b>"]
+                for t in open_tasks[:3]:
+                    status_icon = "🔴" if t.status == "blocked" else "⏳"
+                    msg_lines.append(f"  {status_icon} {t.title[:60]}")
+            try:
+                from tg_bot import send_message
+                await send_message(int(tg_id), "\n".join(msg_lines))
+            except Exception as tg_err:
+                logger.warning("Meeting reminder TG error: %s", tg_err)
+    except Exception as e:
+        logger.error(f"Meeting reminder error: {e}")
+    finally:
+        db.close()
+
+
+async def job_check_client_degradation():
+    """Ежедневно 09:00: проверять деградацию клиентов"""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        clients = db.query(Client).all()
+        for client in clients:
+            alerts = []
+            # Нет встречи > 45 дней
+            if client.last_meeting_date:
+                days_no_meeting = (now - client.last_meeting_date).days
+                if days_no_meeting > 45:
+                    alerts.append(f"📅 Нет встречи {days_no_meeting} дней")
+            # Health score низкий
+            if (client.health_score or 0) < 0.4:
+                alerts.append(f"❤️ Health score: {int((client.health_score or 0)*100)}%")
+            # Много заблокированных задач
+            blocked_count = db.query(Task).filter(Task.client_id == client.id, Task.status == "blocked").count()
+            if blocked_count >= 3:
+                alerts.append(f"🚫 {blocked_count} заблокированных задач")
+            if not alerts:
+                continue
+            # Отправляем уведомление АМу
+            user = db.query(User).filter(User.manager_email == client.manager_email).first()
+            tg_id = None
+            if user and user.settings:
+                tg_id = user.settings.get("telegram", {}).get("chat_id") or user.telegram_id
+            if not tg_id and user:
+                tg_id = user.telegram_id
+            if not tg_id:
+                continue
+            try:
+                from tg_bot import send_message
+                msg = (f"⚠️ <b>Деградация клиента: {client.name}</b>\n"
+                       + "\n".join(f"  • {a}" for a in alerts)
+                       + f"\n\n👉 /checkup {client.name}")
+                await send_message(int(tg_id), msg)
+            except Exception as tg_err:
+                logger.warning("Degradation TG error: %s", tg_err)
+    except Exception as e:
+        logger.error(f"Client degradation check error: {e}")
+    finally:
+        db.close()
+
+
 # ============================================================================
 # NOTIFICATION JOBS
 # ============================================================================

@@ -126,6 +126,28 @@
     </div>
   </div>
 
+  <!-- My Day Block -->
+  <div id="my-day-block" style="margin-bottom:24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="section-title">☀️ Мой день</div>
+      <span id="my-day-date" style="font-size:.75rem;color:var(--muted);"></span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;" id="my-day-grid">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;">
+        <div style="font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📅 Встречи сегодня</div>
+        <div id="myday-meetings"><div style="color:var(--muted);font-size:.8rem;">Загрузка…</div></div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;">
+        <div style="font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📋 Задачи с дедлайном</div>
+        <div id="myday-due"><div style="color:var(--muted);font-size:.8rem;">Загрузка…</div></div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;">
+        <div style="font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🚫 Заблокировано</div>
+        <div id="myday-blocked"><div style="color:var(--muted);font-size:.8rem;">Загрузка…</div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Action Cards -->
   <div id="action-cards" style="margin-bottom:24px;">
     <div class="section-title" style="margin-bottom:10px;">⚡ Действия</div>
@@ -262,6 +284,64 @@ async function loadActions(){
   }catch(e){console.error(e);}
 }
 loadActions();
+
+// My Day block
+async function loadMyDay(){
+  const days=['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+  const now=new Date();
+  document.getElementById('my-day-date').textContent=days[now.getDay()]+', '+now.toLocaleDateString('ru-RU',{day:'numeric',month:'long'});
+  try{
+    const r=await fetch('/api/dashboard/my-day');
+    if(!r.ok){setMyDayEmpty();return;}
+    const d=await r.json();
+
+    const el_m=document.getElementById('myday-meetings');
+    if(d.meetings&&d.meetings.length){
+      el_m.innerHTML=d.meetings.map(m=>
+        `<a href="/client/${m.client_id}" style="display:block;padding:6px 0;border-bottom:1px solid var(--border);text-decoration:none;color:inherit;">
+          <div style="font-size:.82rem;font-weight:600;">${m.time} · ${m.client_name}</div>
+          <div style="font-size:.75rem;color:var(--muted);">${m.title}</div>
+        </a>`).join('')+'<div style="font-size:.72rem;color:var(--accent);margin-top:6px;">Всего: '+d.meetings.length+'</div>';
+    } else {
+      el_m.innerHTML='<div style="color:var(--muted);font-size:.8rem;padding:8px 0;">Встреч нет</div>';
+    }
+
+    const el_t=document.getElementById('myday-due');
+    const all_due=[...d.due_today,...d.checkups_overdue];
+    if(all_due.length){
+      el_t.innerHTML=d.due_today.map(t=>
+        `<a href="/client/${t.client_id}" style="display:block;padding:5px 0;border-bottom:1px solid var(--border);text-decoration:none;color:inherit;">
+          <div style="font-size:.82rem;">${t.client_name}</div>
+          <div style="font-size:.75rem;color:var(--muted);">${t.title.substring(0,50)}</div>
+        </a>`).join('')
+        +d.checkups_overdue.map(c=>
+        `<a href="/client/${c.id}" style="display:block;padding:5px 0;border-bottom:1px solid var(--border);text-decoration:none;color:inherit;">
+          <div style="font-size:.82rem;color:var(--red);">⚠️ ${c.client_name}</div>
+          <div style="font-size:.75rem;color:var(--muted);">Чекап просрочен на ${c.days_overdue} дн.</div>
+        </a>`).join('');
+    } else {
+      el_t.innerHTML='<div style="color:var(--green);font-size:.8rem;padding:8px 0;">✅ Всё сделано!</div>';
+    }
+
+    const el_b=document.getElementById('myday-blocked');
+    if(d.blocked&&d.blocked.length){
+      el_b.innerHTML=d.blocked.map(t=>
+        `<a href="/client/${t.client_id}" style="display:block;padding:5px 0;border-bottom:1px solid var(--border);text-decoration:none;color:inherit;">
+          <div style="font-size:.82rem;color:var(--red);">🔴 ${t.client_name}</div>
+          <div style="font-size:.75rem;color:var(--muted);">${t.title.substring(0,50)}</div>
+        </a>`).join('')+'<div style="font-size:.72rem;color:var(--red);margin-top:6px;">Заблокировано: '+d.blocked.length+'</div>';
+    } else {
+      el_b.innerHTML='<div style="color:var(--green);font-size:.8rem;padding:8px 0;">✅ Заблокированных нет</div>';
+    }
+  } catch(e){setMyDayEmpty();}
+}
+function setMyDayEmpty(){
+  ['myday-meetings','myday-due','myday-blocked'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.innerHTML='<div style="color:var(--muted);font-size:.8rem;">Нет данных</div>';
+  });
+}
+loadMyDay();
 </script>
 </body>
 </html>

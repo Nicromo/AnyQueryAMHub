@@ -54,9 +54,38 @@
     </div>
   </div>
 
+  <!-- Мини-метрики: health + tickets + QBR прогресс -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;">
+      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px;">HEALTH SCORE</div>
+      {% set hs = client.health_score or 0 %}
+      <div style="font-size:1.4rem;font-weight:700;color:{% if hs >= 0.7 %}var(--green){% elif hs >= 0.5 %}var(--yellow){% else %}var(--red){% endif %};">{{ (hs * 100)|int }}%</div>
+      <div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px;"><div style="height:4px;border-radius:2px;width:{{ (hs*100)|int }}%;background:{% if hs >= 0.7 %}var(--green){% elif hs >= 0.5 %}var(--yellow){% else %}var(--red){% endif %};"></div></div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;">
+      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px;">ОТКРЫТЫХ ЗАДАЧ</div>
+      <div style="font-size:1.4rem;font-weight:700;color:var(--yellow);">{{ tasks|selectattr('status','in',['plan','in_progress','blocked'])|list|length }}</div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:2px;">{{ tasks|selectattr('status','equalto','blocked')|list|length }} заблокировано</div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;">
+      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px;">ТИКЕТЫ TIME</div>
+      <div style="font-size:1.4rem;font-weight:700;color:{% if client.open_tickets > 0 %}var(--red){% else %}var(--green){% endif %};">{{ client.open_tickets or 0 }}</div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:2px;">{% if client.last_ticket_date %}посл.: {{ client.last_ticket_date.strftime('%d.%m') }}{% else %}нет тикетов{% endif %}</div>
+    </div>
+    {% if qbr_stats %}
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;">
+      <div style="font-size:.68rem;color:var(--muted);margin-bottom:4px;">QBR ПРОГРЕСС</div>
+      <div style="font-size:1.4rem;font-weight:700;">{{ qbr_stats.done }}/{{ qbr_stats.total }}</div>
+      <div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px;"><div style="height:4px;border-radius:2px;width:{% if qbr_stats.total > 0 %}{{ ((qbr_stats.done / qbr_stats.total)*100)|int }}{% else %}0{% endif %}%;background:var(--accent);"></div></div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:2px;">задач из QBR</div>
+    </div>
+    {% endif %}
+  </div>
+
   <div class="tabs">
     <button class="tab active" onclick="showTab('tasks',this)">📋 Задачи ({{ tasks|length }})</button>
     <button class="tab" onclick="showTab('meetings',this)">📅 Встречи ({{ meetings|length }})</button>
+    <button class="tab" onclick="showTab('tickets',this)">🎫 Тикеты</button>
   </div>
 
   <div id="tab-tasks" class="tab-content">
@@ -78,6 +107,10 @@
     {% endif %}
   </div>
 
+  <div id="tab-tickets" class="tab-content" style="display:none;">
+    <div id="tickets-list"><div style="color:var(--muted);font-size:.82rem;padding:20px 0;">Загрузка…</div></div>
+  </div>
+
   <div id="tab-meetings" class="tab-content" style="display:none;">
     {% if meetings %}
     {% for m in meetings %}
@@ -96,7 +129,37 @@
   </div>
 </div>
 <script>
-function showTab(id,btn){document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');document.getElementById('tab-'+id).style.display='block';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function showTab(id,btn){
+  document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');
+  document.getElementById('tab-'+id).style.display='block';
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(id==='tickets') loadTickets();
+}
+async function loadTickets(){
+  const el=document.getElementById('tickets-list');
+  if(!el||el.dataset.loaded) return;
+  try{
+    const r=await fetch('/api/tbank/tickets/{{ client.name|urlencode }}');
+    const d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:var(--red);font-size:.82rem;">'+d.error+'</div>';return;}
+    if(!d.tickets||!d.tickets.length){
+      el.innerHTML='<div style="color:var(--green);font-size:.82rem;padding:20px 0;">✅ Открытых тикетов нет</div>';
+    } else {
+      el.innerHTML=d.tickets.map(t=>`
+        <div class="card">
+          <h3>${t.title||'Тикет #'+t.id}</h3>
+          <p>${(t.description||'').substring(0,150)}</p>
+          <div class="meta">
+            <span class="badge b-${t.priority||'plan'}">${t.priority||'normal'}</span>
+            <span>${t.status}</span>
+            <span>${t.created_at?new Date(t.created_at).toLocaleDateString('ru-RU'):''}</span>
+          </div>
+        </div>`).join('');
+    }
+    el.dataset.loaded='1';
+  } catch(e){el.innerHTML='<div style="color:var(--muted);font-size:.82rem;">Нет данных (TIME_API_TOKEN не задан)</div>';}
+}
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
 </script>

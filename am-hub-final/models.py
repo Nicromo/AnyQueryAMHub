@@ -30,6 +30,8 @@ class Client(Base):
     open_tasks = Column(Integer, default=0)   # кол-во открытых задач (обновляется при загрузке дашборда)
     open_tickets = Column(Integer, default=0)
     last_ticket_date = Column(DateTime, nullable=True)
+    tbank_time_project_id = Column(String, nullable=True)  # ID проекта в Tbank Time
+    ktalk_account_id = Column(String, nullable=True)        # ID аккаунта в Ктолк
     last_sync_at = Column(DateTime, nullable=True)
     integration_metadata = Column(JSONB, default=dict)
 

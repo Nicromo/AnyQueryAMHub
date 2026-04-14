@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Клиенты — Kanban · AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --bg2:#111827; --card:#111827; --card-h:#1a2235; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --accent-glow:rgba(99,102,241,.12); --green:#22c55e; --red:#ef4444; --yellow:#eab308; --blue:#3b82f6; --orange:#f97316; }
+    [data-theme="light"] { --bg:#f1f5f9; --bg2:#fff; --card:#fff; --card-h:#f8fafc; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; overflow-y:auto; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); margin-bottom:12px; }
+    .sidebar-logo h1 { font-size:1.1rem; font-weight:700; }
+    .sidebar-logo span { font-size:.68rem; color:var(--accent); text-transform:uppercase; letter-spacing:1px; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); background:rgba(255,255,255,.03); text-decoration:none; }
+    .nav-item.active { color:var(--accent); background:var(--accent-glow); border-left-color:var(--accent); }
+    .main { margin-left:240px; padding:24px 28px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .topbar h2 { font-size:1.4rem; font-weight:700; }
+    .btn { padding:7px 14px; border-radius:10px; font-size:.8rem; font-weight:500; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+    .btn:hover { border-color:var(--accent); text-decoration:none; }
+    .btn-p { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .kanban { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; align-items:start; }
+    @media(max-width:1100px){ .kanban{ grid-template-columns:repeat(2,1fr); } }
+    @media(max-width:640px){ .kanban{ grid-template-columns:1fr; } }
+    .col { background:rgba(255,255,255,.02); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+    .col-header { padding:12px 14px; display:flex; align-items:center; justify-content:space-between; }
+    .col-label { font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:8px; }
+    .col-count { font-size:.72rem; background:rgba(255,255,255,.08); padding:2px 8px; border-radius:10px; }
+    .col-body { padding:8px; display:flex; flex-direction:column; gap:8px; min-height:80px; }
+    .c-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; transition:border .15s; text-decoration:none; color:inherit; display:block; }
+    .c-card:hover { border-color:var(--accent); text-decoration:none; }
+    .c-name { font-size:.85rem; font-weight:600; margin-bottom:4px; }
+    .c-meta { font-size:.72rem; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+    .c-bar { height:3px; border-radius:2px; background:var(--border); overflow:hidden; }
+    .c-bar-fill { height:3px; border-radius:2px; }
+    .badge { display:inline-block; padding:1px 6px; border-radius:5px; font-size:.65rem; font-weight:600; }
+    .badge-ENT { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .badge-SME { background:rgba(168,85,247,.15); color:#c084fc; }
+    .badge-SMB { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-SS { background:rgba(249,115,22,.15); color:#fb923c; }
+    .theme-btn { position:fixed; bottom:16px; left:16px; z-index:200; padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--muted); cursor:pointer; font-size:.78rem; }
+    .search { padding:7px 12px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text); font-size:.8rem; outline:none; width:180px; }
+    .search:focus { border-color:var(--accent); }
+    .col-ok .col-header { border-bottom:2px solid var(--green); }
+    .col-checkup .col-header { border-bottom:2px solid var(--yellow); }
+    .col-risk .col-header { border-bottom:2px solid var(--orange); }
+    .col-critical .col-header { border-bottom:2px solid var(--red); }
+    .empty-col { text-align:center; padding:24px 8px; color:var(--muted); font-size:.78rem; }
+  </style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>AM Hub</h1><span>Account Manager</span></div>
+  <a class="nav-item" href="/dashboard">🏠 Дашборд</a>
+  <a class="nav-item active" href="/clients">👥 Клиенты</a>
+  <a class="nav-item" href="/clients/kanban">📌 Kanban</a>
+  <a class="nav-item" href="/tasks">📋 Задачи</a>
+  <a class="nav-item" href="/settings">⚙️ Настройки</a>
+</div>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+
+<div class="main">
+  <div class="topbar">
+    <div>
+      <h2>📌 Клиенты — Kanban</h2>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" class="search" placeholder="🔍 Поиск…" oninput="filterCards(this.value)">
+      <a href="/clients" class="btn">📋 Таблица</a>
+      <a href="/clients/kanban" class="btn btn-p">📌 Kanban</a>
+    </div>
+  </div>
+
+  <!-- Счётчики -->
+  <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+    <div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:8px 16px;font-size:.82rem;">
+      <span style="color:var(--green);font-weight:700;">{{ counts.ok }}</span> <span style="color:var(--muted);">Норма</span>
+    </div>
+    <div style="background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.2);border-radius:10px;padding:8px 16px;font-size:.82rem;">
+      <span style="color:var(--yellow);font-weight:700;">{{ counts.checkup }}</span> <span style="color:var(--muted);">Нужен чекап</span>
+    </div>
+    <div style="background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2);border-radius:10px;padding:8px 16px;font-size:.82rem;">
+      <span style="color:var(--orange);font-weight:700;">{{ counts.risk }}</span> <span style="color:var(--muted);">Риск</span>
+    </div>
+    <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:8px 16px;font-size:.82rem;">
+      <span style="color:var(--red);font-weight:700;">{{ counts.critical }}</span> <span style="color:var(--muted);">Критично</span>
+    </div>
+  </div>
+
+  <div class="kanban" id="kanban">
+    <!-- Норма -->
+    <div class="col col-ok">
+      <div class="col-header">
+        <div class="col-label"><span style="color:var(--green);">●</span> Норма <span class="col-count">{{ counts.ok }}</span></div>
+      </div>
+      <div class="col-body" id="col-ok">
+        {% for c in columns.ok %}
+        <a class="c-card" href="/client/{{ c.id }}" data-name="{{ c.name|lower }}">
+          <div class="c-name">{{ c.name }}</div>
+          <div class="c-meta">
+            <span class="badge badge-{{ c.segment|replace('+','') if c.segment else 'SMB' }}">{{ c.segment or '—' }}</span>
+            {% if c.open_tasks %}<span>📋 {{ c.open_tasks }}</span>{% endif %}
+            {% if c.last_meeting_date %}<span>📅 {{ c.last_meeting_date.strftime('%d.%m') }}</span>{% endif %}
+          </div>
+          <div class="c-bar"><div class="c-bar-fill" style="width:{{ ((c.health_score or 0)*100)|int }}%;background:var(--green);"></div></div>
+        </a>
+        {% else %}
+        <div class="empty-col">Нет клиентов</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Нужен чекап -->
+    <div class="col col-checkup">
+      <div class="col-header">
+        <div class="col-label"><span style="color:var(--yellow);">●</span> Нужен чекап <span class="col-count">{{ counts.checkup }}</span></div>
+      </div>
+      <div class="col-body" id="col-checkup">
+        {% for c in columns.checkup %}
+        <a class="c-card" href="/client/{{ c.id }}" data-name="{{ c.name|lower }}">
+          <div class="c-name">{{ c.name }}</div>
+          <div class="c-meta">
+            <span class="badge badge-{{ c.segment|replace('+','') if c.segment else 'SMB' }}">{{ c.segment or '—' }}</span>
+            {% if c.open_tasks %}<span>📋 {{ c.open_tasks }}</span>{% endif %}
+            {% if c.last_meeting_date %}<span>📅 {{ c.last_meeting_date.strftime('%d.%m') }}</span>{% endif %}
+          </div>
+          <div class="c-bar"><div class="c-bar-fill" style="width:{{ ((c.health_score or 0)*100)|int }}%;background:var(--yellow);"></div></div>
+        </a>
+        {% else %}
+        <div class="empty-col">Нет клиентов</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Риск -->
+    <div class="col col-risk">
+      <div class="col-header">
+        <div class="col-label"><span style="color:var(--orange);">●</span> Риск <span class="col-count">{{ counts.risk }}</span></div>
+      </div>
+      <div class="col-body" id="col-risk">
+        {% for c in columns.risk %}
+        <a class="c-card" href="/client/{{ c.id }}" data-name="{{ c.name|lower }}">
+          <div class="c-name">{{ c.name }}</div>
+          <div class="c-meta">
+            <span class="badge badge-{{ c.segment|replace('+','') if c.segment else 'SMB' }}">{{ c.segment or '—' }}</span>
+            {% if c.open_tasks %}<span>📋 {{ c.open_tasks }}</span>{% endif %}
+            {% if c.open_tickets %}<span style="color:var(--red);">🎫 {{ c.open_tickets }}</span>{% endif %}
+          </div>
+          <div class="c-bar"><div class="c-bar-fill" style="width:{{ ((c.health_score or 0)*100)|int }}%;background:var(--orange);"></div></div>
+        </a>
+        {% else %}
+        <div class="empty-col">Нет клиентов</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Критично -->
+    <div class="col col-critical">
+      <div class="col-header">
+        <div class="col-label"><span style="color:var(--red);">●</span> Критично <span class="col-count">{{ counts.critical }}</span></div>
+      </div>
+      <div class="col-body" id="col-critical">
+        {% for c in columns.critical %}
+        <a class="c-card" href="/client/{{ c.id }}" data-name="{{ c.name|lower }}" style="border-color:rgba(239,68,68,.3);">
+          <div class="c-name">{{ c.name }}</div>
+          <div class="c-meta">
+            <span class="badge badge-{{ c.segment|replace('+','') if c.segment else 'SMB' }}">{{ c.segment or '—' }}</span>
+            {% if c.open_tasks %}<span>📋 {{ c.open_tasks }}</span>{% endif %}
+            {% if c.open_tickets %}<span style="color:var(--red);">🎫 {{ c.open_tickets }}</span>{% endif %}
+            {% if c.last_meeting_date %}
+              <span style="color:var(--red);">📅 {{ c.last_meeting_date.strftime('%d.%m') }}</span>
+            {% else %}
+              <span style="color:var(--red);">📅 Не было</span>
+            {% endif %}
+          </div>
+          <div class="c-bar"><div class="c-bar-fill" style="width:{{ ((c.health_score or 0)*100)|int }}%;background:var(--red);"></div></div>
+        </a>
+        {% else %}
+        <div class="empty-col">✅ Нет</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function filterCards(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.c-card').forEach(c=>{
+    c.style.display=(q===''||c.dataset.name.includes(q))?'':'none';
+  });
+}
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+</script>
+</body>
+</html>
