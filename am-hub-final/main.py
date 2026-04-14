@@ -2981,6 +2981,48 @@ async def qbr_auto_page(request: Request, client_id: int, db: Session = Depends(
     return templates.TemplateResponse("qbr_auto.html", {"request": request, "user": user, "client": client})
 
 
+@app.get("/voice-notes", response_class=HTMLResponse)
+async def voice_notes_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Страница голосовых заметок."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("voice_notes.html", {"request": request, "user": user})
+
+
+@app.get("/api/voice-notes")
+async def api_get_voice_notes(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить голосовые заметки пользователя."""
+    if not auth_token:
+        return {"notes": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"notes": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    notes = db.query(VoiceNote).filter(VoiceNote.user_id == user.id).order_by(VoiceNote.created_at.desc()).limit(50).all()
+    return {"notes": [{"id": n.id, "text": n.transcription, "duration": n.duration_seconds, "client_id": n.client_id, "created_at": n.created_at.isoformat() if n.created_at else None} for n in notes]}
+
+
+# ============================================================================
+# PWA ICONS (SVG placeholder)
+# ============================================================================
+
+@app.get("/static/icon-192.png")
+@app.get("/static/icon-512.png")
+async def pwa_icon():
+    """SVG иконка для PWA (base64 PNG placeholder)."""
+    from fastapi.responses import PlainTextResponse
+    # Simple colored square as placeholder
+    return PlainTextResponse(content="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAAlwSFlzAAAWJQAAFiUBSVIk8AAAAA0lEQVQI12P4z8BQDwAEgAF/QL9hbgAAAABJRU5ErkJggg==", headers={"Content-Type": "image/png"})
+
+
 # ============================================================================
 # PWA MANIFEST
 # ============================================================================

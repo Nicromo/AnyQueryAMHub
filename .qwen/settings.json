@@ -9,7 +9,9 @@
       "Bash(del *)",
       "Bash(git reset *)",
       "Bash(do *)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(then *)",
+      "Bash(fi)"
     ]
   },
   "$version": 3
