@@ -27,17 +27,22 @@ async def _get_token(client: httpx.AsyncClient, login: str, password: str) -> Op
     if cache_key in _token_cache:
         return _token_cache[cache_key]
     try:
-        r = await client.post(
-            f"{MERCHRULES_URL}/backend-v2/auth/login",
-            json={"username": login, "password": password},
-            timeout=10,
-        )
-        if r.status_code == 200:
-            body = r.json()
-            token = body.get("token") or body.get("access_token") or body.get("accessToken", "")
-            if token:
-                _token_cache[cache_key] = token
-            return token
+        for payload in [
+            {"email": login, "password": password},
+            {"username": login, "password": password},
+            {"login": login, "password": password},
+        ]:
+            r = await client.post(
+                f"{MERCHRULES_URL}/backend-v2/auth/login",
+                json=payload,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                body = r.json()
+                token = body.get("token") or body.get("access_token") or body.get("accessToken", "")
+                if token:
+                    _token_cache[cache_key] = token
+                    return token
         logger.warning("MR login failed %s %s: %s", login, r.status_code, r.text[:150])
     except Exception as e:
         logger.warning("MR login error (%s): %s", login, e)

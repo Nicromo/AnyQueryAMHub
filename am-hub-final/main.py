@@ -111,7 +111,8 @@ async def lifespan(app: FastAPI):
                 ).fetchall()
                 ccol_names = {row[0] for row in ccols}
                 for col, col_type in [("last_qbr_date", "TIMESTAMP"), ("next_qbr_date", "TIMESTAMP"),
-                                       ("account_plan", "JSONB"), ("open_tasks", "INTEGER DEFAULT 0")]:
+                                       ("account_plan", "JSONB"), ("open_tasks", "INTEGER DEFAULT 0"),
+                                       ("tbank_time_project_id", "VARCHAR"), ("ktalk_account_id", "VARCHAR")]:
                     if col not in ccol_names:
                         db.execute(text(f"ALTER TABLE clients ADD COLUMN {col} {col_type}"))
                         db.commit()
@@ -917,18 +918,19 @@ async def api_sync_merchrules(
             from merchrules_sync import get_auth_token, fetch_site_tasks, fetch_site_meetings
             token = await get_auth_token(hx, login, password)
             if not token:
-                return {"error": "Ошибка авторизации Merchrules"}
+                return {"error": f"Ошибка авторизации Merchrules (логин: {login}). Проверьте email и пароль."}
             headers = {"Authorization": f"Bearer {token}"}
 
             # Получаем список клиентов из API
-            r = await hx.get(
-                f"{mr_base_url}/backend-v2/accounts",
-                headers=headers,
-            )
+            # Try /api/site/all first (correct Merchrules endpoint), then fallback
+            sites_r = await hx.get(f"{mr_base_url}/api/site/all", headers=headers)
+            if sites_r.status_code != 200:
+                sites_r = await hx.get(f"{mr_base_url}/backend-v2/accounts", headers=headers)
+            r = sites_r
             if r.status_code != 200:
                 return {"error": f"Merchrules вернул {r.status_code}: {r.text[:200]}"}
             body = r.json()
-            accounts = body if isinstance(body, list) else body.get("accounts") or body.get("items") or []
+            accounts = body if isinstance(body, list) else body.get("accounts") or body.get("items") or body.get("sites") or []
             if not accounts:
                 return {"error": "Нет аккаунтов в Merchrules"}
 
@@ -1297,13 +1299,23 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
     csv_content += f'"{task.title}","{task.description or ""}",{task.status},{task.priority},{task.team or ""},{task.task_type or ""},any,,,'
     try:
         async with httpx.AsyncClient(timeout=30) as hx:
-            token_resp = await hx.post(
-                f"{mr_base_url}/backend-v2/auth/login",
-                json={"username": login, "password": password},
-            )
-            if token_resp.status_code != 200:
+            token = None
+            for auth_payload in [
+                {"email": login, "password": password},
+                {"username": login, "password": password},
+                {"login": login, "password": password},
+            ]:
+                token_resp = await hx.post(
+                    f"{mr_base_url}/backend-v2/auth/login",
+                    json=auth_payload,
+                )
+                if token_resp.status_code == 200:
+                    body_t = token_resp.json()
+                    token = body_t.get("token") or body_t.get("access_token") or body_t.get("accessToken")
+                    if token:
+                        break
+            if not token:
                 return {"error": "Ошибка авторизации Merchrules"}
-            token = token_resp.json().get("token")
 
             files = {"file": ("task.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
             resp = await hx.post(
@@ -1517,6 +1529,292 @@ async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optio
         return {"tickets": all_tickets, "total": len(all_tickets)}
     except Exception as e:
         return {"error": str(e), "tickets": [], "total": 0}
+
+
+# ============================================================================
+# WEBHOOK: KTALK (видеовстречи)
+# ============================================================================
+
+@app.post("/webhook/ktalk/meeting-ended")
+async def webhook_ktalk_meeting_ended(request: Request, db: Session = Depends(get_db)):
+    """
+    Webhook от Ктолк: встреча завершена.
+    Ктолк шлёт POST с данными встречи по окончании.
+    Env: KTALK_WEBHOOK_SECRET — для проверки подписи (опционально).
+    """
+    secret = os.environ.get("KTALK_WEBHOOK_SECRET", "")
+    if secret:
+        sig = request.headers.get("X-Ktalk-Signature", "")
+        if sig != secret:
+            raise HTTPException(status_code=403, detail="Invalid signature")
+
+    data = await request.json()
+    logger.info(f"Ktalk webhook received: {list(data.keys())}")
+
+    # Нормализуем поля — Ктолк может слать разные форматы
+    meeting_id_ext = str(data.get("id") or data.get("meeting_id") or data.get("roomId") or "")
+    title = data.get("title") or data.get("subject") or data.get("name") or "Встреча"
+    participants = data.get("participants") or data.get("attendees") or []
+    duration_min = data.get("duration") or data.get("duration_minutes") or 0
+    recording_url = data.get("recording_url") or data.get("recordingUrl") or data.get("video_url")
+    transcript_text = data.get("transcript") or data.get("transcription") or ""
+    started_at_raw = data.get("started_at") or data.get("start_time") or data.get("date")
+
+    try:
+        started_at = datetime.fromisoformat(str(started_at_raw)) if started_at_raw else datetime.utcnow()
+    except Exception:
+        started_at = datetime.utcnow()
+
+    # Определяем клиента по ktalk_account_id или по участникам
+    client = None
+    ktalk_acc = data.get("account_id") or data.get("accountId")
+    if ktalk_acc:
+        client = db.query(Client).filter(Client.ktalk_account_id == str(ktalk_acc)).first()
+    if not client and participants:
+        # Пробуем найти по домену email участника
+        for p in participants[:5]:
+            email = p.get("email") or p.get("user_email") or ""
+            if "@" in email:
+                domain = email.split("@")[1]
+                client = db.query(Client).filter(Client.domain == domain).first()
+                if client:
+                    break
+
+    # Создаём встречу в БД
+    meeting = Meeting(
+        client_id=client.id if client else None,
+        external_id=meeting_id_ext or None,
+        date=started_at,
+        type="sync",
+        source="ktalk",
+        title=title,
+        recording_url=recording_url,
+        transcript=transcript_text[:50000] if transcript_text else None,
+        attendees=[
+            {"name": p.get("name") or p.get("display_name") or "",
+             "email": p.get("email") or ""}
+            for p in participants
+        ],
+        followup_status="pending",
+    )
+    db.add(meeting)
+    db.flush()
+
+    # Если есть транскрипт — запускаем AI-обработку
+    if transcript_text and client:
+        try:
+            from ai_followup import process_transcript
+            ai_result = await process_transcript(
+                transcript=transcript_text,
+                client_name=client.name,
+                meeting_date=started_at.strftime("%Y-%m-%d"),
+            )
+            if not ai_result.get("error"):
+                meeting.summary = ai_result.get("postmit_internal", "")
+                meeting.followup_text = ai_result.get("postmit_client", "")
+                meeting.mood = ai_result.get("mood", "neutral")
+                meeting.followup_status = "filled"
+                # Создаём задачи
+                for t in ai_result.get("tasks", [])[:20]:
+                    if t.get("title"):
+                        db.add(Task(
+                            client_id=client.id,
+                            title=t["title"],
+                            description=t.get("description", ""),
+                            status=t.get("status", "plan"),
+                            priority=t.get("priority", "medium"),
+                            team=t.get("team", ""),
+                            task_type=t.get("task_type", ""),
+                            source="ktalk",
+                            created_from_meeting_id=meeting.id,
+                        ))
+        except Exception as ai_err:
+            logger.warning(f"Ktalk AI processing error: {ai_err}")
+
+    if client:
+        client.last_meeting_date = started_at
+
+    db.commit()
+
+    # Уведомляем АМа в Telegram
+    if client:
+        try:
+            from tg_bot import send_message
+            from tg_bot import format_meeting_reminder
+            tg_ids_raw = os.environ.get("ALLOWED_TG_IDS", "")
+            user = db.query(User).filter(User.manager_email == client.manager_email).first()
+            if user and user.settings:
+                tg_id = user.settings.get("telegram", {}).get("chat_id") or user.telegram_id
+            else:
+                tg_id = None
+            if tg_id:
+                tasks_open = db.query(Task).filter(Task.client_id == client.id, Task.status.in_(["plan","in_progress"])).count()
+                msg = (
+                    f"📹 <b>Встреча завершена: {client.name}</b>\n"
+                    f"⏱ {duration_min} мин · {len(participants)} участников\n\n"
+                    + (f"✍️ Транскрипт обработан AI, фолоуап готов\n" if transcript_text else "")
+                    + f"\n👉 <a href='/followup/{meeting.id}'>Заполнить фолоуап</a>"
+                )
+                await send_message(int(tg_id), msg)
+        except Exception as tg_err:
+            logger.warning(f"Ktalk TG notification error: {tg_err}")
+
+    return {"ok": True, "meeting_id": meeting.id, "client": client.name if client else None}
+
+
+# ============================================================================
+# API: MY DAY
+# ============================================================================
+
+@app.get("/api/dashboard/my-day")
+async def api_my_day(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Данные блока 'Мой день' для текущего менеджера."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+
+    # Фильтр по менеджеру
+    def client_filter(q):
+        if user.role != "admin":
+            q = q.filter(Client.manager_email == user.email)
+        return q
+
+    client_ids = [c.id for c in client_filter(db.query(Client)).all()]
+
+    # 1. Сегодняшние встречи (из Ктолк или вручную)
+    upcoming_meetings = (
+        db.query(Meeting)
+        .filter(Meeting.client_id.in_(client_ids), Meeting.date >= now, Meeting.date < today_end)
+        .order_by(Meeting.date)
+        .all()
+    )
+
+    # 2. Задачи с дедлайном сегодня
+    due_today = (
+        db.query(Task)
+        .filter(Task.client_id.in_(client_ids), Task.due_date >= today_start,
+                Task.due_date < today_end, Task.status.in_(["plan","in_progress"]))
+        .all()
+    )
+
+    # 3. Горящие — blocked задачи
+    blocked = (
+        db.query(Task)
+        .filter(Task.client_id.in_(client_ids), Task.status == "blocked")
+        .order_by(Task.created_at)
+        .limit(10)
+        .all()
+    )
+
+    # 4. Просроченные чекапы
+    checkups_overdue = (
+        db.query(CheckUp)
+        .filter(CheckUp.client_id.in_(client_ids), CheckUp.status == "overdue")
+        .order_by(CheckUp.scheduled_date)
+        .limit(5)
+        .all()
+    )
+
+    def client_name(client_id):
+        c = db.query(Client).filter(Client.id == client_id).first()
+        return c.name if c else "—"
+
+    return {
+        "meetings": [
+            {
+                "id": m.id, "title": m.title or m.type, "type": m.type,
+                "time": m.date.strftime("%H:%M") if m.date else "",
+                "client_id": m.client_id, "client_name": client_name(m.client_id),
+                "source": m.source,
+            }
+            for m in upcoming_meetings
+        ],
+        "due_today": [
+            {
+                "id": t.id, "title": t.title, "status": t.status, "priority": t.priority,
+                "client_id": t.client_id, "client_name": client_name(t.client_id),
+                "due_date": t.due_date.strftime("%H:%M") if t.due_date else "",
+            }
+            for t in due_today
+        ],
+        "blocked": [
+            {
+                "id": t.id, "title": t.title, "priority": t.priority,
+                "client_id": t.client_id, "client_name": client_name(t.client_id),
+            }
+            for t in blocked
+        ],
+        "checkups_overdue": [
+            {
+                "id": c.client_id, "type": c.type,
+                "client_name": client_name(c.client_id),
+                "days_overdue": (now - c.scheduled_date).days if c.scheduled_date else 0,
+            }
+            for c in checkups_overdue
+        ],
+    }
+
+
+# ============================================================================
+# CLIENTS KANBAN VIEW
+# ============================================================================
+
+@app.get("/clients/kanban", response_class=HTMLResponse)
+async def clients_kanban(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Kanban-вид клиентов по стадиям здоровья."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+
+    clients = q.all()
+    now = datetime.now()
+
+    def get_stage(c):
+        # Определяем стадию по health_score + дням с последней встречи
+        days_since = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+        score = c.health_score or 0
+        if score >= 0.7 and days_since < 45:
+            return "ok"
+        elif score >= 0.5 and days_since < 90:
+            return "checkup"
+        elif score >= 0.3 or days_since < 120:
+            return "risk"
+        else:
+            return "critical"
+
+    columns = {"ok": [], "checkup": [], "risk": [], "critical": []}
+    for c in clients:
+        stage = get_stage(c)
+        open_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status.in_(["plan","in_progress","blocked"])).count()
+        c.open_tasks = open_tasks
+        c._stage = stage
+        columns[stage].append(c)
+
+    return templates.TemplateResponse("clients_kanban.html", {
+        "request": request, "user": user,
+        "columns": columns,
+        "counts": {k: len(v) for k, v in columns.items()},
+    })
 
 
 # ============================================================================

@@ -49,24 +49,29 @@ async def get_auth_token(login: str = "", password: str = "") -> Optional[str]:
 
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(
-                f"{MERCHRULES_URL}/backend-v2/auth/login",
-                json={"username": _login, "password": _password},
-                timeout=10,
-            )
+            resp = None
+            for payload in [
+                {"email": _login, "password": _password},
+                {"username": _login, "password": _password},
+                {"login": _login, "password": _password},
+            ]:
+                resp = await client.post(
+                    f"{MERCHRULES_URL}/backend-v2/auth/login",
+                    json=payload,
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    body = resp.json()
+                    token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                    if token:
+                        _auth_cache[cache_key] = {
+                            "token": token,
+                            "expires_at": datetime.now() + timedelta(hours=1),
+                        }
+                        logger.info(f"Merchrules auth OK for {_login}")
+                        return token
 
-            if resp.status_code == 200:
-                body = resp.json()
-                token = body.get("token") or body.get("access_token") or body.get("accessToken")
-                if token:
-                    _auth_cache[cache_key] = {
-                        "token": token,
-                        "expires_at": datetime.now() + timedelta(hours=1),
-                    }
-                    logger.info(f"Merchrules auth OK for {_login}")
-                    return token
-
-            logger.warning(f"Merchrules auth failed: {resp.status_code}")
+            logger.warning(f"Merchrules auth failed: {resp.status_code if resp else 'no response'}")
             return None
 
         except Exception as e:

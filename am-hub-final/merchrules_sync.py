@@ -44,18 +44,24 @@ async def get_auth_token(client: httpx.AsyncClient,
         return cached["token"]
 
     try:
-        resp = await client.post(
-            f"{MERCHRULES_URL}/backend-v2/auth/login",
-            json={"username": login, "password": password},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            token = body.get("token") or body.get("access_token") or body.get("accessToken")
-            if token:
-                _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
-                logger.info("Merchrules auth OK for %s", login)
-                return token
+        # Try email field first (Merchrules uses email-based auth)
+        for payload in [
+            {"email": login, "password": password},
+            {"username": login, "password": password},
+            {"login": login, "password": password},
+        ]:
+            resp = await client.post(
+                f"{MERCHRULES_URL}/backend-v2/auth/login",
+                json=payload,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                body = resp.json()
+                token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                if token:
+                    _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
+                    logger.info("Merchrules auth OK for %s", login)
+                    return token
         logger.warning("Merchrules auth failed (%s): %s %s", login, resp.status_code, resp.text[:150])
     except Exception as exc:
         logger.warning("Merchrules auth error (%s): %s", login, exc)
