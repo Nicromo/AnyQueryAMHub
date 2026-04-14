@@ -1082,41 +1082,53 @@ async def api_sync_merchrules(
     user.settings = settings
     db.commit()
 
-    # Пробуем авторизацию на QA и Production
+    # Пробуем авторизацию — все URL + все варианты поля логина
     import httpx
     urls_to_try = [
         "https://merchrules-qa.any-platform.ru",
         "https://merchrules.any-platform.ru",
     ]
+    login_fields = ["email", "login", "username"]
     base_url = None
     token = None
     last_error = ""
+    attempts_log = []
 
     async with httpx.AsyncClient(timeout=30) as hx:
+        outer_break = False
         for url in urls_to_try:
-            try:
-                resp = await hx.post(
-                    f"{url}/backend-v2/auth/login",
-                    json={"username": login, "password": password},
-                    timeout=15,
-                )
-                if resp.status_code == 200:
-                    body_resp = resp.json()
-                    token = body_resp.get("token") or body_resp.get("access_token") or body_resp.get("accessToken")
-                    if token:
-                        base_url = url
-                        logger.info(f"✅ Merchrules auth OK on {url}")
-                        break
+            if outer_break:
+                break
+            for field in login_fields:
+                try:
+                    resp = await hx.post(
+                        f"{url}/backend-v2/auth/login",
+                        json={field: login, "password": password},
+                        timeout=15,
+                    )
+                    attempt_info = f"{url} [{field}] → {resp.status_code}"
+                    if resp.status_code == 200:
+                        body_resp = resp.json()
+                        token = body_resp.get("token") or body_resp.get("access_token") or body_resp.get("accessToken")
+                        if token:
+                            base_url = url
+                            logger.info(f"✅ Merchrules auth OK on {url} with field={field}")
+                            outer_break = True
+                            break
+                        else:
+                            last_error = f"Нет токена в ответе ({field}): {body_resp}"
+                            attempts_log.append(attempt_info + " [no token]")
                     else:
-                        last_error = f"Нет токена в ответе: {body_resp}"
-                else:
-                    last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
-            except Exception as e:
-                last_error = str(e)
+                        last_error = f"HTTP {resp.status_code} [{field}]: {resp.text[:200]}"
+                        attempts_log.append(attempt_info)
+                except Exception as e:
+                    last_error = str(e)
+                    attempts_log.append(f"{url} [{field}] → error: {e}")
 
     if not token:
-        logger.error(f"Merchrules auth failed: {last_error}")
-        return {"error": f"Ошибка авторизации: {last_error}"}
+        detail = " | ".join(attempts_log[-4:]) if attempts_log else last_error
+        logger.error(f"Merchrules auth failed. Attempts: {attempts_log}")
+        return {"error": f"Ошибка авторизации Merchrules. {detail}"}
 
     headers = {"Authorization": f"Bearer {token}"}
     logger.info(f"Using Merchrules base URL: {base_url}")
@@ -1232,6 +1244,176 @@ async def api_sync_merchrules(
         db.rollback()
         logger.error(f"Merchrules sync error: {e}")
         return {"error": str(e)}
+
+
+@app.post("/api/auth/taim/test")
+async def api_test_taim(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """Проверить авторизацию в 1Time (time.tbank.ru / Mattermost)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    body = await request.json()
+    login_id = body.get("login", "")
+    password = body.get("password", "")
+    import taim
+    result = await taim.login(login_id, password)
+    if result["ok"]:
+        summary = await taim.get_summary(login_id, password)
+        return {**result, **summary, "password": None}
+    return result
+
+
+@app.post("/api/auth/ktalk/test")
+async def api_test_ktalk(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """Проверить OIDC авторизацию в KTalk (tbank.ktalk.ru)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    body = await request.json()
+    login_id = body.get("login", "")
+    password = body.get("password", "")
+    import ktalk
+    oidc_cfg = await ktalk._get_oidc_config()
+    result = await ktalk.login(login_id, password)
+    return {**result, "oidc_grant_types": oidc_cfg.get("grant_types_supported", []), "password": None}
+
+
+@app.get("/auth/ktalk", response_class=HTMLResponse)
+async def ktalk_oauth_start(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """
+    Запускает OIDC авторизацию через браузер.
+    Редиректит пользователя на страницу входа KTalk.
+    """
+    if not auth_token:
+        return RedirectResponse(url="/login")
+    import secrets, urllib.parse
+    state = secrets.token_urlsafe(16)
+    redirect_uri = str(request.base_url).rstrip("/") + "/auth/ktalk/callback"
+    params = urllib.parse.urlencode({
+        "client_id": "KTalk",
+        "response_type": "id_token token",
+        "scope": "profile email allatclaims",
+        "redirect_uri": redirect_uri,
+        "nonce": secrets.token_urlsafe(16),
+        "state": state,
+    })
+    return RedirectResponse(url=f"https://tbank.ktalk.ru/api/authorize/oidc/connect/authorize?{params}")
+
+
+@app.get("/auth/ktalk/callback", response_class=HTMLResponse)
+async def ktalk_oauth_callback(request: Request):
+    """
+    Callback страница после OIDC авторизации KTalk.
+    Токен приходит в URL-фрагменте (#), JS читает его и отправляет на бэкенд.
+    """
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>KTalk — авторизация</title>
+<style>
+  body{font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
+  .card{background:#111827;border:1px solid #1e2a3a;border-radius:14px;padding:32px 40px;text-align:center;max-width:400px;}
+  h2{font-size:1.2rem;margin-bottom:8px;}
+  p{color:#64748b;font-size:.85rem;}
+  .ok{color:#22c55e;} .err{color:#ef4444;}
+</style></head>
+<body><div class="card">
+  <h2 id="title">⏳ Авторизация...</h2>
+  <p id="msg">Получаем токен KTalk</p>
+</div>
+<script>
+(async function(){
+  const hash = window.location.hash.slice(1);
+  const params = Object.fromEntries(new URLSearchParams(hash));
+  const token = params.access_token || params.id_token;
+  if(!token){
+    document.getElementById('title').textContent = '❌ Ошибка';
+    document.getElementById('msg').textContent = 'Токен не получен. Попробуйте ещё раз.';
+    document.getElementById('msg').className = 'err';
+    return;
+  }
+  try{
+    const r = await fetch('/api/auth/ktalk/token', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({access_token: token, id_token: params.id_token})
+    });
+    const d = await r.json();
+    if(d.ok){
+      document.getElementById('title').textContent = '✅ Подключено!';
+      document.getElementById('msg').innerHTML = 'KTalk: <b>' + (d.user?.firstname||'') + ' ' + (d.user?.surname||'') + '</b><br><br><a href="/settings" style="color:#6366f1">← Вернуться в настройки</a>';
+      document.getElementById('msg').className = 'ok';
+    } else {
+      document.getElementById('title').textContent = '❌ Ошибка';
+      document.getElementById('msg').textContent = d.error || 'Не удалось сохранить токен';
+      document.getElementById('msg').className = 'err';
+    }
+  }catch(e){
+    document.getElementById('title').textContent = '❌ Ошибка';
+    document.getElementById('msg').textContent = e.message;
+  }
+})();
+</script></body></html>""")
+
+
+@app.post("/api/auth/ktalk/token")
+async def api_ktalk_save_token(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Сохраняет OIDC access_token KTalk после browser-based авторизации."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    body = await request.json()
+    access_token = body.get("access_token", "")
+    if not access_token:
+        return {"ok": False, "error": "Нет токена"}
+
+    # Получаем данные пользователя чтобы подтвердить токен
+    import ktalk as ktalk_mod
+    user_info = await ktalk_mod._get_user_info(access_token)
+
+    settings = user.settings or {}
+    kt = settings.get("ktalk", {})
+    kt["access_token"] = access_token
+    kt["login"] = user_info.get("email", kt.get("login", ""))
+    settings["ktalk"] = kt
+    user.settings = settings
+    db.commit()
+    return {"ok": True, "user": user_info}
+
+
+@app.get("/api/ktalk/calendar")
+async def api_ktalk_calendar(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+    days: int = 7,
+):
+    """Получить встречи из KTalk календаря."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    settings = user.settings or {}
+    kt = settings.get("ktalk", {})
+    login_id = kt.get("login", "")
+    password = kt.get("password", "")
+    if not login_id or not password:
+        return {"error": "Укажи логин/пароль KTalk в Настройках"}
+
+    import ktalk
+    return await ktalk.get_today_meetings(login_id, password)
 
 
 @app.get("/api/sync/merchrules-creds")

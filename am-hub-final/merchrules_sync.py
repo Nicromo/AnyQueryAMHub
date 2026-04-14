@@ -43,23 +43,26 @@ async def get_auth_token(client: httpx.AsyncClient,
     if cached.get("token") and cached.get("expires_at") and now < cached["expires_at"]:
         return cached["token"]
 
-    try:
-        resp = await client.post(
-            f"{MERCHRULES_URL}/backend-v2/auth/login",
-            json={"username": login, "password": password},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            token = body.get("token") or body.get("access_token") or body.get("accessToken")
-            if token:
-                _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
-                logger.info("Merchrules auth OK for %s", login)
-                return token
-        logger.warning("Merchrules auth failed (%s): %s %s", login, resp.status_code, resp.text[:150])
-    except Exception as exc:
-        logger.warning("Merchrules auth error (%s): %s", login, exc)
+    for field in ("email", "login", "username"):
+        try:
+            resp = await client.post(
+                f"{MERCHRULES_URL}/backend-v2/auth/login",
+                json={field: login, "password": password},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                body = resp.json()
+                token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                if token:
+                    _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
+                    logger.info("Merchrules auth OK for %s using field=%s", login, field)
+                    return token
+            elif resp.status_code not in (400, 401, 422):
+                logger.warning("Merchrules auth failed (%s) field=%s: %s %s", login, field, resp.status_code, resp.text[:150])
+        except Exception as exc:
+            logger.warning("Merchrules auth error (%s) field=%s: %s", login, field, exc)
 
+    logger.warning("Merchrules: all field variants failed for %s", login)
     return None
 
 
