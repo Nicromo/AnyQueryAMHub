@@ -7,6 +7,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from datetime import timezone as tz
 from typing import List, Optional
 
 from fastapi import (
@@ -48,6 +49,8 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 templates = Jinja2Templates(directory="templates")
+
+MSK = tz(timedelta(hours=3))  # Moscow timezone
 
 
 # ============================================================================
@@ -2776,3 +2779,374 @@ async def client_focus_view(request: Request, client_id: int, db: Session = Depe
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "2.0.0"}
+
+
+# ============================================================================
+# VOICE NOTES
+# ============================================================================
+
+@app.post("/api/voice-notes")
+async def api_create_voice_note(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Создать голосовую заметку (текстовую транскрипцию)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    data = await request.json()
+    vn = VoiceNote(
+        client_id=data.get("client_id"),
+        meeting_id=data.get("meeting_id"),
+        user_id=user.id,
+        transcription=data.get("text", ""),
+        duration_seconds=data.get("duration", 0),
+    )
+    db.add(vn)
+    # Авто-создание задачи из заметки
+    if data.get("create_task"):
+        db.add(Task(
+            client_id=data.get("client_id"),
+            title=f"🎤 {data.get('text', '')[:80]}",
+            description=data.get("text", ""),
+            status="plan",
+            priority="medium",
+            source="voice_note",
+        ))
+    db.commit()
+    return {"ok": True, "id": vn.id}
+
+
+# ============================================================================
+# PERSONAL INBOX
+# ============================================================================
+
+@app.get("/inbox", response_class=HTMLResponse)
+async def inbox_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Персональный Inbox."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("inbox.html", {"request": request, "user": user})
+
+
+@app.get("/api/inbox")
+async def api_inbox(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить сообщения Inbox."""
+    if not auth_token:
+        return {"items": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"items": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    items = []
+    now = datetime.now()
+
+    # Новые уведомления
+    notifs = db.query(Notification).filter(Notification.user_id == user.id, Notification.is_read == False).order_by(Notification.created_at.desc()).limit(20).all()
+    for n in notifs:
+        items.append({"type": "notification", "title": n.title, "message": n.message, "date": n.created_at.isoformat() if n.created_at else None, "priority": n.type})
+
+    # Просроченные чекапы
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+    for c in clients:
+        interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+        last = c.last_meeting_date or c.last_checkup
+        if last and (now - last).days > interval:
+            items.append({"type": "overdue", "title": f"Просрочен чекап: {c.name}", "message": f"Последний контакт {(now-last).days} дн. назад (норма: {interval})", "date": last.isoformat(), "priority": "high", "client_id": c.id})
+
+    # Blocked tasks
+    task_q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        task_q = task_q.filter(Client.manager_email == user.email)
+    blocked = task_q.filter(Task.status == "blocked").all()
+    for t in blocked:
+        items.append({"type": "blocked", "title": f"Заблокирована: {t.title}", "message": t.client.name if t.client else "", "priority": "high", "client_id": t.client_id})
+
+    items.sort(key=lambda x: x.get("date") or "", reverse=True)
+    return {"items": items[:50]}
+
+
+@app.post("/api/inbox/mark-read")
+async def api_inbox_mark_read(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Отметить уведомления прочитанными."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    db.query(Notification).filter(Notification.user_id == user.id, Notification.is_read == False).update({"is_read": True})
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# CHURN PREDICTION
+# ============================================================================
+
+@app.get("/api/churn/risk")
+async def api_churn_risk(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Прогнозирование оттока: rule-based scoring."""
+    if not auth_token:
+        return {"clients": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"clients": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"clients": []}
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+    now = datetime.now()
+    results = []
+
+    for c in clients:
+        score = 0
+        reasons = []
+        interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+        last = c.last_meeting_date or c.last_checkup
+
+        # Фактор 1: Нет контакта > 2x интервала
+        if last and (now - last).days > interval * 2:
+            score += 40
+            reasons.append(f"Нет контакта {(now-last).days} дн. (норма: {interval})")
+
+        # Фактор 2: Low health score
+        if c.health_score and c.health_score < 0.3:
+            score += 30
+            reasons.append(f"Низкий health score: {c.health_score:.0%}")
+
+        # Фактор 3: Blocked tasks
+        blocked = db.query(Task).filter(Task.client_id == c.id, Task.status == "blocked").count()
+        if blocked > 0:
+            score += 15
+            reasons.append(f"{blocked} заблокированных задач")
+
+        # Фактор 4: Нет задач вообще
+        total_tasks = db.query(Task).filter(Task.client_id == c.id).count()
+        if total_tasks == 0:
+            score += 15
+            reasons.append("Нет задач")
+
+        risk = "low"
+        if score >= 60:
+            risk = "critical"
+        elif score >= 30:
+            risk = "medium"
+
+        results.append({"id": c.id, "name": c.name, "segment": c.segment, "risk": risk, "score": score, "reasons": reasons})
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return {"clients": results}
+
+
+# ============================================================================
+# AI AUTO-QBR PAGE
+# ============================================================================
+
+@app.get("/qbr/auto/{client_id}", response_class=HTMLResponse)
+async def qbr_auto_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Страница авто-QBR."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse("qbr_auto.html", {"request": request, "user": user, "client": client})
+
+
+# ============================================================================
+# PWA MANIFEST
+# ============================================================================
+
+@app.get("/manifest.json")
+async def pwa_manifest():
+    """PWA manifest для установки на телефон."""
+    return JSONResponse(content={
+        "name": "AM Hub — Account Manager",
+        "short_name": "AM Hub",
+        "description": "Система управления аккаунтами",
+        "start_url": "/dashboard",
+        "display": "standalone",
+        "background_color": "#0a0e1a",
+        "theme_color": "#6366f1",
+        "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                   {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"}],
+    })
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """Service Worker для PWA и офлайн-кэширования."""
+    from fastapi.responses import PlainTextResponse
+    sw = """
+const CACHE = 'amhub-v1';
+const PRECACHE = ['/dashboard', '/today', '/clients', '/manifest.json'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys =>
+    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+  ));
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
+      if (resp.status === 200) {
+        const clone = resp.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+      }
+      return resp;
+    }).catch(() => caches.match('/dashboard')))
+  );
+});
+
+// Offline form submission queue
+self.addEventListener('message', e => {
+  if (e.data.type === 'SYNC_QUEUE') {
+    // TODO: replay queued requests
+  }
+});
+"""
+    return PlainTextResponse(content=sw, headers={"Content-Type": "application/javascript"})
+
+
+# ============================================================================
+# OFFLINE / DRAFTS
+# ============================================================================
+
+@app.post("/api/drafts")
+async def api_save_draft(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить черновик (фолоуап, заметка) для офлайн-синхронизации."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    data = await request.json()
+    settings = user.settings or {}
+    drafts = settings.get("drafts", [])
+    drafts.append({**data, "saved_at": datetime.utcnow().isoformat(), "user_id": user.id})
+    settings["drafts"] = drafts[-50:]  # keep last 50
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/drafts")
+async def api_get_drafts(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить черновики."""
+    if not auth_token:
+        return {"drafts": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"drafts": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"drafts": []}
+    settings = user.settings or {}
+    return {"drafts": settings.get("drafts", [])}
+
+
+# ============================================================================
+# TASK MODAL API (bulk edit)
+# ============================================================================
+
+@app.patch("/api/tasks/bulk")
+async def api_bulk_edit_tasks(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Массовое редактирование задач."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    task_ids = data.get("task_ids", [])
+    updates = {}
+    for key in ["status", "priority", "due_date", "team", "task_type"]:
+        if key in data and data[key]:
+            updates[key] = data[key]
+    if not task_ids or not updates:
+        return {"error": "Need task_ids and updates"}
+    updated = db.query(Task).filter(Task.id.in_(task_ids)).update(updates, synchronize_session=False)
+    db.commit()
+    return {"ok": True, "updated": updated}
+
+
+# ============================================================================
+# MEETING REMINDER API (for morning alerts)
+# ============================================================================
+
+@app.get("/api/meetings/today")
+async def api_meetings_today(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить встречи сегодня с ссылками."""
+    if not auth_token:
+        return {"meetings": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"meetings": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"meetings": []}
+
+    now_msk = datetime.now(MSK)
+    today = now_msk.date()
+    tomorrow = today + timedelta(days=1)
+
+    q = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    meetings = q.filter(
+        Meeting.date >= datetime.combine(today, datetime.min.time()),
+        Meeting.date < datetime.combine(tomorrow, datetime.min.time()),
+    ).all()
+
+    return {
+        "meetings": [{
+            "id": m.id,
+            "title": m.title or m.type,
+            "time": m.date.strftime("%H:%M") if m.date else "—",
+            "client": m.client.name if m.client else "—",
+            "client_id": m.client_id,
+            "link": m.recording_url or f"/client/{m.client_id}",
+            "type": m.type,
+        } for m in meetings]
+    }

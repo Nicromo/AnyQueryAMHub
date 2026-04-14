@@ -104,6 +104,7 @@
   <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
   <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
   <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/inbox"><span>📬</span> Inbox</a>
   <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
   <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
   <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
@@ -126,6 +127,7 @@
     </div>
     <div class="topbar-actions">
       <button class="btn btn-sm" onclick="openSearch()" title="Поиск (Ctrl+K)">🔍</button>
+      <button class="btn btn-sm" id="notifBell" onclick="location.href='/inbox'" title="Уведомления">🔔</button>
       <button class="btn btn-sm" onclick="location.reload()">🔄</button>
       <a class="btn btn-sm btn-p" href="/sync">Sync</a>
     </div>
@@ -331,6 +333,41 @@ document.getElementById('searchInput').addEventListener('input',e=>{
     }catch(e){console.error(e);}
   },300);
 });
+
+// ── PWA Registration ──
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
+if('BeforeInstallPromptEvent' in window){window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window._pwaPrompt=e;});}
+
+// ── Notification Badge ──
+async function updateNotifBadge(){
+  try{
+    const r=await fetch('/api/notifications');
+    const d=await r.json();
+    const bell=document.getElementById('notifBell');
+    if(d.notifications&&d.notifications.length>0){
+      bell.textContent='🔔('+d.notifications.length+')';
+      bell.style.background='rgba(239,68,68,.2)';bell.style.borderRadius='12px';bell.style.padding='4px 8px';
+    }
+  }catch(e){}
+}
+updateNotifBadge();
+setInterval(updateNotifBadge, 60000);
+
+// ── Offline Draft Saving ──
+window.addEventListener('beforeunload',()=>{
+  const forms=document.querySelectorAll('textarea,input[type="text"]');
+  forms.forEach(f=>{if(f.value)localStorage.setItem('draft_'+f.id,f.value);});
+});
+window.addEventListener('load',()=>{
+  document.querySelectorAll('textarea,input[type="text"]').forEach(f=>{
+    const saved=localStorage.getItem('draft_'+f.id);
+    if(saved&&!f.value)f.value=saved;
+  });
+});
 </script>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </body>
 </html>

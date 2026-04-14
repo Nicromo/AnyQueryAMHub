@@ -9,6 +9,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
 
+# Интервалы чекапов по сегментам (дни)
+CHECKUP_INTERVALS = {"SS": 180, "SMB": 90, "SME": 60, "ENT": 30, "SME+": 60, "SME-": 60}
+
 
 class Client(Base):
     __tablename__ = "clients"
