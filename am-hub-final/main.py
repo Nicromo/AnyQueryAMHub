@@ -1109,15 +1109,29 @@ async def api_sync_merchrules(
                     attempt_info = f"{url} [{field}] → {resp.status_code}"
                     if resp.status_code == 200:
                         body_resp = resp.json()
-                        token = body_resp.get("token") or body_resp.get("access_token") or body_resp.get("accessToken")
+                        # Ищем токен во всех возможных полях
+                        token = (
+                            body_resp.get("token") or
+                            body_resp.get("access_token") or
+                            body_resp.get("accessToken") or
+                            body_resp.get("jwt") or
+                            body_resp.get("jwtToken") or
+                            body_resp.get("bearer") or
+                            body_resp.get("auth_token") or
+                            body_resp.get("authToken") or
+                            (body_resp.get("data") or {}).get("token") or
+                            (body_resp.get("data") or {}).get("access_token") or
+                            (body_resp.get("result") or {}).get("token")
+                        )
                         if token:
                             base_url = url
                             logger.info(f"✅ Merchrules auth OK on {url} with field={field}")
                             outer_break = True
                             break
                         else:
-                            last_error = f"Нет токена в ответе ({field}): {body_resp}"
-                            attempts_log.append(attempt_info + " [no token]")
+                            body_keys = list(body_resp.keys()) if isinstance(body_resp, dict) else str(body_resp)[:100]
+                            last_error = f"Нет токена в ответе ({field}). Ключи ответа: {body_keys}"
+                            attempts_log.append(attempt_info + f" [no token, keys={body_keys}]")
                     else:
                         last_error = f"HTTP {resp.status_code} [{field}]: {resp.text[:200]}"
                         attempts_log.append(attempt_info)

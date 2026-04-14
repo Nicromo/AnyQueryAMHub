@@ -35,11 +35,16 @@ async def _get_token(client: httpx.AsyncClient, login: str, password: str) -> Op
             )
             if r.status_code == 200:
                 body = r.json()
-                token = body.get("token") or body.get("access_token") or body.get("accessToken", "")
+                token = (
+                    body.get("token") or body.get("access_token") or body.get("accessToken") or
+                    body.get("jwt") or body.get("jwtToken") or body.get("authToken") or
+                    (body.get("data") or {}).get("token") or (body.get("result") or {}).get("token") or ""
+                )
                 if token:
                     _token_cache[cache_key] = token
                     logger.info("MR auth OK for %s using field=%s", login, field)
                     return token
+                logger.warning("MR auth 200 but no token for %s [%s]. Keys: %s", login, field, list(body.keys()) if isinstance(body, dict) else body)
             elif r.status_code not in (400, 401, 422):
                 logger.warning("MR login failed %s field=%s %s: %s", login, field, r.status_code, r.text[:150])
         except Exception as e:

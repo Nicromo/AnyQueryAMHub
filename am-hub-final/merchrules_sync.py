@@ -52,11 +52,16 @@ async def get_auth_token(client: httpx.AsyncClient,
             )
             if resp.status_code == 200:
                 body = resp.json()
-                token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                token = (
+                    body.get("token") or body.get("access_token") or body.get("accessToken") or
+                    body.get("jwt") or body.get("jwtToken") or body.get("authToken") or
+                    (body.get("data") or {}).get("token") or (body.get("result") or {}).get("token")
+                )
                 if token:
                     _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
                     logger.info("Merchrules auth OK for %s using field=%s", login, field)
                     return token
+                logger.warning("Merchrules 200 but no token for %s [%s]. Keys: %s", login, field, list(body.keys()) if isinstance(body, dict) else body)
             elif resp.status_code not in (400, 401, 422):
                 logger.warning("Merchrules auth failed (%s) field=%s: %s %s", login, field, resp.status_code, resp.text[:150])
         except Exception as exc:
