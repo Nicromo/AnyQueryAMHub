@@ -21,7 +21,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import engine, get_db, Base, init_db, SessionLocal
-from models import Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog, Notification, QBR, AccountPlan
+from models import (
+    Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog, Notification, QBR, AccountPlan,
+    ClientNote, TaskComment, FollowupTemplate, VoiceNote,
+)
 from auth import (
     get_current_user, get_current_admin,
     authenticate_user, create_user, create_access_token,
@@ -174,6 +177,50 @@ async def lifespan(app: FastAPI):
                 logger.info("✅ Created account_plans table")
             except Exception as e:
                 logger.warning(f"Migration account_plans: {e}")
+
+            # Новые таблицы v3
+            for table_name, table_sql in [
+                ("client_notes", """CREATE TABLE IF NOT EXISTS client_notes (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER REFERENCES clients(id),
+                    user_id INTEGER REFERENCES users(id),
+                    content TEXT NOT NULL,
+                    is_pinned BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )"""),
+                ("task_comments", """CREATE TABLE IF NOT EXISTS task_comments (
+                    id SERIAL PRIMARY KEY,
+                    task_id INTEGER REFERENCES tasks(id),
+                    user_id INTEGER REFERENCES users(id),
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )"""),
+                ("followup_templates", """CREATE TABLE IF NOT EXISTS followup_templates (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    name VARCHAR NOT NULL,
+                    content TEXT NOT NULL,
+                    category VARCHAR DEFAULT 'general',
+                    created_at TIMESTAMP DEFAULT NOW()
+                )"""),
+                ("voice_notes", """CREATE TABLE IF NOT EXISTS voice_notes (
+                    id SERIAL PRIMARY KEY,
+                    meeting_id INTEGER REFERENCES meetings(id),
+                    client_id INTEGER REFERENCES clients(id),
+                    user_id INTEGER REFERENCES users(id),
+                    audio_url VARCHAR,
+                    transcription TEXT,
+                    duration_seconds INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )"""),
+            ]:
+                try:
+                    db.execute(text(table_sql))
+                    db.commit()
+                    logger.info(f"✅ Created {table_name} table")
+                except Exception as e:
+                    logger.warning(f"Migration {table_name}: {e}")
 
             if db.query(User).count() == 0:
                 admin = User(
@@ -1844,8 +1891,90 @@ async def api_onboarding_status(db: Session = Depends(get_db), auth_token: Optio
 
 
 # ============================================================================
-# ROOT
+# GLOBAL SEARCH
 # ============================================================================
+
+@app.get("/api/search")
+async def api_global_search(
+    q: str = Query("", min_length=1),
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Глобальный поиск по клиентам, задачам, встречам, заметкам."""
+    if not auth_token:
+        return {"clients": [], "tasks": [], "meetings": [], "notes": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"clients": [], "tasks": [], "meetings": [], "notes": []}
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"clients": [], "tasks": [], "meetings": [], "notes": []}
+
+    # Фильтр для менеджеров — только свои клиенты
+    manager_filter = True
+    if user.role == "manager":
+        manager_filter = Client.manager_email == user.email
+
+    search_pattern = f"%{q}%"
+
+    # Клиенты
+    clients = db.query(Client).filter(
+        manager_filter,
+        Client.name.ilike(search_pattern) |
+        (Client.segment is not None and Client.segment.ilike(search_pattern)),
+    ).limit(limit).all()
+
+    # Задачи — через JOIN с клиентами для фильтрации по менеджеру
+    task_query = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        task_query = task_query.filter(Client.manager_email == user.email)
+    tasks = task_query.filter(
+        Task.title.ilike(search_pattern) |
+        (Task.description is not None and Task.description.ilike(search_pattern)),
+    ).limit(limit).all()
+
+    # Встречи — через JOIN
+    meeting_query = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        meeting_query = meeting_query.filter(Client.manager_email == user.email)
+    meetings = meeting_query.filter(
+        (Meeting.title is not None and Meeting.title.ilike(search_pattern)) |
+        (Meeting.type is not None and Meeting.type.ilike(search_pattern)),
+    ).order_by(Meeting.date.desc()).limit(limit).all()
+
+    # Заметки клиентов — через JOIN
+    note_query = db.query(ClientNote).join(Client, ClientNote.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        note_query = note_query.filter(Client.manager_email == user.email)
+    notes = note_query.filter(
+        ClientNote.content.ilike(search_pattern),
+    ).order_by(ClientNote.is_pinned.desc(), ClientNote.updated_at.desc()).limit(limit).all()
+
+    return {
+        "clients": [{
+            "id": c.id, "name": c.name, "segment": c.segment,
+            "url": f"/client/{c.id}", "type": "client",
+        } for c in clients],
+        "tasks": [{
+            "id": t.id, "title": t.title, "status": t.status,
+            "client_name": t.client.name if t.client else "—",
+            "url": f"/client/{t.client_id}", "type": "task",
+        } for t in tasks],
+        "meetings": [{
+            "id": m.id, "title": m.title or m.type, "date": m.date.isoformat() if m.date else None,
+            "client_name": m.client.name if m.client else "—",
+            "url": f"/client/{m.client_id}", "type": "meeting",
+        } for m in meetings],
+        "notes": [{
+            "id": n.id, "content": n.content[:100] + "..." if len(n.content) > 100 else n.content,
+            "client_name": n.client.name if n.client else "—",
+            "url": f"/client/{n.client_id}", "type": "note",
+            "pinned": n.is_pinned,
+        } for n in notes],
+    }
 
 @app.get("/health")
 async def health():

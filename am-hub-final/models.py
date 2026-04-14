@@ -254,3 +254,61 @@ class SyncLog(Base):
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     sync_data = Column(JSONB, default=dict)
+
+
+class ClientNote(Base):
+    """Заметки к клиенту"""
+    __tablename__ = "client_notes"
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    content = Column(Text, nullable=False)
+    is_pinned = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    client = relationship("Client")
+    user = relationship("User")
+
+
+class TaskComment(Base):
+    """Комментарии к задачам"""
+    __tablename__ = "task_comments"
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    task = relationship("Task")
+    user = relationship("User")
+
+
+class FollowupTemplate(Base):
+    """Шаблоны фолоуапов"""
+    __tablename__ = "followup_templates"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    name = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    category = Column(String, default="general")  # general/qbr/kickoff/sync/checkup
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class VoiceNote(Base):
+    """Голосовые заметки к встречам"""
+    __tablename__ = "voice_notes"
+    id = Column(Integer, primary_key=True, index=True)
+    meeting_id = Column(Integer, ForeignKey("meetings.id"))
+    client_id = Column(Integer, ForeignKey("clients.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    audio_url = Column(String, nullable=True)
+    transcription = Column(Text, nullable=True)
+    duration_seconds = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    meeting = relationship("Meeting")
+    client = relationship("Client")
+    user = relationship("User")

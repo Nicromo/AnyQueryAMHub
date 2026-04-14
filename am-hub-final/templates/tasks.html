@@ -50,7 +50,17 @@
   <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
 </div>
 <div class="main">
-  <h1>📋 Задачи</h1>
+  <h1 style="display:flex;align-items:center;justify-content:space-between;">📋 Задачи <button class="btn btn-sm" onclick="openSearch()" title="Поиск (Ctrl+K)">🔍</button></h1>
+
+  <!-- Search Modal -->
+  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">🔍</span><input id="searchInput" type="text" placeholder="Поиск..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;" autocomplete="off"><kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd></div>
+      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
+      <div id="searchEmpty" style="padding:30px;text-align:center;color:var(--muted);font-size:.85rem;display:none;">Начните вводить</div>
+    </div>
+  </div>
+  <style>.search-cat{padding:6px 16px 4px;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;}.search-item{padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s;}.search-item:hover{background:rgba(255,255,255,.04);}.search-item .s-icon{font-size:1rem;flex-shrink:0;width:20px;text-align:center;}.search-item .s-text{flex:1;min-width:0;}.search-item .s-title{font-size:.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.search-item .s-sub{font-size:.72rem;color:var(--muted);}.search-item .s-badge{font-size:.65rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,.15);color:var(--accent);font-weight:600;flex-shrink:0;}</style>
   <div class="filter-bar">
     <a class="fbtn {% if status_filter == 'all' %}active{% endif %}" href="?status=all">Все ({{ tasks|length }})</a>
     <a class="fbtn {% if status_filter == 'plan' %}active{% endif %}" href="?status=plan">Plan</a>
@@ -78,6 +88,7 @@
 <script>
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+let searchTimeout=null;function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').value='';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';}function closeSearch(){document.getElementById('searchModal').style.display='none';}document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')closeSearch();});document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))closeSearch();});document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}document.getElementById('searchEmpty').style.display='none';searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div></div></div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+'</div></div></div>';});}if(d.meetings.length){html+='<div class="search-cat">📅 Встречи</div>';d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div></div></div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){console.error(e);}},300);});
 </script>
 </body>
 </html>
