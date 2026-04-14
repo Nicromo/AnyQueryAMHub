@@ -1051,7 +1051,7 @@ async def api_tbank_all_tickets(
 async def api_sync_merchrules(
     request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
 ):
-    """Синхронизация с Merchrules — берёт креды из настроек пользователя."""
+    """Синхронизация с Merchrules — пробует QA и Production."""
     if not auth_token:
         raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -1063,18 +1063,17 @@ async def api_sync_merchrules(
     if not user:
         raise HTTPException(status_code=401)
 
-    # Креды: из тела запроса → из настроек пользователя → из env
     body = await request.json()
     settings = user.settings or {}
     mr = settings.get("merchrules", {})
     login = body.get("login") or mr.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
     password = body.get("password") or mr.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
-    site_ids_input = body.get("site_ids") or settings.get("merchrules_site_ids", [])
+    site_ids_input = body.get("site_ids") or mr.get("site_ids") or settings.get("merchrules_site_ids", [])
 
     if not login or not password:
-        return {"error": "Нужны креды Merchrules. Введите на странице /settings → Интеграции"}
+        return {"error": "Нужны креды Merchrules"}
 
-    # Сохраняем креды в настройки пользователя
+    # Сохраняем креды
     mr["login"] = login
     mr["password"] = password
     if site_ids_input:
@@ -1083,87 +1082,152 @@ async def api_sync_merchrules(
     user.settings = settings
     db.commit()
 
+    # Пробуем авторизацию на QA и Production
     import httpx
-    try:
-        async with httpx.AsyncClient(timeout=30) as hx:
-            from merchrules_sync import get_auth_token, fetch_site_tasks, fetch_site_meetings
-            token = await get_auth_token(hx, login, password)
-            if not token:
-                return {"error": "Ошибка авторизации Merchrules. Проверьте логин/пароль."}
-            headers = {"Authorization": f"Bearer {token}"}
+    urls_to_try = [
+        "https://merchrules-qa.any-platform.ru",
+        "https://merchrules.any-platform.ru",
+    ]
+    base_url = None
+    token = None
+    last_error = ""
 
-            synced_clients = 0
-            synced_tasks = 0
-
-            # Если указаны site_id — используем их
-            if site_ids_input:
-                for sid in site_ids_input:
-                    sid = str(sid).strip()
-                    if not sid:
-                        continue
-                    c = db.query(Client).filter(Client.merchrules_account_id == sid).first()
-                    if not c:
-                        c = Client(merchrules_account_id=sid, name=f"Site {sid}", manager_email=user.email, segment="SMB")
-                        db.add(c)
-                        db.flush()
-
-                    td = await fetch_site_tasks(hx, headers, sid)
-                    md = await fetch_site_meetings(hx, headers, sid)
-
-                    for t in td.get("tasks", [])[:20]:
-                        existing = db.query(Task).filter(Task.merchrules_task_id == str(t.get("id"))).first()
-                        if not existing:
-                            db.add(Task(client_id=c.id, merchrules_task_id=str(t.get("id")),
-                                title=t.get("title",""), status=t.get("status","plan"),
-                                priority=t.get("priority","medium"), source="roadmap"))
-                            synced_tasks += 1
-
-                    if md.get("last_meeting"):
-                        try:
-                            c.last_meeting_date = datetime.fromisoformat(md["last_meeting"])
-                        except:
-                            pass
-                    synced_clients += 1
-            else:
-                # Без site_ids — пробуем получить accounts
-                r = await hx.get("https://merchrules-qa.any-platform.ru/backend-v2/accounts", headers=headers)
-                accounts = r.json().get("accounts", []) if r.status_code == 200 else []
-                if not accounts:
-                    return {"error": "Нет аккаунтов. Укажите site_id в настройках (через запятую)."}
-
-                for acc in accounts[:30]:
-                    aid = acc.get("id")
-                    if not aid:
-                        continue
-                    site_id = str(aid)
-                    c = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
-                    if not c:
-                        c = Client(merchrules_account_id=site_id, name=acc.get("name",f"Account {site_id}"), manager_email=user.email)
-                        db.add(c)
-                        db.flush()
+    async with httpx.AsyncClient(timeout=30) as hx:
+        for url in urls_to_try:
+            try:
+                resp = await hx.post(
+                    f"{url}/backend-v2/auth/login",
+                    json={"username": login, "password": password},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    body_resp = resp.json()
+                    token = body_resp.get("token") or body_resp.get("access_token") or body_resp.get("accessToken")
+                    if token:
+                        base_url = url
+                        logger.info(f"✅ Merchrules auth OK on {url}")
+                        break
                     else:
-                        c.name = acc.get("name") or c.name
+                        last_error = f"Нет токена в ответе: {body_resp}"
+                else:
+                    last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            except Exception as e:
+                last_error = str(e)
 
-                    td = await fetch_site_tasks(hx, headers, site_id)
-                    md = await fetch_site_meetings(hx, headers, site_id)
+    if not token:
+        logger.error(f"Merchrules auth failed: {last_error}")
+        return {"error": f"Ошибка авторизации: {last_error}"}
 
-                    for t in td.get("tasks", [])[:20]:
-                        existing = db.query(Task).filter(Task.merchrules_task_id == str(t.get("id"))).first()
-                        if not existing:
-                            db.add(Task(client_id=c.id, merchrules_task_id=str(t.get("id")),
-                                title=t.get("title",""), status=t.get("status","plan"),
-                                priority=t.get("priority","medium"), source="roadmap"))
-                            synced_tasks += 1
+    headers = {"Authorization": f"Bearer {token}"}
+    logger.info(f"Using Merchrules base URL: {base_url}")
 
-                    if md.get("last_meeting"):
-                        try:
-                            c.last_meeting_date = datetime.fromisoformat(md["last_meeting"])
-                        except:
-                            pass
-                    synced_clients += 1
+    synced_clients = 0
+    synced_tasks = 0
 
-            db.commit()
-            return {"ok": True, "clients_synced": synced_clients, "tasks_synced": synced_tasks}
+    try:
+        # Если указаны site_id — используем их
+        if site_ids_input:
+            for sid in site_ids_input:
+                sid = str(sid).strip()
+                if not sid:
+                    continue
+                c = db.query(Client).filter(Client.merchrules_account_id == sid).first()
+                if not c:
+                    c = Client(merchrules_account_id=sid, name=f"Site {sid}", manager_email=user.email, segment="SMB")
+                    db.add(c)
+                    db.flush()
+
+                # Tasks
+                try:
+                    r_tasks = await hx.get(f"{base_url}/backend-v2/tasks", params={"site_id": sid, "limit": 50}, headers=headers, timeout=15)
+                    if r_tasks.status_code == 200:
+                        tasks_data = r_tasks.json()
+                        tasks_list = tasks_data.get("tasks") or tasks_data.get("items") or []
+                        for t in tasks_list[:20]:
+                            existing = db.query(Task).filter(Task.merchrules_task_id == str(t.get("id"))).first()
+                            if not existing:
+                                db.add(Task(client_id=c.id, merchrules_task_id=str(t.get("id")),
+                                    title=t.get("title",""), status=t.get("status","plan"),
+                                    priority=t.get("priority","medium"), source="roadmap"))
+                                synced_tasks += 1
+                except Exception as e:
+                    logger.warning(f"Failed to fetch tasks for {sid}: {e}")
+
+                # Meetings
+                try:
+                    r_meetings = await hx.get(f"{base_url}/backend-v2/meetings", params={"site_id": sid, "limit": 10}, headers=headers, timeout=15)
+                    if r_meetings.status_code == 200:
+                        meetings_data = r_meetings.json()
+                        meetings_list = meetings_data.get("meetings") or meetings_data.get("items") or []
+                        if meetings_list:
+                            last_mtg = max(meetings_list, key=lambda m: m.get("date", ""))
+                            try:
+                                c.last_meeting_date = datetime.fromisoformat(last_mtg.get("date", "")[:19])
+                            except:
+                                pass
+                except Exception as e:
+                    logger.warning(f"Failed to fetch meetings for {sid}: {e}")
+
+                synced_clients += 1
+        else:
+            # Без site_ids — пробуем получить accounts
+            try:
+                r = await hx.get(f"{base_url}/backend-v2/accounts", headers=headers, timeout=15)
+                accounts = r.json().get("accounts", []) if r.status_code == 200 else []
+            except:
+                accounts = []
+
+            if not accounts:
+                return {"error": f"Нет аккаунтов (HTTP {r.status_code if 'r' in dir() else 'N/A'}). Укажите site_id в настройках (через запятую), например: 2262, 5335"}
+
+            for acc in accounts[:30]:
+                aid = acc.get("id")
+                if not aid:
+                    continue
+                site_id = str(aid)
+                c = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
+                if not c:
+                    c = Client(merchrules_account_id=site_id, name=acc.get("name",f"Account {site_id}"), manager_email=user.email)
+                    db.add(c)
+                    db.flush()
+                else:
+                    c.name = acc.get("name") or c.name
+
+                # Tasks
+                try:
+                    r_tasks = await hx.get(f"{base_url}/backend-v2/tasks", params={"site_id": site_id, "limit": 50}, headers=headers, timeout=15)
+                    if r_tasks.status_code == 200:
+                        tasks_data = r_tasks.json()
+                        tasks_list = tasks_data.get("tasks") or tasks_data.get("items") or []
+                        for t in tasks_list[:20]:
+                            existing = db.query(Task).filter(Task.merchrules_task_id == str(t.get("id"))).first()
+                            if not existing:
+                                db.add(Task(client_id=c.id, merchrules_task_id=str(t.get("id")),
+                                    title=t.get("title",""), status=t.get("status","plan"),
+                                    priority=t.get("priority","medium"), source="roadmap"))
+                                synced_tasks += 1
+                except:
+                    pass
+
+                # Meetings
+                try:
+                    r_meetings = await hx.get(f"{base_url}/backend-v2/meetings", params={"site_id": site_id, "limit": 10}, headers=headers, timeout=15)
+                    if r_meetings.status_code == 200:
+                        meetings_data = r_meetings.json()
+                        meetings_list = meetings_data.get("meetings") or meetings_data.get("items") or []
+                        if meetings_list:
+                            last_mtg = max(meetings_list, key=lambda m: m.get("date", ""))
+                            try:
+                                c.last_meeting_date = datetime.fromisoformat(last_mtg.get("date", "")[:19])
+                            except:
+                                pass
+                except:
+                    pass
+
+                synced_clients += 1
+
+        db.commit()
+        return {"ok": True, "clients_synced": synced_clients, "tasks_synced": synced_tasks, "base_url": base_url}
     except Exception as e:
         db.rollback()
         logger.error(f"Merchrules sync error: {e}")
