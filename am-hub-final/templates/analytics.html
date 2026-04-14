@@ -1,147 +1,103 @@
-{% extends "base.html" %}
-{% block title %}Аналитика — AM Hub{% endblock %}
-{% block content %}
-
-<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-  <div>
-    <h1>📈 Аналитика</h1>
-    <p style="color:var(--text-muted)">Сводка: встречи, задачи, чекапы</p>
-  </div>
-  <div style="display:flex;gap:8px">
-    <button onclick="setRange('week')"  class="tab-btn active" id="range-week">Неделя</button>
-    <button onclick="setRange('month')" class="tab-btn" id="range-month">Месяц</button>
-    <button onclick="setRange('quarter')" class="tab-btn" id="range-quarter">Квартал</button>
-  </div>
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Аналитика — AM Hub</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    h1 { font-size:1.4rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .charts-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+    @media(max-width:800px){.charts-row{grid-template-columns:1fr;}}
+    .chart-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; }
+    .chart-title { font-size:.9rem; font-weight:600; margin-bottom:14px; }
+    .chart-wrap { position:relative; height:250px; }
+    .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:20px; }
+    .kpi { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; text-align:center; }
+    .kpi .v { font-size:1.8rem; font-weight:700; }
+    .kpi .l { font-size:.72rem; color:var(--muted); text-transform:uppercase; margin-top:4px; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
+  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
+  <a class="nav-item active" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
 </div>
 
-<!-- KPI-карточки -->
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-  {% set open = stats.task_stats.get('open', 0) %}
-  {% set done = stats.task_stats.get('done', 0) %}
-  {% set blocked = stats.task_stats.get('blocked', 0) %}
-  {% set total_tasks = open + done + blocked %}
+<div class="main">
+  <h1>📈 Аналитика</h1>
+  <p class="sub">Обзор по всем клиентам</p>
 
-  <div class="kpi-card">
-    <div class="kpi-val">{{ stats.meetings_weekly | sum(attribute='cnt') }}</div>
-    <div class="kpi-label">Встреч за 12 нед.</div>
+  <div class="kpi-grid" id="kpiGrid"></div>
+
+  <div class="charts-row">
+    <div class="chart-card"><div class="chart-title">Клиенты по сегментам</div><div class="chart-wrap"><canvas id="segChart"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Health Score</div><div class="chart-wrap"><canvas id="healthChart"></canvas></div></div>
   </div>
-  <div class="kpi-card">
-    <div class="kpi-val" style="color:var(--yellow)">{{ open }}</div>
-    <div class="kpi-label">Открытых задач</div>
-  </div>
-  <div class="kpi-card">
-    <div class="kpi-val" style="color:var(--red)">{{ blocked }}</div>
-    <div class="kpi-label">Заблокировано</div>
-  </div>
-  <div class="kpi-card">
-    <div class="kpi-val" style="color:var(--accent)">
-      {% if total_tasks > 0 %}{{ (done / total_tasks * 100)|int }}%{% else %}—{% endif %}
-    </div>
-    <div class="kpi-label">Выполнено (всего)</div>
+  <div class="charts-row">
+    <div class="chart-card"><div class="chart-title">Задачи по статусам</div><div class="chart-wrap"><canvas id="taskChart"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Встречи по месяцам</div><div class="chart-wrap"><canvas id="meetingsChart"></canvas></div></div>
   </div>
 </div>
-
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-
-  <!-- Встречи по неделям -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">📅 Встречи по неделям</h2>
-    {% if stats.meetings_weekly %}
-    <div style="display:flex;align-items:flex-end;gap:4px;height:120px">
-      {% set max_cnt = stats.meetings_weekly | map(attribute='cnt') | max %}
-      {% for w in stats.meetings_weekly[-8:] %}
-      {% set h = (w.cnt / max_cnt * 100)|int if max_cnt > 0 else 0 %}
-      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
-        <span style="font-size:.65rem;color:var(--text-muted)">{{ w.cnt }}</span>
-        <div style="width:100%;background:var(--accent);opacity:.8;border-radius:3px 3px 0 0;height:{{ h }}%"></div>
-        <span style="font-size:.6rem;color:var(--text-muted);writing-mode:vertical-rl;transform:rotate(180deg)">
-          {{ w.week[-2:] }}н
-        </span>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p style="color:var(--text-muted);text-align:center;padding:20px">Нет данных</p>
-    {% endif %}
-  </div>
-
-  <!-- Чекапы по сегментам -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">🎯 Соответствие ритму чекапов</h2>
-    {% for row in stats.clients_by_segment %}
-    {% set pct = (row.on_time / row.total * 100)|int if row.total > 0 else 0 %}
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
-        <span><span class="badge badge-{{ row.segment|lower }}">{{ row.segment }}</span></span>
-        <span style="color:{% if pct >= 80 %}var(--accent){% elif pct >= 50 %}var(--yellow){% else %}var(--red){% endif %}">
-          {{ row.on_time }}/{{ row.total }} ({{ pct }}%)
-        </span>
-      </div>
-      <div style="background:var(--border);border-radius:4px;height:5px">
-        <div style="background:{% if pct >= 80 %}var(--accent){% elif pct >= 50 %}var(--yellow){% else %}var(--red){% endif %};
-                    width:{{ pct }}%;height:5px;border-radius:4px"></div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-
-  <!-- Статус задач -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">✅ Задачи по статусам</h2>
-    {% set total = stats.task_stats.values() | sum %}
-    {% for status, color, label in [('open','var(--yellow)','Открытые'),('done','var(--accent)','Выполненные'),('blocked','var(--red)','Заблокированные')] %}
-    {% set cnt = stats.task_stats.get(status, 0) %}
-    {% set pct = (cnt / total * 100)|int if total > 0 else 0 %}
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-      <span style="width:90px;font-size:.82rem;color:{{ color }}">{{ label }}</span>
-      <div style="flex:1;background:var(--border);border-radius:4px;height:8px">
-        <div style="background:{{ color }};width:{{ pct }}%;height:8px;border-radius:4px"></div>
-      </div>
-      <span style="font-size:.82rem;font-weight:600;width:30px;text-align:right">{{ cnt }}</span>
-    </div>
-    {% endfor %}
-  </div>
-
-  <!-- Топ активных клиентов -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">🏆 Активные клиенты (квартал)</h2>
-    {% if stats.top_active %}
-    <div>
-      {% for row in stats.top_active %}
-      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:.75rem;color:var(--text-muted);width:20px;text-align:right">{{ loop.index }}</span>
-        <span style="flex:1;font-size:.85rem">{{ row.name }}</span>
-        <span class="badge badge-{{ row.segment|lower }}" style="font-size:.65rem">{{ row.segment }}</span>
-        <span style="font-size:.82rem;font-weight:600;color:var(--accent)">{{ row.meetings }} встреч</span>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p style="color:var(--text-muted);text-align:center;padding:20px">Нет данных</p>
-    {% endif %}
-  </div>
-
-</div>
-
-<style>
-.kpi-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  text-align: center;
-}
-.kpi-val   { font-size: 2rem; font-weight: 700; line-height: 1; }
-.kpi-label { font-size: .78rem; color: var(--text-muted); margin-top: 4px; }
-</style>
 
 <script>
-function setRange(r) {
-  ['week','month','quarter'].forEach(x => {
-    document.getElementById('range-'+x)?.classList.toggle('active', x === r);
-  });
-  // TODO: reload with range param
-  window.location.href = '/analytics?range=' + r;
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+async function loadAnalytics(){
+  try{
+    const r=await fetch('/api/analytics');
+    const d=await r.json();
+    document.getElementById('kpiGrid').innerHTML=
+      '<div class="kpi"><div class="v">'+d.total_clients+'</div><div class="l">Клиентов</div></div>'+
+      '<div class="kpi"><div class="v" style="color:var(--green)">'+d.avg_health+'%</div><div class="l">Ср. Health</div></div>'+
+      '<div class="kpi"><div class="v">'+d.total_tasks+'</div><div class="l">Задач</div></div>'+
+      '<div class="kpi"><div class="v">'+Object.keys(d.meetings_per_month||{}).length+'</div><div class="l">Мес. с встречами</div></div>';
+
+    // Segments
+    const segLabels=Object.keys(d.segments||{});
+    new Chart(document.getElementById('segChart'),{type:'bar',data:{labels:segLabels,datasets:[{data:segLabels.map(l=>d.segments[l]),backgroundColor:['rgba(59,130,246,.6)','rgba(168,85,247,.6)','rgba(34,197,94,.6)','rgba(249,115,22,.6)'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.05)'}},x:{ticks:{color:'#64748b'},grid:{display:false}}}}});
+
+    // Health
+    const hLabels=Object.keys(d.health_distribution||{});
+    new Chart(document.getElementById('healthChart'),{type:'doughnut',data:{labels:hLabels,datasets:[{data:hLabels.map(l=>d.health_distribution[l]),backgroundColor:['rgba(239,68,68,.7)','rgba(234,179,8,.7)','rgba(59,130,246,.7)','rgba(34,197,94,.7)'],borderWidth:0,spacing:4}]},options:{responsive:true,maintainAspectRatio:false,cutout:'70%',plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',padding:12,font:{size:10}}}}}});
+
+    // Tasks
+    const tLabels=Object.keys(d.task_status||{});
+    new Chart(document.getElementById('taskChart'),{type:'bar',data:{labels:tLabels,datasets:[{data:tLabels.map(l=>d.task_status[l]),backgroundColor:['rgba(59,130,246,.6)','rgba(168,85,247,.6)','rgba(34,197,94,.6)','rgba(239,68,68,.6)'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.05)'}},y:{ticks:{color:'#64748b'},grid:{display:false}}}}});
+
+    // Meetings per month
+    const mLabels=Object.keys(d.meetings_per_month||{}).reverse();
+    new Chart(document.getElementById('meetingsChart'),{type:'line',data:{labels:mLabels,datasets:[{data:mLabels.map(l=>d.meetings_per_month[l]),borderColor:'var(--accent)',backgroundColor:'rgba(99,102,241,.1)',fill:true,tension:.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.05)'}},x:{ticks:{color:'#64748b'},grid:{display:false}}}}});
+  }catch(e){console.error(e);}
 }
+loadAnalytics();
 </script>
-{% endblock %}
+</body>
+</html>

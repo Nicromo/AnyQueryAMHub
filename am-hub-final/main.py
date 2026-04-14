@@ -2193,6 +2193,586 @@ async def api_client_timeline(client_id: int, db: Session = Depends(get_db), aut
 
     return {"events": events[:50]}
 
+
+# ============================================================================
+# SMART CHECKUPS
+# ============================================================================
+
+CHECKUP_INTERVALS = {"SS": 180, "SMB": 90, "SME": 60, "ENT": 30, "SME+": 60, "SME-": 60}
+
+@app.get("/checkups", response_class=HTMLResponse)
+async def checkups_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Страница умных чекапов."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("checkups.html", {"request": request, "user": user})
+
+
+@app.get("/api/checkups")
+async def api_checkups(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить список чекапов по сегментам с дедлайнами."""
+    if not auth_token:
+        return {"overdue": [], "due_soon": [], "upcoming": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"overdue": [], "due_soon": [], "upcoming": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"overdue": [], "due_soon": [], "upcoming": []}
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+
+    now = datetime.now()
+    overdue, due_soon, upcoming = [], [], []
+
+    for c in clients:
+        interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+        last = c.last_meeting_date or c.last_checkup
+        if last:
+            days_since = (now - last).days
+            days_until = interval - days_since
+        else:
+            days_since = 999
+            days_until = -30
+
+        info = {"id": c.id, "name": c.name, "segment": c.segment, "days_since": days_since, "days_until": days_until, "interval": interval, "last_date": last.isoformat() if last else None}
+
+        if days_until < 0:
+            overdue.append(info)
+        elif days_until <= 14:
+            due_soon.append(info)
+        elif days_until <= 30:
+            upcoming.append(info)
+
+    overdue.sort(key=lambda x: x["days_until"])
+    due_soon.sort(key=lambda x: x["days_until"])
+    upcoming.sort(key=lambda x: x["days_until"])
+
+    return {"overdue": overdue, "due_soon": due_soon, "upcoming": upcoming}
+
+
+@app.post("/api/checkups/assign")
+async def api_assign_checkup(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Назначить чекап клиенту (создать встречу)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    client_id = data.get("client_id")
+    date_str = data.get("date")
+    if not client_id:
+        raise HTTPException(status_code=400)
+    meeting_date = datetime.fromisoformat(date_str) if date_str else datetime.now()
+    meeting = Meeting(client_id=client_id, date=meeting_date, type="checkup", source="internal", title="Чекап")
+    db.add(meeting)
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if client:
+        client.last_meeting_date = meeting_date
+        client.needs_checkup = False
+    db.commit()
+    return {"ok": True, "meeting_id": meeting.id}
+
+
+# ============================================================================
+# FOLLOWUP TEMPLATES
+# ============================================================================
+
+@app.get("/api/followup-templates")
+async def api_get_followup_templates(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить шаблоны фолоуапов пользователя."""
+    if not auth_token:
+        return {"templates": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"templates": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"templates": []}
+    templates_list = db.query(FollowupTemplate).filter(FollowupTemplate.user_id == user.id).order_by(FollowupTemplate.name).all()
+    return {"templates": [{"id": t.id, "name": t.name, "content": t.content, "category": t.category} for t in templates_list]}
+
+
+@app.post("/api/followup-templates")
+async def api_create_followup_template(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Создать шаблон фолоуапа."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    data = await request.json()
+    tpl = FollowupTemplate(user_id=user.id, name=data.get("name", ""), content=data.get("content", ""), category=data.get("category", "general"))
+    db.add(tpl)
+    db.commit()
+    return {"ok": True, "id": tpl.id}
+
+
+@app.delete("/api/followup-templates/{tpl_id}")
+async def api_delete_followup_template(tpl_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Удалить шаблон."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    tpl = db.query(FollowupTemplate).filter(FollowupTemplate.id == tpl_id).first()
+    if not tpl:
+        raise HTTPException(status_code=404)
+    db.delete(tpl)
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# CALENDAR
+# ============================================================================
+
+@app.get("/calendar", response_class=HTMLResponse)
+async def calendar_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Календарь встреч."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("calendar.html", {"request": request, "user": user})
+
+
+@app.get("/api/calendar/events")
+async def api_calendar_events(start: str = "", end: str = "", db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить события для календаря."""
+    if not auth_token:
+        return {"events": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"events": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"events": []}
+
+    q = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    if start and end:
+        q = q.filter(Meeting.date >= datetime.fromisoformat(start), Meeting.date <= datetime.fromisoformat(end))
+    meetings = q.order_by(Meeting.date).all()
+
+    events = []
+    for m in meetings:
+        color = {"checkup": "#22c55e", "qbr": "#6366f1", "kickoff": "#f97316", "sync": "#3b82f6"}.get(m.type, "#64748b")
+        events.append({
+            "id": m.id,
+            "title": f"{m.client.name + ': ' if m.client else ''}{m.title or m.type}",
+            "start": m.date.isoformat() if m.date else None,
+            "color": color,
+            "url": f"/client/{m.client_id}",
+            "type": m.type,
+        })
+
+    # Также добавляем дедлайны задач
+    task_q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        task_q = task_q.filter(Client.manager_email == user.email)
+    task_q = task_q.filter(Task.due_date != None, Task.status != "done")
+    if start and end:
+        task_q = task_q.filter(Task.due_date >= datetime.fromisoformat(start), Task.due_date <= datetime.fromisoformat(end))
+    tasks = task_q.all()
+
+    for t in tasks:
+        events.append({
+            "id": f"task-{t.id}",
+            "title": f"⏰ {t.title}",
+            "start": t.due_date.isoformat() if t.due_date else None,
+            "color": "#ef4444",
+            "url": f"/client/{t.client_id}",
+            "type": "task",
+        })
+
+    return {"events": events}
+
+
+# ============================================================================
+# ANALYTICS
+# ============================================================================
+
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Страница аналитики."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("analytics.html", {"request": request, "user": user})
+
+
+@app.get("/api/analytics")
+async def api_analytics(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Данные для аналитики."""
+    if not auth_token:
+        return {}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {}
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+
+    # Segments
+    seg_counts = {}
+    for c in clients:
+        seg = c.segment or "other"
+        seg_counts[seg] = seg_counts.get(seg, 0) + 1
+
+    # Health distribution
+    health_buckets = {"0-25": 0, "25-50": 0, "50-75": 0, "75-100": 0}
+    for c in clients:
+        score = (c.health_score or 0) * 100
+        if score < 25:
+            health_buckets["0-25"] += 1
+        elif score < 50:
+            health_buckets["25-50"] += 1
+        elif score < 75:
+            health_buckets["50-75"] += 1
+        else:
+            health_buckets["75-100"] += 1
+
+    # Tasks by status
+    task_q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        task_q = task_q.filter(Client.manager_email == user.email)
+    all_tasks = task_q.all()
+    task_status_counts = {}
+    for t in all_tasks:
+        s = t.status or "plan"
+        task_status_counts[s] = task_status_counts.get(s, 0) + 1
+
+    # Meetings per month (last 6 months)
+    meetings_per_month = {}
+    meeting_q = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        meeting_q = meeting_q.filter(Client.manager_email == user.email)
+    all_meetings = meeting_q.filter(Meeting.date != None).order_by(Meeting.date.desc()).all()
+    for m in all_meetings:
+        if m.date:
+            key = m.date.strftime("%Y-%m")
+            meetings_per_month[key] = meetings_per_month.get(key, 0) + 1
+
+    return {
+        "total_clients": len(clients),
+        "segments": seg_counts,
+        "health_distribution": health_buckets,
+        "task_status": task_status_counts,
+        "total_tasks": len(all_tasks),
+        "meetings_per_month": dict(sorted(meetings_per_month.items(), reverse=True)[:6]),
+        "avg_health": round(sum((c.health_score or 0) for c in clients) / max(len(clients), 1) * 100, 1),
+    }
+
+
+# ============================================================================
+# BULK ACTIONS
+# ============================================================================
+
+@app.post("/api/bulk/checkups")
+async def api_bulk_checkups(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Массовое назначение чекапов."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    client_ids = data.get("client_ids", [])
+    date_str = data.get("date")
+    meeting_date = datetime.fromisoformat(date_str) if date_str else datetime.now()
+    created = 0
+    for cid in client_ids:
+        client = db.query(Client).filter(Client.id == cid).first()
+        if client:
+            m = Meeting(client_id=cid, date=meeting_date, type="checkup", source="internal", title="Чекап")
+            db.add(m)
+            client.last_meeting_date = meeting_date
+            client.needs_checkup = False
+            created += 1
+    db.commit()
+    return {"ok": True, "created": created}
+
+
+@app.post("/api/bulk/segment")
+async def api_bulk_segment(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Массовое изменение сегмента."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    client_ids = data.get("client_ids", [])
+    segment = data.get("segment", "")
+    updated = 0
+    for cid in client_ids:
+        client = db.query(Client).filter(Client.id == cid).first()
+        if client:
+            client.segment = segment
+            updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated}
+
+
+# ============================================================================
+# EXPORT
+# ============================================================================
+
+@app.get("/api/export/client/{client_id}")
+async def api_export_client(client_id: int, fmt: str = "json", db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Экспорт отчёта по клиенту (JSON/CSV)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).all()
+    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).all()
+
+    data = {
+        "client": {"id": client.id, "name": client.name, "segment": client.segment, "health_score": client.health_score, "manager_email": client.manager_email},
+        "tasks": [{"id": t.id, "title": t.title, "status": t.status, "priority": t.priority, "due_date": t.due_date.isoformat() if t.due_date else None} for t in tasks],
+        "meetings": [{"id": m.id, "title": m.title or m.type, "date": m.date.isoformat() if m.date else None, "type": m.type} for m in meetings],
+        "notes": [{"id": n.id, "content": n.content, "pinned": n.is_pinned} for n in notes],
+        "exported_at": datetime.utcnow().isoformat(),
+    }
+
+    if fmt == "csv":
+        import io, csv
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["type", "id", "title", "date", "details"])
+        for t in tasks:
+            writer.writerow(["task", t.id, t.title, t.due_date.isoformat() if t.due_date else "", t.status])
+        for m in meetings:
+            writer.writerow(["meeting", m.id, m.title or m.type, m.date.isoformat() if m.date else "", m.type])
+        for n in notes:
+            writer.writerow(["note", n.id, n.content[:50], "", "pinned" if n.is_pinned else ""])
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(content=output.getvalue(), headers={"Content-Disposition": f"attachment; filename=client_{client_id}.csv"})
+
+    return data
+
+
+# ============================================================================
+# AI RECOMMENDATIONS & AUTO-QBR
+# ============================================================================
+
+@app.post("/api/ai/auto-qbr/{client_id}")
+async def api_auto_qbr(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """AI-генерация черновика QBR из данных клиента."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(10).all()
+
+    tasks_done = [t for t in tasks if t.status == "done"]
+    tasks_blocked = [t for t in tasks if t.status == "blocked"]
+
+    prompt = f"""Создай черновик QBR для клиента {client.name} ({client.segment or '—'}).
+
+Health Score: {(client.health_score or 0)*100:.0f}%
+Задач выполнено: {len(tasks_done)}
+Задач заблокировано: {len(tasks_blocked)}
+Последние встречи:
+{chr(10).join([f"- {m.title or m.type} ({m.date.strftime('%d.%m.%Y') if m.date else ''})" for m in meetings[:5]])}
+
+Ответь JSON:
+{"achievements": [...], "issues": [...], "next_quarter_goals": [...], "summary": "..."}"""
+
+    try:
+        text = await _ai_chat("", prompt, max_tokens=1500)
+        import json, re
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            data = json.loads(m.group(0))
+        else:
+            data = {}
+    except Exception as e:
+        data = {"error": str(e)}
+
+    return data
+
+
+async def _ai_chat(system: str, user: str, max_tokens: int = 1000) -> str:
+    """AI чат через Groq или Qwen."""
+    groq_key = os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ", "")
+    qwen_key = os.environ.get("QWEN_API_KEY", "")
+
+    if groq_key:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=60) as hx:
+                resp = await hx.post("https://api.groq.com/openai/v1/chat/completions",
+                    json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "max_tokens": max_tokens, "temperature": 0.1},
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"})
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"].strip()
+        except:
+            pass
+
+    if qwen_key:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=60) as hx:
+                resp = await hx.post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                    json={"model": "qwen-plus", "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "max_tokens": max_tokens, "temperature": 0.1},
+                    headers={"Authorization": f"Bearer {qwen_key}", "Content-Type": "application/json"})
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"].strip()
+        except:
+            pass
+
+    return "AI недоступен. Настройте GROQ_API_KEY или QWEN_API_KEY."
+
+
+# ============================================================================
+# "TIME TO WRITE" SIGNALS
+# ============================================================================
+
+@app.get("/api/notifications")
+async def api_notifications(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить уведомления: пора написать, просрочки и т.д."""
+    if not auth_token:
+        return {"notifications": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"notifications": []}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"notifications": []}
+
+    notifications = []
+    now = datetime.now()
+
+    # Клиенты без активности
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+
+    for c in clients:
+        interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+        last = c.last_meeting_date or c.last_checkup
+        if last:
+            days_since = (now - last).days
+            if days_since > interval:
+                notifications.append({
+                    "type": "overdue_checkup",
+                    "priority": "high",
+                    "message": f"Пора написать: {c.name} (последний контакт {days_since} дн. назад)",
+                    "client_id": c.id,
+                    "client_name": c.name,
+                })
+            elif days_since > interval - 14:
+                notifications.append({
+                    "type": "checkup_soon",
+                    "priority": "medium",
+                    "message": f"Скоро чекап: {c.name} (через {interval - days_since} дн.)",
+                    "client_id": c.id,
+                    "client_name": c.name,
+                })
+
+    # Blocked tasks
+    task_q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        task_q = task_q.filter(Client.manager_email == user.email)
+    blocked = task_q.filter(Task.status == "blocked").all()
+    for t in blocked:
+        notifications.append({
+            "type": "blocked_task",
+            "priority": "high",
+            "message": f"Заблокирована задача: {t.title} ({t.client.name if t.client else ''})",
+            "client_id": t.client_id,
+        })
+
+    return {"notifications": notifications}
+
+
+# ============================================================================
+# FOCUS MODE (CSS toggle — client detail page with sidebar hidden)
+# ============================================================================
+
+@app.get("/client/{client_id}/focus", response_class=HTMLResponse)
+async def client_focus_view(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Режим фокуса: клиент без сайдбара."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.due_date.desc()).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(5).all()
+    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.is_pinned.desc(), ClientNote.updated_at.desc()).all()
+
+    return templates.TemplateResponse("client_focus.html", {
+        "request": request, "user": user, "client": client,
+        "tasks": tasks, "meetings": meetings, "notes": notes,
+    })
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "2.0.0"}
