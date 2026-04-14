@@ -1,8 +1,7 @@
 """
-Интеграция с MerchRules. Авторизация через login/password.
-Синхронизирует встречи и задачи из AM Hub → Merchrules.
-
-Кредсы передаются явно (из профиля менеджера), fallback — env-переменные.
+Интеграция с MerchRules. Авторизация через cookie-сессию (HttpOnly).
+Один httpx.AsyncClient на весь сеанс — логин ставит куки, они автоматически
+передаются в последующих запросах (как браузер).
 """
 import os, io, csv, logging
 from typing import Optional
@@ -12,54 +11,37 @@ logger = logging.getLogger(__name__)
 
 MERCHRULES_URL = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
 
-# Кэш токенов по login (чтобы не авторизовываться каждый раз)
-_token_cache: dict[str, str] = {}
-
 
 def _get_default_creds() -> tuple[str, str]:
     return os.getenv("MERCHRULES_LOGIN", ""), os.getenv("MERCHRULES_PASSWORD", "")
 
 
-async def _get_token(client: httpx.AsyncClient, login: str, password: str) -> Optional[str]:
+async def _make_authed_client(login: str, password: str) -> tuple[Optional[httpx.AsyncClient], str]:
+    """
+    Создаёт httpx.AsyncClient и авторизуется через cookie-сессию.
+    Возвращает (client, base_url) или (None, error_message).
+    Вызывающий код ОБЯЗАН закрыть клиент через await client.aclose().
+    """
     if not login or not password:
-        return None
-    cache_key = f"{login}:{password[:8]}"
-    if cache_key in _token_cache:
-        return _token_cache[cache_key]
-    for field in ("email", "login", "username"):
+        return None, "Не заданы логин/пароль Merchrules"
+
+    client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+    for url in ["https://merchrules-qa.any-platform.ru", MERCHRULES_URL]:
         try:
             r = await client.post(
-                f"{MERCHRULES_URL}/backend-v2/auth/login",
-                json={field: login, "password": password},
+                f"{url}/backend-v2/auth/login",
+                json={"username": login, "password": password},
                 timeout=10,
             )
             if r.status_code == 200:
-                body = r.json()
-                token = (
-                    body.get("token") or body.get("access_token") or body.get("accessToken") or
-                    body.get("jwt") or body.get("jwtToken") or body.get("authToken") or
-                    (body.get("data") or {}).get("token") or (body.get("result") or {}).get("token") or ""
-                )
-                if token:
-                    _token_cache[cache_key] = token
-                    logger.info("MR auth OK for %s using field=%s", login, field)
-                    return token
-                logger.warning("MR auth 200 but no token for %s [%s]. Keys: %s", login, field, list(body.keys()) if isinstance(body, dict) else body)
-            elif r.status_code not in (400, 401, 422):
-                logger.warning("MR login failed %s field=%s %s: %s", login, field, r.status_code, r.text[:150])
+                logger.info("MR cookie-auth OK for %s on %s, cookies: %s", login, url, list(client.cookies.keys()))
+                return client, url
+            logger.warning("MR login %s on %s: HTTP %s", login, url, r.status_code)
         except Exception as e:
-            logger.warning("MR login error (%s) field=%s: %s", login, field, e)
-    logger.warning("MR auth: all field variants failed for %s", login)
-    return None
+            logger.warning("MR login error (%s) on %s: %s", login, url, e)
 
-
-def invalidate_token(login: str = "", password: str = ""):
-    """Сбрасываем кэш токена (например после 401)."""
-    if login:
-        key = f"{login}:{password[:8]}"
-        _token_cache.pop(key, None)
-    else:
-        _token_cache.clear()
+    await client.aclose()
+    return None, "Авторизация Merchrules не удалась — проверь логин/пароль"
 
 
 async def push_tasks_csv(site_ids: list[str], tasks: list[dict],
@@ -69,12 +51,13 @@ async def push_tasks_csv(site_ids: list[str], tasks: list[dict],
     if not login:
         login, password = _get_default_creds()
 
-    async with httpx.AsyncClient(timeout=30) as hx:
-        token = await _get_token(hx, login, password)
-        if not token:
-            return {"ok": False, "error": "Авторизация Merchrules не удалась — проверь логин/пароль в Профиле"}
-        headers = {"Authorization": f"Bearer {token}"}
-        uploaded, errors = [], []
+    client, base_url_or_err = await _make_authed_client(login, password)
+    if not client:
+        return {"ok": False, "error": base_url_or_err}
+    base_url = base_url_or_err
+
+    uploaded, errors = [], []
+    try:
         for site_id in site_ids:
             buf = io.StringIO()
             w = csv.DictWriter(buf, fieldnames=["title", "description", "status", "priority",
@@ -95,21 +78,20 @@ async def push_tasks_csv(site_ids: list[str], tasks: list[dict],
                     "due_date":    t.get("due_date", ""),
                 })
             try:
-                r = await hx.post(
-                    f"{MERCHRULES_URL}/backend-v2/import/tasks/csv",
+                r = await client.post(
+                    f"{base_url}/backend-v2/import/tasks/csv",
                     params={"site_id": site_id},
                     files={"file": ("tasks.csv", io.BytesIO(buf.getvalue().encode()), "text/csv")},
-                    headers=headers,
                     timeout=20,
                 )
                 if r.status_code in (200, 201):
                     uploaded.append(site_id)
                 else:
                     errors.append({"site_id": site_id, "error": r.text[:150]})
-                    if r.status_code == 401:
-                        invalidate_token(login, password)
             except Exception as e:
                 errors.append({"site_id": site_id, "error": str(e)})
+    finally:
+        await client.aclose()
 
     return {"ok": bool(uploaded), "uploaded": uploaded, "errors": errors}
 
@@ -122,27 +104,27 @@ async def push_meeting(site_ids: list[str], meeting_date: str, meeting_type: str
     if not login:
         login, password = _get_default_creds()
 
-    async with httpx.AsyncClient(timeout=20) as hx:
-        token = await _get_token(hx, login, password)
-        if not token:
-            return {"ok": False, "error": "Авторизация Merchrules не удалась — проверь логин/пароль в Профиле"}
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        results = []
+    client, base_url_or_err = await _make_authed_client(login, password)
+    if not client:
+        return {"ok": False, "error": base_url_or_err}
+    base_url = base_url_or_err
+
+    results = []
+    try:
         for site_id in site_ids:
             try:
-                r = await hx.post(
-                    f"{MERCHRULES_URL}/backend-v2/meetings",
+                r = await client.post(
+                    f"{base_url}/backend-v2/meetings",
                     json={"site_id": site_id, "date": meeting_date, "type": meeting_type,
                           "summary": summary, "mood": mood, "next_date": next_meeting},
-                    headers=headers,
                     timeout=15,
                 )
                 results.append({"site_id": site_id, "ok": r.status_code in (200, 201),
                                  "status": r.status_code})
-                if r.status_code == 401:
-                    invalidate_token(login, password)
             except Exception as e:
                 results.append({"site_id": site_id, "ok": False, "error": str(e)})
+    finally:
+        await client.aclose()
 
     return {"ok": any(r.get("ok") for r in results), "results": results}
 
@@ -152,10 +134,6 @@ async def sync_meeting_to_merchrules(client_name: str, meeting_date: str, meetin
                                      aq_tasks: list[dict], client_tasks: list[dict],
                                      site_ids: str = "",
                                      login: str = "", password: str = "") -> dict:
-    """
-    Главная точка входа. login/password — кредсы текущего менеджера.
-    Если не переданы — берём из env (глобальный fallback).
-    """
     if not login:
         login, password = _get_default_creds()
     if not login or not password:

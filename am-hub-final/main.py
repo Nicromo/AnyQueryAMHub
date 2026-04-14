@@ -1082,70 +1082,34 @@ async def api_sync_merchrules(
     user.settings = settings
     db.commit()
 
-    # Пробуем авторизацию — все URL + все варианты поля логина
+    # Merchrules использует cookie-сессию (HttpOnly) — не Bearer-токен.
+    # Один клиент на весь сеанс: логин ставит куки, они автоматом идут в следующих запросах.
     import httpx
-    urls_to_try = [
-        "https://merchrules-qa.any-platform.ru",
-        "https://merchrules.any-platform.ru",
-    ]
-    login_fields = ["email", "login", "username"]
     base_url = None
-    token = None
     last_error = ""
-    attempts_log = []
 
-    async with httpx.AsyncClient(timeout=30) as hx:
-        outer_break = False
-        for url in urls_to_try:
-            if outer_break:
-                break
-            for field in login_fields:
-                try:
-                    resp = await hx.post(
-                        f"{url}/backend-v2/auth/login",
-                        json={field: login, "password": password},
-                        timeout=15,
-                    )
-                    attempt_info = f"{url} [{field}] → {resp.status_code}"
-                    if resp.status_code == 200:
-                        body_resp = resp.json()
-                        # Ищем токен во всех возможных полях
-                        token = (
-                            body_resp.get("token") or
-                            body_resp.get("access_token") or
-                            body_resp.get("accessToken") or
-                            body_resp.get("jwt") or
-                            body_resp.get("jwtToken") or
-                            body_resp.get("bearer") or
-                            body_resp.get("auth_token") or
-                            body_resp.get("authToken") or
-                            (body_resp.get("data") or {}).get("token") or
-                            (body_resp.get("data") or {}).get("access_token") or
-                            (body_resp.get("result") or {}).get("token")
-                        )
-                        if token:
-                            base_url = url
-                            logger.info(f"✅ Merchrules auth OK on {url} with field={field}")
-                            outer_break = True
-                            break
-                        else:
-                            body_keys = list(body_resp.keys()) if isinstance(body_resp, dict) else str(body_resp)[:100]
-                            last_error = f"Нет токена в ответе ({field}). Ключи ответа: {body_keys}"
-                            attempts_log.append(attempt_info + f" [no token, keys={body_keys}]")
-                    else:
-                        last_error = f"HTTP {resp.status_code} [{field}]: {resp.text[:200]}"
-                        attempts_log.append(attempt_info)
-                except Exception as e:
-                    last_error = str(e)
-                    attempts_log.append(f"{url} [{field}] → error: {e}")
+    hx = httpx.AsyncClient(timeout=30, follow_redirects=True)
+    try:
+        for url in ["https://merchrules-qa.any-platform.ru", "https://merchrules.any-platform.ru"]:
+            try:
+                resp = await hx.post(
+                    f"{url}/backend-v2/auth/login",
+                    json={"username": login, "password": password},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    base_url = url
+                    logger.info(f"✅ Merchrules cookie-auth OK on {url}, cookies: {list(hx.cookies.keys())}")
+                    break
+                last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            except Exception as e:
+                last_error = str(e)
 
-    if not token:
-        detail = " | ".join(attempts_log[-4:]) if attempts_log else last_error
-        logger.error(f"Merchrules auth failed. Attempts: {attempts_log}")
-        return {"error": f"Ошибка авторизации Merchrules. {detail}"}
+        if not base_url:
+            return {"error": f"Ошибка авторизации Merchrules. {last_error}"}
 
-    headers = {"Authorization": f"Bearer {token}"}
-    logger.info(f"Using Merchrules base URL: {base_url}")
+        headers = {}  # куки идут автоматически через hx
+        logger.info(f"Using Merchrules base URL: {base_url}")
 
     synced_clients = 0
     synced_tasks = 0
@@ -1258,6 +1222,8 @@ async def api_sync_merchrules(
         db.rollback()
         logger.error(f"Merchrules sync error: {e}")
         return {"error": str(e)}
+    finally:
+        await hx.aclose()
 
 
 @app.post("/api/auth/taim/test")

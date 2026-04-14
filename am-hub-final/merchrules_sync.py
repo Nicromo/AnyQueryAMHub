@@ -1,7 +1,7 @@
 """
 Синхронизация данных из Merchrules Dashboard.
-Получаем список открытых задач и встреч для каждого клиента.
-Кэшируем результат на 30 минут.
+Авторизация через cookie-сессию (HttpOnly) — не Bearer-токен.
+Один httpx.AsyncClient на сеанс, куки идут автоматически.
 """
 import os
 import logging
@@ -13,83 +13,51 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# ── Настройки ─────────────────────────────────────────────────────────────────
-
 MERCHRULES_URL = os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
 CACHE_TTL_MINUTES = 30
 
-# Кэши: ключ = login (чтобы разные менеджеры не мешали друг другу)
-_auth_cache:  dict[str, dict] = {}  # login → {token, expires_at}
 _data_cache:  dict[str, dict] = {}  # login → {data, updated_at}
+_metrics_cache: dict[str, dict] = {}
 
 
 def _default_creds() -> tuple[str, str]:
     return os.getenv("MERCHRULES_LOGIN", ""), os.getenv("MERCHRULES_PASSWORD", "")
 
 
-# ── Авторизация ────────────────────────────────────────────────────────────────
-
-async def get_auth_token(client: httpx.AsyncClient,
-                          login: str = "", password: str = "") -> Optional[str]:
-    """Получаем/обновляем токен авторизации для конкретного пользователя."""
-    if not login:
-        login, password = _default_creds()
-    if not login or not password:
-        logger.debug("MR creds not set — skipping sync")
-        return None
-
-    now = datetime.now()
-    cached = _auth_cache.get(login, {})
-    if cached.get("token") and cached.get("expires_at") and now < cached["expires_at"]:
-        return cached["token"]
-
-    for field in ("email", "login", "username"):
+async def _make_authed_client(login: str, password: str) -> tuple[Optional[httpx.AsyncClient], str]:
+    """
+    Авторизуется через cookie-сессию, возвращает (client, base_url).
+    Вызывающий ОБЯЗАН закрыть через await client.aclose().
+    """
+    client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+    for url in ["https://merchrules-qa.any-platform.ru", MERCHRULES_URL]:
         try:
             resp = await client.post(
-                f"{MERCHRULES_URL}/backend-v2/auth/login",
-                json={field: login, "password": password},
+                f"{url}/backend-v2/auth/login",
+                json={"username": login, "password": password},
                 timeout=10,
             )
             if resp.status_code == 200:
-                body = resp.json()
-                token = (
-                    body.get("token") or body.get("access_token") or body.get("accessToken") or
-                    body.get("jwt") or body.get("jwtToken") or body.get("authToken") or
-                    (body.get("data") or {}).get("token") or (body.get("result") or {}).get("token")
-                )
-                if token:
-                    _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
-                    logger.info("Merchrules auth OK for %s using field=%s", login, field)
-                    return token
-                logger.warning("Merchrules 200 but no token for %s [%s]. Keys: %s", login, field, list(body.keys()) if isinstance(body, dict) else body)
-            elif resp.status_code not in (400, 401, 422):
-                logger.warning("Merchrules auth failed (%s) field=%s: %s %s", login, field, resp.status_code, resp.text[:150])
+                logger.info("Merchrules cookie-auth OK for %s on %s", login, url)
+                return client, url
         except Exception as exc:
-            logger.warning("Merchrules auth error (%s) field=%s: %s", login, field, exc)
+            logger.warning("Merchrules auth error (%s) on %s: %s", login, url, exc)
+    await client.aclose()
+    return None, ""
 
-    logger.warning("Merchrules: all field variants failed for %s", login)
-    return None
 
-
-# ── Получение данных ───────────────────────────────────────────────────────────
-
-async def fetch_site_tasks(
-    client: httpx.AsyncClient, headers: dict, site_id: str
-) -> dict:
-    """Получаем открытые задачи для одного site_id."""
+async def fetch_site_tasks(client: httpx.AsyncClient, base_url: str, site_id: str) -> dict:
     result = {"open_tasks": 0, "blocked_tasks": 0, "overdue_tasks": 0, "tasks": []}
     try:
         resp = await client.get(
-            f"{MERCHRULES_URL}/backend-v2/tasks",
+            f"{base_url}/backend-v2/tasks",
             params={"site_id": site_id, "status": "plan,in_progress,blocked", "limit": 100},
-            headers=headers,
             timeout=15,
         )
         if resp.status_code == 200:
             data = resp.json()
             tasks = data if isinstance(data, list) else data.get("tasks") or data.get("items") or []
             today = datetime.today().date().isoformat()
-
             for t in tasks:
                 result["tasks"].append({
                     "id": t.get("id"),
@@ -103,27 +71,20 @@ async def fetch_site_tasks(
                     result["blocked_tasks"] += 1
                 else:
                     result["open_tasks"] += 1
-
                 due = t.get("due_date") or t.get("dueDate") or ""
                 if due and due < today:
                     result["overdue_tasks"] += 1
-
     except Exception as exc:
         logger.warning("fetch_site_tasks(%s) error: %s", site_id, exc)
-
     return result
 
 
-async def fetch_site_meetings(
-    client: httpx.AsyncClient, headers: dict, site_id: str
-) -> dict:
-    """Получаем последние встречи для site_id."""
+async def fetch_site_meetings(client: httpx.AsyncClient, base_url: str, site_id: str) -> dict:
     result = {"last_meeting": None, "meetings_count": 0}
     try:
         resp = await client.get(
-            f"{MERCHRULES_URL}/backend-v2/meetings",
+            f"{base_url}/backend-v2/meetings",
             params={"site_id": site_id, "limit": 5},
-            headers=headers,
             timeout=15,
         )
         if resp.status_code == 200:
@@ -131,7 +92,6 @@ async def fetch_site_meetings(
             meetings = data if isinstance(data, list) else data.get("meetings") or data.get("items") or []
             result["meetings_count"] = len(meetings)
             if meetings:
-                # Берём самую свежую встречу
                 dates = [
                     m.get("date") or m.get("meeting_date") or m.get("createdAt", "")[:10]
                     for m in meetings
@@ -141,19 +101,11 @@ async def fetch_site_meetings(
                     result["last_meeting"] = max(dates)
     except Exception as exc:
         logger.warning("fetch_site_meetings(%s) error: %s", site_id, exc)
-
     return result
 
 
-# ── Публичный API ─────────────────────────────────────────────────────────────
-
 async def sync_clients_from_merchrules(clients: list[dict],
                                        login: str = "", password: str = "") -> dict:
-    """
-    Получаем данные из Merchrules для всех клиентов.
-    login/password — кредсы конкретного менеджера (или env-fallback).
-    Кэшируется на CACHE_TTL_MINUTES минут per-manager.
-    """
     if not login:
         login, password = _default_creds()
     if not login or not password:
@@ -168,16 +120,12 @@ async def sync_clients_from_merchrules(clients: list[dict],
     ):
         return cached["data"]
 
+    client, base_url = await _make_authed_client(login, password)
+    if not client:
+        return {}
+
     result = {}
-
-    async with httpx.AsyncClient(timeout=30) as hx:
-        token = await get_auth_token(hx, login, password)
-        if not token:
-            return {}
-
-        headers = {"Authorization": f"Bearer {token}"}
-
-        # Собираем все уникальные site_ids из переданных клиентов
+    try:
         site_ids = set()
         for c in clients:
             raw = c.get("site_ids") or ""
@@ -190,8 +138,8 @@ async def sync_clients_from_merchrules(clients: list[dict],
             return {}
 
         async def fetch_one(site_id: str):
-            tasks_data    = await fetch_site_tasks(hx, headers, site_id)
-            meetings_data = await fetch_site_meetings(hx, headers, site_id)
+            tasks_data    = await fetch_site_tasks(client, base_url, site_id)
+            meetings_data = await fetch_site_meetings(client, base_url, site_id)
             return site_id, {**tasks_data, **meetings_data}
 
         done = await asyncio.gather(*[fetch_one(sid) for sid in site_ids], return_exceptions=True)
@@ -202,6 +150,8 @@ async def sync_clients_from_merchrules(clients: list[dict],
                 continue
             site_id, data = item
             result[site_id] = data
+    finally:
+        await client.aclose()
 
     _data_cache[login] = {"data": result, "updated_at": now}
     logger.info("MR sync done for %s: %d sites", login, len(result))
@@ -209,10 +159,6 @@ async def sync_clients_from_merchrules(clients: list[dict],
 
 
 def get_client_mr_data(mr_data: dict, site_ids_raw: str) -> dict:
-    """
-    Агрегирует данные Merchrules для клиента у которого может быть несколько site_ids.
-    Возвращает суммарную статистику.
-    """
     if not site_ids_raw or not mr_data:
         return {"open_tasks": 0, "blocked_tasks": 0, "overdue_tasks": 0, "last_meeting": None}
 
@@ -232,50 +178,26 @@ def get_client_mr_data(mr_data: dict, site_ids_raw: str) -> dict:
 
     if all_dates:
         total["last_meeting"] = max(all_dates)
-
     return total
 
 
 def invalidate_cache(login: str = ""):
-    """Сбрасываем кэш принудительно. Если login — только для него, иначе всё."""
     if login:
         _data_cache.pop(login, None)
-        _auth_cache.pop(login, None)
     else:
         _data_cache.clear()
-        _auth_cache.clear()
-
-
-# ── Метрики клиента ────────────────────────────────────────────────────────────
-
-_metrics_cache: dict[str, dict] = {}  # site_id → {metrics, updated_at}
-METRICS_CACHE_TTL_MINUTES = 60
 
 
 async def get_client_metrics(site_id: str, login: str = "", password: str = "") -> dict:
-    """
-    Получает ключевые метрики клиента с Merchrules.
-    Пытается hit /backend-v2/sites/{site_id}/analytics или /backend-v2/sites/{site_id}/stats
-    Возвращает:
-    {
-        "gmv": 0,
-        "conversion": 0.0,
-        "search_ctr": 0.0,
-        "orders": 0,
-        "error": None
-    }
-    Результаты кэшируются на METRICS_CACHE_TTL_MINUTES минут.
-    """
     if not site_id:
         return {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": "no site_id"}
 
-    # Проверяем кэш
     now = datetime.now()
     cached = _metrics_cache.get(site_id, {})
     if (
         cached.get("metrics") is not None
         and cached.get("updated_at") is not None
-        and now - cached["updated_at"] < timedelta(minutes=METRICS_CACHE_TTL_MINUTES)
+        and now - cached["updated_at"] < timedelta(minutes=60)
     ):
         return cached["metrics"]
 
@@ -284,48 +206,33 @@ async def get_client_metrics(site_id: str, login: str = "", password: str = "") 
 
     result = {"gmv": 0, "conversion": 0.0, "search_ctr": 0.0, "orders": 0, "error": None}
 
+    client, base_url = await _make_authed_client(login, password)
+    if not client:
+        result["error"] = "auth_failed"
+        return result
+
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            token = await get_auth_token(client, login, password)
-            if not token:
-                result["error"] = "auth_failed"
-                return result
-
-            headers = {"Authorization": f"Bearer {token}"}
-
-            # Пробуем оба endpoint'а
-            endpoints = [
-                f"{MERCHRULES_URL}/backend-v2/sites/{site_id}/analytics",
-                f"{MERCHRULES_URL}/backend-v2/sites/{site_id}/stats",
-            ]
-
-            for endpoint in endpoints:
-                try:
-                    resp = await client.get(endpoint, headers=headers, timeout=15)
-                    if resp.status_code == 200:
-                        data = resp.json()
-
-                        # Пытаемся распарсить
-                        if isinstance(data, dict):
-                            result["gmv"] = int(data.get("gmv") or data.get("revenue") or 0)
-                            result["conversion"] = float(data.get("conversion") or data.get("conversion_rate") or 0.0)
-                            result["search_ctr"] = float(data.get("search_ctr") or data.get("ctr") or 0.0)
-                            result["orders"] = int(data.get("orders") or data.get("order_count") or 0)
-                            result["error"] = None
-                            break
-                except Exception as e:
-                    logger.debug("Metrics endpoint %s failed: %s", endpoint, e)
-                    continue
-
-            # Если оба endpoint'а упали
-            if result["error"] is None and result["gmv"] == 0:
-                result["error"] = "no_data"
-
+        for endpoint in [
+            f"{base_url}/backend-v2/sites/{site_id}/analytics",
+            f"{base_url}/backend-v2/sites/{site_id}/stats",
+        ]:
+            try:
+                resp = await client.get(endpoint, timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        result["gmv"] = int(data.get("gmv") or data.get("revenue") or 0)
+                        result["conversion"] = float(data.get("conversion") or data.get("conversion_rate") or 0.0)
+                        result["search_ctr"] = float(data.get("search_ctr") or data.get("ctr") or 0.0)
+                        result["orders"] = int(data.get("orders") or data.get("order_count") or 0)
+                        result["error"] = None
+                        break
+            except Exception as e:
+                logger.debug("Metrics endpoint %s failed: %s", endpoint, e)
     except Exception as exc:
-        logger.error("get_client_metrics error for site %s: %s", site_id, exc)
         result["error"] = str(exc)[:100]
+    finally:
+        await client.aclose()
 
-    # Кэшируем результат
     _metrics_cache[site_id] = {"metrics": result, "updated_at": now}
-
     return result
