@@ -1226,6 +1226,53 @@ async def api_sync_merchrules(
         await hx.aclose()
 
 
+@app.post("/api/auth/ktalk/cookie-test")
+async def api_test_ktalk_cookie(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """Проверить session cookie для KTalk."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    body = await request.json()
+    cookie = body.get("session_cookie", "")
+    if not cookie:
+        return {"ok": False, "error": "Нет cookie"}
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as hx:
+        r = await hx.get(
+            "https://tbank.ktalk.ru/api/context",
+            headers={"Cookie": f"session={cookie}", "Accept": "application/json"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            u = data.get("user", {})
+            if u.get("email"):
+                return {"ok": True, "user": f"{u.get('firstname','')} {u.get('surname','')} ({u.get('email')})"}
+        return {"ok": False, "error": f"HTTP {r.status_code} — cookie не подошёл или истёк"}
+
+
+@app.post("/api/auth/taim/cookie-test")
+async def api_test_taim_cookie(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """Проверить MMAUTHTOKEN cookie для 1Time."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    body = await request.json()
+    cookie = body.get("session_cookie", "")
+    if not cookie:
+        return {"ok": False, "error": "Нет cookie"}
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as hx:
+        r = await hx.get(
+            "https://time.tbank.ru/api/v4/users/me",
+            headers={
+                "Cookie": f"MMAUTHTOKEN={cookie}",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        if r.status_code == 200:
+            u = r.json()
+            return {"ok": True, "user": f"{u.get('nickname') or u.get('username')} ({u.get('email')})"}
+        return {"ok": False, "error": f"HTTP {r.status_code} — cookie не подошёл или истёк"}
+
+
 @app.post("/api/auth/taim/test")
 async def api_test_taim(request: Request, auth_token: Optional[str] = Cookie(None)):
     """Проверить авторизацию в 1Time (time.tbank.ru / Mattermost)."""

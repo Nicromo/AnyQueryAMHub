@@ -143,6 +143,15 @@ async def _get_user_info(access_token: str) -> dict:
     return {}
 
 
+def _cookie_headers(session_cookie: str) -> dict:
+    """Заголовки для cookie-based сессии KTalk."""
+    return {
+        "Cookie": f"session={session_cookie}",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": f"{BASE_URL}/",
+    }
+
+
 def _auth_headers(access_token: str) -> dict:
     return {
         "Authorization": f"Bearer {access_token}",
@@ -160,9 +169,17 @@ def invalidate(login_id: str = ""):
 
 # ── API methods ───────────────────────────────────────────────────────────────
 
+async def get_calendar_with_cookie(session_cookie: str,
+                                    start: Optional[str] = None,
+                                    end: Optional[str] = None) -> list[dict]:
+    """Получить встречи из KTalk через session cookie."""
+    return await get_calendar(session_cookie, start, end, use_cookie=True)
+
+
 async def get_calendar(access_token: str,
                        start: Optional[str] = None,
-                       end: Optional[str] = None) -> list[dict]:
+                       end: Optional[str] = None,
+                       use_cookie: bool = False) -> list[dict]:
     """
     Получить события из корпоративного календаря.
     start/end — ISO-даты (YYYY-MM-DDTHH:mm:ss.sssZ).
@@ -174,11 +191,12 @@ async def get_calendar(access_token: str,
         now = datetime.utcnow()
         end = (now + timedelta(days=7)).replace(hour=23, minute=59, second=59, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S.999Z")
     try:
+        headers = _cookie_headers(access_token) if use_cookie else _auth_headers(access_token)
         async with httpx.AsyncClient(timeout=15) as hx:
             r = await hx.get(
                 f"{BASE_URL}/api/calendar",
                 params={"start": start, "end": end},
-                headers=_auth_headers(access_token),
+                headers=headers,
             )
         if r.status_code == 200:
             return r.json() if isinstance(r.json(), list) else r.json().get("events") or r.json().get("items") or []

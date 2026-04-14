@@ -98,29 +98,44 @@
     {% set tm = user_settings.get('tbank_time', {}) %}
     <div class="section">
       <h3>💬 KTalk (tbank.ktalk.ru)</h3>
-      <p class="help" style="margin-bottom:10px;">Авторизация через браузер — безопасно, пароль не передаётся в AM Hub.</p>
-      {% if kt.get('access_token') %}
+      {% if kt.get('session_cookie') %}
       <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.84rem;color:#22c55e;">
-        ✅ Подключено: {{ kt.get('login', 'KTalk') }}
+        ✅ Session cookie сохранён
+        <button onclick="disconnectKTalk()" style="margin-left:12px;background:none;border:none;color:#ef4444;cursor:pointer;font-size:.8rem;">✕ сбросить</button>
       </div>
       {% endif %}
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <a href="/auth/ktalk" class="btn btn-sm">🔗 Войти через KTalk</a>
-        {% if kt.get('access_token') %}
-        <button class="btn btn-sm" style="background:var(--red);" onclick="disconnectKTalk()">✕ Отключить</button>
-        {% endif %}
+      <div class="field">
+        <label>Session Cookie</label>
+        <input id="kt-cookie" type="password" value="{{ kt.get('session_cookie', '') }}" placeholder="Вставьте значение cookie из DevTools">
+        <div class="help" style="margin-top:6px;line-height:1.5;">
+          Как получить: откройте <b>tbank.ktalk.ru</b> → F12 → Application → Cookies → <b>tbank.ktalk.ru</b><br>
+          Скопируйте значение (<b>Value</b>) cookie с именем <code>oidc.user:...</code> или <code>session</code>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-sm" onclick="testKTalkCookie()">🔗 Проверить</button>
+        <span id="kt-test-result" style="font-size:.82rem;"></span>
       </div>
     </div>
 
     <div class="section">
       <h3>⏱ 1Time / Time (time.tbank.ru)</h3>
-      <p class="help" style="margin-bottom:10px;">Корпоративный логин и пароль T-Bank. Используется для отправки DM и доступа к каналам.</p>
-      <div class="field-row">
-        <div class="field"><label>Логин (email)</label><input id="tm-login" value="{{ tm.get('login', '') }}" placeholder="d.name@tbank.ru"></div>
-        <div class="field"><label>Пароль</label><input id="tm-pass" type="password" value="{{ tm.get('password', '') }}" placeholder="••••••••"></div>
+      {% if tm.get('session_cookie') %}
+      <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.84rem;color:#22c55e;">
+        ✅ Session cookie сохранён
+        <button onclick="disconnectTaim()" style="margin-left:12px;background:none;border:none;color:#ef4444;cursor:pointer;font-size:.8rem;">✕ сбросить</button>
       </div>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-sm" onclick="testTaim()">🔗 Проверить</button>
+      {% endif %}
+      <div class="field">
+        <label>MMAUTHTOKEN (session cookie)</label>
+        <input id="tm-cookie" type="password" value="{{ tm.get('session_cookie', '') }}" placeholder="Вставьте значение MMAUTHTOKEN из DevTools">
+        <div class="help" style="margin-top:6px;line-height:1.5;">
+          Как получить: откройте <b>time.tbank.ru</b> → F12 → Application → Cookies → <b>time.tbank.ru</b><br>
+          Скопируйте значение (<b>Value</b>) cookie с именем <code>MMAUTHTOKEN</code>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-sm" onclick="testTaimCookie()">🔗 Проверить</button>
         <span id="tm-test-result" style="font-size:.82rem;"></span>
       </div>
     </div>
@@ -281,15 +296,45 @@ function showSaved(id){
 
 async function saveCreds(){
   const data={
-    tbank_time:{login:document.getElementById('tm-login').value,password:document.getElementById('tm-pass').value},
+    ktalk:{session_cookie:document.getElementById('kt-cookie').value},
+    tbank_time:{session_cookie:document.getElementById('tm-cookie').value},
   };
   const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   if(r.ok) showSaved('saved-creds');
 }
 
 async function disconnectKTalk(){
-  const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ktalk:{access_token:'',login:''}})});
-  if(r.ok) location.reload();
+  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ktalk:{session_cookie:''}})});
+  location.reload();
+}
+
+async function disconnectTaim(){
+  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tbank_time:{session_cookie:''}})});
+  location.reload();
+}
+
+async function testKTalkCookie(){
+  const el=document.getElementById('kt-test-result');
+  el.textContent='⏳ Проверяем...';el.style.color='var(--muted)';
+  const cookie=document.getElementById('kt-cookie').value;
+  try{
+    const r=await fetch('/api/auth/ktalk/cookie-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_cookie:cookie})});
+    const d=await r.json();
+    if(d.ok){el.textContent='✅ '+d.user;el.style.color='var(--green)';}
+    else{el.textContent='❌ '+d.error;el.style.color='var(--red)';}
+  }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
+}
+
+async function testTaimCookie(){
+  const el=document.getElementById('tm-test-result');
+  el.textContent='⏳ Проверяем...';el.style.color='var(--muted)';
+  const cookie=document.getElementById('tm-cookie').value;
+  try{
+    const r=await fetch('/api/auth/taim/cookie-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_cookie:cookie})});
+    const d=await r.json();
+    if(d.ok){el.textContent='✅ '+d.user;el.style.color='var(--green)';}
+    else{el.textContent='❌ '+d.error;el.style.color='var(--red)';}
+  }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
 }
 
 async function testTaim(){

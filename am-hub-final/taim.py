@@ -89,6 +89,45 @@ def _headers(token: str) -> dict:
     }
 
 
+def _cookie_headers(mmauthtoken: str) -> dict:
+    """Заголовки для cookie-based сессии Mattermost/1Time."""
+    return {
+        "Cookie": f"MMAUTHTOKEN={mmauthtoken}",
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+
+async def get_me_with_cookie(mmauthtoken: str) -> dict:
+    """Получить данные пользователя через session cookie."""
+    async with httpx.AsyncClient(timeout=10) as hx:
+        r = await hx.get(f"{BASE_URL}/api/v4/users/me", headers=_cookie_headers(mmauthtoken))
+    return r.json() if r.status_code == 200 else {}
+
+
+async def get_channels_with_cookie(mmauthtoken: str) -> list[dict]:
+    """Получить каналы через session cookie."""
+    async with httpx.AsyncClient(timeout=15) as hx:
+        r = await hx.get(f"{BASE_URL}/api/v4/users/me/channels", headers=_cookie_headers(mmauthtoken))
+    return r.json() if r.status_code == 200 else []
+
+
+async def send_message_with_cookie(mmauthtoken: str, channel_id: str, message: str) -> dict:
+    """Отправить сообщение через session cookie."""
+    async with httpx.AsyncClient(timeout=15) as hx:
+        # Нужен CSRF токен для POST запросов
+        me = await hx.get(f"{BASE_URL}/api/v4/users/me", headers=_cookie_headers(mmauthtoken))
+        csrf = me.cookies.get("MMCSRF", "")
+        h = {**_cookie_headers(mmauthtoken)}
+        if csrf:
+            h["X-CSRF-Token"] = csrf
+        r = await hx.post(f"{BASE_URL}/api/v4/posts", headers=h,
+                          json={"channel_id": channel_id, "message": message})
+    if r.status_code in (200, 201):
+        return {"ok": True, "post_id": r.json().get("id")}
+    return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+
+
 def invalidate(login_id: str = ""):
     if login_id:
         _token_cache.pop(login_id, None)
