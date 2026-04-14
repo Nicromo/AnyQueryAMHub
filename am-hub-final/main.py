@@ -1430,6 +1430,35 @@ async def api_ktalk_calendar(
     return await ktalk.get_today_meetings(login_id, password)
 
 
+@app.post("/api/debug/merchrules-auth")
+async def api_debug_mr_auth(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """Debug: возвращает сырой ответ от Merchrules auth — чтобы найти нужное поле токена."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    body = await request.json()
+    login = body.get("login", "")
+    password = body.get("password", "")
+    import httpx
+    results = []
+    async with httpx.AsyncClient(timeout=15) as hx:
+        for url in ["https://merchrules-qa.any-platform.ru", "https://merchrules.any-platform.ru"]:
+            try:
+                resp = await hx.post(
+                    f"{url}/backend-v2/auth/login",
+                    json={"username": login, "password": password},
+                    timeout=10,
+                )
+                try:
+                    resp_body = resp.json()
+                except Exception:
+                    resp_body = resp.text[:500]
+                results.append({"url": url, "status": resp.status_code, "body": resp_body})
+                break  # достаточно первого 200
+            except Exception as e:
+                results.append({"url": url, "error": str(e)})
+    return {"results": results}
+
+
 @app.get("/api/sync/merchrules-creds")
 async def api_get_mr_creds(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Получить сохранённые креды Merchrules пользователя."""
