@@ -658,6 +658,21 @@ async def tasks_page(request: Request, db: Session = Depends(get_db), auth_token
     })
 
 
+@app.get("/kanban", response_class=HTMLResponse)
+async def kanban_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Kanban-доска задач."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("kanban.html", {"request": request, "user": user})
+
+
 # ============================================================================
 # SYNC
 # ============================================================================
@@ -1913,21 +1928,18 @@ async def api_global_search(
     if not user:
         return {"clients": [], "tasks": [], "meetings": [], "notes": []}
 
-    # Фильтр для менеджеров — только свои клиенты
-    manager_filter = True
-    if user.role == "manager":
-        manager_filter = Client.manager_email == user.email
-
     search_pattern = f"%{q}%"
 
     # Клиенты
-    clients = db.query(Client).filter(
-        manager_filter,
+    c_q = db.query(Client)
+    if user.role == "manager":
+        c_q = c_q.filter(Client.manager_email == user.email)
+    clients = c_q.filter(
         Client.name.ilike(search_pattern) |
         (Client.segment is not None and Client.segment.ilike(search_pattern)),
     ).limit(limit).all()
 
-    # Задачи — через JOIN с клиентами для фильтрации по менеджеру
+    # Задачи
     task_query = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
     if user.role == "manager":
         task_query = task_query.filter(Client.manager_email == user.email)
@@ -1936,7 +1948,7 @@ async def api_global_search(
         (Task.description is not None and Task.description.ilike(search_pattern)),
     ).limit(limit).all()
 
-    # Встречи — через JOIN
+    # Встречи
     meeting_query = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True)
     if user.role == "manager":
         meeting_query = meeting_query.filter(Client.manager_email == user.email)
@@ -1945,36 +1957,241 @@ async def api_global_search(
         (Meeting.type is not None and Meeting.type.ilike(search_pattern)),
     ).order_by(Meeting.date.desc()).limit(limit).all()
 
-    # Заметки клиентов — через JOIN
+    # Заметки
     note_query = db.query(ClientNote).join(Client, ClientNote.client_id == Client.id, isouter=True)
     if user.role == "manager":
         note_query = note_query.filter(Client.manager_email == user.email)
-    notes = note_query.filter(
-        ClientNote.content.ilike(search_pattern),
-    ).order_by(ClientNote.is_pinned.desc(), ClientNote.updated_at.desc()).limit(limit).all()
+    notes = note_query.filter(ClientNote.content.ilike(search_pattern)).order_by(
+        ClientNote.is_pinned.desc(), ClientNote.updated_at.desc()
+    ).limit(limit).all()
 
     return {
-        "clients": [{
-            "id": c.id, "name": c.name, "segment": c.segment,
-            "url": f"/client/{c.id}", "type": "client",
-        } for c in clients],
-        "tasks": [{
-            "id": t.id, "title": t.title, "status": t.status,
-            "client_name": t.client.name if t.client else "—",
-            "url": f"/client/{t.client_id}", "type": "task",
-        } for t in tasks],
-        "meetings": [{
-            "id": m.id, "title": m.title or m.type, "date": m.date.isoformat() if m.date else None,
-            "client_name": m.client.name if m.client else "—",
-            "url": f"/client/{m.client_id}", "type": "meeting",
-        } for m in meetings],
-        "notes": [{
-            "id": n.id, "content": n.content[:100] + "..." if len(n.content) > 100 else n.content,
-            "client_name": n.client.name if n.client else "—",
-            "url": f"/client/{n.client_id}", "type": "note",
-            "pinned": n.is_pinned,
-        } for n in notes],
+        "clients": [{"id": c.id, "name": c.name, "segment": c.segment, "url": f"/client/{c.id}", "type": "client"} for c in clients],
+        "tasks": [{"id": t.id, "title": t.title, "status": t.status, "client_name": t.client.name if t.client else "—", "url": f"/client/{t.client_id}", "type": "task"} for t in tasks],
+        "meetings": [{"id": m.id, "title": m.title or m.type, "date": m.date.isoformat() if m.date else None, "client_name": m.client.name if m.client else "—", "url": f"/client/{m.client_id}", "type": "meeting"} for m in meetings],
+        "notes": [{"id": n.id, "content": n.content[:100] + "..." if len(n.content) > 100 else n.content, "client_name": n.client.name if n.client else "—", "url": f"/client/{n.client_id}", "type": "note", "pinned": n.is_pinned} for n in notes],
     }
+
+
+# ============================================================================
+# CLIENT NOTES API
+# ============================================================================
+
+@app.post("/api/clients/{client_id}/notes")
+async def api_create_note(client_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Создать заметку к клиенту."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    data = await request.json()
+    note = ClientNote(client_id=client_id, user_id=user.id, content=data.get("content", ""), is_pinned=data.get("pinned", False))
+    db.add(note)
+    db.commit()
+    return {"ok": True, "id": note.id}
+
+
+@app.get("/api/clients/{client_id}/notes")
+async def api_get_notes(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить заметки клиента."""
+    if not auth_token:
+        return {"notes": []}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"notes": []}
+    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.is_pinned.desc(), ClientNote.updated_at.desc()).all()
+    return {"notes": [{"id": n.id, "content": n.content, "pinned": n.is_pinned, "created_at": n.created_at.isoformat() if n.created_at else None, "user_id": n.user_id} for n in notes]}
+
+
+@app.put("/api/clients/notes/{note_id}")
+async def api_update_note(note_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Обновить заметку."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    note = db.query(ClientNote).filter(ClientNote.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404)
+    data = await request.json()
+    if "content" in data:
+        note.content = data["content"]
+    if "pinned" in data:
+        note.is_pinned = data["pinned"]
+    note.updated_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/clients/notes/{note_id}")
+async def api_delete_note(note_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Удалить заметку."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    note = db.query(ClientNote).filter(ClientNote.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404)
+    db.delete(note)
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# KANBAN API
+# ============================================================================
+
+@app.get("/api/kanban")
+async def api_kanban(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить задачи в формате канбан (группировка по статусам)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    tasks = q.order_by(Task.due_date.asc()).all()
+
+    columns = {"plan": [], "in_progress": [], "review": [], "done": [], "blocked": []}
+    for t in tasks:
+        status = t.status or "plan"
+        if status not in columns:
+            columns["plan"].append(t)
+        else:
+            columns[status].append(t)
+
+    return {
+        col: [{"id": t.id, "title": t.title, "priority": t.priority, "due_date": t.due_date.isoformat() if t.due_date else None,
+               "client_name": t.client.name if t.client else "—", "client_id": t.client_id, "team": t.team, "created_at": t.created_at.isoformat() if t.created_at else None}
+              for t in tasks_list]
+        for col, tasks_list in columns.items()
+    }
+
+
+@app.patch("/api/tasks/{task_id}/status")
+async def api_update_task_status(task_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Изменить статус задачи (для канбан drag-and-drop)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    data = await request.json()
+    new_status = data.get("status")
+    if new_status not in ("plan", "in_progress", "review", "done", "blocked"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404)
+    task.status = new_status
+    if new_status == "done":
+        task.confirmed_at = datetime.utcnow()
+        task.confirmed_by = user.email if user else None
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# MY DAY: TIME TRACKING API
+# ============================================================================
+
+@app.post("/api/my-day/schedule")
+async def api_my_day_schedule(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить расписание задач на день."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    settings = user.settings or {}
+    settings["my_day_schedule"] = data.get("schedule", [])
+    settings["my_day_date"] = data.get("date")
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/my-day/schedule")
+async def api_get_my_day_schedule(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Получить расписание задач на день."""
+    if not auth_token:
+        return {"schedule": [], "date": None}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"schedule": [], "date": None}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"schedule": [], "date": None}
+    settings = user.settings or {}
+    return {"schedule": settings.get("my_day_schedule", []), "date": settings.get("my_day_date")}
+
+
+@app.get("/api/clients/{client_id}/timeline")
+async def api_client_timeline(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Таймлайн клиента: встречи, задачи, заметки."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    events = []
+
+    # Встречи
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(20).all()
+    for m in meetings:
+        events.append({
+            "date": m.date.strftime("%d.%m.%Y") if m.date else "—",
+            "icon": "📅",
+            "title": m.title or m.type,
+            "desc": (m.summary or "")[:100] + ("..." if m.summary and len(m.summary) > 100 else ""),
+        })
+
+    # Задачи
+    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.created_at.desc()).limit(20).all()
+    for t in tasks:
+        events.append({
+            "date": t.created_at.strftime("%d.%m.%Y") if t.created_at else "—",
+            "icon": {"plan": "📝", "in_progress": "🔄", "done": "✅", "blocked": "🔴", "review": "👀"}.get(t.status, "📋"),
+            "title": t.title,
+            "desc": f"Статус: {t.status}" + (f" · {t.priority}" if t.priority else ""),
+        })
+
+    # Заметки
+    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.updated_at.desc()).limit(10).all()
+    for n in notes:
+        events.append({
+            "date": n.updated_at.strftime("%d.%m.%Y") if n.updated_at else "—",
+            "icon": "📝" if not n.is_pinned else "📌",
+            "title": "Заметка" + (" (закреплена)" if n.is_pinned else ""),
+            "desc": n.content[:100] + ("..." if len(n.content) > 100 else ""),
+        })
+
+    # Сортировка по дате
+    events.sort(key=lambda e: e.get("date", ""), reverse=True)
+
+    return {"events": events[:50]}
 
 @app.get("/health")
 async def health():

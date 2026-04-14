@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Канбан — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    h1 { font-size:1.4rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+
+    /* Kanban */
+    .kanban { display:flex; gap:14px; overflow-x:auto; padding-bottom:20px; min-height:calc(100vh - 160px); }
+    .kanban-col { min-width:260px; max-width:300px; flex:1; background:var(--bg); border:1px solid var(--border); border-radius:12px; display:flex; flex-direction:column; }
+    .kanban-header { padding:12px 14px; font-size:.85rem; font-weight:600; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); border-radius:12px 12px 0 0; z-index:1; }
+    .kanban-count { background:var(--border); border-radius:10px; padding:2px 8px; font-size:.72rem; color:var(--muted); }
+    .kanban-body { padding:8px; flex:1; overflow-y:auto; min-height:100px; transition:background .15s; }
+    .kanban-body.drag-over { background:rgba(99,102,241,.08); }
+    .k-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:grab; transition:box-shadow .15s,border-color .15s; }
+    .k-card:hover { border-color:var(--accent); box-shadow:0 2px 8px rgba(0,0,0,.2); }
+    .k-card.dragging { opacity:.5; }
+    .k-card-title { font-size:.82rem; font-weight:500; margin-bottom:4px; }
+    .k-card-meta { font-size:.7rem; color:var(--muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .k-badge { padding:1px 6px; border-radius:4px; font-size:.62rem; font-weight:600; }
+    .k-badge-high { background:rgba(239,68,68,.15); color:var(--red); }
+    .k-badge-medium { background:rgba(234,179,8,.15); color:var(--yellow); }
+    .k-badge-low { background:rgba(34,197,94,.15); color:var(--green); }
+    .k-due { color:var(--muted); }
+    .k-due.overdue { color:var(--red); }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item active" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <h1>📋 Канбан задач</h1>
+  <p class="sub">Перетаскивайте задачи между колонками для изменения статуса</p>
+
+  <div class="kanban" id="kanban">
+    <div class="kanban-col">
+      <div class="kanban-header">📝 Plan <span class="kanban-count" id="count-plan">0</span></div>
+      <div class="kanban-body" data-status="plan" id="col-plan"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">🔄 In Progress <span class="kanban-count" id="count-in_progress">0</span></div>
+      <div class="kanban-body" data-status="in_progress" id="col-in_progress"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">👀 Review <span class="kanban-count" id="count-review">0</span></div>
+      <div class="kanban-body" data-status="review" id="col-review"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">✅ Done <span class="kanban-count" id="count-done">0</span></div>
+      <div class="kanban-body" data-status="done" id="col-done"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">🔴 Blocked <span class="kanban-count" id="count-blocked">0</span></div>
+      <div class="kanban-body" data-status="blocked" id="col-blocked"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+const today = new Date().toISOString().slice(0,10);
+let draggedId = null;
+
+async function loadKanban(){
+  try{
+    const r=await fetch('/api/kanban');
+    if(!r.ok) return;
+    const d=await r.json();
+    const cols = {plan:[], in_progress:[], review:[], done:[], blocked:[]};
+    Object.entries(d).forEach(([status, tasks])=>{
+      cols[status] = tasks;
+      document.getElementById('count-'+status).textContent = tasks.length;
+      const el = document.getElementById('col-'+status);
+      el.innerHTML = tasks.map(t=>{
+        const due = t.due_date ? t.due_date.slice(0,10) : '';
+        const overdue = due && due < today;
+        const prioBadge = t.priority ? '<span class="k-badge k-badge-'+t.priority+'">'+t.priority+'</span>' : '';
+        const dueBadge = due ? '<span class="k-due'+(overdue?' overdue':'')">'+(overdue?'⚠️ ':'')+due+'</span>' : '';
+        return '<div class="k-card" draggable="true" data-id="'+t.id+'" data-status="'+status+'">'+
+          '<div class="k-card-title">'+(t.title||'Без названия')+'</div>'+
+          '<div class="k-card-meta">'+prioBadge+dueBadge+'<span>'+t.client_name+'</span></div></div>';
+      }).join('');
+    });
+    initDragDrop();
+  }catch(e){console.error(e);}
+}
+
+function initDragDrop(){
+  document.querySelectorAll('.k-card').forEach(card=>{
+    card.addEventListener('dragstart',e=>{draggedId=card.dataset.id;card.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
+    card.addEventListener('dragend',()=>{card.classList.remove('dragging');draggedId=null;document.querySelectorAll('.kanban-body').forEach(c=>c.classList.remove('drag-over'));});
+  });
+  document.querySelectorAll('.kanban-body').forEach(col=>{
+    col.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';col.classList.add('drag-over');});
+    col.addEventListener('dragleave',()=>{col.classList.remove('drag-over');});
+    col.addEventListener('drop',async e=>{
+      e.preventDefault();col.classList.remove('drag-over');
+      const newStatus=col.dataset.status;
+      if(!draggedId || draggedId===null) return;
+      try{
+        const r=await fetch('/api/tasks/'+draggedId+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})});
+        if(r.ok) loadKanban();
+      }catch(e){console.error(e);}
+    });
+  });
+}
+
+loadKanban();
+</script>
+</body>
+</html>

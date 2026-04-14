@@ -57,6 +57,8 @@
   <div class="tabs">
     <button class="tab active" onclick="showTab('tasks',this)">📋 Задачи ({{ tasks|length }})</button>
     <button class="tab" onclick="showTab('meetings',this)">📅 Встречи ({{ meetings|length }})</button>
+    <button class="tab" onclick="showTab('notes',this)">📝 Заметки</button>
+    <button class="tab" onclick="showTab('timeline',this)">📜 Таймлайн</button>
   </div>
 
   <div id="tab-tasks" class="tab-content">
@@ -94,11 +96,73 @@
     <div style="text-align:center;padding:40px;color:var(--muted);">Нет встреч</div>
     {% endif %}
   </div>
+
+  <!-- Notes Tab -->
+  <div id="tab-notes" class="tab-content" style="display:none;">
+    <div id="notes-list"></div>
+    <div style="margin-top:12px;">
+      <div class="field"><textarea id="new-note" placeholder="Новая заметка..." style="width:100%;min-height:60px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;resize:vertical;outline:none;"></textarea></div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-sm" onclick="addNote()">💾 Сохранить</button>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--muted);cursor:pointer;"><input type="checkbox" id="note-pinned"> 📌 Закрепить</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline Tab -->
+  <div id="tab-timeline" class="tab-content" style="display:none;">
+    <div id="timeline-list" style="text-align:center;padding:20px;color:var(--muted);">Загрузка...</div>
+  </div>
 </div>
+
 <script>
-function showTab(id,btn){document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');document.getElementById('tab-'+id).style.display='block';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+const clientId = {{ client.id }};
+function showTab(id,btn){document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');document.getElementById('tab-'+id).style.display='block';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(id==='notes')loadNotes();if(id==='timeline')loadTimeline();}
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+async function loadNotes(){
+  try{
+    const r=await fetch('/api/clients/'+clientId+'/notes');
+    const d=await r.json();
+    const el=document.getElementById('notes-list');
+    if(!d.notes.length){el.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);">Нет заметок</div>';return;}
+    el.innerHTML=d.notes.map(n=>'<div class="card" style="margin-bottom:8px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:start;">'+
+      '<div style="flex:1;">'+(n.pinned?'📌 ':'')+'<span style="font-size:.85rem;">'+n.content.replace(/</g,'&lt;')+'</span>'+
+      '<div class="meta" style="margin-top:4px;">'+(n.created_at||'')+'</div></div>'+
+      '<div style="display:flex;gap:6px;">'+
+      '<button class="btn btn-sm" style="padding:3px 8px;font-size:.7rem;" onclick="deleteNote('+n.id+')">✕</button></div></div></div>').join('');
+  }catch(e){console.error(e);}
+}
+
+async function addNote(){
+  const content=document.getElementById('new-note').value.trim();
+  if(!content)return;
+  const pinned=document.getElementById('note-pinned').checked;
+  const r=await fetch('/api/clients/'+clientId+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,pinned})});
+  if(r.ok){document.getElementById('new-note').value='';document.getElementById('note-pinned').checked=false;loadNotes();}
+}
+
+async function deleteNote(id){
+  if(!confirm('Удалить заметку?'))return;
+  const r=await fetch('/api/clients/notes/'+id,{method:'DELETE'});
+  if(r.ok)loadNotes();
+}
+
+async function loadTimeline(){
+  try{
+    const r=await fetch('/api/clients/'+clientId+'/timeline');
+    const d=await r.json();
+    const el=document.getElementById('timeline-list');
+    if(!d.events||!d.events.length){el.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);">Нет событий</div>';return;}
+    el.innerHTML=d.events.map(e=>'<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">'+
+      '<div style="font-size:.72rem;color:var(--muted);min-width:80px;">'+(e.date||'')+'</div>'+
+      '<div style="font-size:1rem;">'+(e.icon||'📌')+'</div>'+
+      '<div><div style="font-size:.82rem;font-weight:500;">'+e.title+'</div>'+
+      '<div style="font-size:.72rem;color:var(--muted);">'+(e.desc||'')+'</div></div></div>').join('');
+  }catch(e){console.error(e);}
+}
 </script>
 </body>
 </html>
