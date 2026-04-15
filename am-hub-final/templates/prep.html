@@ -14,8 +14,69 @@
     <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm">✍️ Фолоуап</a>
     <a href="/roadmap?client_id={{ client.id }}" class="btn btn-ghost btn-sm">🗺️ Роадмап</a>
     <a href="/qbr/{{ client.id }}" class="btn btn-ghost btn-sm">📊 QBR</a>
+    <a href="/client/{{ client.id }}/profile" class="btn btn-ghost btn-sm">👤 Профиль</a>
   </div>
 </div>
+
+<!-- Карточка профиля клиента -->
+{% if profile and (profile.key_notes or profile.contacts or profile.comm_style or profile.tech_context) %}
+<div class="card" style="padding:16px 18px;margin-bottom:14px;border-left:3px solid var(--accent)">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <div style="font-weight:600;font-size:.9rem">👤 Профиль клиента</div>
+    <a href="/client/{{ client.id }}/profile" class="btn btn-ghost btn-sm" style="font-size:.75rem">✏️ Редактировать</a>
+  </div>
+
+  {% if profile.key_notes %}
+  <div style="font-size:.83rem;margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;white-space:pre-wrap">{{ profile.key_notes }}</div>
+  {% endif %}
+
+  {% if profile.contacts %}
+  <div style="margin-bottom:10px">
+    <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:5px">Контакты</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+    {% for c in profile.contacts %}
+    {% if c.name %}
+    <div style="font-size:.78rem;background:var(--surface2);border-radius:8px;padding:5px 10px">
+      <b>{{ c.name }}</b>{% if c.role %} <span style="color:var(--text-muted)">· {{ c.role }}</span>{% endif %}
+      {% if c.tg %} <a href="https://t.me/{{ c.tg.lstrip('@') }}" target="_blank" style="color:var(--accent)">{{ c.tg }}</a>{% endif %}
+      {% if c.phone %} <span style="color:var(--text-muted)">{{ c.phone }}</span>{% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div style="display:flex;gap:16px;flex-wrap:wrap">
+    {% if profile.comm_style %}
+    <div style="flex:1;min-width:180px">
+      <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:3px">💬 Коммуникация</div>
+      <div style="font-size:.8rem">{{ profile.comm_style[:200] }}{% if profile.comm_style|length > 200 %}…{% endif %}</div>
+    </div>
+    {% endif %}
+    {% if profile.tech_context %}
+    <div style="flex:1;min-width:180px">
+      <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:3px">⚙️ Технический контекст</div>
+      <div style="font-size:.8rem">{{ profile.tech_context[:200] }}{% if profile.tech_context|length > 200 %}…{% endif %}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if profile.tags %}
+  <div style="margin-top:8px">
+    {% for tag in profile.tags.split(',') %}
+    <span style="background:rgba(99,102,241,.12);color:var(--accent);border-radius:10px;padding:2px 8px;font-size:.7rem;margin-right:4px">{{ tag.strip() }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div style="margin-bottom:14px">
+  <a href="/client/{{ client.id }}/profile" style="font-size:.82rem;color:var(--text-muted)">
+    + Добавить профиль клиента (контакты, заметки, особенности)
+  </a>
+</div>
+{% endif %}
 
 <!-- Статус чекапа + БЫСТРОЕ ЗАКРЫТИЕ -->
 <div class="card" style="border-left:4px solid

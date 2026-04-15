@@ -125,6 +125,23 @@ def init_db():
                 updated_at           TEXT DEFAULT (datetime('now'))
             )
         """)
+
+        # Профиль клиента — структурированная карточка (живёт между менеджерами)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_profile (
+                client_id           INTEGER PRIMARY KEY REFERENCES clients(id),
+                contacts            TEXT DEFAULT '[]',  -- JSON: [{name, role, tg, phone}]
+                comm_style          TEXT DEFAULT '',     -- особенности коммуникации
+                tech_context        TEXT DEFAULT '',     -- CMS, регион, ниша, стек
+                key_notes           TEXT DEFAULT '',     -- краткие заметки — самое важное
+                tags                TEXT DEFAULT '',     -- через запятую
+                checkup_days        INTEGER DEFAULT 0,   -- 0 = использовать дефолт по сегменту
+                prep_template       TEXT DEFAULT '',     -- кастомные пункты подготовки (JSON)
+                followup_template   TEXT DEFAULT '',     -- кастомный шаблон фолоуапа
+                manager_history     TEXT DEFAULT '[]',   -- JSON: [{manager, from, to, note}]
+                updated_at          TEXT DEFAULT (datetime('now'))
+            )
+        """)
         try:
             conn.execute("ALTER TABLE manager_credentials ADD COLUMN manager_display_name TEXT NOT NULL DEFAULT ''")
         except Exception:
@@ -136,9 +153,9 @@ def init_db():
 CHECKUP_DAYS = {"ENT": 30, "SME": 60, "SME+": 60, "SME-": 60, "SMB": 90, "SS": 90}
 
 
-def checkup_status(last_checkup: str | None, segment: str) -> dict:
+def checkup_status(last_checkup: str | None, segment: str, custom_days: int = 0) -> dict:
     """Статус чекапа: days_left, color (red/yellow/green), next_date, label."""
-    days = CHECKUP_DAYS.get(segment, 90)
+    days = custom_days if custom_days > 0 else CHECKUP_DAYS.get(segment, 90)
     if not last_checkup:
         return {"days_left": None, "color": "red", "next_date": None, "label": "Нет данных"}
     last = date.fromisoformat(last_checkup)
@@ -602,5 +619,93 @@ def clear_checklist(client_id: int):
             "DELETE FROM checklist_items WHERE client_id = ? AND checked = 1",
             (client_id,)
         )
+
+
+# ── Client Profile ────────────────────────────────────────────────────────────
+
+def get_client_profile(client_id: int) -> dict:
+    """Возвращает профиль клиента или пустой dict с дефолтами."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM client_profile WHERE client_id = ?", (client_id,)
+        ).fetchone()
+    if not row:
+        return {
+            "client_id": client_id,
+            "contacts": [],
+            "comm_style": "",
+            "tech_context": "",
+            "key_notes": "",
+            "tags": "",
+            "checkup_days": 0,
+            "prep_template": "",
+            "followup_template": "",
+            "manager_history": [],
+        }
+    d = dict(row)
+    d["contacts"] = json.loads(d.get("contacts") or "[]")
+    d["manager_history"] = json.loads(d.get("manager_history") or "[]")
+    return d
+
+
+def save_client_profile(client_id: int, data: dict):
+    """Сохраняет/обновляет профиль клиента."""
+    contacts = json.dumps(data.get("contacts", []), ensure_ascii=False)
+    manager_history = json.dumps(data.get("manager_history", []), ensure_ascii=False)
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO client_profile
+                (client_id, contacts, comm_style, tech_context, key_notes, tags,
+                 checkup_days, prep_template, followup_template, manager_history, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now'))
+            ON CONFLICT(client_id) DO UPDATE SET
+                contacts          = excluded.contacts,
+                comm_style        = excluded.comm_style,
+                tech_context      = excluded.tech_context,
+                key_notes         = excluded.key_notes,
+                tags              = excluded.tags,
+                checkup_days      = excluded.checkup_days,
+                prep_template     = excluded.prep_template,
+                followup_template = excluded.followup_template,
+                manager_history   = excluded.manager_history,
+                updated_at        = excluded.updated_at
+        """, (
+            client_id,
+            contacts,
+            data.get("comm_style", ""),
+            data.get("tech_context", ""),
+            data.get("key_notes", ""),
+            data.get("tags", ""),
+            int(data.get("checkup_days", 0)),
+            data.get("prep_template", ""),
+            data.get("followup_template", ""),
+            manager_history,
+        ))
+
+
+def get_client_profiles_bulk(client_ids: list[int]) -> dict:
+    """Возвращает {client_id: checkup_days} для списка клиентов (одним запросом)."""
+    if not client_ids:
+        return {}
+    placeholders = ",".join("?" * len(client_ids))
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT client_id, checkup_days FROM client_profile WHERE client_id IN ({placeholders})",
+            client_ids,
+        ).fetchall()
+    return {r["client_id"]: r["checkup_days"] for r in rows}
+
+
+def add_manager_history_entry(client_id: int, manager_name: str, note: str = ""):
+    """Добавляет запись в историю смены менеджеров."""
+    profile = get_client_profile(client_id)
+    history = profile.get("manager_history", [])
+    # Закрываем предыдущего менеджера
+    today = date.today().isoformat()
+    if history and not history[-1].get("to"):
+        history[-1]["to"] = today
+    history.append({"manager": manager_name, "from": today, "to": None, "note": note})
+    profile["manager_history"] = history
+    save_client_profile(client_id, profile)
 
 

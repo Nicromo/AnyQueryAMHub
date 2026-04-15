@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} — Профиль{% endblock %}
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <p style="margin:0 0 4px"><a href="/prep/{{ client.id }}">← Подготовка к встрече</a></p>
+    <h1>📋 {{ client.name }}</h1>
+    <p style="color:var(--text-muted);font-size:.85rem;margin-top:4px">
+      <span class="badge badge-{{ client.segment|lower }}">{{ client.segment }}</span>
+      {% if client.assigned_manager %} · 👤 {{ client.assigned_manager }}{% endif %}
+      {% if profile.tags %}
+        {% for tag in profile.tags.split(',') %}
+        <span style="background:var(--surface2);border-radius:10px;padding:1px 8px;font-size:.72rem;margin-left:4px">{{ tag.strip() }}</span>
+        {% endfor %}
+      {% endif %}
+    </p>
+  </div>
+  <div style="display:flex;gap:8px">
+    <a href="/prep/{{ client.id }}" class="btn btn-ghost btn-sm">📋 Подготовка</a>
+    <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm">✍️ Фолоуап</a>
+  </div>
+</div>
+
+{% if saved %}
+<div style="background:rgba(99,102,241,.12);border:1px solid var(--accent);border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:.88rem">
+  ✅ Профиль сохранён
+</div>
+{% endif %}
+
+<form method="POST" action="/client/{{ client.id }}/profile">
+
+<!-- Ключевые заметки -->
+<div class="card" style="padding:18px;margin-bottom:14px">
+  <div style="font-weight:600;font-size:.95rem;margin-bottom:12px">📌 Главное о клиенте</div>
+  <div style="display:grid;gap:12px">
+    <div>
+      <label class="form-label">Ключевые заметки</label>
+      <textarea name="key_notes" class="form-control" rows="3"
+                placeholder="Самое важное: что нужно помнить, особенности бизнеса, ключевые договорённости…">{{ profile.key_notes }}</textarea>
+    </div>
+    <div>
+      <label class="form-label">Теги</label>
+      <input type="text" name="tags" class="form-control"
+             value="{{ profile.tags }}"
+             placeholder="fashion, b2b, mobile-first, VIP">
+      <div style="font-size:.72rem;color:var(--text-muted);margin-top:3px">Через запятую</div>
+    </div>
+  </div>
+</div>
+
+<!-- Контакты -->
+<div class="card" style="padding:18px;margin-bottom:14px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div style="font-weight:600;font-size:.95rem">👥 Ключевые контакты</div>
+    <button type="button" onclick="addContact()" class="btn btn-ghost btn-sm">+ Добавить</button>
+  </div>
+  <div id="contacts-list" style="display:flex;flex-direction:column;gap:10px">
+    {% for c in profile.contacts %}
+    <div class="contact-row" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:center">
+      <input type="text" class="form-control" placeholder="Имя" value="{{ c.name }}" oninput="syncContacts()">
+      <input type="text" class="form-control" placeholder="Должность" value="{{ c.role }}" oninput="syncContacts()">
+      <input type="text" class="form-control" placeholder="Telegram (@user)" value="{{ c.tg }}" oninput="syncContacts()">
+      <input type="text" class="form-control" placeholder="Телефон" value="{{ c.phone }}" oninput="syncContacts()">
+      <button type="button" onclick="removeContact(this)" class="btn btn-ghost btn-sm" style="color:var(--red);padding:6px 10px">✕</button>
+    </div>
+    {% endfor %}
+  </div>
+  <input type="hidden" name="contacts" id="contacts-json" value="{{ profile.contacts | tojson }}">
+</div>
+
+<!-- Особенности коммуникации -->
+<div class="card" style="padding:18px;margin-bottom:14px">
+  <div style="font-weight:600;font-size:.95rem;margin-bottom:12px">💬 Особенности коммуникации</div>
+  <textarea name="comm_style" class="form-control" rows="3"
+            placeholder="Как предпочитают общаться? Что раздражает? Кто принимает решения? Когда лучше писать…">{{ profile.comm_style }}</textarea>
+</div>
+
+<!-- Технический контекст -->
+<div class="card" style="padding:18px;margin-bottom:14px">
+  <div style="font-weight:600;font-size:.95rem;margin-bottom:12px">⚙️ Технический контекст</div>
+  <textarea name="tech_context" class="form-control" rows="3"
+            placeholder="CMS, регион, ниша, интеграции, особенности сайта, командный стек…">{{ profile.tech_context }}</textarea>
+</div>
+
+<!-- Настройки чекапов -->
+<div class="card" style="padding:18px;margin-bottom:14px">
+  <div style="font-weight:600;font-size:.95rem;margin-bottom:12px">⏱️ Частота чекапов</div>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div>
+      <label class="form-label">Дней между чекапами</label>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <input type="number" name="checkup_days" class="form-control" style="width:100px"
+               value="{{ profile.checkup_days if profile.checkup_days > 0 else '' }}"
+               placeholder="По умолчанию" min="7" max="365">
+        <span style="font-size:.8rem;color:var(--text-muted)">
+          Дефолт для {{ client.segment }}: {{ default_checkup_days }} дн.
+        </span>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:18px">
+      {% for d in [14, 30, 45, 60, 90] %}
+      <button type="button" onclick="document.querySelector('[name=checkup_days]').value='{{ d }}'"
+              class="btn btn-ghost btn-sm">{{ d }}д</button>
+      {% endfor %}
+      <button type="button" onclick="document.querySelector('[name=checkup_days]').value=''"
+              class="btn btn-ghost btn-sm" style="color:var(--text-muted)">Дефолт</button>
+    </div>
+  </div>
+</div>
+
+<!-- История менеджеров -->
+{% if profile.manager_history %}
+<div class="card" style="padding:18px;margin-bottom:14px">
+  <div style="font-weight:600;font-size:.95rem;margin-bottom:12px">🔄 История менеджеров</div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    {% for h in profile.manager_history %}
+    <div style="display:flex;gap:10px;font-size:.83rem;padding:6px 10px;background:var(--surface2);border-radius:6px">
+      <span style="font-weight:600">{{ h.manager }}</span>
+      <span style="color:var(--text-muted)">
+        с {{ h.from }}
+        {% if h.to %} по {{ h.to }}{% else %} — сейчас{% endif %}
+      </span>
+      {% if h.note %}<span style="color:var(--text-muted)">· {{ h.note }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div style="display:flex;gap:10px;justify-content:flex-end">
+  <a href="/prep/{{ client.id }}" class="btn btn-ghost">Отмена</a>
+  <button type="submit" class="btn btn-primary">💾 Сохранить профиль</button>
+</div>
+
+</form>
+
+<script>
+function syncContacts() {
+  const rows = document.querySelectorAll('.contact-row');
+  const contacts = Array.from(rows).map(row => {
+    const inputs = row.querySelectorAll('input');
+    return { name: inputs[0].value, role: inputs[1].value, tg: inputs[2].value, phone: inputs[3].value };
+  });
+  document.getElementById('contacts-json').value = JSON.stringify(contacts);
+}
+
+function addContact() {
+  const list = document.getElementById('contacts-list');
+  const div = document.createElement('div');
+  div.className = 'contact-row';
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:center';
+  div.innerHTML = `
+    <input type="text" class="form-control" placeholder="Имя" oninput="syncContacts()">
+    <input type="text" class="form-control" placeholder="Должность" oninput="syncContacts()">
+    <input type="text" class="form-control" placeholder="Telegram (@user)" oninput="syncContacts()">
+    <input type="text" class="form-control" placeholder="Телефон" oninput="syncContacts()">
+    <button type="button" onclick="removeContact(this)" class="btn btn-ghost btn-sm" style="color:var(--red);padding:6px 10px">✕</button>
+  `;
+  list.appendChild(div);
+}
+
+function removeContact(btn) {
+  btn.closest('.contact-row').remove();
+  syncContacts();
+}
+</script>
+
+<style>
+@media (max-width: 600px) {
+  .contact-row { grid-template-columns: 1fr 1fr !important; }
+  .contact-row button { grid-column: span 2; }
+}
+</style>
+
+{% endblock %}

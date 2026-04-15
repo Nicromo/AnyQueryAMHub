@@ -26,6 +26,8 @@ from database import (
     get_manager_client_ids, set_manager_clients, get_all_clients_for_manager,
     get_all_managers, get_clients_by_manager,
     save_manager_display_name, get_manager_display_name,
+    get_client_profile, save_client_profile, add_manager_history_entry,
+    get_client_profiles_bulk,
 )
 from auth import SessionManager, verify_tg_auth
 from tg import build_followup_message, send_to_tg
@@ -180,9 +182,13 @@ async def index(request: Request, segment: str = "", sort: str = "", manager: st
     tg_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     clients = get_all_clients_for_manager(tg_id)
 
+    # Батч-загрузка кастомных частот чекапов
+    custom_days_map = get_client_profiles_bulk([c["id"] for c in clients])
+
     # Добавляем статус чекапа и дополнительные поля к каждому клиенту
     for c in clients:
-        c["status"] = checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])
+        custom_days = custom_days_map.get(c["id"], 0)
+        c["status"] = checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"], custom_days)
         # Считаем заблокированные задачи отдельно
         all_t = get_client_tasks(c["id"], "open")
         c["blocked_tasks"] = sum(1 for t in all_t if t.get("status") == "blocked")
@@ -333,6 +339,62 @@ async def send_brief_telegram(request: Request, client_id: int):
         })
 
 
+# ── Профиль клиента ───────────────────────────────────────────────────────────
+
+@app.get("/client/{client_id}/profile", response_class=HTMLResponse)
+async def client_profile_page(request: Request, client_id: int, saved: bool = False):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404, "Клиент не найден")
+    profile = get_client_profile(client_id)
+    return templates.TemplateResponse("client_profile.html", {
+        "request": request,
+        "user": user,
+        "client": client,
+        "profile": profile,
+        "default_checkup_days": CHECKUP_DAYS.get(client["segment"], 90),
+        "saved": saved,
+    })
+
+
+@app.post("/client/{client_id}/profile", response_class=HTMLResponse)
+async def save_client_profile_route(request: Request, client_id: int):
+    user = get_user_or_redirect(request)
+    if not user:
+        return RedirectResponse("/login")
+    client = get_client(client_id)
+    if not client:
+        raise HTTPException(404, "Клиент не найден")
+
+    form = await request.form()
+    import json as _json
+
+    contacts_raw = form.get("contacts", "[]")
+    try:
+        contacts = _json.loads(contacts_raw)
+    except Exception:
+        contacts = []
+
+    checkup_days_raw = form.get("checkup_days", "").strip()
+    checkup_days = int(checkup_days_raw) if checkup_days_raw.isdigit() else 0
+
+    save_client_profile(client_id, {
+        "contacts": contacts,
+        "comm_style": form.get("comm_style", "").strip(),
+        "tech_context": form.get("tech_context", "").strip(),
+        "key_notes": form.get("key_notes", "").strip(),
+        "tags": form.get("tags", "").strip(),
+        "checkup_days": checkup_days,
+        "prep_template": form.get("prep_template", "").strip(),
+        "followup_template": form.get("followup_template", "").strip(),
+        "manager_history": get_client_profile(client_id).get("manager_history", []),
+    })
+    return RedirectResponse(f"/client/{client_id}/profile?saved=1", status_code=303)
+
+
 # ── Подготовка к встрече ─────────────────────────────────────────────────────
 
 @app.get("/prep/{client_id}", response_class=HTMLResponse)
@@ -347,9 +409,12 @@ async def prep_page(request: Request, client_id: int):
 
     meetings = get_client_meetings(client_id, limit=5)
     open_tasks = get_client_tasks(client_id, "open")
-    status = checkup_status(client.get("last_checkup"), client["segment"])
+    profile = get_client_profile(client_id)
 
-    days = CHECKUP_DAYS.get(client["segment"], 90)
+    custom_days = profile.get("checkup_days", 0)
+    status = checkup_status(client.get("last_checkup"), client["segment"], custom_days)
+
+    days = custom_days if custom_days > 0 else CHECKUP_DAYS.get(client["segment"], 90)
     suggested_next = (date.today() + timedelta(days=days)).isoformat()
 
     # Данные из Merchrules — используем credentials текущего пользователя
@@ -396,6 +461,7 @@ async def prep_page(request: Request, client_id: int):
         "mr_ok": bool(mr_data),
         "merchrules_url": os.getenv("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
         "quick_links": quick_links,
+        "profile": profile,
     })
 
 
