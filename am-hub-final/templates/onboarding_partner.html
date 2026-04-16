@@ -376,6 +376,12 @@ function saveAll(){
   for(let i=0;i<TOTAL_STEPS;i++) notes[i]=document.getElementById('note-'+i).value;
   localStorage.setItem('onb_notes_{{ client.id }}',JSON.stringify(notes));
   localStorage.setItem('onb_steps_{{ client.id }}',JSON.stringify([...completedSteps]));
+  // Сохраняем в БД
+  fetch('/api/clients/{{ client.id }}/onboarding/' + idx, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({done: true})
+  }).catch(e => console.debug('onboarding save:', e));
   showToast('💾 Сохранено');
 }
 
@@ -403,8 +409,20 @@ try{
 }catch(e){}
 
 try{
-  const steps=JSON.parse(localStorage.getItem('onb_steps_{{ client.id }}')||'[]');
-  steps.forEach(i=>completeStep(Number(i)));
+  // Загружаем прогресс из БД (приоритет), localStorage — fallback
+  (async function() {
+    try {
+      const r = await fetch('/api/clients/{{ client.id }}/onboarding');
+      const d = await r.json();
+      (d.checklist || []).forEach(item => {
+        if (item.done) completeStep(item.id - 1);
+      });
+    } catch(e) {
+      // fallback localStorage
+      const steps=JSON.parse(localStorage.getItem('onb_steps_{{ client.id }}')||'[]');
+      steps.forEach(i=>completeStep(Number(i)));
+    }
+  })();
 }catch(e){}
 
 updateProgress();

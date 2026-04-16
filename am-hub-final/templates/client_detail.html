@@ -149,7 +149,28 @@
 
   <div class="header">
     <div>
-      <h1>{{ client.name }}</h1>
+      <h1 id="client-name-display">{{ client.name }}
+        <button onclick="toggleEdit()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--muted);margin-left:6px;" title="Редактировать">✏️</button>
+      </h1>
+      <!-- Форма редактирования (скрыта) -->
+      <div id="edit-form" style="display:none;margin-top:8px;background:var(--surface-2,rgba(255,255,255,.04));border:1px solid var(--border);border-radius:10px;padding:12px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <input id="edit-name" value="{{ client.name }}" placeholder="Название" style="flex:1;min-width:150px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+          <select id="edit-segment" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
+            <option value="">— Сегмент —</option>
+            {% for seg in ['SS','SMB','SME','SME+','SME-','ENT'] %}
+            <option value="{{ seg }}" {% if client.segment == seg %}selected{% endif %}>{{ seg }}</option>
+            {% endfor %}
+          </select>
+          <input id="edit-domain" value="{{ client.domain or '' }}" placeholder="domain.ru" style="flex:1;min-width:120px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
+          <input id="edit-health" type="number" min="0" max="100" value="{{ (client.health_score * 100)|int if client.health_score else 0 }}" placeholder="Health%" style="width:80px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" onclick="saveClientEdit()">💾 Сохранить</button>
+          <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text);" onclick="toggleEdit()">Отмена</button>
+          <span id="edit-result" style="font-size:.78rem;align-self:center;display:none;"></span>
+        </div>
+      </div>
       <div class="header-meta">
         {% if client.segment %}<span class="seg-badge">{{ client.segment }}</span>{% endif %}
         {% if client.manager_email %}<span style="color:var(--muted);font-size:.78rem;">{{ client.manager_email }}</span>{% endif %}
@@ -170,6 +191,10 @@
       <a href="/followup/{{ client.id }}" class="btn">✍️ Followup</a>
       <a href="/client/{{ client.id }}/plan" class="btn">📐 План</a>
       <a href="/client/{{ client.id }}/qbr" class="btn">📊 QBR</a>
+      {% if client.segment in ['ENT','SME+','SME'] or meetings|length == 0 %}
+      <a href="/onboarding/{{ client.id }}" class="btn" style="background:rgba(249,115,22,.12);color:#fb923c;border:1px solid rgba(249,115,22,.3);">🚀 Онбординг</a>
+      {% endif %}
+      <button class="btn" style="background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);font-size:.8rem;" onclick="toggleEditClient()">✏️ Изменить</button>
       <a href="/api/clients/{{ client.id }}/export/pdf" class="btn" style="background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.25);" target="_blank">📄 PDF</a>
     </div>
   </div>
@@ -191,11 +216,46 @@
     </a>
   </div>
 
+  <!-- Форма редактирования клиента -->
+  <div id="edit-client-form" style="display:none;background:var(--surface-2,var(--card));border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
+    <div style="font-size:.88rem;font-weight:600;margin-bottom:12px;">✏️ Редактировать клиента</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Название</label>
+        <input id="edit-name" value="{{ client.name }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+      </div>
+      <div>
+        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Сегмент</label>
+        <select id="edit-segment" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+          <option value="">— Не задан —</option>
+          {% for seg in ["ENT","SME+","SME","SME-","SMB","SS"] %}
+          <option value="{{ seg }}" {% if client.segment == seg %}selected{% endif %}>{{ seg }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Домен</label>
+        <input id="edit-domain" value="{{ client.domain or '' }}" placeholder="company.ru" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+      </div>
+      <div>
+        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Health Score (0–1)</label>
+        <input id="edit-health" type="number" min="0" max="1" step="0.05" value="{{ client.health_score or 0 }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn btn-sm" onclick="saveClient()">💾 Сохранить</button>
+      <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text);" onclick="toggleEditClient()">Отмена</button>
+      <span id="edit-client-result" style="font-size:.8rem;align-self:center;display:none;"></span>
+    </div>
+  </div>
+
   <div class="tabs">
     <button class="tab active" onclick="showTab('tasks',this)">✅ Задачи <span class="tab-badge">{{ tasks|length }}</span></button>
     <button class="tab" onclick="showTab('meetings',this)">📅 Встречи <span class="tab-badge">{{ meetings|length }}</span></button>
     <button class="tab" onclick="showTab('notes',this)">📝 Заметки <span class="tab-badge" id="badge-notes">0</span></button>
     <button class="tab" onclick="showTab('timeline',this)">📜 История</button>
+    <button class="tab" onclick="showTab('tickets',this)">🎫 Тикеты</button>
+    <button class="tab" onclick="showTab('onboarding',this)">🚀 Онбординг</button>
   </div>
 
   <!-- ЗАДАЧИ -->
@@ -317,6 +377,20 @@
   <div id="tab-notes" class="tab-content">
     <div id="notes-list">
       <div class="empty"><div class="empty-icon">📝</div><div class="empty-text">Загрузка…</div></div>
+    </div>
+  </div>
+
+  <!-- ОНБОРДИНГ -->
+  <div id="tab-onboarding" class="tab-content">
+    <div id="onboarding-list" style="padding:4px 0;"></div>
+  </div>
+
+  <!-- ТИКЕТЫ Tbank Time -->
+  <div id="tab-tickets" class="tab-content">
+    <div id="tickets-list">
+      <div style="text-align:center;padding:30px;color:var(--muted);font-size:.85rem;">
+        ⏳ Загрузка тикетов...
+      </div>
     </div>
   </div>
 
@@ -506,6 +580,226 @@ function renderTl(){
 }
 
 loadNotesBadge();
+// ── ОНБОРДИНГ ЧЕКЛИСТ ────────────────────────────────────────────────────
+const ONBOARDING_ICONS = {meeting:'📅', followup:'✍️', admin:'⚙️', ktalk:'💬', check:'🔍'};
+
+async function loadOnboarding() {
+  try {
+    const r = await fetch('/api/clients/' + clientId + '/onboarding');
+    const d = await r.json();
+    const list = document.getElementById('onboarding-list');
+    const items = d.checklist || [];
+    const done_count = items.filter(i => i.done).length;
+    const pct = Math.round(done_count / items.length * 100);
+
+    let html = '<div style="margin-bottom:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:4px;">';
+    html += '<span>Прогресс онбординга</span><span style="font-weight:600;">' + done_count + '/' + items.length + '</span></div>';
+    html += '<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">';
+    html += '<div style="height:100%;width:' + pct + '%;background:var(--accent);border-radius:3px;transition:width .3s;"></div></div></div>';
+
+    items.forEach(item => {
+      const icon = ONBOARDING_ICONS[item.type] || '📋';
+      html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:4px;background:' + (item.done ? 'rgba(34,197,94,.06)' : 'var(--surface-2,rgba(255,255,255,.02))') + ';border:1px solid var(--border);">';
+      html += '<input type="checkbox" ' + (item.done ? 'checked' : '') + ' onchange="toggleOnboarding(' + item.id + ', this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);">';
+      html += '<span style="font-size:.9rem;">' + icon + '</span>';
+      html += '<div style="flex:1;"><div style="font-size:.84rem;' + (item.done ? 'text-decoration:line-through;color:var(--muted);' : '') + '">' + item.title + '</div>';
+      html += '<div style="font-size:.72rem;color:var(--muted);">день ' + item.day + '</div></div></div>';
+    });
+
+    list.innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+async function toggleOnboarding(itemId, done) {
+  try {
+    await fetch('/api/clients/' + clientId + '/onboarding/' + itemId, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({done})
+    });
+    await loadOnboarding();
+  } catch(e) {}
+}
+
+
+// ── РЕДАКТИРОВАНИЕ КЛИЕНТА ──────────────────────────────────────────────
+function toggleEditClient() {
+  const f = document.getElementById('edit-client-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveClient() {
+  const el = document.getElementById('edit-client-result');
+  const data = {
+    name: document.getElementById('edit-name').value.trim(),
+    segment: document.getElementById('edit-segment').value,
+    domain: document.getElementById('edit-domain').value.trim(),
+    health_score: parseFloat(document.getElementById('edit-health').value) || 0,
+  };
+  try {
+    const r = await fetch('/api/clients/' + clientId, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    const d = await r.json();
+    if (d.ok) {
+      el.style.display = 'inline';
+      el.style.color = 'var(--green)';
+      el.textContent = '✅ Сохранено';
+      setTimeout(() => { el.style.display='none'; location.reload(); }, 1200);
+    } else {
+      el.style.display = 'inline';
+      el.style.color = 'var(--red)';
+      el.textContent = '❌ ' + (d.error || 'Ошибка');
+    }
+  } catch(e) {
+    el.style.display = 'inline';
+    el.style.color = 'var(--red)';
+    el.textContent = '❌ ' + e.message;
+  }
+}
+
+// ── КОММЕНТАРИИ К ЗАДАЧАМ ─────────────────────────────────────────────────
+async function loadTaskComments(taskId) {
+  const el = document.getElementById('comments-' + taskId);
+  if (!el) return;
+  try {
+    const r = await fetch('/api/tasks/' + taskId + '/comments');
+    const d = await r.json();
+    const comments = d.comments || [];
+    if (!comments.length) {
+      el.innerHTML = '<div style="font-size:.75rem;color:var(--muted);padding:4px 0;">Нет комментариев</div>';
+      return;
+    }
+    el.innerHTML = comments.map(c => `
+      <div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+        <div style="flex:1;font-size:.78rem;">${c.content.replace(/</g,'&lt;')}</div>
+        <div style="font-size:.68rem;color:var(--muted);white-space:nowrap;">${c.created_at || ''}</div>
+        <button onclick="deleteTaskComment(${taskId},${c.id})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;">✕</button>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+async function addTaskComment(taskId) {
+  const input = document.getElementById('comment-input-' + taskId);
+  const text = input?.value.trim();
+  if (!text) return;
+  try {
+    const r = await fetch('/api/tasks/' + taskId + '/comments', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: text})
+    });
+    if (r.ok) {
+      input.value = '';
+      await loadTaskComments(taskId);
+    }
+  } catch(e) {}
+}
+
+async function deleteTaskComment(taskId, commentId) {
+  try {
+    await fetch('/api/tasks/' + taskId + '/comments/' + commentId, {method: 'DELETE'});
+    await loadTaskComments(taskId);
+  } catch(e) {}
+}
+
+// Показываем комментарии под задачей при клике
+function toggleComments(taskId) {
+  const wrap = document.getElementById('comment-wrap-' + taskId);
+  if (!wrap) return;
+  if (wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    loadTaskComments(taskId);
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+// Расширяем renderTasks чтобы добавить кнопку комментариев
+const _origRenderTasks = renderTasks;
+function renderTasks(tasks) {
+  _origRenderTasks(tasks);
+  // После рендера добавляем кнопки комментариев к каждой задаче
+  tasks.forEach(t => {
+    const card = document.getElementById('task-' + t.id);
+    if (!card) return;
+    const existing = card.querySelector('.comment-btn');
+    if (existing) return;
+    const btn = document.createElement('button');
+    btn.className = 'comment-btn';
+    btn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--muted);cursor:pointer;font-size:.72rem;padding:3px 8px;border-radius:5px;margin-top:6px;';
+    btn.textContent = '💬 Комментарии';
+    btn.onclick = () => toggleComments(t.id);
+    const wrap = document.createElement('div');
+    wrap.id = 'comment-wrap-' + t.id;
+    wrap.style.display = 'none';
+    wrap.style.marginTop = '8px';
+    wrap.innerHTML = `
+      <div id="comments-${t.id}" style="margin-bottom:6px;"></div>
+      <div style="display:flex;gap:6px;">
+        <input id="comment-input-${t.id}" placeholder="Добавить комментарий..." style="flex:1;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.78rem;">
+        <button onclick="addTaskComment(${t.id})" style="padding:5px 10px;border-radius:6px;border:none;background:var(--accent,#6366f1);color:#fff;cursor:pointer;font-size:.75rem;">+</button>
+      </div>`;
+    card.appendChild(btn);
+    card.appendChild(wrap);
+  });
+}
+
+// ── ТИКЕТЫ TBANK TIME ────────────────────────────────────────────────────
+async function loadTickets() {
+  const el = document.getElementById('tickets-list');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/tbank/tickets/' + encodeURIComponent('{{ client.name }}'));
+    const d = await r.json();
+    if (d.error) {
+      el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">⚠️ ' + d.error + '</div>';
+      return;
+    }
+    const tickets = d.tickets || [];
+    if (!tickets.length) {
+      el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">✅ Открытых тикетов нет</div>';
+      return;
+    }
+    const STATUS_COLOR = {open:'#ef4444', in_progress:'#eab308', resolved:'#22c55e', closed:'#64748b'};
+    el.innerHTML = '<div style="margin-bottom:8px;font-size:.78rem;color:var(--muted);">Найдено тикетов: ' + tickets.length + '</div>' +
+      tickets.map(t => `
+        <div style="background:var(--surface-2,var(--card));border:1px solid var(--border);border-left:3px solid ${STATUS_COLOR[t.status]||'#64748b'};border-radius:8px;padding:10px 14px;margin-bottom:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:start;">
+            <div style="font-size:.84rem;font-weight:500;flex:1;">${t.title||'Без темы'}</div>
+            <span style="font-size:.7rem;color:${STATUS_COLOR[t.status]||'#64748b'};font-weight:600;margin-left:8px;">${t.status||''}</span>
+          </div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:4px;">
+            ${t.priority ? '⚡ ' + t.priority + ' · ' : ''}
+            ${t.created_at ? '📅 ' + new Date(t.created_at).toLocaleDateString('ru') : ''}
+            ${t.messages_count ? ' · 💬 ' + t.messages_count : ''}
+          </div>
+        </div>`).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">❌ Ошибка загрузки тикетов</div>';
+  }
+}
+
+// Загружаем тикеты при открытии вкладки
+const _origShowTab = showTab;
+function showTab(id, btn) {
+  _origShowTab(id, btn);
+  if (id === 'tickets') loadTickets();
+}
+
+// Обновляем бейдж заметок
+async function updateNotesBadge() {
+  try {
+    const r = await fetch('/api/clients/' + clientId + '/notes');
+    const d = await r.json();
+    const badge = document.getElementById('badge-notes');
+    if (badge && d.notes) badge.textContent = d.notes.length;
+  } catch(e) {}
+}
+updateNotesBadge();
 </script>
 </body>
 </html>

@@ -3924,6 +3924,45 @@ async def api_test_outlook():
 
 
 # ============================================================================
+# KPI МЕНЕДЖЕРА
+# ============================================================================
+
+@app.get("/kpi", response_class=HTMLResponse)
+async def kpi_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Страница KPI менеджера."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("kpi.html", {"request": request, "user": user})
+
+
+@app.get("/notifications", response_class=HTMLResponse)
+async def notifications_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Страница всех уведомлений."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    notifs = db.query(Notification).filter(
+        Notification.user_id == user.id
+    ).order_by(Notification.created_at.desc()).limit(100).all()
+    return templates.TemplateResponse("notifications.html", {
+        "request": request, "user": user, "notifications": notifs
+    })
+
+
+# ============================================================================
 # ANALYTICS
 # ============================================================================
 
@@ -5133,3 +5172,567 @@ async def api_export_client_pdf(
     except Exception as e:
         logger.error(f"PDF export error: {e}")
         return {"error": str(e)}
+
+# ============================================================================
+# КЛИЕНТ: редактирование карточки
+# ============================================================================
+
+@app.patch("/api/clients/{client_id}")
+async def api_update_client(
+    client_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Обновить поля клиента (сегмент, имя, домен, health_score)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    data = await request.json()
+    allowed = ("name", "segment", "domain", "health_score", "manager_email", "activity_level")
+    changed = {}
+    for field in allowed:
+        if field in data:
+            old_val = getattr(client, field)
+            new_val = data[field]
+            if old_val != new_val:
+                setattr(client, field, new_val)
+                changed[field] = {"old": old_val, "new": new_val}
+
+    if changed:
+        db.commit()
+        # Push изменений в Airtable если есть record_id
+        if client.airtable_record_id:
+            try:
+                from airtable_sync import push_client_fields_to_airtable
+                # Маппинг полей хаба → поля Airtable (подстраивается под реальную структуру)
+                at_fields = {}
+                if "segment" in changed:
+                    at_fields["Сегмент"] = data["segment"]
+                if "health_score" in changed:
+                    at_fields["Health Score"] = data["health_score"]
+                if "domain" in changed:
+                    at_fields["Домен"] = data["domain"]
+                if at_fields:
+                    await push_client_fields_to_airtable(client.airtable_record_id, at_fields)
+            except Exception as e:
+                logger.warning(f"Airtable push on client update failed: {e}")
+
+    return {"ok": True, "changed": changed}
+
+
+# ============================================================================
+# ЗАДАЧИ: комментарии
+# ============================================================================
+
+@app.get("/api/tasks/{task_id}/comments")
+async def api_get_task_comments(
+    task_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    comments = db.query(TaskComment).filter(TaskComment.task_id == task_id).order_by(TaskComment.created_at.asc()).all()
+    return {"comments": [{
+        "id": c.id,
+        "content": c.content,
+        "created_at": c.created_at.strftime("%d.%m.%Y %H:%M") if c.created_at else None,
+        "user_id": c.user_id,
+    } for c in comments]}
+
+
+@app.post("/api/tasks/{task_id}/comments")
+async def api_add_task_comment(
+    task_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    content = (data.get("content") or "").strip()
+    if not content:
+        return {"error": "Пустой комментарий"}
+
+    comment = TaskComment(task_id=task_id, user_id=user.id, content=content)
+    db.add(comment)
+    db.commit()
+    return {"ok": True, "id": comment.id}
+
+
+@app.delete("/api/tasks/{task_id}/comments/{comment_id}")
+async def api_delete_task_comment(
+    task_id: int,
+    comment_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    comment = db.query(TaskComment).filter(
+        TaskComment.id == comment_id, TaskComment.task_id == task_id
+    ).first()
+    if not comment:
+        raise HTTPException(status_code=404)
+    db.delete(comment)
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# KPI МЕНЕДЖЕРА
+# ============================================================================
+
+@app.get("/api/manager/kpi")
+async def api_manager_kpi(
+    period_days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """KPI менеджера за период: задачи, встречи, фолоуапы, чекапы."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    since = datetime.utcnow() - timedelta(days=period_days)
+    email = user.email
+
+    # Задачи
+    tasks_closed = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+        Client.manager_email == email,
+        Task.status == "done",
+        Task.confirmed_at >= since,
+    ).count()
+
+    tasks_created = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+        Client.manager_email == email,
+        Task.created_at >= since,
+    ).count()
+
+    tasks_overdue = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+        Client.manager_email == email,
+        Task.due_date < datetime.utcnow(),
+        Task.status.in_(["plan", "in_progress"]),
+    ).count()
+
+    # Встречи
+    meetings_held = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
+        Client.manager_email == email,
+        Meeting.date >= since,
+        Meeting.date <= datetime.utcnow(),
+    ).count()
+
+    # Фолоуапы отправлены
+    followups_sent = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
+        Client.manager_email == email,
+        Meeting.followup_status == "sent",
+        Meeting.followup_sent_at >= since,
+    ).count()
+
+    followups_pending = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
+        Client.manager_email == email,
+        Meeting.followup_status == "pending",
+        Meeting.date < datetime.utcnow(),
+    ).count()
+
+    # Клиенты
+    total_clients = db.query(Client).filter(Client.manager_email == email).count()
+
+    clients_no_contact = db.query(Client).filter(
+        Client.manager_email == email,
+        Client.last_meeting_date < datetime.utcnow() - timedelta(days=60),
+    ).count()
+
+    # Средний health score
+    from sqlalchemy import func
+    avg_health = db.query(func.avg(Client.health_score)).filter(
+        Client.manager_email == email,
+        Client.health_score != None,
+    ).scalar() or 0
+
+    return {
+        "period_days": period_days,
+        "manager": user.email,
+        "tasks": {
+            "closed": tasks_closed,
+            "created": tasks_created,
+            "overdue": tasks_overdue,
+            "close_rate": round(tasks_closed / max(tasks_created, 1) * 100, 1),
+        },
+        "meetings": {
+            "held": meetings_held,
+            "followups_sent": followups_sent,
+            "followups_pending": followups_pending,
+            "followup_rate": round(followups_sent / max(meetings_held, 1) * 100, 1),
+        },
+        "clients": {
+            "total": total_clients,
+            "no_contact_60d": clients_no_contact,
+            "avg_health_score": round(float(avg_health) * 100, 1),
+        },
+    }
+
+
+@app.get("/api/team/kpi")
+async def api_team_kpi(
+    period_days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """KPI всей команды — только для admin."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403)
+
+    since = datetime.utcnow() - timedelta(days=period_days)
+    managers = db.query(User).filter(User.role == "manager", User.is_active == True).all()
+    result = []
+
+    for m in managers:
+        tasks_closed = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+            Client.manager_email == m.email,
+            Task.status == "done", Task.confirmed_at >= since,
+        ).count()
+        meetings_held = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
+            Client.manager_email == m.email,
+            Meeting.date >= since, Meeting.date <= datetime.utcnow(),
+        ).count()
+        followups_sent = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
+            Client.manager_email == m.email,
+            Meeting.followup_status == "sent", Meeting.followup_sent_at >= since,
+        ).count()
+        clients_count = db.query(Client).filter(Client.manager_email == m.email).count()
+
+        result.append({
+            "manager": m.email,
+            "name": f"{m.first_name or ''} {m.last_name or ''}".strip() or m.email,
+            "tasks_closed": tasks_closed,
+            "meetings_held": meetings_held,
+            "followups_sent": followups_sent,
+            "clients": clients_count,
+        })
+
+    result.sort(key=lambda x: x["tasks_closed"] + x["meetings_held"], reverse=True)
+    return {"period_days": period_days, "managers": result}
+
+
+# ============================================================================
+# AIRTABLE WEBHOOK (входящие изменения из Airtable)
+# ============================================================================
+
+@app.post("/webhook/airtable")
+async def airtable_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Webhook от Airtable при изменении записи.
+    Настроить в Airtable: Automations → Webhook → URL: /webhook/airtable
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return {"ok": False}
+
+    record_id = data.get("record_id") or data.get("id", "")
+    if not record_id:
+        return {"ok": False, "error": "no record_id"}
+
+    client = db.query(Client).filter(Client.airtable_record_id == record_id).first()
+    if not client:
+        return {"ok": True, "note": "client not found, skip"}
+
+    fields = data.get("fields") or data.get("changedFields") or {}
+    changed = False
+
+    # Маппинг Airtable полей → Client поля
+    field_map = {
+        "Сегмент": "segment", "segment": "segment",
+        "Домен": "domain", "domain": "domain",
+        "Health Score": "health_score", "health_score": "health_score",
+        "Менеджер": "manager_email", "manager": "manager_email",
+        "Название": "name", "name": "name", "Name": "name",
+    }
+    for at_field, db_field in field_map.items():
+        if at_field in fields:
+            val = fields[at_field]
+            if db_field == "health_score":
+                try:
+                    val = float(val)
+                    if val > 1:
+                        val = val / 100
+                except Exception:
+                    continue
+            if getattr(client, db_field) != val:
+                setattr(client, db_field, val)
+                changed = True
+
+    if changed:
+        db.commit()
+        logger.info(f"✅ Airtable webhook: updated client {client.name}")
+
+    return {"ok": True, "changed": changed}
+
+
+# ============================================================================
+# ОНБОРДИНГ ПАРТНЁРА: чеклист
+# ============================================================================
+
+ONBOARDING_CHECKLIST = [
+    {"id": 1, "title": "Провести вводную встречу (1 ч)", "type": "meeting", "day": 0},
+    {"id": 2, "title": "Отправить welcome-фолоуап", "type": "followup", "day": 0},
+    {"id": 3, "title": "Добавить в карточку клиента", "type": "admin", "day": 1},
+    {"id": 4, "title": "Касание в Ktalk (день 3)", "type": "ktalk", "day": 3},
+    {"id": 5, "title": "Проверить первые шаги партнёра", "type": "check", "day": 7},
+    {"id": 6, "title": "Касание в Ktalk (день 7)", "type": "ktalk", "day": 7},
+    {"id": 7, "title": "Первый чекап (2 нед)", "type": "meeting", "day": 14},
+    {"id": 8, "title": "Касание в Ktalk (день 14)", "type": "ktalk", "day": 14},
+    {"id": 9, "title": "Проверить health score", "type": "check", "day": 30},
+    {"id": 10, "title": "Закрыть онбординг, перевести в активные", "type": "admin", "day": 30},
+]
+
+
+@app.get("/api/clients/{client_id}/onboarding")
+async def api_get_onboarding(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Получить чеклист онбординга клиента."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    # Читаем прогресс из account_plan
+    plan_data = client.account_plan or {}
+    onboarding_progress = plan_data.get("onboarding_progress", {})
+
+    checklist = []
+    for item in ONBOARDING_CHECKLIST:
+        checklist.append({
+            **item,
+            "done": onboarding_progress.get(str(item["id"]), False),
+        })
+
+    return {"checklist": checklist, "client_id": client_id}
+
+
+@app.patch("/api/clients/{client_id}/onboarding/{item_id}")
+async def api_update_onboarding_item(
+    client_id: int,
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Отметить шаг онбординга выполненным."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    data = await request.json()
+    done = bool(data.get("done", True))
+
+    plan_data = dict(client.account_plan or {})
+    if "onboarding_progress" not in plan_data:
+        plan_data["onboarding_progress"] = {}
+    plan_data["onboarding_progress"][str(item_id)] = done
+
+    client.account_plan = plan_data
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(client, "account_plan")
+    db.commit()
+
+    # Если отмечаем касание в Ktalk — отправляем авто-сообщение
+    item = next((i for i in ONBOARDING_CHECKLIST if i["id"] == item_id), None)
+    if done and item and item["type"] == "ktalk":
+        try:
+            from auth import decode_access_token
+            user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+            if user:
+                settings = user.settings or {}
+                kt = settings.get("ktalk", {})
+                channel_id = kt.get("followup_channel_id") or kt.get("channel_id")
+                token = kt.get("access_token", "")
+                if channel_id and token:
+                    from integrations.ktalk import send_message
+                    await send_message(
+                        channel_id,
+                        f"📋 Онбординг {client.name}: выполнено — {item['title']}",
+                        token,
+                    )
+        except Exception as e:
+            logger.warning(f"Ktalk onboarding notify failed: {e}")
+
+    return {"ok": True, "done": done}
+
+
+# ============================================================================
+# KPI PAGE
+# ============================================================================
+
+@app.get("/kpi", response_class=HTMLResponse)
+async def kpi_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("kpi.html", {"request": request, "user": user})
+
+# ============================================================================
+# AIRTABLE WEBHOOK (push при изменении записи)
+# ============================================================================
+
+@app.post("/webhook/airtable")
+async def airtable_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Webhook от Airtable — вызывается при изменении записи клиента.
+    Настройка: в Airtable → Automations → Run script/webhook → этот URL.
+    Обновляет клиента в локальной БД по airtable_record_id.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return {"ok": False, "error": "Invalid JSON"}
+
+    record_id = data.get("record_id") or data.get("id")
+    fields = data.get("fields") or data.get("data") or {}
+
+    if not record_id:
+        return {"ok": False, "error": "No record_id"}
+
+    client = db.query(Client).filter(Client.airtable_record_id == record_id).first()
+    if not client:
+        logger.info(f"Airtable webhook: client not found for record {record_id}")
+        return {"ok": True, "message": "Client not found, skipped"}
+
+    # Маппинг полей Airtable → модель Client
+    field_map = {
+        "Название": "name", "Name": "name", "Компания": "name",
+        "Сегмент": "segment", "Segment": "segment",
+        "Домен": "domain", "Domain": "domain",
+        "Менеджер": "manager_email", "Manager": "manager_email",
+        "Health Score": "health_score",
+    }
+
+    changed = {}
+    for at_field, db_field in field_map.items():
+        val = fields.get(at_field)
+        if val is not None:
+            old = getattr(client, db_field, None)
+            if db_field == "health_score":
+                try:
+                    val = float(str(val).replace("%", "")) / 100 if float(str(val)) > 1 else float(val)
+                except Exception:
+                    continue
+            if old != val:
+                setattr(client, db_field, val)
+                changed[db_field] = val
+
+    if changed:
+        db.commit()
+        logger.info(f"Airtable webhook: updated client {client.name}, fields: {list(changed.keys())}")
+
+    return {"ok": True, "updated": changed}
+
+
+# ============================================================================
+# GOOGLE SHEETS WRITE-BACK (запись статуса чекапа обратно)
+# ============================================================================
+
+@app.post("/api/sheets/update-checkup")
+async def api_sheets_update_checkup(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Записать статус чекапа клиента обратно в Google Sheets.
+    Требует сервисный аккаунт или Apps Script webhook.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    client_id = data.get("client_id")
+    status = data.get("status", "")
+    note = data.get("note", "")
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        return {"error": "Client not found"}
+
+    # Пробуем обновить через Apps Script webhook (если настроен)
+    apps_script_url = _env("SHEETS_WEBHOOK_URL")
+    if not apps_script_url:
+        return {"ok": False, "error": "SHEETS_WEBHOOK_URL не настроен. Добавьте Apps Script webhook в переменные."}
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            resp = await hx.post(apps_script_url, json={
+                "client_name": client.name,
+                "status": status,
+                "note": note,
+                "date": datetime.now().strftime("%d.%m.%Y"),
+            })
+        if resp.status_code == 200:
+            return {"ok": True, "message": f"Статус '{status}' записан в Sheets для {client.name}"}
+        return {"ok": False, "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
