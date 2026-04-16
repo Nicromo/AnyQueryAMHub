@@ -162,7 +162,6 @@
 <script>
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 
-// Load saved credentials
 async function loadCreds(){
   try{
     const r=await fetch('/api/sync/merchrules-creds');
@@ -172,37 +171,52 @@ async function loadCreds(){
 loadCreds();
 
 async function doSyncMR(){
-  const btn=document.getElementById('mrBtn');btn.disabled=true;btn.textContent='⏳ Синхронизация...';
-  const res=document.getElementById('mrResult');res.className='result';
+  const btn=document.getElementById('mrBtn');
+  const res=document.getElementById('mrResult');
+  btn.disabled=true; btn.textContent='⏳ Синхронизация...';
+  res.className='result ok'; res.textContent='⏳ Подключаемся к Merchrules...';
   const login=document.getElementById('mr-login').value;
   const password=document.getElementById('mr-pass').value;
   const sitesStr=document.getElementById('mr-sites').value;
-  const siteIds=sitesStr?sitesStr.split(',').map(s=>parseInt(s.trim())).filter(s=>!isNaN(s)):[];
+  const siteIds=sitesStr?sitesStr.split(',').map(s=>s.trim()).filter(Boolean):[];
   try{
     const r=await fetch('/api/sync/merchrules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login,password,site_ids:siteIds})});
     const d=await r.json();
-    if(d.ok){res.className='result ok';res.textContent='✅ Синхронизировано: '+d.clients_synced+' клиентов, '+d.tasks_synced+' задач';}
-    else{res.className='result err';res.textContent='❌ '+d.error;}
+    if(d.ok){
+      res.className='result ok';
+      res.textContent='✅ '+d.message+'\n\nURL: '+(d.base_url||'—');
+    }else{
+      res.className='result err';
+      let msg='❌ '+(d.error||'Неизвестная ошибка');
+      if(d.endpoints_tried) msg+='\n\nПробовали:\n'+d.endpoints_tried.join('\n');
+      if(d.hint) msg+='\n\n💡 '+d.hint;
+      res.textContent=msg;
+    }
   }catch(e){res.className='result err';res.textContent='❌ '+e.message;}
-  btn.disabled=false;btn.textContent='🔄 Синхронизировать Merchrules';
+  btn.disabled=false; btn.textContent='🔄 Синхронизировать Merchrules';
 }
 
-async function doSyncAirtable(){
-  const btn=document.getElementById('atSyncBtn');btn.disabled=true;btn.textContent='⏳ Синхронизация...';
-  const el=document.getElementById('atResult');el.className='result';
-  const token=document.getElementById('at-pat').value;
-  const view=document.getElementById('at-view').value;
+async function diagMR(){
+  const login=document.getElementById('mr-login').value;
+  const password=document.getElementById('mr-pass').value;
+  const el=document.getElementById('mrResult');
+  if(!login||!password){el.className='result err';el.textContent='❌ Введите логин и пароль';return;}
+  el.className='result ok';el.textContent='⏳ Диагностируем...';
   try{
-    const r=await fetch('/api/sync/airtable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,view_id:view})});
+    const r=await fetch('/api/diagnostics/merchrules-auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login,password})});
     const d=await r.json();
     if(d.ok){
-      el.className='result ok';
-      el.textContent='✅ Airtable синхронизирован!\nВсего записей: '+d.total+'\nСоздано: '+d.created+' | Обновлено: '+d.updated+' | Пропущено: '+d.skipped+(d.field_map?'\n\nОпределённые поля:\n'+JSON.stringify(d.field_map,null,2):'');
+      const w=d.working;
+      el.textContent='✅ Авторизация успешна!\nURL: '+w.url+'\nПоле: '+w.field+'\n\nТеперь нажмите «Синхронизировать»';
     }else{
-      el.className='result err';el.textContent='❌ '+(d.error||JSON.stringify(d));
+      let lines=['❌ Авторизация не удалась:',''];
+      for(const a of (d.all||[])){
+        lines.push(a.url+' ['+a.field+'] → '+(a.error||'HTTP '+a.status));
+        if(a.response) lines.push('  '+a.response.slice(0,120));
+      }
+      el.className='result err';el.textContent=lines.join('\n');
     }
   }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
-  btn.disabled=false;btn.textContent='🔄 Синхронизировать Airtable';
 }
 
 async function saveAirtableCreds(){
@@ -221,30 +235,26 @@ async function saveSheetsCreds(){
   }catch(e){}
 }
 
-async function diagMR(){
-  const login=document.getElementById('mr-login').value;
-  const password=document.getElementById('mr-pass').value;
-  const el=document.getElementById('mrResult');
-  if(!login||!password){el.className='result err';el.textContent='❌ Введите логин и пароль';return;}
-  el.className='result ok';el.textContent='⏳ Диагностируем авторизацию...';
+async function saveTgCreds(){
+  const token=document.getElementById('tg-token').value;
+  const chat=document.getElementById('tg-chat').value;
   try{
-    const r=await fetch('/api/diagnostics/merchrules-auth',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({login,password})
-    });
-    const d=await r.json();
-    if(d.ok){
-      const w=d.working;
-      el.textContent='✅ Авторизация успешна!\nURL: '+w.url+'\nПоле: '+w.field+'\n\nТеперь нажмите «Синхронизировать»';
-    } else {
-      let lines=['❌ Авторизация не удалась. Детали:',''];
-      for(const a of (d.all||[])){
-        lines.push(a.url+' ['+a.field+'] → '+(a.error||'HTTP '+a.status));
-        if(a.response) lines.push('  Ответ: '+a.response.slice(0,120));
+    const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram:{bot_token:token,chat_id:chat}})});
+    if(r.ok&&token&&chat){
+      const resp=await fetch('https://api.telegram.org/bot'+token+'/getMe');
+      const d=await resp.json();
+      if(d.ok){
+        const el=document.getElementById('tgResult');
+        el.className='result ok';
+        el.textContent='✅ Бот: '+d.result.first_name+'. Сообщение отправлено!';
+        await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chat,text:'✅ AM Hub подключен!',parse_mode:'HTML'})});
+      }else{
+        const el=document.getElementById('tgResult');
+        el.className='result err';
+        el.textContent='❌ '+d.description;
       }
-      el.className='result err';el.textContent=lines.join('\n');
     }
-  }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
+  }catch(e){}
 }
 
 async function getOutboundIP(){
@@ -254,8 +264,8 @@ async function getOutboundIP(){
     const r=await fetch('/api/diagnostics/outbound-ip');
     const d=await r.json();
     if(d.ip){
-      el.textContent='🌐 IP сервера: '+d.ip+'\n\nЭтот адрес нужно добавить в whitelist Merchrules.\nСкопируйте и передайте администратору Merchrules.';
-    } else {
+      el.textContent='🌐 IP сервера: '+d.ip+'\n\nДобавьте этот адрес в whitelist Merchrules.';
+    }else{
       el.className='result err';el.textContent='❌ '+(d.error||'Не удалось определить');
     }
   }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
@@ -264,15 +274,15 @@ async function getOutboundIP(){
 async function importClients(){
   const file=document.getElementById('clientsFile').files[0];
   const el=document.getElementById('clientsResult');
-  if(!file){el.className='result err';el.textContent='❌ Выберите файл';el.style.display='block';return;}
+  if(!file){el.className='result err';el.textContent='❌ Выберите файл';return;}
   el.className='result ok';el.textContent='⏳ Загружаем...';
   const fd=new FormData();fd.append('file',file);
   try{
     const r=await fetch('/api/import/clients-csv',{method:'POST',body:fd});
     const d=await r.json();
     if(d.ok){
-      el.textContent='✅ Готово!\nСоздано: '+d.created+' | Обновлено: '+d.updated+' | Пропущено: '+d.skipped+'\nВсего строк: '+d.total_rows;
-    } else {
+      el.textContent='✅ Готово!\nСоздано: '+d.created+' | Обновлено: '+d.updated+' | Пропущено: '+d.skipped;
+    }else{
       el.className='result err';el.textContent='❌ '+d.error;
     }
   }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
@@ -281,32 +291,18 @@ async function importClients(){
 async function importTasks(){
   const file=document.getElementById('tasksFile').files[0];
   const el=document.getElementById('tasksResult');
-  if(!file){el.className='result err';el.textContent='❌ Выберите файл';el.style.display='block';return;}
+  if(!file){el.className='result err';el.textContent='❌ Выберите файл';return;}
   el.className='result ok';el.textContent='⏳ Загружаем...';
   const fd=new FormData();fd.append('file',file);
   try{
     const r=await fetch('/api/import/tasks-csv',{method:'POST',body:fd});
     const d=await r.json();
     if(d.ok){
-      el.textContent='✅ Готово!\nСоздано задач: '+d.created+' | Пропущено: '+d.skipped+'\nВсего строк: '+d.total_rows;
-    } else {
+      el.textContent='✅ Готово!\nСоздано задач: '+d.created+' | Пропущено: '+d.skipped;
+    }else{
       el.className='result err';el.textContent='❌ '+d.error;
     }
   }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
-}
-
-  const token=document.getElementById('tg-token').value;
-  const chat=document.getElementById('tg-chat').value;
-  try{
-    const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram:{bot_token:token,chat_id:chat}})});
-    if(r.ok&&token&&chat){
-      const resp=await fetch('https://api.telegram.org/bot'+token+'/getMe');
-      const d=await resp.json();
-      if(d.ok){const el=document.getElementById('tgResult');el.className='result ok';el.textContent='✅ Бот: '+d.result.first_name+'. Сообщение отправлено в Telegram!';
-        await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chat,text:'✅ AM Hub подключен!',parse_mode:'HTML'})});
-      }else{const el=document.getElementById('tgResult');el.className='result err';el.textContent='❌ '+d.description;}
-    }
-  }catch(e){}
 }
 </script>
 </body>
