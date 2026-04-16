@@ -3,7 +3,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 import os, json, logging
 
-from fastapi import APIRouter, Request, Depends, HTTPException, Query, Cookie, Form
+from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -11,9 +11,22 @@ from sqlalchemy import text, desc
 
 from database import get_db, SessionLocal
 from models import (
-    Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
-    Notification, QBR, AccountPlan, ClientNote, TaskComment,
-    FollowupTemplate, VoiceNote, ClientHistory,
+    AccountPlan,
+    AuditLog,
+    CheckUp,
+    CheckupResult,
+    Client,
+    ClientHistory,
+    ClientNote,
+    FollowupTemplate,
+    Meeting,
+    Notification,
+    QBR,
+    SyncLog,
+    Task,
+    TaskComment,
+    User,
+    VoiceNote,
 )
 from auth import decode_access_token, hash_password, verify_password, log_audit
 from deps import require_user, require_admin, optional_user

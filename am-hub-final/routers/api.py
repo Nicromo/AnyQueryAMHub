@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 

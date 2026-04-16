@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime
 import logging, os
 
-from fastapi import APIRouter, Depends, HTTPException, Cookie
+from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session

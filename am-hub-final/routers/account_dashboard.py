@@ -12,7 +12,7 @@ from collections import defaultdict
 import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Cookie
+from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func

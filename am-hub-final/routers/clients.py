@@ -7,7 +7,7 @@ import os
 import json
 import logging
 
-from fastapi import APIRouter, Request, Depends, HTTPException, Query, Cookie, Form, status
+from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -15,9 +15,23 @@ from sqlalchemy import text
 
 from database import get_db, SessionLocal
 from models import (
-    Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
-    Notification, QBR, AccountPlan, ClientNote, TaskComment,
-    FollowupTemplate, VoiceNote,
+    AccountPlan,
+    AuditLog,
+    CheckUp,
+    ChurnScore,
+    Client,
+    ClientAttachment,
+    ClientHistory,
+    ClientNote,
+    FollowupTemplate,
+    Meeting,
+    Notification,
+    QBR,
+    SyncLog,
+    Task,
+    TaskComment,
+    User,
+    VoiceNote,
 )
 from auth import (
     authenticate_user, create_user, create_access_token,
