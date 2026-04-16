@@ -956,7 +956,7 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
         "ai_active": ai_active,
         "ai_type": ai_type,
         "ktalk_active": bool(env.KTALK_TOKEN and env.KTALK_SPACE),
-        "ktalk_space": os.environ.get("KTALK_SPACE", ""),
+        "ktalk_space": _env("KTALK_SPACE"),
         "time_active": bool(env.TIME_TOKEN),
     }
     return templates.TemplateResponse("integrations.html", {"request": request, "user": user, **integrations_data})
@@ -1001,42 +1001,6 @@ async def test_ktalk(space: str = "", token: str = ""):
     except Exception as e:
         return {"error": str(e)}
 
-
-@app.get("/api/integrations/test/tbank")
-async def test_tbank(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Проверить подключение к Tbank Time (Mattermost)."""
-    if not auth_token:
-        return {"ok": False, "error": "Не авторизован"}
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return {"ok": False, "error": "Не авторизован"}
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return {"ok": False, "error": "Пользователь не найден"}
-
-    u_settings = user.settings or {}
-    tm = u_settings.get("tbank_time", {})
-    token = tm.get("mmauthtoken") or tm.get("session_cookie") or os.environ.get("TIME_API_TOKEN", "")
-
-    if not token:
-        return {"ok": False, "error": "Нет токена — войдите через «Войти через Tbank Time»"}
-
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.get(
-                "https://time.tbank.ru/api/v4/users/me",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-        if resp.status_code == 200:
-            me = resp.json()
-            return {"ok": True, "username": me.get("username"), "email": me.get("email")}
-        if resp.status_code == 401:
-            return {"ok": False, "error": "Токен истёк — войдите заново"}
-        return {"ok": False, "error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
 
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
@@ -1333,10 +1297,10 @@ async def api_sync_airtable(
     at_settings = u_settings.get("airtable", {})
     token = (body.get("token")
              or at_settings.get("pat") or at_settings.get("token")
-             or os.environ.get("AIRTABLE_TOKEN") or os.environ.get("AIRTABLE_PAT", ""))
+             or _env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT"))
     base_id = (body.get("base_id")
                or at_settings.get("base_id")
-               or os.environ.get("AIRTABLE_BASE_ID", ""))
+               or _env("AIRTABLE_BASE_ID"))
     view_id = body.get("view_id") or at_settings.get("view_id", "")
 
     if not token:
@@ -1825,11 +1789,8 @@ async def ktalk_oauth_start(request: Request, auth_token: Optional[str] = Cookie
     import secrets, urllib.parse
 
     # client_id можно переопределить через env если у вас корпоративный OIDC клиент
-    client_id = os.environ.get("KTALK_OIDC_CLIENT_ID", "KTalk")
-    redirect_uri = os.environ.get(
-        "KTALK_REDIRECT_URI",
-        str(request.base_url).rstrip("/") + "/auth/ktalk/callback"
-    )
+    client_id = _env("KTALK_OIDC_CLIENT_ID", "KTalk")
+    redirect_uri = _env("KTALK_REDIRECT_URI") or (str(request.base_url).rstrip("/") + "/auth/ktalk/callback")
 
     params = urllib.parse.urlencode({
         "client_id": client_id,
@@ -3403,7 +3364,7 @@ async def api_ktalk_send_dm(
 
     u_settings = user.settings or {}
     kt = u_settings.get("ktalk", {})
-    token = kt.get("access_token") or os.environ.get("KTALK_API_TOKEN", "")
+    token = kt.get("access_token") or _env("KTALK_API_TOKEN")
     if not token:
         return {"ok": False, "error": "KTalk не настроен — войдите в Настройки → KTalk"}
 
@@ -3443,7 +3404,7 @@ async def api_test_airtable(db: Session = Depends(get_db), auth_token: Optional[
     if not user: raise HTTPException(status_code=401)
     u = user.settings or {}
     at = u.get("airtable", {})
-    token = at.get("pat") or at.get("token") or os.environ.get("AIRTABLE_TOKEN", "")
+    token = at.get("pat") or at.get("token") or _env("AIRTABLE_TOKEN")
     if not token:
         return {"ok": False, "error": "Airtable токен не настроен"}
     try:
@@ -3467,7 +3428,7 @@ async def api_test_tbank(db: Session = Depends(get_db), auth_token: Optional[str
     if not user: raise HTTPException(status_code=401)
     u = user.settings or {}
     tm = u.get("tbank_time", {})
-    token = tm.get("session_cookie") or tm.get("mmauthtoken") or tm.get("api_token") or os.environ.get("TIME_API_TOKEN", "")
+    token = tm.get("session_cookie") or tm.get("mmauthtoken") or tm.get("api_token") or _env("TIME_API_TOKEN")
     if not token:
         return {"ok": False, "error": "Tbank Time токен не настроен"}
     try:
@@ -5335,7 +5296,7 @@ async def api_diag_merchrules_auth(
     import httpx
     results = []
     urls = list(dict.fromkeys([
-        os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
+        _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
         "https://merchrules.any-platform.ru",
         "https://merchrules-qa.any-platform.ru",
     ]))
@@ -6423,65 +6384,6 @@ async def pwa_icon():
 # PWA MANIFEST
 # ============================================================================
 
-@app.get("/manifest.json")
-async def pwa_manifest():
-    """PWA manifest для установки на телефон."""
-    return JSONResponse(content={
-        "name": "AM Hub — Account Manager",
-        "short_name": "AM Hub",
-        "description": "Система управления аккаунтами",
-        "start_url": "/dashboard",
-        "display": "standalone",
-        "background_color": "#0a0e1a",
-        "theme_color": "#6366f1",
-        "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
-                   {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"}],
-    })
-
-
-@app.get("/sw.js")
-async def service_worker():
-    """Service Worker для PWA и офлайн-кэширования."""
-    from fastapi.responses import PlainTextResponse
-    sw = """
-const CACHE = 'amhub-v1';
-const PRECACHE = ['/dashboard', '/today', '/clients', '/manifest.json'];
-
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)));
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-  ));
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
-      if (resp.status === 200) {
-        const clone = resp.clone();
-        caches.open(CACHE).then(c => c.put(e.request, clone));
-      }
-      return resp;
-    }).catch(() => caches.match('/dashboard')))
-  );
-});
-
-// Offline form submission queue
-self.addEventListener('message', e => {
-  if (e.data.type === 'SYNC_QUEUE') {
-    // TODO: replay queued requests
-  }
-});
-"""
-    return PlainTextResponse(content=sw, headers={"Content-Type": "application/javascript"})
-
-
 # ============================================================================
 # OFFLINE / DRAFTS
 # ============================================================================
@@ -6703,156 +6605,6 @@ async def api_clients_list(
 # ============================================================================
 # EXPORT: PDF REPORT
 # ============================================================================
-
-@app.get("/api/clients/{client_id}/export/pdf")
-async def api_export_client_pdf(
-    client_id: int,
-    db: Session = Depends(get_db),
-    auth_token: Optional[str] = Cookie(None),
-):
-    """Экспорт отчёта по клиенту в PDF."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404)
-
-    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.created_at.desc()).limit(30).all()
-    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(10).all()
-    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.created_at.desc()).limit(10).all()
-    qbr = db.query(QBR).filter(QBR.client_id == client_id).order_by(QBR.date.desc()).first()
-
-    try:
-        import io
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import mm
-        from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        from fastapi.responses import StreamingResponse
-
-        buf = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buf, pagesize=A4,
-            leftMargin=20*mm, rightMargin=20*mm,
-            topMargin=20*mm, bottomMargin=20*mm,
-        )
-        styles = getSampleStyleSheet()
-
-        # Стили
-        h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontSize=18, spaceAfter=6, textColor=colors.HexColor('#1e293b'))
-        h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontSize=13, spaceAfter=4, spaceBefore=12, textColor=colors.HexColor('#334155'))
-        body = ParagraphStyle('body', parent=styles['Normal'], fontSize=9, spaceAfter=3, leading=14)
-        muted = ParagraphStyle('muted', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#64748b'), spaceAfter=2)
-        label = ParagraphStyle('label', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#6366f1'), fontName='Helvetica-Bold', spaceAfter=2)
-
-        story = []
-
-        # Заголовок
-        story.append(Paragraph(f"Отчёт по клиенту: {client.name}", h1))
-        story.append(Paragraph(
-            f"Сегмент: {client.segment or '—'}  |  "
-            f"Менеджер: {client.manager_email or '—'}  |  "
-            f"Health Score: {int((client.health_score or 0)*100)}%  |  "
-            f"Дата: {datetime.now().strftime('%d.%m.%Y')}",
-            muted
-        ))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=8))
-
-        # Задачи
-        story.append(Paragraph("Задачи", h2))
-        if tasks:
-            STATUS_RU = {'plan': 'В плане', 'in_progress': 'В работе', 'review': 'Ревью', 'done': 'Готово', 'blocked': 'Заблок.'}
-            STATUS_COLORS = {'plan': '#64748b', 'in_progress': '#6366f1', 'done': '#22c55e', 'blocked': '#ef4444', 'review': '#eab308'}
-            tdata = [['Задача', 'Статус', 'Приоритет', 'Дедлайн', 'Команда']]
-            for t in tasks:
-                tdata.append([
-                    t.title[:60] + ('…' if len(t.title) > 60 else ''),
-                    STATUS_RU.get(t.status, t.status),
-                    t.priority or '—',
-                    t.due_date.strftime('%d.%m.%y') if t.due_date else '—',
-                    t.team or '—',
-                ])
-            tbl = Table(tdata, colWidths=[85*mm, 22*mm, 20*mm, 22*mm, 20*mm])
-            tbl.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f8fafc')),
-                ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#475569')),
-                ('FONTSIZE', (0,0), (-1,-1), 8),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
-                ('TOPPADDING', (0,0), (-1,-1), 4),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                ('LEFTPADDING', (0,0), (-1,-1), 6),
-            ]))
-            story.append(tbl)
-        else:
-            story.append(Paragraph("Нет задач", muted))
-
-        # Встречи
-        story.append(Paragraph("История встреч", h2))
-        if meetings:
-            for m in meetings:
-                date_str = m.date.strftime('%d.%m.%Y %H:%M') if m.date else '—'
-                story.append(Paragraph(f"<b>{date_str}</b> — {m.title or m.type}", body))
-                if m.summary:
-                    story.append(Paragraph(m.summary[:200], muted))
-                followup_status = {'sent': '✓ Фолоуап отправлен', 'pending': '⏳ Ожидает фолоуапа', 'skipped': '— Пропущен'}.get(m.followup_status, '')
-                if followup_status:
-                    story.append(Paragraph(followup_status, muted))
-                story.append(Spacer(1, 3))
-        else:
-            story.append(Paragraph("Встреч нет", muted))
-
-        # QBR если есть
-        if qbr:
-            story.append(Paragraph(f"Последний QBR ({qbr.quarter})", h2))
-            if qbr.summary:
-                story.append(Paragraph(qbr.summary[:500], body))
-            if qbr.achievements:
-                story.append(Paragraph("Достижения:", label))
-                for a in (qbr.achievements or [])[:5]:
-                    story.append(Paragraph(f"• {str(a)[:100]}", body))
-            if qbr.issues:
-                story.append(Paragraph("Проблемы:", label))
-                for i in (qbr.issues or [])[:5]:
-                    story.append(Paragraph(f"• {str(i)[:100]}", body))
-
-        # Заметки
-        if notes:
-            story.append(Paragraph("Заметки", h2))
-            for n in notes:
-                date_str = n.created_at.strftime('%d.%m.%Y') if n.created_at else ''
-                story.append(Paragraph(f"{'📌 ' if n.is_pinned else ''}{n.content[:300]}", body))
-                if date_str:
-                    story.append(Paragraph(date_str, muted))
-                story.append(Spacer(1, 3))
-
-        # Footer
-        story.append(Spacer(1, 12))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e2e8f0')))
-        story.append(Paragraph(f"Сгенерировано AM Hub · {datetime.now().strftime('%d.%m.%Y %H:%M')}", muted))
-
-        doc.build(story)
-        buf.seek(0)
-
-        filename = f"client_{client.name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
-        return StreamingResponse(
-            buf,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-
-    except Exception as e:
-        logger.error(f"PDF export error: {e}")
-        raise HTTPException(status_code=500, detail=f"PDF генерация не удалась: {e}")
 
 # ============================================================================
 # EXPORT: PDF отчёт по клиенту
@@ -7304,57 +7056,6 @@ async def api_team_kpi(
 # AIRTABLE WEBHOOK (входящие изменения из Airtable)
 # ============================================================================
 
-@app.post("/webhook/airtable")
-async def airtable_webhook(request: Request, db: Session = Depends(get_db)):
-    """
-    Webhook от Airtable при изменении записи.
-    Настроить в Airtable: Automations → Webhook → URL: /webhook/airtable
-    """
-    try:
-        data = await request.json()
-    except Exception:
-        return {"ok": False}
-
-    record_id = data.get("record_id") or data.get("id", "")
-    if not record_id:
-        return {"ok": False, "error": "no record_id"}
-
-    client = db.query(Client).filter(Client.airtable_record_id == record_id).first()
-    if not client:
-        return {"ok": True, "note": "client not found, skip"}
-
-    fields = data.get("fields") or data.get("changedFields") or {}
-    changed = False
-
-    # Маппинг Airtable полей → Client поля
-    field_map = {
-        "Сегмент": "segment", "segment": "segment",
-        "Домен": "domain", "domain": "domain",
-        "Health Score": "health_score", "health_score": "health_score",
-        "Менеджер": "manager_email", "manager": "manager_email",
-        "Название": "name", "name": "name", "Name": "name",
-    }
-    for at_field, db_field in field_map.items():
-        if at_field in fields:
-            val = fields[at_field]
-            if db_field == "health_score":
-                try:
-                    val = float(val)
-                    if val > 1:
-                        val = val / 100
-                except Exception:
-                    continue
-            if getattr(client, db_field) != val:
-                setattr(client, db_field, val)
-                changed = True
-
-    if changed:
-        db.commit()
-        logger.info(f"✅ Airtable webhook: updated client {client.name}")
-
-    return {"ok": True, "changed": changed}
-
-
 # ============================================================================
 # ОНБОРДИНГ ПАРТНЁРА: чеклист
 # ============================================================================
@@ -7483,108 +7184,9 @@ async def kpi_page(request: Request, db: Session = Depends(get_db), auth_token: 
 # AIRTABLE WEBHOOK (push при изменении записи)
 # ============================================================================
 
-@app.post("/webhook/airtable")
-async def airtable_webhook(request: Request, db: Session = Depends(get_db)):
-    """
-    Webhook от Airtable — вызывается при изменении записи клиента.
-    Настройка: в Airtable → Automations → Run script/webhook → этот URL.
-    Обновляет клиента в локальной БД по airtable_record_id.
-    """
-    try:
-        data = await request.json()
-    except Exception:
-        return {"ok": False, "error": "Invalid JSON"}
-
-    record_id = data.get("record_id") or data.get("id")
-    fields = data.get("fields") or data.get("data") or {}
-
-    if not record_id:
-        return {"ok": False, "error": "No record_id"}
-
-    client = db.query(Client).filter(Client.airtable_record_id == record_id).first()
-    if not client:
-        logger.info(f"Airtable webhook: client not found for record {record_id}")
-        return {"ok": True, "message": "Client not found, skipped"}
-
-    # Маппинг полей Airtable → модель Client
-    field_map = {
-        "Название": "name", "Name": "name", "Компания": "name",
-        "Сегмент": "segment", "Segment": "segment",
-        "Домен": "domain", "Domain": "domain",
-        "Менеджер": "manager_email", "Manager": "manager_email",
-        "Health Score": "health_score",
-    }
-
-    changed = {}
-    for at_field, db_field in field_map.items():
-        val = fields.get(at_field)
-        if val is not None:
-            old = getattr(client, db_field, None)
-            if db_field == "health_score":
-                try:
-                    val = float(str(val).replace("%", "")) / 100 if float(str(val)) > 1 else float(val)
-                except Exception:
-                    continue
-            if old != val:
-                setattr(client, db_field, val)
-                changed[db_field] = val
-
-    if changed:
-        db.commit()
-        logger.info(f"Airtable webhook: updated client {client.name}, fields: {list(changed.keys())}")
-
-    return {"ok": True, "updated": changed}
-
-
 # ============================================================================
 # GOOGLE SHEETS WRITE-BACK (запись статуса чекапа обратно)
 # ============================================================================
-
-@app.post("/api/sheets/update-checkup")
-async def api_sheets_update_checkup(
-    request: Request,
-    db: Session = Depends(get_db),
-    auth_token: Optional[str] = Cookie(None),
-):
-    """
-    Записать статус чекапа клиента обратно в Google Sheets.
-    Требует сервисный аккаунт или Apps Script webhook.
-    """
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    client_id = data.get("client_id")
-    status = data.get("status", "")
-    note = data.get("note", "")
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        return {"error": "Client not found"}
-
-    # Пробуем обновить через Apps Script webhook (если настроен)
-    apps_script_url = _env("SHEETS_WEBHOOK_URL")
-    if not apps_script_url:
-        return {"ok": False, "error": "SHEETS_WEBHOOK_URL не настроен. Добавьте Apps Script webhook в переменные."}
-
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=15) as hx:
-            resp = await hx.post(apps_script_url, json={
-                "client_name": client.name,
-                "status": status,
-                "note": note,
-                "date": datetime.now().strftime("%d.%m.%Y"),
-            })
-        if resp.status_code == 200:
-            return {"ok": True, "message": f"Статус '{status}' записан в Sheets для {client.name}"}
-        return {"ok": False, "error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
 
 # ============================================================================
 # AIRTABLE WEBHOOK — push при изменении записи в Airtable
@@ -8771,75 +8373,6 @@ async def api_bulk_update_segment(
 # REVENUE TRACKING
 # ============================================================================
 
-@app.patch("/api/clients/{client_id}/revenue")
-async def api_set_revenue(
-    client_id: int, request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Обновить MRR/ARR клиента."""
-    body  = await request.json()
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client: raise HTTPException(status_code=404)
-    from sqlalchemy.orm.attributes import flag_modified
-    meta = dict(client.integration_metadata or {})
-    if "mrr" in body: meta["mrr"] = float(body["mrr"])
-    if "arr" in body: meta["arr"] = float(body["arr"])
-    if "currency" in body: meta["currency"] = body["currency"]
-    client.integration_metadata = meta
-    flag_modified(client, "integration_metadata")
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/api/analytics/revenue")
-async def api_analytics_revenue(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Аналитика выручки по портфелю."""
-    q = db.query(Client)
-    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
-    clients = q.all()
-
-    total_mrr = at_risk_mrr = 0.0
-    by_segment = {}
-    clients_with_revenue = []
-
-    for c in clients:
-        meta = c.integration_metadata or {}
-        mrr  = float(meta.get("mrr") or 0)
-        arr  = float(meta.get("arr") or meta.get("mrr", 0) * 12)
-        if mrr <= 0 and arr > 0: mrr = arr / 12
-        if mrr <= 0: continue
-
-        total_mrr += mrr
-        seg = c.segment or "Unknown"
-        by_segment[seg] = by_segment.get(seg, 0) + mrr
-
-        if (c.health_score or 0) < 50:
-            at_risk_mrr += mrr
-
-        clients_with_revenue.append({
-            "id": c.id, "name": c.name, "segment": seg,
-            "mrr": mrr, "arr": arr,
-            "health_score": c.health_score,
-            "currency": meta.get("currency", "₽"),
-        })
-
-    clients_with_revenue.sort(key=lambda x: x["mrr"], reverse=True)
-
-    return {
-        "total_mrr": total_mrr,
-        "total_arr": total_mrr * 12,
-        "at_risk_mrr": at_risk_mrr,
-        "at_risk_pct": round(at_risk_mrr / total_mrr * 100, 1) if total_mrr else 0,
-        "by_segment": [{"segment": k, "mrr": v} for k, v in sorted(by_segment.items(), key=lambda x: -x[1])],
-        "top_clients": clients_with_revenue[:20],
-        "clients_with_revenue": len(clients_with_revenue),
-    }
-
-
 # ============================================================================
 # CHURN SCORING
 # ============================================================================
@@ -9006,57 +8539,6 @@ async def api_clients_merge(
 # DATA ENRICHMENT
 # ============================================================================
 
-@app.post("/api/clients/{client_id}/enrich")
-async def api_client_enrich(
-    client_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Обогащение данных клиента по домену через публичные источники."""
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client: raise HTTPException(status_code=404)
-    domain = client.domain or ""
-    if not domain:
-        return {"ok": False, "error": "Нет домена для обогащения"}
-
-    # Убираем протокол
-    domain = domain.replace("https://", "").replace("http://", "").split("/")[0]
-
-    enriched = {}
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=10) as hx:
-            # Clearbit Logo API (бесплатный)
-            logo_url = f"https://logo.clearbit.com/{domain}"
-            enriched["logo_url"] = logo_url
-
-            # Попытка получить title/description через HTML
-            try:
-                r = await hx.get(f"https://{domain}", follow_redirects=True, timeout=5)
-                import re
-                title_m = re.search(r'<title[^>]*>(.*?)</title>', r.text, re.I | re.S)
-                desc_m = re.search(r'<meta[^>]+name=[^>]*description[^>]*content="([^"]+)"', r.text, re.I)
-                if title_m: enriched["site_title"]   = title_m.group(1).strip()[:100]
-                if desc_m:  enriched["site_description"] = desc_m.group(1).strip()[:200]
-            except Exception:
-                pass
-
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-    # Сохраняем
-    from sqlalchemy.orm.attributes import flag_modified
-    meta = dict(client.integration_metadata or {})
-    meta.update(enriched)
-    client.integration_metadata = meta
-    flag_modified(client, "integration_metadata")
-    if not client.domain and domain:
-        client.domain = f"https://{domain}"
-    db.commit()
-
-    return {"ok": True, "enriched": enriched}
-
-
 # ============================================================================
 # DATA VALIDATION
 # ============================================================================
@@ -9186,67 +8668,6 @@ async def api_job_run(
 # FILE ATTACHMENTS
 # ============================================================================
 
-@app.post("/api/clients/{client_id}/attachments")
-async def api_upload_attachment(
-    client_id: int,
-    file: UploadFile,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client: raise HTTPException(status_code=404)
-
-    data = await file.read()
-    from storage import upload_file as store_file
-    try:
-        result = await store_file(data, file.filename or "file", client_id, file.content_type)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    from models import ClientAttachment
-    att = ClientAttachment(
-        client_id=client_id, user_id=user.id,
-        filename=file.filename or "file",
-        file_key=result["key"], file_size=result["size"],
-        mime_type=result.get("mime_type"),
-    )
-    db.add(att); db.commit(); db.refresh(att)
-    return {"ok": True, "id": att.id, "filename": att.filename, "url": result["url"], "size": att.file_size}
-
-
-@app.get("/api/clients/{client_id}/attachments")
-async def api_list_attachments(
-    client_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    from models import ClientAttachment
-    atts = db.query(ClientAttachment).filter(ClientAttachment.client_id == client_id).order_by(ClientAttachment.created_at.desc()).all()
-    from storage import get_signed_url
-    return {"attachments": [
-        {"id": a.id, "filename": a.filename, "size": a.file_size,
-         "mime_type": a.mime_type, "url": get_signed_url(a.file_key),
-         "created_at": a.created_at.isoformat(),
-         "user_name": a.user.name if a.user else "Система"}
-        for a in atts
-    ]}
-
-
-@app.delete("/api/attachments/{att_id}")
-async def api_delete_attachment(
-    att_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    from models import ClientAttachment
-    att = db.query(ClientAttachment).filter(ClientAttachment.id == att_id).first()
-    if not att: raise HTTPException(status_code=404)
-    from storage import delete_file
-    await delete_file(att.file_key)
-    db.delete(att); db.commit()
-    return {"ok": True}
-
-
 @app.get("/api/files/{file_path:path}")
 async def api_serve_file(
     file_path: str,
@@ -9264,113 +8685,6 @@ async def api_serve_file(
 # ============================================================================
 # EXCEL EXPORT (полноценный)
 # ============================================================================
-
-@app.get("/api/export/excel")
-async def api_export_excel(
-    scope: str = "clients",   # clients | tasks | checkups | full
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Полноценный Excel экспорт с форматированием, несколькими листами."""
-    import io
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-
-    wb = Workbook()
-    BG_HDR   = PatternFill("solid", start_color="07090F", end_color="07090F")
-    BG_ROW   = PatternFill("solid", start_color="0D1117", end_color="0D1117")
-    BG_ROW2  = PatternFill("solid", start_color="131924", end_color="131924")
-    BG_GREEN = PatternFill("solid", start_color="0A2318", end_color="0A2318")
-    BG_RED   = PatternFill("solid", start_color="2A0A12", end_color="2A0A12")
-    BG_YELLOW= PatternFill("solid", start_color="2A1E08", end_color="2A1E08")
-    F_HDR    = Font(name="Arial", bold=True, color="6474FF", size=10)
-    F_MONO   = Font(name="Courier New", color="23D18B", size=9)
-    F_WHITE  = Font(name="Arial", color="E8ECF4", size=9)
-    F_DIM    = Font(name="Arial", color="7D8AAA", size=9)
-    CENTER   = Alignment(horizontal="center", vertical="center")
-    LEFT     = Alignment(vertical="center")
-
-    q = db.query(Client)
-    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
-    clients = q.order_by(Client.name).all()
-
-    def add_header(ws, headers):
-        ws.row_dimensions[1].height = 28
-        for col, (title, width) in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=title)
-            cell.font = F_HDR; cell.fill = BG_HDR; cell.alignment = CENTER
-            ws.column_dimensions[get_column_letter(col)].width = width
-        ws.freeze_panes = "A2"
-
-    def health_fill(score):
-        if score is None: return BG_ROW
-        if score >= 70: return BG_GREEN
-        if score >= 40: return BG_YELLOW
-        return BG_RED
-
-    # ── Sheet 1: Клиенты ──────────────────────────────────────────────────────
-    ws1 = wb.active; ws1.title = "Клиенты"
-    add_header(ws1, [
-        ("ID",20),("Название",36),("Сегмент",18),("Health",12),
-        ("Домен",30),("Менеджер",24),("Последняя встреча",22),("MRR (₽)",16),
-    ])
-    for i, c in enumerate(clients, 2):
-        meta  = c.integration_metadata or {}
-        mrr   = meta.get("mrr", "")
-        last  = c.last_meeting_date.strftime("%d.%m.%Y") if c.last_meeting_date else "—"
-        h     = c.health_score or 0
-        fill  = health_fill(h) if i % 2 == 0 else BG_ROW2
-        vals  = [c.id, c.name, c.segment or "—", f"{h:.0f}%" if c.health_score else "—",
-                 c.domain or "—", c.manager_email or "—", last, mrr or "—"]
-        for col, val in enumerate(vals, 1):
-            cell = ws1.cell(row=i, column=col, value=val)
-            cell.fill = fill; cell.alignment = LEFT
-            cell.font = F_MONO if col in (1, 4, 8) else (F_WHITE if col == 2 else F_DIM)
-        ws1.row_dimensions[i].height = 18
-
-    # ── Sheet 2: Задачи ───────────────────────────────────────────────────────
-    ws2 = wb.create_sheet("Задачи")
-    add_header(ws2, [("Клиент",30),("Задача",40),("Статус",16),("Приоритет",14),("Срок",18)])
-    tasks = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
-    if user.role == "manager": tasks = tasks.filter(Client.manager_email == user.email)
-    tasks = tasks.filter(Task.status != "done").order_by(Task.due_date.asc().nullslast()).all()
-    for i, t in enumerate(tasks, 2):
-        fill = BG_ROW if i % 2 == 0 else BG_ROW2
-        due  = t.due_date.strftime("%d.%m.%Y") if t.due_date else "—"
-        overdue = t.due_date and t.due_date < datetime.utcnow()
-        row_fill = BG_RED if overdue else fill
-        for col, val in enumerate([t.client.name if t.client else "—", t.title, t.status, t.priority or "—", due], 1):
-            cell = ws2.cell(row=i, column=col, value=val)
-            cell.fill = row_fill; cell.alignment = LEFT; cell.font = F_WHITE if col <= 2 else F_DIM
-        ws2.row_dimensions[i].height = 18
-
-    # ── Sheet 3: Сводка ───────────────────────────────────────────────────────
-    ws3 = wb.create_sheet("Сводка")
-    ws3.column_dimensions["A"].width = 30; ws3.column_dimensions["B"].width = 20
-    summary = [
-        ("Дата экспорта", datetime.utcnow().strftime("%d.%m.%Y %H:%M")),
-        ("Менеджер", user.name or user.email),
-        ("Всего клиентов", len(clients)),
-        ("Открытых задач", len(tasks)),
-        ("Средний Health Score", f"{sum(c.health_score or 0 for c in clients)/max(len(clients),1):.0f}%"),
-        ("Клиентов с high risk", sum(1 for c in clients if (c.health_score or 100) < 40)),
-    ]
-    for i, (k, v) in enumerate(summary, 1):
-        ws3.cell(row=i, column=1, value=k).font = Font(name="Arial", bold=True, color="6474FF", size=10)
-        ws3.cell(row=i, column=2, value=v).font = Font(name="Arial", color="E8ECF4", size=10)
-        for col in (1, 2): ws3.cell(row=i, column=col).fill = BG_ROW if i%2==0 else BG_ROW2
-        ws3.row_dimensions[i].height = 22
-
-    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
-    from fastapi.responses import Response
-    filename = f"amhub_export_{user.name or 'manager'}_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
-    return Response(
-        content=buf.read(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
-
 
 # ============================================================================
 # MEETING TRANSCRIPTION + AI SUMMARY
@@ -9461,36 +8775,6 @@ async def api_meeting_transcribe(
 # ============================================================================
 # MEETING COMMENTS
 # ============================================================================
-
-@app.get("/api/meetings/{meeting_id}/comments")
-async def api_meeting_comments(
-    meeting_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    from models import MeetingComment
-    comments = db.query(MeetingComment).filter(MeetingComment.meeting_id == meeting_id).order_by(MeetingComment.created_at).all()
-    return {"comments": [
-        {"id": c.id, "content": c.content,
-         "user_name": c.user.name if c.user else "Система",
-         "created_at": c.created_at.isoformat()}
-        for c in comments
-    ]}
-
-
-@app.post("/api/meetings/{meeting_id}/comments")
-async def api_meeting_comment_add(
-    meeting_id: int, request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    from models import MeetingComment
-    body = await request.json()
-    c = MeetingComment(meeting_id=meeting_id, user_id=user.id, content=body.get("content","").strip())
-    if not c.content: raise HTTPException(status_code=400, detail="Пустой комментарий")
-    db.add(c); db.commit(); db.refresh(c)
-    return {"ok": True, "id": c.id}
-
 
 # ============================================================================
 # ONBOARDING WIZARD
@@ -10111,25 +9395,6 @@ async def api_meeting_comments(
          "user_name": c.user.name if c.user else "Система"}
         for c in comments
     ]}
-
-
-@app.post("/api/onboarding/skip")
-async def api_onboarding_skip(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Пропустить онбординг."""
-    from models import OnboardingProgress
-    from sqlalchemy.orm.attributes import flag_modified
-    prog = db.query(OnboardingProgress).filter(OnboardingProgress.user_id == user.id).first()
-    if not prog:
-        prog = OnboardingProgress(user_id=user.id, completed=[], skipped=True)
-        db.add(prog)
-    else:
-        prog.skipped = True
-        flag_modified(prog, "completed")
-    db.commit()
-    return {"ok": True}
 
 
 @app.post("/api/onboarding/skip")
