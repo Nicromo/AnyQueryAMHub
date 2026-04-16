@@ -274,6 +274,158 @@ async def job_morning_plan():
         logger.error(f"❌ Morning plan error: {e}")
 
 
+async def job_sync_meetings_and_slots():
+    """
+    Каждые 30 минут: синхронизировать встречи из Ktalk и Outlook,
+    создавать задачи-слоты (prep/followup) для новых встреч.
+    """
+    logger.info("🔄 Syncing meetings + creating slots...")
+    try:
+        from database import SessionLocal
+        from models import Client, Meeting, Task, SyncLog, User
+        from meeting_slots import create_slots_for_meeting
+
+        db = SessionLocal()
+        sync_log = SyncLog(
+            integration="meetings_slots",
+            resource_type="meetings",
+            action="sync_and_slot",
+            status="in_progress",
+        )
+        total_slots = 0
+
+        try:
+            now = datetime.utcnow()
+            window_from = now - timedelta(hours=1)
+            window_to = now + timedelta(days=7)
+
+            # ── Ktalk ────────────────────────────────────────────────────────
+            ktalk_space = os.environ.get("KTALK_SPACE", "")
+            ktalk_token = os.environ.get("KTALK_API_TOKEN", "")
+            if ktalk_space and ktalk_token:
+                from integrations.ktalk import get_events
+                events = await get_events(date_from=window_from, date_to=window_to, use_cache=False)
+                for e in events:
+                    external_id = f"ktalk_{e['id']}"
+                    existing = db.query(Meeting).filter(Meeting.external_id == external_id).first()
+                    if existing:
+                        continue
+
+                    # Пытаемся найти клиента по участникам/названию
+                    client = None
+                    title_lower = (e.get("title") or "").lower()
+                    all_clients = db.query(Client).all()
+                    for c in all_clients:
+                        if c.name.lower() in title_lower:
+                            client = c
+                            break
+                        for p in e.get("participants", []):
+                            if c.name.lower() in (p.get("name") or "").lower():
+                                client = c
+                                break
+                        if client:
+                            break
+
+                    start = None
+                    if e.get("start"):
+                        try:
+                            start = datetime.fromisoformat(str(e["start"]).replace("Z", ""))
+                        except Exception:
+                            pass
+
+                    if not start:
+                        continue
+
+                    # Определяем тип встречи
+                    meeting_type = "meeting"
+                    for kw, mt in [("qbr", "qbr"), ("чекап", "checkup"), ("checkup", "checkup"),
+                                   ("онбординг", "onboarding"), ("kickoff", "kickoff"),
+                                   ("апсейл", "upsell"), ("upsell", "upsell")]:
+                        if kw in title_lower:
+                            meeting_type = mt
+                            break
+
+                    meeting = Meeting(
+                        client_id=client.id if client else None,
+                        date=start,
+                        type=meeting_type,
+                        title=e.get("title", ""),
+                        source="ktalk",
+                        external_id=external_id,
+                        followup_status="pending",
+                    )
+                    db.add(meeting)
+                    db.flush()
+
+                    if client:
+                        slots = create_slots_for_meeting(db, meeting)
+                        total_slots += len(slots)
+
+            # ── Outlook ──────────────────────────────────────────────────────
+            outlook_client_id = os.environ.get("OUTLOOK_CLIENT_ID", "")
+            if outlook_client_id:
+                from integrations.outlook import get_calendar_events
+                events = await get_calendar_events(date_from=window_from, date_to=window_to)
+                for e in events:
+                    external_id = f"outlook_{e['external_id']}"
+                    existing = db.query(Meeting).filter(Meeting.external_id == external_id).first()
+                    if existing:
+                        continue
+
+                    if not e.get("start"):
+                        continue
+
+                    # Ищем клиента по участникам
+                    client = None
+                    all_clients = db.query(Client).all()
+                    attendee_emails = [a["email"].lower() for a in e.get("attendees", [])]
+                    attendee_names = [a["name"].lower() for a in e.get("attendees", [])]
+
+                    for c in all_clients:
+                        c_lower = c.name.lower()
+                        if any(c_lower in name for name in attendee_names):
+                            client = c
+                            break
+                        if c.domain and any(c.domain.lower() in email for email in attendee_emails):
+                            client = c
+                            break
+
+                    meeting = Meeting(
+                        client_id=client.id if client else None,
+                        date=e["start"],
+                        type=e.get("meeting_type", "meeting"),
+                        title=e.get("title", ""),
+                        source="outlook",
+                        external_id=external_id,
+                        followup_status="pending",
+                        attendees=[{"name": a["name"], "email": a["email"]} for a in e.get("attendees", [])],
+                    )
+                    db.add(meeting)
+                    db.flush()
+
+                    if client:
+                        slots = create_slots_for_meeting(db, meeting)
+                        total_slots += len(slots)
+
+            db.commit()
+            sync_log.status = "success"
+            sync_log.records_processed = total_slots
+            logger.info(f"✅ Meetings sync done, created {total_slots} slot tasks")
+
+        except Exception as e:
+            db.rollback()
+            sync_log.status = "error"
+            sync_log.message = str(e)
+            logger.error(f"❌ Meetings sync error: {e}")
+        finally:
+            db.add(sync_log)
+            db.commit()
+            db.close()
+
+    except Exception as e:
+        logger.error(f"❌ job_sync_meetings_and_slots error: {e}")
+
+
 async def job_weekly_digest():
     """Пятница 17:00: еженедельный дайджест."""
     logger.info("📊 Weekly digest...")
@@ -320,6 +472,10 @@ def start_scheduler():
     if os.environ.get("MERCHRULES_LOGIN") and os.environ.get("MERCHRULES_PASSWORD"):
         sched.add_job(job_sync_merchrules, "interval", hours=1,
                       id="sync_merchrules", name="Sync Merchrules", replace_existing=True)
+
+    # Meetings sync + slots — каждые 30 минут
+    sched.add_job(job_sync_meetings_and_slots, "interval", minutes=30,
+                  id="sync_meetings_slots", name="Sync Meetings + Create Slots", replace_existing=True)
 
     # Daily
     sched.add_job(job_check_overdue_checkups, "cron", hour=8, minute=0,

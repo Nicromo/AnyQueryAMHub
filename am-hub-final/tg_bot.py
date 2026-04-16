@@ -161,6 +161,7 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
         await send_message(chat_id, (
             "👋 <b>AM Hub Bot</b>\n\n"
             "Доступные команды:\n"
+            "/today — мой день: встречи + слоты подготовки\n"
             "/status — общая статистика\n"
             "/checkups — просроченные чекапы\n"
             "/checkup &lt;name&gt; — статус клиента\n"
@@ -173,7 +174,58 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
             "/help — эта справка"
         ))
 
-    elif cmd == "/status":
+    elif cmd == "/today":
+        # Слоты дня из БД
+        try:
+            from database import SessionLocal
+            from models import User as UserModel
+            from meeting_slots import get_day_slots
+            from datetime import timezone as tz_mod
+            MSK = tz_mod(timedelta(hours=3))
+            db = SessionLocal()
+
+            # Ищем пользователя по telegram_id
+            tg_user = db.query(UserModel).filter(
+                UserModel.telegram_id == str(user_id)
+            ).first()
+
+            if not tg_user:
+                db.close()
+                await send_message(chat_id, "❌ Ваш Telegram не привязан к аккаунту AM Hub.")
+                return
+
+            today = datetime.now(MSK).replace(tzinfo=None)
+            slots = get_day_slots(db, tg_user.email, today)
+            db.close()
+
+            if not slots:
+                await send_message(chat_id, f"📅 <b>{today.strftime('%d.%m.%Y')}</b>\n\nНа сегодня встреч и слотов нет.")
+                return
+
+            lines = [f"📅 <b>Мой день — {today.strftime('%d.%m.%Y')}</b>\n"]
+            for s in slots:
+                time_str = s.get("time", "—")
+                title = s.get("title", "")
+                s_type = s.get("type", "")
+                if s_type == "meeting":
+                    mtype = s.get("meeting_type", "")
+                    icon = {"qbr": "🔵", "checkup": "🟢", "kickoff": "🟠",
+                            "onboarding": "🟠", "upsell": "💚", "downsell": "🔴"}.get(mtype, "⚫")
+                    lines.append(f"{icon} <b>{time_str}</b> — {title}")
+                elif s_type == "slot":
+                    slot_type = s.get("slot_type", "prep")
+                    icon = {"prep": "📋", "followup": "✍️", "extra": "📌"}.get(slot_type, "📌")
+                    status = s.get("status", "plan")
+                    done_mark = " ✅" if status == "done" else ""
+                    lines.append(f"  {icon} до <b>{time_str}</b> — {title}{done_mark}")
+
+            await send_message(chat_id, "\n".join(lines))
+
+        except Exception as e:
+            logger.error(f"TG /today error: {e}")
+            await send_message(chat_id, "❌ Ошибка при загрузке слотов дня.")
+
+
         clients = get_clients_fn()
         from database import checkup_status
         for c in clients:

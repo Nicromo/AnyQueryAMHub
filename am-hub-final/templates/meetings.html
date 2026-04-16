@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Встречи — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; --orange:#f97316; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; overflow-y:auto; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); margin-bottom:8px; }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); background:var(--card); }
+    a { color:var(--accent); text-decoration:none; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+
+    /* Header */
+    .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .page-header h1 { font-size:1.4rem; }
+    .date-nav { display:flex; align-items:center; gap:8px; }
+    .date-nav button { background:var(--card); border:1px solid var(--border); color:var(--text); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:.85rem; }
+    .date-nav button:hover { border-color:var(--accent); color:var(--accent); }
+    #dateLabel { font-weight:600; min-width:160px; text-align:center; font-size:.95rem; }
+    .btn { padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-size:.83rem; font-weight:500; }
+    .btn-primary { background:var(--accent); color:#fff; }
+    .btn-primary:hover { opacity:.9; }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .btn-outline:hover { border-color:var(--accent); color:var(--accent); }
+
+    /* Timeline */
+    .timeline-wrap { display:flex; gap:24px; }
+    .timeline { flex:1; display:flex; flex-direction:column; gap:8px; }
+    .slot-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; display:flex; align-items:flex-start; gap:14px; border-left-width:4px; transition:transform .15s; }
+    .slot-card:hover { transform:translateX(2px); }
+    .slot-time { font-size:.82rem; color:var(--muted); min-width:44px; font-variant-numeric:tabular-nums; padding-top:2px; }
+    .slot-body { flex:1; }
+    .slot-title { font-size:.9rem; font-weight:600; margin-bottom:4px; }
+    .slot-meta { font-size:.75rem; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; }
+    .slot-badge { padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:600; }
+    .badge-meeting { background:rgba(99,102,241,.15); color:#818cf8; }
+    .badge-prep { background:rgba(234,179,8,.15); color:#ca8a04; }
+    .badge-followup { background:rgba(139,92,246,.15); color:#a78bfa; }
+    .badge-extra { background:rgba(6,182,212,.15); color:#22d3ee; }
+    .badge-done { background:rgba(34,197,94,.15); color:#4ade80; }
+    .slot-actions { display:flex; gap:6px; margin-top:8px; }
+    .slot-actions a, .slot-actions button { padding:4px 10px; border-radius:6px; font-size:.73rem; background:rgba(255,255,255,.05); border:1px solid var(--border); color:var(--text); cursor:pointer; }
+    .slot-actions a:hover, .slot-actions button:hover { border-color:var(--accent); color:var(--accent); }
+    .divider { height:1px; background:var(--border); margin:4px 0; opacity:.4; }
+    .empty-state { text-align:center; padding:60px 20px; color:var(--muted); }
+    .empty-state .icon { font-size:2.5rem; margin-bottom:12px; }
+
+    /* Sidebar summary */
+    .day-summary { width:220px; flex-shrink:0; }
+    .summary-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; }
+    .summary-card h3 { font-size:.82rem; color:var(--muted); margin-bottom:10px; text-transform:uppercase; letter-spacing:.04em; }
+    .summary-row { display:flex; justify-content:space-between; align-items:center; font-size:.83rem; margin-bottom:6px; }
+    .summary-num { font-weight:700; font-size:1rem; }
+    .loading { text-align:center; padding:40px; color:var(--muted); }
+
+    /* Sync button */
+    #syncBtn { position:relative; }
+    #syncBtn.loading { opacity:.6; pointer-events:none; }
+    .sync-spinner { display:none; }
+    #syncBtn.loading .sync-spinner { display:inline; }
+    #syncBtn.loading .sync-label { display:none; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>☀️</span> Мой день</a>
+  <a class="nav-item active" href="/meetings"><span>📅</span> Встречи</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>✅</span> Чекапы</a>
+  <a class="nav-item" href="/calendar"><span>🗓</span> Календарь</a>
+  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/tasks"><span>⚙️</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <div class="page-header">
+    <div>
+      <h1>📅 Встречи</h1>
+      <div style="color:var(--muted);font-size:.82rem;margin-top:2px;">Таймлайн дня с автослотами подготовки и фолоуапов</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <div class="date-nav">
+        <button onclick="changeDay(-1)">←</button>
+        <span id="dateLabel">—</span>
+        <button onclick="changeDay(1)">→</button>
+        <button onclick="goToday()">Сегодня</button>
+      </div>
+      <button class="btn btn-primary" id="syncBtn" onclick="syncSlots()">
+        <span class="sync-label">🔄 Создать слоты</span>
+        <span class="sync-spinner">⏳ Создаём...</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="timeline-wrap">
+    <div class="timeline" id="timeline">
+      <div class="loading">⏳ Загрузка...</div>
+    </div>
+
+    <div class="day-summary" id="daySummary"></div>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='light'?'dark':'light');localStorage.setItem('theme',h.getAttribute('data-theme'));}
+(function(){const t=localStorage.getItem('theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
+
+const WEEKDAYS = ['вс','пн','вт','ср','чт','пт','сб'];
+const MONTHS_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+
+let currentDate = new Date();
+currentDate.setHours(0,0,0,0);
+
+function fmtDate(d) {
+  const wd = WEEKDAYS[d.getDay()];
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} (${wd})`;
+}
+
+function isToday(d) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  return d.getTime() === today.getTime();
+}
+
+function changeDay(delta) {
+  currentDate.setDate(currentDate.getDate() + delta);
+  loadSlots();
+}
+
+function goToday() {
+  currentDate = new Date();
+  currentDate.setHours(0,0,0,0);
+  loadSlots();
+}
+
+function slotBadge(s) {
+  if (s.type === 'meeting') return `<span class="slot-badge badge-meeting">${s.meeting_type || 'встреча'}</span>`;
+  const map = {prep:'badge-prep', followup:'badge-followup', extra:'badge-extra'};
+  const cls = map[s.slot_type] || 'badge-extra';
+  if (s.status === 'done') return `<span class="slot-badge badge-done">✅ готово</span>`;
+  return `<span class="slot-badge ${cls}">${s.slot_type || 'задача'}</span>`;
+}
+
+function renderSlot(s) {
+  const borderColor = s.color || '#64748b';
+  const clientLink = s.client_id ? `<a href="/client/${s.client_id}">${s.client_name || 'Клиент'}</a>` : '';
+
+  let actions = '';
+  if (s.type === 'meeting') {
+    actions = `<a href="${s.url}">✍️ Фолоуап</a><a href="/prep/${s.client_id}">📋 Prep</a>`;
+  } else if (s.slot_type === 'prep' && s.status !== 'done') {
+    actions = `<a href="/prep/${s.client_id}">Открыть Prep →</a>`;
+  } else if (s.slot_type === 'followup' && s.status !== 'done') {
+    actions = `<a href="${s.url}">Написать фолоуап →</a>`;
+  }
+
+  return `
+    <div class="slot-card" style="border-left-color:${borderColor}" data-slot-id="${s.id}">
+      <div class="slot-time">${s.time}</div>
+      <div class="slot-body">
+        <div class="slot-title">${s.title}</div>
+        <div class="slot-meta">
+          ${slotBadge(s)}
+          ${clientLink ? `<span>${clientLink}</span>` : ''}
+        </div>
+        ${actions ? `<div class="slot-actions">${actions}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderSummary(slots) {
+  const meetings = slots.filter(s => s.type === 'meeting');
+  const preps = slots.filter(s => s.slot_type === 'prep');
+  const followups = slots.filter(s => s.slot_type === 'followup');
+  const extras = slots.filter(s => s.slot_type === 'extra');
+  const done = slots.filter(s => s.status === 'done' || s.followup_status === 'sent').length;
+
+  const typeCount = {};
+  for (const m of meetings) {
+    const t = m.meeting_type || 'other';
+    typeCount[t] = (typeCount[t] || 0) + 1;
+  }
+  const typeRows = Object.entries(typeCount).map(([k,v]) => `
+    <div class="summary-row"><span>${k}</span><span class="summary-num">${v}</span></div>`).join('');
+
+  document.getElementById('daySummary').innerHTML = `
+    <div class="summary-card">
+      <h3>📊 День</h3>
+      <div class="summary-row"><span>Встреч</span><span class="summary-num" style="color:var(--accent)">${meetings.length}</span></div>
+      <div class="summary-row"><span>Prep задач</span><span class="summary-num" style="color:var(--yellow)">${preps.length}</span></div>
+      <div class="summary-row"><span>Фолоуапов</span><span class="summary-num" style="color:#a78bfa">${followups.length}</span></div>
+      ${extras.length ? `<div class="summary-row"><span>Доп. задач</span><span class="summary-num" style="color:#22d3ee">${extras.length}</span></div>` : ''}
+    </div>
+    ${typeRows ? `<div class="summary-card"><h3>По типам</h3>${typeRows}</div>` : ''}
+    <div class="summary-card">
+      <h3>💡 Подсказка</h3>
+      <div style="font-size:.78rem;color:var(--muted);line-height:1.5;">
+        Слоты создаются автоматически при синхронизации из Ktalk или Outlook.<br><br>
+        Нажми <b>«Создать слоты»</b> чтобы сгенерировать их вручную для предстоящих встреч.
+      </div>
+    </div>`;
+}
+
+async function loadSlots() {
+  const dateStr = currentDate.toISOString().slice(0, 10);
+  document.getElementById('dateLabel').textContent = fmtDate(currentDate) + (isToday(currentDate) ? ' — сегодня' : '');
+  document.getElementById('timeline').innerHTML = '<div class="loading">⏳ Загрузка...</div>';
+
+  try {
+    const resp = await fetch(`/api/meetings/slots?date=${dateStr}`);
+    const data = await resp.json();
+    const slots = data.slots || [];
+
+    if (!slots.length) {
+      document.getElementById('timeline').innerHTML = `
+        <div class="empty-state">
+          <div class="icon">📅</div>
+          <div>На этот день встреч и слотов нет</div>
+          <div style="margin-top:8px;font-size:.8rem;color:var(--muted)">Слоты создаются автоматически при синхронизации встреч</div>
+        </div>`;
+      renderSummary([]);
+      return;
+    }
+
+    // Группируем — встреча + её слоты рядом
+    let html = '';
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      // Разделитель между разными типами
+      if (i > 0 && s.type === 'meeting' && slots[i-1].type !== 'meeting') {
+        html += '<div class="divider"></div>';
+      }
+      html += renderSlot(s);
+    }
+
+    document.getElementById('timeline').innerHTML = html;
+    renderSummary(slots);
+  } catch (e) {
+    document.getElementById('timeline').innerHTML = '<div class="loading">❌ Ошибка загрузки</div>';
+  }
+}
+
+async function syncSlots() {
+  const btn = document.getElementById('syncBtn');
+  btn.classList.add('loading');
+  try {
+    const resp = await fetch('/api/meetings/sync-slots', {method:'POST'});
+    const data = await resp.json();
+    await loadSlots();
+    if (data.slots_created > 0) {
+      alert(`✅ Создано ${data.slots_created} слотов для ${data.meetings_processed} встреч`);
+    } else {
+      alert(`ℹ️ Все слоты уже существуют (${data.meetings_processed} встреч проверено)`);
+    }
+  } catch(e) {
+    alert('❌ Ошибка синхронизации');
+  } finally {
+    btn.classList.remove('loading');
+  }
+}
+
+loadSlots();
+</script>
+</body>
+</html>

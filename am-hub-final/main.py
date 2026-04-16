@@ -48,6 +48,53 @@ from ai_assistant import generate_prep_brief, generate_smart_followup, detect_ac
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+
+# ============================================================================
+# ENV HELPERS — единый источник конфигурации
+# ============================================================================
+
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default)
+
+def _env_bool(key: str) -> bool:
+    return bool(os.environ.get(key, ""))
+
+class Env:
+    """Централизованный доступ к переменным окружения."""
+    # Merchrules
+    MR_LOGIN      = property(lambda self: _env("MERCHRULES_LOGIN"))
+    MR_PASSWORD   = property(lambda self: _env("MERCHRULES_PASSWORD"))
+    MR_ACTIVE     = property(lambda self: bool(_env("MERCHRULES_LOGIN") and _env("MERCHRULES_PASSWORD")))
+    # AI
+    GROQ_KEY      = property(lambda self: _env("GROQ_API_KEY") or _env("API_GROQ"))
+    QWEN_KEY      = property(lambda self: _env("QWEN_API_KEY"))
+    AI_ACTIVE     = property(lambda self: bool(_env("GROQ_API_KEY") or _env("API_GROQ") or _env("QWEN_API_KEY")))
+    AI_TYPE       = property(lambda self: "qwen" if _env("QWEN_API_KEY") else ("groq" if (_env("GROQ_API_KEY") or _env("API_GROQ")) else ""))
+    # Telegram
+    TG_TOKEN      = property(lambda self: _env("TG_BOT_TOKEN") or _env("TELEGRAM_BOT_TOKEN"))
+    TG_ACTIVE     = property(lambda self: bool(_env("TG_BOT_TOKEN")))
+    # Ktalk
+    KTALK_SPACE   = property(lambda self: _env("KTALK_SPACE"))
+    KTALK_TOKEN   = property(lambda self: _env("KTALK_API_TOKEN"))
+    KTALK_ACTIVE  = property(lambda self: bool(_env("KTALK_API_TOKEN") and _env("KTALK_SPACE")))
+    KTALK_WEBHOOK = property(lambda self: _env("KTALK_WEBHOOK_URL"))
+    # Tbank Time
+    TIME_TOKEN    = property(lambda self: _env("TIME_API_TOKEN"))
+    TIME_URL      = property(lambda self: _env("TIME_BASE_URL", "https://time.tbank.ru"))
+    TIME_ACTIVE   = property(lambda self: bool(_env("TIME_API_TOKEN")))
+    # Airtable
+    AIRTABLE_PAT  = property(lambda self: _env("AIRTABLE_PAT"))
+    AIRTABLE_BASE = property(lambda self: _env("AIRTABLE_BASE_ID"))
+    AIRTABLE_ACTIVE = property(lambda self: bool(_env("AIRTABLE_PAT")))
+    # Google Sheets
+    SHEETS_ID     = property(lambda self: _env("SHEETS_SPREADSHEET_ID"))
+    SHEETS_ACTIVE = property(lambda self: bool(_env("SHEETS_SPREADSHEET_ID")))
+    # App
+    APP_URL       = property(lambda self: _env("RAILWAY_PUBLIC_DOMAIN") or _env("APP_URL"))
+    SECRET_KEY    = property(lambda self: _env("SECRET_KEY", "your-secret-key-change-in-production"))
+
+env = Env()
+
 templates = Jinja2Templates(directory="templates")
 
 MSK = tz(timedelta(hours=3))  # Moscow timezone
@@ -250,7 +297,7 @@ async def lifespan(app: FastAPI):
         try:
             from tg_bot import set_webhook, BOT_TOKEN as TG_TOKEN
             if TG_TOKEN:
-                domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", os.environ.get("APP_URL", ""))
+                domain = env.APP_URL
                 if domain:
                     await set_webhook(f"{domain}/webhook/telegram")
                     logger.info(f"✅ TG webhook: {domain}/webhook/telegram")
@@ -288,7 +335,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 def _get_user_cred(user: User) -> tuple:
     """Получить креды пользователя из env"""
-    return os.environ.get("MERCHRULES_LOGIN", ""), os.environ.get("MERCHRULES_PASSWORD", "")
+    return env.MR_LOGIN, env.MR_PASSWORD
 
 
 # ============================================================================
@@ -691,7 +738,7 @@ async def sync_page(request: Request, db: Session = Depends(get_db), auth_token:
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": os.environ.get("MERCHRULES_LOGIN", "")})
+    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": env.MR_LOGIN})
 
 
 # ============================================================================
@@ -762,71 +809,25 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
-    mr_login = os.environ.get("MERCHRULES_LOGIN", "")
-    airtable_active = bool(os.environ.get("AIRTABLE_PAT"))
-    sheets_active = bool(os.environ.get("SHEETS_SPREADSHEET_ID"))
-    ai_active = bool(os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ") or os.environ.get("QWEN_API_KEY"))
-    ai_type = "qwen" if os.environ.get("QWEN_API_KEY") else ("groq" if (os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ")) else "")
+    mr_login = env.MR_LOGIN
+    airtable_active = bool(env.AIRTABLE_PAT)
+    sheets_active = bool(env.SHEETS_ID)
+    ai_active = bool(env.AI_ACTIVE)
+    ai_type = "qwen" if env.QWEN_KEY else ("groq" if (env.GROQ_KEY) else "")
     integrations_data = {
-        "mr_active": bool(os.environ.get("MERCHRULES_LOGIN") and os.environ.get("MERCHRULES_PASSWORD")),
+        "mr_active": bool(env.MR_LOGIN and env.MR_PASSWORD),
         "mr_login": mr_login,
         "airtable_active": airtable_active,
         "sheets_active": sheets_active,
-        "sheets_id": os.environ.get("SHEETS_SPREADSHEET_ID", ""),
-        "tg_active": bool(os.environ.get("TG_BOT_TOKEN")),
+        "sheets_id": env.SHEETS_ID,
+        "tg_active": bool(env.TG_TOKEN),
         "ai_active": ai_active,
         "ai_type": ai_type,
-        "ktalk_active": bool(os.environ.get("KTALK_API_TOKEN") and os.environ.get("KTALK_SPACE")),
+        "ktalk_active": bool(env.KTALK_TOKEN and env.KTALK_SPACE),
         "ktalk_space": os.environ.get("KTALK_SPACE", ""),
-        "time_active": bool(os.environ.get("TIME_API_TOKEN")),
+        "time_active": bool(env.TIME_TOKEN),
     }
     return templates.TemplateResponse("integrations.html", {"request": request, "user": user, **integrations_data})
-
-
-# ============================================================================
-# SETTINGS API
-# ============================================================================
-
-@app.post("/api/settings/rules")
-async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    settings["rules"] = data
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
-
-
-@app.post("/api/settings/prefs")
-async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    if "preferences" not in settings:
-        settings["preferences"] = {}
-    settings["preferences"].update(data)
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
 
 
 # ============================================================================
@@ -873,7 +874,7 @@ async def test_ktalk(space: str = "", token: str = ""):
 async def test_tbank(token: str = ""):
     if not token:
         return {"error": "Need token"}
-    time_url = os.environ.get("TIME_BASE_URL", "https://time.tbank.ru")
+    time_url = env.TIME_URL
     import httpx
     try:
         async with httpx.AsyncClient(timeout=10) as hx:
@@ -937,7 +938,7 @@ async def api_ktalk_notify(
         raise HTTPException(status_code=401)
 
     data = await request.json()
-    webhook_url = os.environ.get("KTALK_WEBHOOK_URL", "")
+    webhook_url = env.KTALK_WEBHOOK
     if not webhook_url:
         return {"error": "KTALK_WEBHOOK_URL not set"}
 
@@ -967,7 +968,7 @@ async def api_ktalk_followup(
     summary = data.get("summary", "")
     tasks = data.get("tasks", [])
 
-    webhook_url = os.environ.get("KTALK_WEBHOOK_URL", "")
+    webhook_url = env.KTALK_WEBHOOK
     if not webhook_url:
         return {"error": "KTALK_WEBHOOK_URL not set"}
 
@@ -982,65 +983,6 @@ async def api_ktalk_followup(
         return {"ok": True}
     except Exception as e:
         return {"error": str(e)}
-
-
-# ============================================================================
-# API: TBANK TIME (tickets)
-# ============================================================================
-
-@app.get("/api/tbank/tickets/{client_name}")
-async def api_tbank_tickets(
-    client_name: str, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
-):
-    """Get support tickets for a client from Tbank Time"""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    time_token = os.environ.get("TIME_API_TOKEN", "")
-    if not time_token:
-        return {"error": "TIME_API_TOKEN not set", "tickets": []}
-
-    from integrations.tbank_time import sync_tickets_for_client
-    try:
-        result = await sync_tickets_for_client(client_name)
-        return result
-    except Exception as e:
-        return {"error": str(e), "open_count": 0, "total_count": 0, "last_ticket": None}
-
-
-@app.get("/api/tbank/tickets")
-async def api_tbank_all_tickets(
-    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
-):
-    """Get all open support tickets"""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    time_token = os.environ.get("TIME_API_TOKEN", "")
-    if not time_token:
-        return {"error": "TIME_API_TOKEN not set", "tickets": []}
-
-    from integrations.tbank_time import get_support_tickets
-    try:
-        clients = db.query(Client).all()
-        all_tickets = []
-        for c in clients:
-            if c.name:
-                tickets = await get_support_tickets(c.name)
-                for t in tickets:
-                    t["client"] = c.name
-                all_tickets.extend(tickets)
-        return {"tickets": all_tickets, "total": len(all_tickets)}
-    except Exception as e:
-        return {"error": str(e), "tickets": [], "total": 0}
 
 
 # ============================================================================
@@ -1066,8 +1008,8 @@ async def api_sync_merchrules(
     body = await request.json()
     settings = user.settings or {}
     mr = settings.get("merchrules", {})
-    login = body.get("login") or mr.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
-    password = body.get("password") or mr.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
+    login = body.get("login") or mr.get("login") or env.MR_LOGIN
+    password = body.get("password") or mr.get("password") or env.MR_PASSWORD
     site_ids_input = body.get("site_ids") or mr.get("site_ids") or settings.get("merchrules_site_ids", [])
 
     if not login or not password:
@@ -1576,48 +1518,6 @@ async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_t
     return {"ok": True}
 
 
-@app.post("/api/settings/rules")
-async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    settings["rules"] = data
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
-
-
-@app.post("/api/settings/prefs")
-async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    data = await request.json()
-    settings = user.settings or {}
-    if "preferences" not in settings:
-        settings["preferences"] = {}
-    settings["preferences"].update(data)
-    user.settings = settings
-    db.commit()
-    return {"ok": True}
-
-
 # ============================================================================
 # ROOT
 # ============================================================================
@@ -1792,8 +1692,8 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     settings = user.settings or {} if user else {}
     mr = settings.get("merchrules", {})
-    login = mr.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
-    password = mr.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
+    login = mr.get("login") or env.MR_LOGIN
+    password = mr.get("password") or env.MR_PASSWORD
 
     if not login or not password:
         return {"error": "Нужны креды Merchrules (настройки → креды)"}
@@ -1989,7 +1889,7 @@ async def api_tbank_tickets(client_name: str, db: Session = Depends(get_db), aut
     if not payload:
         raise HTTPException(status_code=401)
 
-    time_token = os.environ.get("TIME_API_TOKEN", "")
+    time_token = env.TIME_TOKEN
     if not time_token:
         return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
 
@@ -2011,7 +1911,7 @@ async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optio
     if not payload:
         raise HTTPException(status_code=401)
 
-    time_token = os.environ.get("TIME_API_TOKEN", "")
+    time_token = env.TIME_TOKEN
     if not time_token:
         return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
 
@@ -2693,6 +2593,101 @@ async def api_calendar_events(start: str = "", end: str = "", db: Session = Depe
 
 
 # ============================================================================
+# MEETING SLOTS
+# ============================================================================
+
+@app.get("/meetings", response_class=HTMLResponse)
+async def meetings_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Страница встреч со слотами дня."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("meetings.html", {"request": request, "user": user})
+
+
+@app.get("/api/meetings/slots")
+async def api_meetings_slots(
+    date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Получить слоты дня (встречи + prep/followup задачи).
+    date: ISO строка даты, по умолчанию — сегодня МСК.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from meeting_slots import get_day_slots
+    target_date = datetime.now(MSK).replace(tzinfo=None)
+    if date:
+        try:
+            target_date = datetime.fromisoformat(date)
+        except ValueError:
+            pass
+
+    slots = get_day_slots(db, user.email, target_date)
+    return {"slots": slots, "date": target_date.strftime("%Y-%m-%d")}
+
+
+@app.post("/api/meetings/sync-slots")
+async def api_sync_meeting_slots(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Принудительно создать слоты для всех предстоящих встреч."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from meeting_slots import create_slots_for_meeting
+    now = datetime.utcnow()
+    window_end = now + timedelta(days=7)
+
+    q = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
+        Meeting.date >= now,
+        Meeting.date <= window_end,
+    )
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+
+    meetings = q.all()
+    total = 0
+    for m in meetings:
+        created = create_slots_for_meeting(db, m)
+        total += len(created)
+
+    return {"ok": True, "slots_created": total, "meetings_processed": len(meetings)}
+
+
+@app.get("/api/integrations/test/outlook")
+async def api_test_outlook():
+    """Тест подключения к Outlook."""
+    from integrations.outlook import test_connection
+    result = await test_connection()
+    return result
+
+
+# ============================================================================
 # ANALYTICS
 # ============================================================================
 
@@ -2930,8 +2925,8 @@ Health Score: {(client.health_score or 0)*100:.0f}%
 
 async def _ai_chat(system: str, user: str, max_tokens: int = 1000) -> str:
     """AI чат через Groq или Qwen."""
-    groq_key = os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ", "")
-    qwen_key = os.environ.get("QWEN_API_KEY", "")
+    groq_key = env.GROQ_KEY
+    qwen_key = env.QWEN_KEY
 
     if groq_key:
         import httpx
