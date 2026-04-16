@@ -334,8 +334,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ============================================================================
 
 def _get_user_cred(user: User) -> tuple:
-    """Получить креды пользователя из env"""
-    return env.MR_LOGIN, env.MR_PASSWORD
+    """Получить Merchrules логин/пароль: сначала из user.settings, потом из env."""
+    settings = (user.settings or {}) if user else {}
+    mr = settings.get("merchrules", {})
+    login = mr.get("login") or env.MR_LOGIN
+    password = mr.get("password") or env.MR_PASSWORD
+    return login, password
 
 
 # ============================================================================
@@ -664,6 +668,14 @@ async def followup_page(request: Request, client_id: int, db: Session = Depends(
     tasks = db.query(Task).filter(Task.client_id == client_id).all()
     meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(3).all()
 
+    # Последняя встреча с pending followup (или просто последняя)
+    meeting = db.query(Meeting).filter(
+        Meeting.client_id == client_id,
+        Meeting.followup_status == "pending"
+    ).order_by(Meeting.date.desc()).first()
+    if not meeting:
+        meeting = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).first()
+
     try:
         followup_text = generate_smart_followup(client, tasks, meetings)
     except Exception as e:
@@ -672,6 +684,34 @@ async def followup_page(request: Request, client_id: int, db: Session = Depends(
     return templates.TemplateResponse("followup.html", {
         "request": request, "user": user, "client": client,
         "tasks": tasks, "meetings": meetings, "followup_text": followup_text,
+        "meeting": meeting, "now": datetime.now(),
+    })
+
+
+# ============================================================================
+# ONBOARDING PARTNER
+# ============================================================================
+
+@app.get("/onboarding/{client_id}", response_class=HTMLResponse)
+async def onboarding_partner_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    return templates.TemplateResponse("onboarding_partner.html", {
+        "request": request, "user": user, "client": client,
         "now": datetime.now(),
     })
 
@@ -738,7 +778,8 @@ async def sync_page(request: Request, db: Session = Depends(get_db), auth_token:
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": env.MR_LOGIN})
+    mr_login_val, _ = _get_user_cred(user)
+    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": mr_login_val})
 
 
 # ============================================================================
@@ -809,14 +850,21 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
-    mr_login = env.MR_LOGIN
-    airtable_active = bool(env.AIRTABLE_PAT)
-    sheets_active = bool(env.SHEETS_ID)
-    ai_active = bool(env.AI_ACTIVE)
-    ai_type = "qwen" if env.QWEN_KEY else ("groq" if (env.GROQ_KEY) else "")
+    mr_login_val, mr_password_val = _get_user_cred(user)
+    u_settings = user.settings or {}
+    ktalk_s = u_settings.get("ktalk", {})
+    airtable_s = u_settings.get("airtable", {})
+    sheets_s = u_settings.get("sheets", {})
+    groq_s = u_settings.get("groq", {})
+    tbank_s = u_settings.get("tbank_time", {})
+    tg_s = u_settings.get("telegram", {})
+    airtable_active = bool(airtable_s.get("pat") or env.AIRTABLE_PAT)
+    sheets_active = bool(sheets_s.get("spreadsheet_id") or env.SHEETS_ID)
+    ai_active = bool(groq_s.get("api_key") or env.AI_ACTIVE)
+    ai_type = "qwen" if env.QWEN_KEY else ("groq" if (groq_s.get("api_key") or env.GROQ_KEY) else "")
     integrations_data = {
-        "mr_active": bool(env.MR_LOGIN and env.MR_PASSWORD),
-        "mr_login": mr_login,
+        "mr_active": bool(mr_login_val and mr_password_val),
+        "mr_login": mr_login_val,
         "airtable_active": airtable_active,
         "sheets_active": sheets_active,
         "sheets_id": env.SHEETS_ID,

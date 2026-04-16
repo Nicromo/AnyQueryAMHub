@@ -8,67 +8,343 @@
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
-    .main { max-width:800px; margin:0 auto; padding:24px; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    .main { margin-left:240px; padding:28px; max-width:960px; }
     a { color:var(--accent); text-decoration:none; }
     .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
-    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
-    h1 { font-size:1.3rem; }
-    .meta { color:var(--muted); font-size:.82rem; }
-    .ai-block { background:rgba(99,102,241,.08); border:1px solid rgba(99,102,241,.2); border-radius:12px; padding:18px; margin-bottom:16px; white-space:pre-wrap; font-size:.88rem; line-height:1.6; }
-    .ai-label { font-size:.72rem; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; font-weight:600; }
-    .section { margin-bottom:20px; }
-    .section h2 { font-size:.95rem; font-weight:600; margin-bottom:10px; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; }
-    .card h3 { font-size:.85rem; font-weight:600; margin-bottom:2px; }
-    .card .meta { font-size:.72rem; color:var(--muted); margin-top:4px; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; background:rgba(59,130,246,.15); color:#60a5fa; }
-    .btn { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
-    .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
-    .btn-p { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .page-header h1 { font-size:1.4rem; }
+    .meta { color:var(--muted); font-size:.82rem; margin-top:4px; }
+    .tabs { display:flex; gap:4px; margin-bottom:20px; border-bottom:1px solid var(--border); }
+    .tab { padding:8px 16px; font-size:.85rem; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px; }
+    .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; }
+    .card h3 { font-size:.88rem; font-weight:600; margin-bottom:4px; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .badge-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .badge-in_progress { background:rgba(234,179,8,.15); color:#fbbf24; }
+    .badge-blocked { background:rgba(239,68,68,.15); color:#f87171; }
+    .badge-done { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-seg { background:rgba(99,102,241,.15); color:#a5b4fc; }
+    .ai-block { background:rgba(99,102,241,.06); border:1px solid rgba(99,102,241,.2); border-radius:12px; padding:18px; margin-bottom:16px; }
+    .ai-label { font-size:.72rem; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; font-weight:600; display:flex; align-items:center; justify-content:space-between; }
+    textarea { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.88rem; line-height:1.7; padding:12px; resize:vertical; font-family:inherit; }
+    textarea:focus { outline:none; border-color:var(--accent); }
+    .form-row { margin-bottom:14px; }
+    .form-row label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:6px; font-weight:500; }
+    input[type=text], input[type=date], select { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.85rem; padding:8px 12px; font-family:inherit; }
+    input:focus, select:focus { outline:none; border-color:var(--accent); }
+    .btn { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; display:inline-flex; align-items:center; gap:6px; }
+    .btn:hover { border-color:var(--accent); }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-primary:hover { filter:brightness(1.1); }
+    .btn-green { background:var(--green); border-color:var(--green); color:#fff; }
+    .btn-sm { padding:5px 10px; font-size:.75rem; }
+    .actions-bar { display:flex; gap:8px; margin-top:20px; flex-wrap:wrap; }
+    .section-title { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
+    .task-new { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
+    .task-new input { flex:1; }
+    .task-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); }
+    .task-row:last-child { border-bottom:none; }
+    .task-row input[type=checkbox] { width:16px; height:16px; cursor:pointer; accent-color:var(--accent); flex-shrink:0; }
+    .task-row .task-title { flex:1; font-size:.85rem; }
+    .task-row select { width:100px; font-size:.75rem; padding:4px 8px; }
+    .mood-btns { display:flex; gap:8px; flex-wrap:wrap; }
+    .mood-btn { padding:6px 14px; border-radius:20px; font-size:.82rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
+    .mood-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(99,102,241,.1); }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .toast { position:fixed; bottom:24px; right:24px; background:var(--green); color:#fff; padding:10px 18px; border-radius:10px; font-size:.85rem; display:none; z-index:999; }
+    .status-badge { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; font-size:.75rem; font-weight:600; }
+    .status-pending { background:rgba(234,179,8,.15); color:var(--yellow); }
+    .status-sent { background:rgba(34,197,94,.15); color:var(--green); }
   </style>
 </head>
 <body>
 <button class="theme-btn" onclick="toggleTheme()">🌓</button>
+
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard">📊 Дашборд</a>
+  <a class="nav-item" href="/today">📅 Мой день</a>
+  <a class="nav-item active" href="/clients">👥 Клиенты</a>
+  <a class="nav-item" href="/kanban">📋 Канбан</a>
+  <a class="nav-item" href="/checkups">🩺 Чекапы</a>
+  <a class="nav-item" href="/calendar">📅 Календарь</a>
+  <a class="nav-item" href="/analytics">📈 Аналитика</a>
+  <a class="nav-item" href="/sync">🔄 Sync</a>
+  <a class="nav-item" href="/settings">⚙️ Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
 <div class="main">
-  <a href="/client/{{ client.id }}" class="back">← Назад</a>
-  <div class="header">
+  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+
+  <div class="page-header">
     <div>
-      <h1>✍️ Followup: {{ client.name }}</h1>
-      <div class="meta">{{ client.segment or '' }}</div>
+      <h1>✍️ Followup</h1>
+      <div class="meta">
+        <span class="badge badge-seg">{{ client.segment or '—' }}</span>
+        {{ client.name }}
+        {% if meeting %}
+        · {{ meeting.date.strftime('%d.%m.%Y') if meeting.date else '' }}
+        <span class="status-badge status-{{ meeting.followup_status or 'pending' }}">{{ meeting.followup_status or 'pending' }}</span>
+        {% endif %}
+      </div>
     </div>
-    <a href="/prep/{{ client.id }}" class="btn">📋 Prep</a>
+    <a href="/prep/{{ client.id }}" class="btn">← Prep</a>
   </div>
 
-  <div class="ai-block">
-    <div class="ai-label">🤖 AI-генерация followup</div>
-    {{ followup_text }}
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('followup')">✍️ Текст фолоуапа</div>
+    <div class="tab" onclick="showTab('summary')">📝 Итоги встречи</div>
+    <div class="tab" onclick="showTab('tasks')">📋 Задачи</div>
+    <div class="tab" onclick="showTab('send')">📤 Отправка</div>
   </div>
 
-  <div class="section">
-    <h2>📋 Все задачи ({{ tasks|length }})</h2>
-    {% for t in tasks %}
+  <!-- Текст фолоуапа -->
+  <div class="tab-pane active" id="tab-followup">
+    <div class="ai-block">
+      <div class="ai-label">
+        🤖 AI-фолоуап (редактируй под себя)
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm" onclick="regenFollowup()">🔄 Перегенерировать</button>
+          <button class="btn btn-sm" onclick="copyFollowup()">📋 Копировать</button>
+        </div>
+      </div>
+      <textarea id="followupText" rows="14">{{ followup_text }}</textarea>
+    </div>
+    <div class="form-row">
+      <label>Тема письма / сообщения</label>
+      <input type="text" id="emailSubject" value="Итоги встречи — {{ client.name }}">
+    </div>
+  </div>
+
+  <!-- Итоги встречи -->
+  <div class="tab-pane" id="tab-summary">
     <div class="card">
-      <h3>{{ t.title }}</h3>
-      <div class="meta"><span class="badge">{{ t.status }}</span> · {{ t.priority }}</div>
+      <div class="section-title">📝 Краткое ревью встречи</div>
+      <div class="form-row">
+        <label>Настрой встречи</label>
+        <div class="mood-btns">
+          <button class="mood-btn active" data-mood="positive" onclick="setMood(this)">😊 Позитивный</button>
+          <button class="mood-btn" data-mood="neutral" onclick="setMood(this)">😐 Нейтральный</button>
+          <button class="mood-btn" data-mood="negative" onclick="setMood(this)">😟 Напряжённый</button>
+          <button class="mood-btn" data-mood="risk" onclick="setMood(this)">⚠️ Есть риски</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Что обсудили (кратко)</label>
+        <textarea id="discussed" rows="3" placeholder="Ключевые темы, которые поднимали на встрече..."></textarea>
+      </div>
+      <div class="form-row">
+        <label>Договорённости со стороны клиента</label>
+        <textarea id="clientCommitments" rows="3" placeholder="Что клиент обещал сделать..."></textarea>
+      </div>
+      <div class="form-row">
+        <label>Наши обязательства</label>
+        <textarea id="ourCommitments" rows="3" placeholder="Что мы обещали сделать..."></textarea>
+      </div>
+      <div class="form-row">
+        <label>Следующая встреча</label>
+        <input type="date" id="nextMeetingDate">
+      </div>
     </div>
-    {% endfor %}
   </div>
 
-  <div class="section">
-    <h2>📅 Последние встречи</h2>
-    {% for m in meetings %}
+  <!-- Задачи из встречи -->
+  <div class="tab-pane" id="tab-tasks">
     <div class="card">
-      <h3>{{ m.title or m.type }}</h3>
-      <div class="meta">{{ m.date.strftime('%d.%m.%Y') if m.date else '' }}</div>
+      <div class="section-title">
+        📋 Задачи из встречи
+        <button class="btn btn-sm btn-primary" onclick="saveNewTasks()">💾 Сохранить задачи</button>
+      </div>
+      <div class="task-new">
+        <input type="text" id="newTaskInput" placeholder="Новая задача..." onkeydown="if(event.key==='Enter')addTask()">
+        <select id="newTaskPriority" style="width:110px;">
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="low">low</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="addTask()">+ Добавить</button>
+      </div>
+      <div id="newTasksList"></div>
     </div>
-    {% endfor %}
+
+    {% if tasks %}
+    <div class="card">
+      <div class="section-title">📋 Существующие задачи ({{ tasks|length }})</div>
+      {% for t in tasks %}
+      <div class="task-row">
+        <input type="checkbox" {% if t.status == 'done' %}checked{% endif %} onchange="updateTaskStatus({{ t.id }}, this.checked)">
+        <span class="task-title">{{ t.title }}</span>
+        <span class="badge badge-{{ t.status }}">{{ t.status }}</span>
+        {% if t.due_date %}<span style="font-size:.72rem;color:var(--muted);">{{ t.due_date.strftime('%d.%m') }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Отправка -->
+  <div class="tab-pane" id="tab-send">
+    <div class="card">
+      <div class="section-title">📤 Способ отправки</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        <button class="mood-btn active" data-ch="ktalk" onclick="setChannel(this)">💬 Контур.Толк</button>
+        <button class="mood-btn" data-ch="email" onclick="setChannel(this)">📧 Email</button>
+        <button class="mood-btn" data-ch="copy" onclick="setChannel(this)">📋 Просто скопировать</button>
+      </div>
+      <div class="form-row">
+        <label>Предпросмотр</label>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:.85rem;line-height:1.7;white-space:pre-wrap;max-height:300px;overflow-y:auto;" id="previewText"></div>
+      </div>
+    </div>
+    {% if meeting %}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-green" onclick="sendFollowup()">📤 Отправить фолоуап</button>
+      <button class="btn" onclick="skipFollowup()">⏭ Пропустить</button>
+    </div>
+    {% else %}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="copyFollowup()">📋 Скопировать текст</button>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="actions-bar">
+    <button class="btn btn-primary" onclick="saveAll()">💾 Сохранить всё</button>
+    <button class="btn" onclick="copyFollowup()">📋 Копировать текст</button>
+    <a href="/client/{{ client.id }}" class="btn">← К клиенту</a>
   </div>
 </div>
+
+<div class="toast" id="toast"></div>
+
 <script>
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
+
+function showTab(name){
+  const names=['followup','summary','tasks','send'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',names[i]===name));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if(name==='send') updatePreview();
+}
+
+function setMood(btn){document.querySelectorAll('.mood-btns .mood-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function setChannel(btn){document.querySelectorAll('[data-ch]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');updatePreview();}
+
+function updatePreview(){
+  document.getElementById('previewText').textContent=document.getElementById('followupText').value;
+}
+
+let newTasks=[];
+function addTask(){
+  const input=document.getElementById('newTaskInput');
+  const prio=document.getElementById('newTaskPriority').value;
+  const title=input.value.trim();
+  if(!title)return;
+  newTasks.push({title,priority:prio});
+  renderNewTasks();
+  input.value='';input.focus();
+}
+
+function renderNewTasks(){
+  const list=document.getElementById('newTasksList');
+  list.innerHTML=newTasks.map((t,i)=>`
+    <div class="task-row">
+      <span class="task-title">📌 ${t.title}</span>
+      <span class="badge badge-plan">${t.priority}</span>
+      <button class="btn btn-sm" onclick="removeTask(${i})" style="padding:2px 8px;font-size:.72rem;">✕</button>
+    </div>`).join('');
+}
+
+function removeTask(i){newTasks.splice(i,1);renderNewTasks();}
+
+async function saveNewTasks(){
+  if(!newTasks.length){showToast('Нет новых задач','var(--yellow)');return;}
+  let saved=0;
+  for(const t of newTasks){
+    try{
+      const r=await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:{{ client.id }},title:t.title,priority:t.priority,source:'followup',status:'plan'})});
+      if(r.ok)saved++;
+    }catch(e){}
+  }
+  newTasks=[];renderNewTasks();
+  showToast(`✅ Сохранено задач: ${saved}`);
+}
+
+async function updateTaskStatus(taskId, done){
+  try{
+    await fetch(`/api/tasks/${taskId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:done?'done':'plan'})});
+    showToast(done?'✅ Задача выполнена':'↩️ Задача возвращена');
+  }catch(e){}
+}
+
+async function regenFollowup(){
+  showToast('🔄 Генерирую...','var(--accent)');
+  try{
+    const r=await fetch('/api/ai/generate-followup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:{{ client.id }}{% if meeting %},meeting_id:{{ meeting.id }}{% endif %}})});
+    const d=await r.json();
+    if(d.followup_text)document.getElementById('followupText').value=d.followup_text;
+    showToast('✅ Перегенерировано');
+  }catch(e){showToast('Ошибка генерации','var(--red)');}
+}
+
+function copyFollowup(){navigator.clipboard.writeText(document.getElementById('followupText').value);showToast('📋 Скопировано');}
+
+{% if meeting %}
+async function sendFollowup(){
+  const r=await fetch('/api/meetings/{{ meeting.id }}/followup/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({followup_text:document.getElementById('followupText').value})});
+  if(r.ok){showToast('✅ Фолоуап отправлен');setTimeout(()=>window.location.href='/client/{{ client.id }}',1500);}
+  else showToast('Ошибка','var(--red)');
+}
+async function skipFollowup(){
+  const r=await fetch('/api/meetings/{{ meeting.id }}/followup/skip',{method:'POST'});
+  if(r.ok){showToast('⏭ Пропущено');setTimeout(()=>window.location.href='/client/{{ client.id }}',1500);}
+}
+{% endif %}
+
+function saveAll(){
+  const data={
+    followup_text:document.getElementById('followupText').value,
+    discussed:document.getElementById('discussed').value,
+    client_commitments:document.getElementById('clientCommitments').value,
+    our_commitments:document.getElementById('ourCommitments').value,
+    next_meeting:document.getElementById('nextMeetingDate').value,
+    mood:document.querySelector('[data-mood].active')?.dataset.mood||'neutral'
+  };
+  localStorage.setItem('followup_{{ client.id }}',JSON.stringify(data));
+  showToast('💾 Сохранено');
+}
+
+function showToast(msg,color='var(--green)'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.background=color;t.style.display='block';
+  setTimeout(()=>t.style.display='none',2500);
+}
+
+// Загружаем сохранённое
+const saved=localStorage.getItem('followup_{{ client.id }}');
+if(saved){
+  try{
+    const d=JSON.parse(saved);
+    if(d.discussed)document.getElementById('discussed').value=d.discussed;
+    if(d.client_commitments)document.getElementById('clientCommitments').value=d.client_commitments;
+    if(d.our_commitments)document.getElementById('ourCommitments').value=d.our_commitments;
+    if(d.next_meeting)document.getElementById('nextMeetingDate').value=d.next_meeting;
+  }catch(e){}
+}
 </script>
 </body>
 </html>

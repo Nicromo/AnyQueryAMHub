@@ -8,69 +8,331 @@
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
-    .main { max-width:900px; margin:0 auto; padding:24px; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    .main { margin-left:240px; padding:28px; max-width:960px; }
     a { color:var(--accent); text-decoration:none; }
     .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
-    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
-    h1 { font-size:1.3rem; }
-    .meta { color:var(--muted); font-size:.82rem; }
-    .section { margin-bottom:20px; }
-    .section h2 { font-size:.95rem; font-weight:600; margin-bottom:10px; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; }
-    .card h3 { font-size:.85rem; font-weight:600; margin-bottom:2px; }
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .page-header h1 { font-size:1.4rem; }
+    .meta { color:var(--muted); font-size:.82rem; margin-top:4px; }
+    .tabs { display:flex; gap:4px; margin-bottom:20px; border-bottom:1px solid var(--border); }
+    .tab { padding:8px 16px; font-size:.85rem; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px; }
+    .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; }
+    .card h3 { font-size:.88rem; font-weight:600; margin-bottom:4px; }
     .card p { font-size:.82rem; color:var(--muted); }
-    .card .meta { font-size:.72rem; color:var(--muted); margin-top:4px; }
-    .ai-block { background:rgba(99,102,241,.08); border:1px solid rgba(99,102,241,.2); border-radius:12px; padding:18px; margin-bottom:16px; white-space:pre-wrap; font-size:.88rem; line-height:1.6; }
-    .ai-label { font-size:.72rem; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; font-weight:600; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; background:rgba(59,130,246,.15); color:#60a5fa; }
-    .btn { padding:6px 12px; border-radius:8px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:4px; }
-    .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .badge-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .badge-in_progress { background:rgba(234,179,8,.15); color:#fbbf24; }
+    .badge-blocked { background:rgba(239,68,68,.15); color:#f87171; }
+    .badge-done { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-seg { background:rgba(99,102,241,.15); color:#a5b4fc; }
+    .ai-block { background:rgba(99,102,241,.06); border:1px solid rgba(99,102,241,.2); border-radius:12px; padding:18px; margin-bottom:16px; }
+    .ai-label { font-size:.72rem; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; font-weight:600; display:flex; align-items:center; justify-content:space-between; }
+    textarea { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.88rem; line-height:1.7; padding:12px; resize:vertical; font-family:inherit; }
+    textarea:focus { outline:none; border-color:var(--accent); }
+    .form-row { margin-bottom:14px; }
+    .form-row label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:6px; font-weight:500; }
+    input[type=text], input[type=date], input[type=time], select { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.85rem; padding:8px 12px; font-family:inherit; }
+    input:focus, select:focus { outline:none; border-color:var(--accent); }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .btn { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; display:inline-flex; align-items:center; gap:6px; }
+    .btn:hover { border-color:var(--accent); }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-primary:hover { filter:brightness(1.1); }
+    .btn-sm { padding:5px 10px; font-size:.75rem; }
+    .actions-bar { display:flex; gap:8px; margin-top:20px; flex-wrap:wrap; }
+    .agenda-item { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); }
+    .agenda-item:last-child { border-bottom:none; }
+    .agenda-item input[type=checkbox] { width:16px; height:16px; cursor:pointer; accent-color:var(--accent); flex-shrink:0; }
+    .agenda-item input[type=text] { flex:1; border:none; background:transparent; font-size:.85rem; padding:4px 0; color:var(--text); }
+    .agenda-item input[type=text]:focus { outline:none; border-bottom:1px solid var(--accent); }
+    .agenda-add { color:var(--accent); font-size:.82rem; cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:8px 0; background:none; border:none; }
+    .risk-item { display:flex; align-items:center; gap:8px; font-size:.85rem; padding:8px 0; border-bottom:1px solid var(--border); }
+    .risk-item:last-child { border-bottom:none; }
+    .section-title { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-    .copy-btn { margin-top:8px; }
+    .toast { position:fixed; bottom:24px; right:24px; background:var(--green); color:#fff; padding:10px 18px; border-radius:10px; font-size:.85rem; display:none; z-index:999; }
+    .meeting-type-btns { display:flex; gap:8px; flex-wrap:wrap; }
+    .type-btn { padding:5px 12px; border-radius:20px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
+    .type-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(99,102,241,.1); }
+    .meeting-summary { display:none; font-size:.82rem; color:var(--muted); margin-top:8px; padding-top:8px; border-top:1px solid var(--border); line-height:1.5; }
   </style>
 </head>
 <body>
 <button class="theme-btn" onclick="toggleTheme()">🌓</button>
+
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard">📊 Дашборд</a>
+  <a class="nav-item" href="/today">📅 Мой день</a>
+  <a class="nav-item active" href="/clients">👥 Клиенты</a>
+  <a class="nav-item" href="/kanban">📋 Канбан</a>
+  <a class="nav-item" href="/checkups">🩺 Чекапы</a>
+  <a class="nav-item" href="/calendar">📅 Календарь</a>
+  <a class="nav-item" href="/analytics">📈 Аналитика</a>
+  <a class="nav-item" href="/sync">🔄 Sync</a>
+  <a class="nav-item" href="/settings">⚙️ Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
 <div class="main">
-  <a href="/client/{{ client.id }}" class="back">← Назад</a>
-  <div class="header">
+  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+
+  <div class="page-header">
     <div>
-      <h1>📋 Подготовка: {{ client.name }}</h1>
-      <div class="meta">{{ client.segment or '' }} · {{ client.manager_email or '' }}</div>
+      <h1>📋 Подготовка к встрече</h1>
+      <div class="meta">
+        <span class="badge badge-seg">{{ client.segment or '—' }}</span>
+        {{ client.name }} · {{ client.manager_email or '' }}
+      </div>
     </div>
-    <a href="/followup/{{ client.id }}" class="btn">✍️ Followup</a>
+    <a href="/followup/{{ client.id }}" class="btn">✍️ Followup →</a>
   </div>
 
-  <div class="ai-block">
-    <div class="ai-label">🤖 AI-подготовка к встрече</div>
-    {{ prep_text }}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="section-title">🎯 Параметры встречи</div>
+    <div class="form-row">
+      <label>Тип встречи</label>
+      <div class="meeting-type-btns" id="meetingTypeBtns">
+        <button class="type-btn active" data-type="checkup" onclick="setType(this)">🩺 Чекап</button>
+        <button class="type-btn" data-type="qbr" onclick="setType(this)">📊 QBR</button>
+        <button class="type-btn" data-type="onboarding" onclick="setType(this)">🚀 Онбординг</button>
+        <button class="type-btn" data-type="upsell" onclick="setType(this)">📈 Апсейл</button>
+        <button class="type-btn" data-type="sync" onclick="setType(this)">🔄 Синк</button>
+        <button class="type-btn" data-type="other" onclick="setType(this)">💬 Другое</button>
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-row">
+        <label>Дата</label>
+        <input type="date" id="meetingDate" value="{{ now.strftime('%Y-%m-%d') }}">
+      </div>
+      <div class="form-row">
+        <label>Время</label>
+        <input type="time" id="meetingTime" value="10:00">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Участники (через запятую)</label>
+      <input type="text" id="attendees" placeholder="Иван Иванов, Мария Петрова...">
+    </div>
+    <div class="form-row">
+      <label>Ссылка на встречу</label>
+      <input type="text" id="meetingLink" placeholder="https://...">
+    </div>
   </div>
 
-  <div class="section">
-    <h2>📋 Открытые задачи ({{ tasks|length }})</h2>
-    {% for t in tasks %}
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('ai')">🤖 AI-подготовка</div>
+    <div class="tab" onclick="showTab('agenda')">📝 Агенда</div>
+    <div class="tab" onclick="showTab('tasks')">📋 Задачи ({{ tasks|length }})</div>
+    <div class="tab" onclick="showTab('history')">📅 История ({{ meetings|length }})</div>
+    <div class="tab" onclick="showTab('risks')">⚠️ Риски</div>
+  </div>
+
+  <div class="tab-pane active" id="tab-ai">
+    <div class="ai-block">
+      <div class="ai-label">
+        🤖 AI-подготовка
+        <button class="btn btn-sm" onclick="copyAI()">📋 Копировать</button>
+      </div>
+      <textarea id="aiText" rows="12">{{ prep_text }}</textarea>
+    </div>
+    <div class="form-row">
+      <label>Личные заметки перед встречей</label>
+      <textarea id="prepNotes" rows="4" placeholder="Что хочу обсудить, о чём не забыть..."></textarea>
+    </div>
+  </div>
+
+  <div class="tab-pane" id="tab-agenda">
     <div class="card">
-      <h3>{{ t.title }}</h3>
-      <div class="meta"><span class="badge">{{ t.status }}</span> · {{ t.priority }}{% if t.due_date %} · {{ t.due_date.strftime('%d.%m') }}{% endif %}</div>
+      <div class="section-title">📝 Агенда встречи</div>
+      <div id="agendaList"></div>
+      <button class="agenda-add" onclick="addAgendaItem()">+ Добавить пункт</button>
     </div>
-    {% endfor %}
   </div>
 
-  <div class="section">
-    <h2>📅 Последние встречи ({{ meetings|length }})</h2>
-    {% for m in meetings %}
+  <div class="tab-pane" id="tab-tasks">
+    {% if tasks %}
+      {% for t in tasks %}
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <h3>{{ t.title }}</h3>
+          <span class="badge badge-{{ t.status }}">{{ t.status }}</span>
+        </div>
+        {% if t.description %}<p style="margin-top:4px;">{{ t.description[:120] }}</p>{% endif %}
+        <div style="font-size:.72rem;color:var(--muted);margin-top:6px;">
+          {{ t.priority }}{% if t.due_date %} · до {{ t.due_date.strftime('%d.%m.%Y') }}{% endif %}{% if t.team %} · {{ t.team }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="color:var(--muted);padding:20px;text-align:center;">Нет открытых задач</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane" id="tab-history">
+    {% if meetings %}
+      {% for m in meetings %}
+      <div class="card" style="cursor:pointer;" onclick="toggleSummary({{ loop.index }})">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <h3>{{ m.title or m.type }}</h3>
+          <span style="font-size:.75rem;color:var(--muted);">{{ m.date.strftime('%d.%m.%Y') if m.date else '' }}</span>
+        </div>
+        <div class="meeting-summary" id="summary-{{ loop.index }}">
+          {% if m.summary %}{{ m.summary }}{% else %}<span style="color:var(--muted)">Нет записи итогов</span>{% endif %}
+          {% if m.followup_text %}<div style="margin-top:8px;"><b>Followup:</b> {{ m.followup_text[:300] }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="color:var(--muted);padding:20px;text-align:center;">Нет истории встреч</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane" id="tab-risks">
     <div class="card">
-      <h3>{{ m.title or m.type }}</h3>
-      {% if m.summary %}<p>{{ m.summary[:150] }}</p>{% endif %}
-      <div class="meta">{{ m.date.strftime('%d.%m.%Y') if m.date else '' }}</div>
+      <div class="section-title">⚠️ Риски по клиенту</div>
+      {% set blocked = tasks | selectattr('status', 'equalto', 'blocked') | list %}
+      {% if blocked %}
+      <div class="risk-item">🔴 {{ blocked|length }} заблокированных задач</div>
+      {% endif %}
+      {% if client.health_score and client.health_score < 0.5 %}
+      <div class="risk-item">📉 Низкий health score: {{ (client.health_score * 100)|int }}%</div>
+      {% endif %}
+      {% if client.last_meeting_date %}
+        {% set days_since = (now - client.last_meeting_date).days %}
+        {% if days_since > 30 %}
+        <div class="risk-item">📅 Нет встреч {{ days_since }} дней</div>
+        {% endif %}
+      {% endif %}
+      {% if client.open_tickets and client.open_tickets > 0 %}
+      <div class="risk-item">🎫 Открытых тикетов: {{ client.open_tickets }}</div>
+      {% endif %}
+      {% if not blocked %}
+      <div class="risk-item">✅ <span style="color:var(--muted);">Критических рисков не обнаружено</span></div>
+      {% endif %}
     </div>
-    {% endfor %}
+  </div>
+
+  <div class="actions-bar">
+    <button class="btn btn-primary" onclick="savePrepAndGo()">✅ Готов — открыть Followup</button>
+    <button class="btn" onclick="savePrep()">💾 Сохранить черновик</button>
+    <button class="btn" onclick="copyAll()">📋 Скопировать всё</button>
   </div>
 </div>
+
+<div class="toast" id="toast"></div>
+
 <script>
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
+
+const AGENDAS={
+  checkup:['Приветствие и цель встречи','Статус по открытым задачам','Обзор метрик и health score','Вопросы и обратная связь','Следующие шаги'],
+  qbr:['Приветствие и повестка','Итоги квартала — метрики','Достижения и проблемы','Цели на следующий квартал','Q&A'],
+  onboarding:['Знакомство с командой','Обзор продукта и возможностей','Настройка и первые шаги','Ответы на вопросы','Первый контрольный чекап — когда?'],
+  upsell:['Приветствие','Текущие результаты клиента','Обзор новых возможностей','Обсуждение условий','Следующие шаги'],
+  sync:['Обновление по задачам','Блокеры и проблемы','Приоритеты на следующий период'],
+  other:['Цель встречи','Обсуждение','Итоги и следующие шаги']
+};
+
+function showTab(name){
+  const names=['ai','agenda','tasks','history','risks'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',names[i]===name));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+function setType(btn){
+  document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAgenda(AGENDAS[btn.dataset.type]||AGENDAS.other);
+}
+
+function renderAgenda(items){
+  const list=document.getElementById('agendaList');
+  list.innerHTML=items.map(item=>`<div class="agenda-item"><input type="checkbox"><input type="text" value="${item}"></div>`).join('');
+}
+
+function addAgendaItem(){
+  const div=document.createElement('div');
+  div.className='agenda-item';
+  div.innerHTML='<input type="checkbox"><input type="text" placeholder="Новый пункт...">';
+  document.getElementById('agendaList').appendChild(div);
+  div.querySelector('input[type=text]').focus();
+}
+
+function toggleSummary(idx){
+  const el=document.getElementById('summary-'+idx);
+  el.style.display=el.style.display==='block'?'none':'block';
+}
+
+function showToast(msg,color='var(--green)'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.background=color;t.style.display='block';
+  setTimeout(()=>t.style.display='none',2500);
+}
+
+function getAgenda(){
+  return Array.from(document.querySelectorAll('#agendaList input[type=text]')).map(i=>i.value).filter(Boolean);
+}
+
+function savePrep(){
+  const data={
+    meeting_type:document.querySelector('.type-btn.active')?.dataset.type||'checkup',
+    meeting_date:document.getElementById('meetingDate').value,
+    meeting_time:document.getElementById('meetingTime').value,
+    attendees:document.getElementById('attendees').value,
+    meeting_link:document.getElementById('meetingLink').value,
+    prep_notes:document.getElementById('prepNotes').value,
+    agenda:getAgenda(),
+    ai_text:document.getElementById('aiText').value
+  };
+  localStorage.setItem('prep_{{ client.id }}',JSON.stringify(data));
+  showToast('💾 Черновик сохранён');
+}
+
+function savePrepAndGo(){savePrep();window.location.href='/followup/{{ client.id }}';}
+
+function copyAI(){navigator.clipboard.writeText(document.getElementById('aiText').value);showToast('📋 Скопировано');}
+
+function copyAll(){
+  const type=document.querySelector('.type-btn.active')?.textContent||'';
+  const agenda=getAgenda().map((a,i)=>`${i+1}. ${a}`).join('\n');
+  const notes=document.getElementById('prepNotes').value;
+  const text=`ПОДГОТОВКА: {{ client.name }}\nТип: ${type}\nДата: ${document.getElementById('meetingDate').value} ${document.getElementById('meetingTime').value}\n\nАГЕНДА:\n${agenda}${notes?'\n\nЗАМЕТКИ:\n'+notes:''}\n\nAI:\n${document.getElementById('aiText').value}`;
+  navigator.clipboard.writeText(text);
+  showToast('📋 Всё скопировано');
+}
+
+// Загружаем сохранённый черновик или рендерим агенду по умолчанию
+const saved=localStorage.getItem('prep_{{ client.id }}');
+if(saved){
+  try{
+    const d=JSON.parse(saved);
+    if(d.meeting_date)document.getElementById('meetingDate').value=d.meeting_date;
+    if(d.meeting_time)document.getElementById('meetingTime').value=d.meeting_time;
+    if(d.attendees)document.getElementById('attendees').value=d.attendees;
+    if(d.meeting_link)document.getElementById('meetingLink').value=d.meeting_link;
+    if(d.prep_notes)document.getElementById('prepNotes').value=d.prep_notes;
+    if(d.agenda&&d.agenda.length)renderAgenda(d.agenda);
+    else renderAgenda(AGENDAS.checkup);
+    if(d.meeting_type){
+      document.querySelectorAll('.type-btn').forEach(b=>b.classList.toggle('active',b.dataset.type===d.meeting_type));
+    }
+  }catch(e){renderAgenda(AGENDAS.checkup);}
+}else{renderAgenda(AGENDAS.checkup);}
 </script>
 </body>
 </html>
