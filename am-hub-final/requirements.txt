@@ -30,3 +30,4 @@ itsdangerous==2.2.0
 sentry-sdk[fastapi]>=2.0.0
 redis>=5.0.0
 alembic>=1.13.0
+slowapi==0.1.9
