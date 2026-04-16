@@ -224,6 +224,10 @@ from routers import pdf_export
 app.include_router(pdf_export.router, tags=["pdf"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])
 
+# ── Page routes (HTML) ───────────────────────────────────────────────────────
+from routers import pages as pages_router
+app.include_router(pages_router.router, tags=["pages"])
+
 
 # ── Rate limiting ────────────────────────────────────────────────────────────
 try:

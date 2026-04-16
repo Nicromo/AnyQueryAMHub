@@ -1,3 +1,6 @@
+from ai_assistant import generate_prep_brief, generate_smart_followup, detect_account_risks
+from ai_followup import process_transcript as ai_process_transcript
+
 """
 Auto-extracted router — do not edit the @app registrations manually.
 """
@@ -41,9 +44,6 @@ logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="templates")
 
 router = APIRouter()
-
-def _env(key: str, default: str = "") -> str:
-    return os.environ.get(key, default)
 
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
@@ -316,6 +316,44 @@ async def api_ai_chat_history(
 
     from models import AIChat
     from sqlalchemy import func
+
+
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default)
+
+def _env_bool(key: str) -> bool:
+    return bool(os.environ.get(key, ""))
+
+def _get_user(auth_token, db):
+    from auth import decode_access_token
+    from models import User as _User
+    if not auth_token: return None
+    payload = decode_access_token(auth_token)
+    if not payload: return None
+    return db.query(_User).filter(_User.id == int(payload.get("sub", 0))).first()
+
+def _require_user(auth_token, db):
+    user = _get_user(auth_token, db)
+    if not user: raise HTTPException(status_code=401)
+    return user
+
+def _require_admin(auth_token, db):
+    user = _get_user(auth_token, db)
+    if not user: raise HTTPException(status_code=401)
+    if user.role != "admin": raise HTTPException(status_code=403)
+    return user
+
+def _checkup_auth(auth_token, db):
+    return _require_user(auth_token, db)
+
+_job_status: dict = {}
+
+def log_job(job_id: str, status_val: str, msg: str = "") -> None:
+    _job_status[job_id] = {"status": status_val, "msg": msg}
+
+def _job_log(job_id: str) -> dict:
+    return _job_status.get(job_id, {})
+
     # Группируем по session (первое сообщение user за последние 30 дней)
     msgs = (db.query(AIChat)
             .filter(AIChat.user_id == user.id, AIChat.role == "user")

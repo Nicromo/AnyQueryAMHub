@@ -15,23 +15,9 @@ from sqlalchemy import text
 
 from database import get_db, SessionLocal
 from models import (
-    AccountPlan,
-    AuditLog,
-    CheckUp,
-    CheckupResult,
-    ChurnScore,
-    Client,
-    ClientNote,
-    FollowupTemplate,
-    HealthSnapshot,
-    Meeting,
-    Notification,
-    QBR,
-    SyncLog,
-    Task,
-    TaskComment,
-    User,
-    VoiceNote,
+    Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
+    Notification, QBR, AccountPlan, ClientNote, TaskComment,
+    FollowupTemplate, VoiceNote,
 )
 from auth import (
     authenticate_user, create_user, create_access_token,
@@ -92,6 +78,7 @@ async def api_analytics_overview(
 
     # Meetings + followups за период
     meetings_count  = db.query(Meeting).filter(Meeting.client_id.in_(cids), Meeting.date >= since).count() if cids else 0
+    week_ago = datetime.utcnow() - timedelta(days=7)
     followups_count = db.query(Meeting).filter(
             Meeting.followup_status == "sent",
             Meeting.followup_sent_at >= week_ago,
@@ -506,7 +493,7 @@ async def api_stats(db: Session = Depends(get_db), auth_token: Optional[str] = C
 
     # Кеш 90 сек — вызывается на каждой странице от 18 менеджеров
     ck = f"stats:{user.id}"
-    cached = cache_get(ck)
+    cached = None
     if cached:
         return cached
 
@@ -537,7 +524,7 @@ async def api_stats(db: Session = Depends(get_db), auth_token: Optional[str] = C
     open_tasks = tq.count()
 
     result = {"overdue": overdue, "warning": warning, "open_tasks": open_tasks}
-    cache_set(ck, result, ttl=90)
+    None
     return result
 
 

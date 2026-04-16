@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import decode_access_token
 from models import (
+    AccountPlan,
     Client, Task, Meeting, User, QBR, CheckUp,
     ClientNote, FollowupTemplate, Notification
 )
 from ai_assistant import generate_smart_followup, detect_account_risks
 from ai_followup import process_transcript as ai_process_transcript
+
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -305,6 +307,44 @@ async def tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optional[
     if not os.environ.get("TIME_API_TOKEN"):
         return {"error": "TIME_API_TOKEN not set", "tickets": []}
     from integrations.tbank_time import get_support_tickets
+
+
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default)
+
+def _env_bool(key: str) -> bool:
+    return bool(os.environ.get(key, ""))
+
+def _get_user(auth_token, db):
+    from auth import decode_access_token
+    from models import User as _User
+    if not auth_token: return None
+    payload = decode_access_token(auth_token)
+    if not payload: return None
+    return db.query(_User).filter(_User.id == int(payload.get("sub", 0))).first()
+
+def _require_user(auth_token, db):
+    user = _get_user(auth_token, db)
+    if not user: raise HTTPException(status_code=401)
+    return user
+
+def _require_admin(auth_token, db):
+    user = _get_user(auth_token, db)
+    if not user: raise HTTPException(status_code=401)
+    if user.role != "admin": raise HTTPException(status_code=403)
+    return user
+
+def _checkup_auth(auth_token, db):
+    return _require_user(auth_token, db)
+
+_job_status: dict = {}
+
+def log_job(job_id: str, status_val: str, msg: str = "") -> None:
+    _job_status[job_id] = {"status": status_val, "msg": msg}
+
+def _job_log(job_id: str) -> dict:
+    return _job_status.get(job_id, {})
+
     try:
         all_tickets = []
         for c in db.query(Client).all():

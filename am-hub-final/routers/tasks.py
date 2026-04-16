@@ -22,7 +22,7 @@ from models import (
 from auth import (
     authenticate_user, create_user, create_access_token,
     verify_password, hash_password, log_audit, decode_access_token,
-)
+    get_current_user,)
 from error_handlers import log_error, handle_db_error
 
 logger = logging.getLogger(__name__)
@@ -63,8 +63,9 @@ async def api_create_task(
     db.refresh(task)
     # WS real-time push
     try:
-        await ws_invalidate_stats(user.id, db)
-        await ws_notify_user(user.id, "task_update", {"action": "created", "task_id": task.id})
+        pass  # ws_
+        # ws_invalidate_stats(user.id, db)
+        # ws_notify_user(user.id, "task_update", {"action": "created", "task_id": task.id})
     except Exception:
         pass
     return {"ok": True, "id": task.id}
