@@ -1,366 +1,154 @@
-{% extends "base.html" %}
-{% block title %}Профиль — AM Hub{% endblock %}
-{% block content %}
-
-<div class="page-header">
-  <p><a href="/">← Назад</a></p>
-  <h1>⚙️ Профиль менеджера</h1>
-  <p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px">
-    Здесь храним твои личные кредсы — Merchrules, Airtable, Telegram.
-    Данные привязаны к твоему Telegram-аккаунту и не видны другим.
-  </p>
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Профиль — AM Hub</title>
+  <style>
+    :root{--bg:#0a0e1a;--card:#111827;--border:#1e2a3a;--text:#e2e8f0;--muted:#64748b;--accent:#6366f1;--green:#22c55e;--red:#ef4444;--accent-glow:rgba(99,102,241,.12);}
+    [data-theme="light"]{--bg:#f1f5f9;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent-glow:rgba(99,102,241,.08);}
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+    .main{margin-left:240px;padding:28px 32px;max-width:720px;}
+    .sidebar{position:fixed;left:0;top:0;bottom:0;width:240px;background:var(--card);border-right:1px solid var(--border);padding:20px 0;z-index:100;overflow-y:auto;}
+    .sidebar-logo{padding:0 20px 20px;border-bottom:1px solid var(--border);margin-bottom:12px;}
+    .sidebar-logo h1{font-size:1.1rem;font-weight:700;}
+    .nav-item{display:flex;align-items:center;gap:10px;padding:9px 20px;color:var(--muted);font-size:.85rem;text-decoration:none;border-left:3px solid transparent;}
+    .nav-item:hover{color:var(--text);background:rgba(255,255,255,.03);}
+    .nav-item.active{color:var(--accent);background:var(--accent-glow);border-left-color:var(--accent);}
+    .sidebar-footer{position:absolute;bottom:0;left:0;right:0;padding:16px 20px;border-top:1px solid var(--border);background:var(--card);}
+    a{color:var(--accent);text-decoration:none;}
+    .avatar-row{display:flex;align-items:center;gap:20px;margin-bottom:24px;}
+    .avatar{width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:1.8rem;font-weight:700;color:#fff;flex-shrink:0;border:3px solid var(--border);}
+    .avatar-info h2{font-size:1.1rem;}.avatar-info p{font-size:.82rem;color:var(--muted);margin-top:2px;}
+    .role-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:.72rem;font-weight:600;background:var(--accent-glow);color:var(--accent);margin-top:4px;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:16px;}
+    .card h3{font-size:.95rem;font-weight:600;margin-bottom:18px;}
+    .field{margin-bottom:16px;}
+    .field label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:6px;font-weight:500;}
+    .field input{width:100%;padding:10px 14px;border-radius:9px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;outline:none;transition:border-color .15s;}
+    .field input:focus{border-color:var(--accent);}
+    .field .help{font-size:.73rem;color:var(--muted);margin-top:4px;}
+    .field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .btn{padding:10px 20px;border-radius:9px;font-size:.85rem;font-weight:600;cursor:pointer;border:none;transition:filter .15s;}
+    .btn-primary{background:var(--accent);color:#fff;}.btn-primary:hover{filter:brightness(1.1);}
+    .btn:disabled{opacity:.5;cursor:not-allowed;}
+    .result{margin-top:10px;font-size:.83rem;padding:8px 12px;border-radius:8px;display:none;}
+    .result.ok{display:block;background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.25);}
+    .result.err{display:block;background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.25);}
+    .stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;}
+    .stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center;}
+    .stat-num{font-size:1.6rem;font-weight:700;color:var(--accent);}
+    .stat-label{font-size:.75rem;color:var(--muted);margin-top:2px;}
+    .theme-btn{position:fixed;top:16px;right:16px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);cursor:pointer;z-index:200;}
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>☀️</span> Мой день</a>
+  <a class="nav-item" href="/meetings"><span>📅</span> Встречи</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>✅</span> Чекапы</a>
+  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/tasks"><span>⚙️</span> Задачи</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <a class="nav-item active" href="/profile"><span>👤</span> Профиль</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
 </div>
-
-{% if saved %}
-<div class="alert alert-success">✅ Профиль сохранён</div>
-{% endif %}
-
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-
-<!-- Основное -->
-<div class="card">
-  <h3 style="font-size:1rem;margin:0 0 16px">👤 Основное</h3>
-  <div class="form-group">
-    <label>Telegram ID</label>
-    <input class="form-control" value="{{ user.id }}" disabled style="opacity:.5">
-  </div>
-  <div class="form-group">
-    <label>Имя</label>
-    <input class="form-control" id="f-name" value="{{ profile.display_name or user.name }}"
-           placeholder="Как тебя называть в уведомлениях">
-  </div>
-  <div class="form-group">
-    <label>Telegram Chat ID для уведомлений</label>
-    <input class="form-control" id="f-notify" value="{{ profile.tg_notify_chat }}"
-           placeholder="Твой личный chat_id или -100… канала">
-    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">
-      Сюда придут утренний план и автозадачи по чекапам.
-      Узнать свой ID: <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>
+<div class="main">
+  <div class="avatar-row">
+    <div class="avatar" id="avatarEl">{{ (user.first_name or user.email)[0].upper() }}</div>
+    <div class="avatar-info">
+      <h2>{{ user.first_name or '' }} {{ user.last_name or '' }}</h2>
+      <p>{{ user.email }}</p>
+      <span class="role-badge">{{ user.role }}</span>
     </div>
   </div>
-</div>
-
-<!-- Merchrules -->
-<div class="card">
-  <h3 style="font-size:1rem;margin:0 0 4px">🔗 Merchrules</h3>
-  <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px">
-    Логин и пароль от твоего аккаунта на merchrules.any-platform.ru.
-    Используются для синхронизации задач и встреч.
-  </p>
-  <div class="form-group">
-    <label>Логин (email)</label>
-    <input class="form-control" id="f-mr-login" type="email"
-           value="{{ profile.mr_login }}" placeholder="your@email.com"
-           autocomplete="username">
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-num" id="statClients">—</div><div class="stat-label">Клиентов</div></div>
+    <div class="stat"><div class="stat-num" id="statTasks">—</div><div class="stat-label">Открытых задач</div></div>
+    <div class="stat"><div class="stat-num" id="statMeetings">—</div><div class="stat-label">Встреч за месяц</div></div>
   </div>
-  <div class="form-group">
-    <label>Пароль</label>
-    <div style="position:relative">
-      <input class="form-control" id="f-mr-pass" type="password"
-             value="{{ profile.mr_password }}" placeholder="••••••••"
-             autocomplete="current-password"
-             style="padding-right:44px">
-      <button onclick="togglePass('f-mr-pass', this)"
-              style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem">
-        👁
-      </button>
+  <div class="card">
+    <h3>👤 Личные данные</h3>
+    <div class="field-row">
+      <div class="field"><label>Имя</label><input id="firstName" value="{{ user.first_name or '' }}" placeholder="Иван"></div>
+      <div class="field"><label>Фамилия</label><input id="lastName" value="{{ user.last_name or '' }}" placeholder="Иванов"></div>
     </div>
+    <div class="field">
+      <label>Email</label>
+      <input value="{{ user.email }}" disabled style="opacity:.5;cursor:not-allowed;">
+      <div class="help">Email нельзя изменить — он используется для привязки клиентов</div>
+    </div>
+    <div class="field">
+      <label>Telegram ID</label>
+      <input id="telegramId" value="{{ user.telegram_id or '' }}" placeholder="123456789">
+      <div class="help">Узнайте через <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> — нужен для уведомлений бота</div>
+    </div>
+    <button class="btn btn-primary" id="saveBtn" onclick="saveProfile()">💾 Сохранить</button>
+    <div class="result" id="profileResult"></div>
   </div>
-  <button onclick="testMR()" class="btn btn-ghost btn-sm" id="mr-test-btn">
-    🔌 Проверить подключение
-  </button>
-  <div id="mr-test-result" style="font-size:0.8rem;margin-top:8px"></div>
-</div>
-
-</div>
-
-<!-- Airtable -->
-<div class="card">
-  <h3 style="font-size:1rem;margin:0 0 4px">📋 Airtable</h3>
-  <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px">
-    Используется для автоматического обновления даты встречи и дозаписи комментариев в базе клиентов.
-    Токен и ID базы уже преднастроены — меняй только если у тебя своя база.
-  </p>
-  <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
-    <div class="form-group" style="margin:0">
-      <label>Personal Access Token</label>
-      <div style="position:relative">
-        <input class="form-control" id="f-at-token" type="password"
-               value="{{ profile.airtable_token or default_airtable_token }}"
-               placeholder="patXXX..."
-               style="padding-right:44px">
-        <button onclick="togglePass('f-at-token', this)"
-                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem">
-          👁
-        </button>
-      </div>
+  <div class="card">
+    <h3>🔐 Смена пароля</h3>
+    <div class="field"><label>Текущий пароль</label><input id="curPass" type="password" placeholder="••••••••"></div>
+    <div class="field-row">
+      <div class="field"><label>Новый пароль</label><input id="newPass" type="password" placeholder="Минимум 8 символов"></div>
+      <div class="field"><label>Подтверждение</label><input id="confPass" type="password" placeholder="Повторите пароль"></div>
     </div>
-    <div class="form-group" style="margin:0">
-      <label>Base ID</label>
-      <input class="form-control" id="f-at-base" value="{{ airtable_base }}"
-             placeholder="appXXX" disabled style="opacity:.6">
-    </div>
-    <div class="form-group" style="margin:0">
-      <label>Table ID</label>
-      <input class="form-control" id="f-at-table" value="{{ airtable_table }}"
-             placeholder="tblXXX" disabled style="opacity:.6">
-    </div>
-  </div>
-  <div style="font-size:0.75rem;color:var(--text-muted);margin-top:8px">
-    Base и Table менять не нужно — они общие для всей команды.
-    Если нужна другая база — обратись к администратору.
+    <div id="pwStrength" style="font-size:.76rem;margin-bottom:12px;min-height:18px;"></div>
+    <button class="btn btn-primary" id="passBtn" onclick="changePassword()">🔑 Сменить пароль</button>
+    <div class="result" id="passResult"></div>
   </div>
 </div>
-
-<!-- K.Talk -->
-<div class="card" id="ktalk">
-  <h3 style="font-size:1rem;margin:0 0 4px">📹 K.Talk Уведомления</h3>
-  <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px">
-    Уведомления о встречах, чекапах и фолоуапах будут дублироваться в твой K.Talk канал.
-    Создай <b>Incoming Webhook</b> в K.Talk: Настройки канала → Интеграции → Входящие Webhooks.
-  </p>
-  <div style="display:flex;gap:10px;align-items:flex-end">
-    <div class="form-group" style="flex:1;margin:0">
-      <label>Webhook URL</label>
-      <input class="form-control" id="f-ktalk-webhook"
-             value="{{ profile.ktalk_webhook or '' }}"
-             placeholder="https://tbank.ktalk.ru/hooks/XXXXXXXX">
-    </div>
-    <button onclick="testKTalk()" class="btn btn-ghost btn-sm" id="ktalk-test-btn" style="margin-bottom:14px">
-      🔌 Проверить
-    </button>
-  </div>
-  <div id="ktalk-test-result" style="font-size:0.8rem;margin-top:4px"></div>
-</div>
-
-<!-- Сохранить -->
-<div style="display:flex;gap:10px;align-items:center">
-  <button onclick="saveProfile()" class="btn btn-primary" id="save-btn">
-    💾 Сохранить профиль
-  </button>
-  <div id="save-result" style="font-size:0.85rem"></div>
-</div>
-
-<!-- Импорт клиентов из Airtable -->
-<div class="card" style="margin-top:24px;border:1px solid var(--blue,#3b82f6)20">
-  <h3 style="font-size:1rem;margin:0 0 6px">📥 Импорт клиентов из Airtable</h3>
-  <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px">
-    Загружает всех клиентов из <b>CS ALL</b> view, авто-определяет поля (имя, сегмент, менеджер, site_id)
-    и добавляет их в базу. Клиенты автоматически привязываются к менеджерам по имени из профиля.
-    Повторный запуск безопасен — существующие клиенты обновляются, дублей не будет.
-  </p>
-  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <button onclick="importAirtable()" class="btn btn-primary" id="import-btn">
-      🔄 Импортировать из Airtable
-    </button>
-    <div id="import-status" style="font-size:0.85rem"></div>
-  </div>
-  <div id="import-result" style="margin-top:12px;font-size:0.82rem;display:none"></div>
-</div>
-
-<!-- Другие менеджеры (только если есть) -->
-{% if other_managers %}
-<div class="card" style="margin-top:24px">
-  <h3 style="font-size:1rem;margin:0 0 12px">👥 Команда ({{ other_managers|length + 1 }} менеджеров)</h3>
-  <div style="display:flex;flex-wrap:wrap;gap:10px">
-    <div style="background:var(--accent-glow);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;font-size:0.85rem">
-      👤 <b>{{ profile.display_name or user.name }}</b> <span style="color:var(--text-muted);font-size:0.75rem">(ты)</span>
-    </div>
-    {% for m in other_managers %}
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:0.85rem;color:var(--text-muted)">
-      👤 {{ m.display_name or '—' }}
-    </div>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-<style>
-.form-group { margin-bottom: 14px; }
-</style>
-
+<script src="/static/js/hub.js"></script>
 <script>
-function togglePass(id, btn) {
-  const el = document.getElementById(id);
-  const show = el.type === 'password';
-  el.type = show ? 'text' : 'password';
-  btn.textContent = show ? '🙈' : '👁';
+async function loadStats(){
+  try{
+    const r=await fetch('/api/analytics');
+    const d=await r.json();
+    if(d.total_clients!==undefined)document.getElementById('statClients').textContent=d.total_clients;
+    if(d.total_tasks!==undefined)document.getElementById('statTasks').textContent=d.total_tasks;
+    const months=Object.values(d.meetings_per_month||{});
+    document.getElementById('statMeetings').textContent=months.length?months[0]:0;
+  }catch(e){}
 }
-
-async function testMR() {
-  const login = document.getElementById('f-mr-login').value.trim();
-  const pass  = document.getElementById('f-mr-pass').value.trim();
-  const res   = document.getElementById('mr-test-result');
-  const btn   = document.getElementById('mr-test-btn');
-
-  if (!login || !pass) {
-    res.textContent = '⚠️ Введи логин и пароль';
-    res.style.color = 'var(--yellow)';
-    return;
-  }
-
-  btn.disabled = true;
-  res.textContent = '⏳ Проверяем...';
-  res.style.color = 'var(--text-muted)';
-
-  try {
-    const r = await fetch('/api/profile/test-mr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login, password: pass }),
-    });
-    const d = await r.json();
-    if (d.ok) {
-      res.textContent = '✅ Подключение успешно' + (d.email ? ` · ${d.email}` : '');
-      res.style.color = 'var(--green)';
-    } else {
-      res.textContent = '❌ ' + (d.error || 'Ошибка авторизации');
-      res.style.color = 'var(--red)';
-    }
-  } catch (e) {
-    res.textContent = '❌ ' + e.message;
-    res.style.color = 'var(--red)';
-  } finally {
-    btn.disabled = false;
-  }
+async function saveProfile(){
+  const btn=document.getElementById('saveBtn');btn.disabled=true;
+  const data={first_name:document.getElementById('firstName').value.trim(),last_name:document.getElementById('lastName').value.trim(),telegram_id:document.getElementById('telegramId').value.trim()};
+  try{
+    const r=await fetch('/api/profile/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const d=await r.json();
+    const el=document.getElementById('profileResult');
+    if(d.ok){el.className='result ok';el.textContent='✅ Сохранено';window.toast('Профиль обновлён','success');document.getElementById('avatarEl').textContent=(data.first_name||'?')[0].toUpperCase();}
+    else{el.className='result err';el.textContent='❌ '+d.error;window.toast(d.error,'error');}
+  }catch(e){window.toast('Ошибка сохранения','error');}
+  btn.disabled=false;
 }
-
-async function importAirtable() {
-  const btn    = document.getElementById('import-btn');
-  const status = document.getElementById('import-status');
-  const result = document.getElementById('import-result');
-
-  btn.disabled = true;
-  status.textContent = '⏳ Загружаем клиентов из Airtable...';
-  status.style.color = 'var(--text-muted)';
-  result.style.display = 'none';
-
-  try {
-    const r = await fetch('/api/admin/import-airtable', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const d = await r.json();
-
-    if (d.ok) {
-      status.textContent = `✅ Готово: ${d.created} клиентов импортировано`;
-      status.style.color = 'var(--green)';
-
-      let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px">`;
-      html += `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px"><div style="font-size:1.2rem;font-weight:600">${d.created}</div><div style="font-size:0.75rem;color:var(--text-muted)">Добавлено / обновлено</div></div>`;
-      html += `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px"><div style="font-size:1.2rem;font-weight:600">${d.managers_linked}</div><div style="font-size:0.75rem;color:var(--text-muted)">Привязано к менеджерам</div></div>`;
-      html += `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px"><div style="font-size:1.2rem;font-weight:600">${d.skipped}</div><div style="font-size:0.75rem;color:var(--text-muted)">Пропущено</div></div>`;
-      html += `</div>`;
-
-      // Определённые поля
-      if (d.field_map) {
-        html += `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px">`;
-        html += `Определены поля: `;
-        const fm = d.field_map;
-        const parts = [];
-        if (fm.name)    parts.push(`<b>имя</b> → ${fm.name}`);
-        if (fm.segment) parts.push(`<b>сегмент</b> → ${fm.segment}`);
-        if (fm.manager) parts.push(`<b>менеджер</b> → ${fm.manager}`);
-        if (fm.site_id) parts.push(`<b>site_id</b> → ${fm.site_id}`);
-        if (fm.checkup) parts.push(`<b>дата встречи</b> → ${fm.checkup}`);
-        html += parts.join(' · ') || '—';
-        html += `</div>`;
-      }
-
-      // Непривязанные менеджеры
-      const unmatched = d.unmatched_managers;
-      if (unmatched && Object.keys(unmatched).length) {
-        html += `<div style="background:var(--yellow-bg,#fef9c3);border:1px solid var(--yellow,#ca8a04)30;border-radius:6px;padding:10px 12px;font-size:0.8rem">`;
-        html += `⚠️ Менеджеры из Airtable не найдены в профилях AM Hub — клиенты добавлены без привязки:<br>`;
-        html += Object.entries(unmatched).map(([name, cnt]) => `<b>${name}</b> (${cnt} кл.)`).join(', ');
-        html += `<br><span style="color:var(--text-muted)">Попроси их войти и заполнить Имя в профиле, затем нажми «Импортировать» снова.</span></div>`;
-      }
-
-      if (d.errors && d.errors.length) {
-        html += `<div style="color:var(--red);font-size:0.78rem;margin-top:8px">Ошибки: ${d.errors.slice(0,5).join('; ')}</div>`;
-      }
-
-      result.innerHTML = html;
-      result.style.display = 'block';
-
-    } else {
-      status.textContent = '❌ ' + (d.error || 'Ошибка импорта');
-      status.style.color = 'var(--red)';
-      if (d.available_fields) {
-        result.innerHTML = `<div style="font-size:0.78rem;color:var(--text-muted)">Доступные поля в таблице: ${d.available_fields.join(', ')}</div>`;
-        result.style.display = 'block';
-      }
-    }
-  } catch (e) {
-    status.textContent = '❌ ' + e.message;
-    status.style.color = 'var(--red)';
-  } finally {
-    btn.disabled = false;
-  }
+async function changePassword(){
+  const btn=document.getElementById('passBtn');btn.disabled=true;
+  const data={current_password:document.getElementById('curPass').value,new_password:document.getElementById('newPass').value,confirm_password:document.getElementById('confPass').value};
+  try{
+    const r=await fetch('/api/profile/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const d=await r.json();
+    const el=document.getElementById('passResult');
+    if(d.ok){el.className='result ok';el.textContent='✅ Пароль изменён';window.toast('Пароль изменён','success');['curPass','newPass','confPass'].forEach(id=>document.getElementById(id).value='');}
+    else{el.className='result err';el.textContent='❌ '+d.error;window.toast(d.error,'error');}
+  }catch(e){window.toast('Ошибка','error');}
+  btn.disabled=false;
 }
-
-async function testKTalk() {
-  const url  = document.getElementById('f-ktalk-webhook').value.trim();
-  const res  = document.getElementById('ktalk-test-result');
-  const btn  = document.getElementById('ktalk-test-btn');
-  if (!url) { res.textContent = '⚠️ Введи Webhook URL'; res.style.color = 'var(--yellow)'; return; }
-  btn.disabled = true;
-  res.textContent = '⏳ Отправляю тест...';
-  try {
-    const r = await fetch('/api/profile/test-ktalk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ webhook_url: url }),
-    });
-    const d = await r.json();
-    if (d.ok) {
-      res.textContent = '✅ Сообщение отправлено в K.Talk!';
-      res.style.color = 'var(--green)';
-    } else {
-      res.textContent = '❌ ' + (d.error || 'Ошибка');
-      res.style.color = 'var(--red)';
-    }
-  } catch(e) {
-    res.textContent = '❌ ' + e.message;
-    res.style.color = 'var(--red)';
-  } finally { btn.disabled = false; }
-}
-
-async function saveProfile() {
-  const btn = document.getElementById('save-btn');
-  const res = document.getElementById('save-result');
-  btn.disabled = true;
-  res.textContent = '⏳ Сохраняем...';
-
-  try {
-    const r = await fetch('/api/profile/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        display_name:    document.getElementById('f-name').value.trim(),
-        mr_login:        document.getElementById('f-mr-login').value.trim(),
-        mr_password:     document.getElementById('f-mr-pass').value.trim(),
-        tg_notify_chat:  document.getElementById('f-notify').value.trim(),
-        airtable_token:  document.getElementById('f-at-token').value.trim(),
-        ktalk_webhook:   document.getElementById('f-ktalk-webhook').value.trim(),
-      }),
-    });
-    const d = await r.json();
-    if (d.ok) {
-      res.textContent = '✅ Сохранено';
-      res.style.color = 'var(--green)';
-    } else {
-      res.textContent = '❌ ' + (d.error || 'Ошибка');
-      res.style.color = 'var(--red)';
-    }
-  } catch (e) {
-    res.textContent = '❌ ' + e.message;
-    res.style.color = 'var(--red)';
-  } finally {
-    btn.disabled = false;
-  }
-}
+document.getElementById('newPass').addEventListener('input',function(){
+  const v=this.value;const el=document.getElementById('pwStrength');
+  if(!v){el.textContent='';return;}
+  let s=0;if(v.length>=8)s++;if(v.length>=12)s++;if(/[A-Z]/.test(v))s++;if(/[0-9]/.test(v))s++;if(/[^A-Za-z0-9]/.test(v))s++;
+  const labels=['','🔴 Слабый','🟡 Средний','🟡 Средний','🟢 Хороший','🟢 Надёжный'];
+  const colors=['','#ef4444','#eab308','#eab308','#22c55e','#22c55e'];
+  el.textContent=labels[s]||'';el.style.color=colors[s]||'';
+});
+loadStats();
 </script>
-
-{% endblock %}
+</body>
+</html>
