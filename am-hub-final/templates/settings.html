@@ -146,33 +146,27 @@
 
     <div class="section">
       <h3>⏱ Tbank Time (time.tbank.ru)</h3>
-      <p class="help" style="margin-bottom:10px;">
-        Авторизация через SSO Т-Банка — как в браузере: логин/пароль + SMS.
-        Нужна для чтения тикетов из канала <code style="background:var(--bg);padding:1px 5px;border-radius:4px;font-size:.78rem;">any-team-support</code>.
+      <p class="help" style="margin-bottom:12px;line-height:1.6;">
+        Personal Access Token — создаётся один раз, не истекает.<br>
+        Нужен для чтения тикетов из канала <code style="background:var(--surface-3);padding:1px 5px;border-radius:4px;font-size:.78rem;color:var(--accent-2)">any-team-support</code>.
       </p>
-      {% if tm.get('mmauthtoken') or tm.get('session_cookie') %}
-      <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.84rem;color:#22c55e;">
-        ✅ Подключено: {{ tm.get('username') or tm.get('email') or 'Tbank Time' }}
-        {% if tm.get('support_channel_id') %} · канал найден{% endif %}
+      {% if tm.get('mmauthtoken') or tm.get('session_cookie') or tm.get('api_token') %}
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;margin-bottom:14px;background:rgba(45,212,160,.06);border:1px solid rgba(45,212,160,.2);border-radius:9px;font-size:.84rem;color:#2dd4a0;">
+        <span style="width:7px;height:7px;border-radius:50%;background:#2dd4a0;box-shadow:0 0 6px #2dd4a0;flex-shrink:0;display:inline-block;"></span>
+        Подключено: <strong>{{ tm.get('username') or tm.get('email') or 'Tbank Time' }}</strong>
+        {% if tm.get('support_channel_id') %} · канал найден ✓{% endif %}
+        <a href="/auth/time" style="margin-left:auto;font-size:.75rem;color:#5a6080;text-decoration:none;" onmouseover="this.style.color='#f05252'" onmouseout="this.style.color='#5a6080'">Переподключить</a>
       </div>
       {% endif %}
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <a href="/auth/time" class="btn btn-sm" target="_blank">🔑 Войти через Tbank Time (SSO + SMS)</a>
-        {% if tm.get('mmauthtoken') %}
-        <button class="btn btn-sm" style="background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.25);" onclick="testTimeToken()">✓ Проверить токен</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <a href="/auth/time" target="_blank" class="btn btn-primary btn-sm">🔑 Подключить через PAT</a>
+        {% if tm.get('mmauthtoken') or tm.get('api_token') or tm.get('session_cookie') %}
+        <button class="btn btn-ghost btn-sm" onclick="testTimeToken()">✓ Проверить</button>
+        <button class="btn btn-danger btn-sm" onclick="disconnectTime()">✗ Отключить</button>
         {% endif %}
-      </div>
-      <div class="field" style="margin-top:12px;">
-        <label>Или вставьте MMAUTHTOKEN вручную <span style="color:var(--muted);font-weight:400;">(F12 → Cookies → MMAUTHTOKEN)</span></label>
-        <input id="tm-session" value="{{ tm.get('mmauthtoken') or tm.get('session_cookie', '') }}" placeholder="MMAUTHTOKEN из DevTools → Application → Cookies">
-        <div class="help">F12 → Application → Cookies → time.tbank.ru → MMAUTHTOKEN → Value</div>
-      </div>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-sm" onclick="saveTimeManual()">💾 Сохранить токен</button>
         <span id="tm-test-result" style="font-size:.82rem;"></span>
       </div>
     </div>
-
     <div class="section">
       {% set at = user_settings.get('airtable', {}) %}
       <h3>📊 Airtable</h3>
@@ -522,6 +516,12 @@ async function saveTimeManual(){
       el.style.color='var(--red)';el.textContent='❌ '+(d.error||'Ошибка');
     }
   }catch(e){el.style.color='var(--red)';el.textContent='❌ '+e.message;}
+}
+
+async function disconnectTime(){
+  if(!confirm('Отключить Tbank Time? Тикеты перестанут загружаться.')) return;
+  const r = await fetch('/api/auth/time/disconnect',{method:'POST'});
+  if(r.ok) location.reload();
 }
 
 async function testTimeToken(){

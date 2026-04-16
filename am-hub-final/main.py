@@ -1609,256 +1609,178 @@ async def api_test_taim(request: Request, auth_token: Optional[str] = Cookie(Non
 @app.get("/auth/time", response_class=HTMLResponse)
 async def time_oauth_start(request: Request, auth_token: Optional[str] = Cookie(None)):
     """
-    Запускает SSO авторизацию в Tbank Time (Mattermost + TinkoffID + SMS).
-
-    Флоу:
-    1. Открывает time.tbank.ru/oauth/tinkoff_id/login
-    2. TinkoffID SSO: логин + пароль + SMS
-    3. После входа MMAUTHTOKEN ставится в cookie на time.tbank.ru
-    4. Менеджер копирует токен через DevTools и вставляет в хаб
-
-    Автоматический перехват невозможен — MMAUTHTOKEN HttpOnly на чужом домене.
+    Страница подключения Tbank Time через Personal Access Token.
+    PAT не истекает — создаётся один раз, работает вечно.
     """
     if not auth_token:
         return RedirectResponse(url="/login")
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login")
+    from models import User
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+        u_settings = (user.settings or {}) if user else {}
+        tm = u_settings.get("tbank_time", {})
+        connected = bool(tm.get("mmauthtoken") or tm.get("api_token") or tm.get("session_cookie"))
+        username_saved = tm.get("username") or tm.get("email") or ""
+        channel_ok = bool(tm.get("support_channel_id"))
+    finally:
+        db.close()
 
-    # Показываем страницу-инструкцию вместо прямого редиректа
-    # (прямой редирект бесполезен — cookie не передаётся на наш домен)
-    return HTMLResponse(content="""<!DOCTYPE html>
+    status_html = ""
+    if connected:
+        status_html = f'''
+      <div class="status-connected">
+        <span class="dot-green status-dot"></span>
+        Подключено: <strong>{username_saved}</strong>
+        {' · канал найден ✓' if channel_ok else ''}
+        <a href="/api/auth/time/disconnect" onclick="return disconnectTime()" class="disconnect-link">Отключить</a>
+      </div>''' 
+
+    return HTMLResponse(f'''<!DOCTYPE html>
 <html lang="ru"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Войти в Tbank Time</title>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tbank Time — подключение</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;
-       display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;}
-  .card{background:#111827;border:1px solid #1e2a3a;border-radius:14px;
-        padding:28px 32px;max-width:500px;width:100%;}
-  h2{font-size:1.15rem;margin-bottom:6px;}
-  .sub{color:#64748b;font-size:.82rem;margin-bottom:20px;}
-  .step{display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;}
-  .step-num{background:#6366f1;color:#fff;border-radius:50%;width:24px;height:24px;
-            display:flex;align-items:center;justify-content:center;font-size:.75rem;
-            font-weight:700;flex-shrink:0;margin-top:1px;}
-  .step-text{font-size:.84rem;line-height:1.6;color:#cbd5e1;}
-  code{background:#0a0e1a;padding:2px 6px;border-radius:4px;color:#818cf8;font-size:.78rem;}
-  .open-btn{display:block;width:100%;padding:12px;background:#6366f1;color:#fff;border:none;
-            border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;text-align:center;
-            text-decoration:none;margin-bottom:16px;}
-  .open-btn:hover{opacity:.9;}
-  .divider{border:none;border-top:1px solid #1e2a3a;margin:16px 0;}
-  label{font-size:.8rem;color:#94a3b8;display:block;margin-bottom:6px;}
-  input{width:100%;padding:10px 12px;border-radius:7px;border:1px solid #1e2a3a;
-        background:#0a0e1a;color:#e2e8f0;font-size:.84rem;}
-  input:focus{border-color:#6366f1;outline:none;}
-  .save-btn{width:100%;margin-top:8px;padding:11px;background:#22c55e;color:#fff;
-            border:none;border-radius:7px;cursor:pointer;font-size:.86rem;font-weight:600;}
-  .save-btn:hover{opacity:.9;}
-  #result{margin-top:10px;font-size:.82rem;text-align:center;}
-  .ok{color:#22c55e;} .err{color:#ef4444;} .warn{color:#eab308;}
-  .help-link{color:#6366f1;font-size:.78rem;}
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'DM Sans',system-ui,sans-serif;background:#080b14;color:#eceef8;
+      display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}}
+.wrap{{max-width:480px;width:100%}}
+.logo{{display:flex;align-items:center;gap:10px;margin-bottom:28px}}
+.logo-mark{{width:32px;height:32px;background:linear-gradient(135deg,#6c63f5,#8b84ff);
+           border-radius:8px;display:flex;align-items:center;justify-content:center;
+           font-size:.75rem;font-weight:700;color:#fff;box-shadow:0 2px 10px rgba(108,99,245,.3)}}
+.logo-text{{font-size:.95rem;font-weight:700;color:#eceef8}}
+.logo-text span{{color:#8b84ff}}
+.card{{background:#0e1120;border:1px solid #1e2438;border-radius:14px;padding:28px 30px}}
+h2{{font-size:1.1rem;font-weight:700;margin-bottom:6px;letter-spacing:-.2px}}
+.sub{{font-size:.82rem;color:#5a6080;margin-bottom:22px;line-height:1.5}}
+.steps{{display:flex;flex-direction:column;gap:0;margin-bottom:20px;
+        background:#131628;border:1px solid #1a1f32;border-radius:10px;overflow:hidden}}
+.step{{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border-bottom:1px solid #161928}}
+.step:last-child{{border-bottom:none}}
+.step-n{{width:22px;height:22px;border-radius:50%;background:#6c63f5;
+         display:flex;align-items:center;justify-content:center;
+         font-size:.68rem;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px}}
+.step-body{{font-size:.83rem;line-height:1.55;color:#a8aec8}}
+.step-body strong{{color:#eceef8;font-weight:500}}
+code{{background:#0a0e1a;border:1px solid #1e2438;padding:1px 6px;border-radius:5px;
+      color:#8b84ff;font-family:'DM Mono',monospace;font-size:.78rem}}
+.open-btn{{display:flex;align-items:center;justify-content:center;gap:8px;
+           width:100%;padding:12px;background:#6c63f5;color:#fff;border:none;
+           border-radius:9px;font-size:.9rem;font-weight:600;cursor:pointer;
+           text-decoration:none;transition:all .12s;font-family:'DM Sans',sans-serif;
+           box-shadow:0 3px 12px rgba(108,99,245,.35);margin-bottom:18px}}
+.open-btn:hover{{background:#8b84ff;transform:translateY(-1px)}}
+label{{display:block;font-size:.75rem;font-weight:500;color:#5a6080;margin-bottom:5px;letter-spacing:.01em}}
+input{{width:100%;padding:9px 12px;background:#131628;border:1px solid #1e2438;
+       border-radius:8px;color:#eceef8;font-size:.855rem;font-family:'DM Sans',sans-serif;
+       outline:none;transition:border-color .12s,box-shadow .12s}}
+input:focus{{border-color:#6c63f5;box-shadow:0 0 0 3px rgba(108,99,245,.12)}}
+input::placeholder{{color:#343a5a}}
+.save-btn{{width:100%;margin-top:9px;padding:11px;background:#6c63f5;color:#fff;border:none;
+           border-radius:8px;cursor:pointer;font-size:.88rem;font-weight:600;
+           font-family:'DM Sans',sans-serif;transition:all .12s;
+           box-shadow:0 2px 8px rgba(108,99,245,.3)}}
+.save-btn:hover{{background:#8b84ff;transform:translateY(-1px)}}
+.save-btn:active{{transform:scale(.98)}}
+#result{{margin-top:10px;padding:10px 14px;border-radius:8px;font-size:.82rem;
+         display:none;line-height:1.5}}
+#result.ok{{display:block;background:rgba(45,212,160,.08);border:1px solid rgba(45,212,160,.2);color:#2dd4a0}}
+#result.err{{display:block;background:rgba(240,82,82,.08);border:1px solid rgba(240,82,82,.2);color:#f05252}}
+.status-connected{{display:flex;align-items:center;gap:7px;padding:10px 14px;
+                   margin-bottom:16px;background:rgba(45,212,160,.06);
+                   border:1px solid rgba(45,212,160,.2);border-radius:9px;
+                   font-size:.83rem;color:#2dd4a0}}
+.status-dot{{width:7px;height:7px;border-radius:50%;background:#2dd4a0;
+             box-shadow:0 0 6px #2dd4a0;flex-shrink:0}}
+.disconnect-link{{margin-left:auto;font-size:.75rem;color:#5a6080;text-decoration:none;cursor:pointer}}
+.disconnect-link:hover{{color:#f05252}}
+.back{{display:block;text-align:center;margin-top:16px;font-size:.8rem;color:#5a6080;text-decoration:none}}
+.back:hover{{color:#8b84ff}}
 </style>
-</head>
-<body><div class="card">
-  <h2>🔑 Подключение Tbank Time</h2>
-  <p class="sub">Нужен доступ к тикетам в канале <code>any-team-support</code></p>
+</head><body><div class="wrap">
+<div class="logo">
+  <div class="logo-mark">AM</div>
+  <div class="logo-text">AM<span>Hub</span></div>
+</div>
+<div class="card">
+  <h2>⏱ Подключение Tbank Time</h2>
+  <p class="sub">Personal Access Token — создаётся один раз, работает без повторных SMS-кодов</p>
+
+  {status_html}
 
   <a href="https://time.tbank.ru" target="_blank" class="open-btn">
-    🚀 Шаг 1: Открыть Tbank Time и войти
+    🚀 Открыть Tbank Time
   </a>
 
-  <div class="step">
-    <div class="step-num">1</div>
-    <div class="step-text">
-      Нажмите кнопку выше — откроется <strong>time.tbank.ru</strong><br>
-      Войдите через SSO Т-Банка: логин → пароль → SMS-код
+  <div class="steps">
+    <div class="step">
+      <div class="step-n">1</div>
+      <div class="step-body">Войдите в <strong>time.tbank.ru</strong> через SSO Т-Банка (логин → пароль → SMS)</div>
     </div>
-  </div>
-  <div class="step">
-    <div class="step-num">2</div>
-    <div class="step-text">
-      После входа нажмите <code>F12</code> → вкладка <code>Application</code> (Chrome)<br>
-      или <code>Storage</code> (Firefox)
+    <div class="step">
+      <div class="step-n">2</div>
+      <div class="step-body">Нажмите на аватар в левом углу → <strong>Настройки профиля</strong></div>
     </div>
-  </div>
-  <div class="step">
-    <div class="step-num">3</div>
-    <div class="step-text">
-      Слева: <code>Cookies</code> → <code>https://time.tbank.ru</code><br>
-      Найдите <code>MMAUTHTOKEN</code> → скопируйте значение из колонки <code>Value</code>
+    <div class="step">
+      <div class="step-n">3</div>
+      <div class="step-body">Раздел <strong>Безопасность</strong> → <strong>Personal Access Tokens</strong> → <code>+ Создать токен</code></div>
     </div>
-  </div>
-  <div class="step">
-    <div class="step-num">4</div>
-    <div class="step-text">
-      Вставьте скопированный токен в поле ниже и нажмите «Сохранить»
+    <div class="step">
+      <div class="step-n">4</div>
+      <div class="step-body">Дайте имя <code>amhub</code>, выберите права <strong>Read</strong> → скопируйте токен</div>
+    </div>
+    <div class="step">
+      <div class="step-n">5</div>
+      <div class="step-body">Вставьте токен ниже — и больше никаких SMS</div>
     </div>
   </div>
 
-  <hr class="divider">
-
-  <label>MMAUTHTOKEN (из DevTools → Cookies → time.tbank.ru)</label>
-  <input id="token-input" type="password"
-         placeholder="Вставьте MMAUTHTOKEN сюда...">
-  <button class="save-btn" onclick="saveToken()">💾 Сохранить и проверить</button>
+  <label>Personal Access Token</label>
+  <input id="token-input" type="password" placeholder="Вставьте Personal Access Token из time.tbank.ru...">
+  <button class="save-btn" onclick="saveToken()">✓ Подключить и проверить</button>
   <div id="result"></div>
-
-  <div style="margin-top:14px;text-align:center;">
-    <a href="/settings" class="help-link">← Вернуться в настройки</a>
-  </div>
+  <a href="/settings" class="back">← Вернуться в настройки</a>
+</div>
 </div>
 <script>
-async function saveToken() {
+async function saveToken() {{
   const token = document.getElementById('token-input').value.trim();
   const el = document.getElementById('result');
-  if (!token) {
-    el.className = 'err'; el.textContent = '❌ Вставьте токен'; return;
-  }
-  el.className = 'warn'; el.textContent = '⏳ Проверяем токен...';
-  try {
-    const r = await fetch('/api/auth/time/token', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token})
-    });
+  if (!token) {{ el.className='err'; el.textContent='❌ Вставьте токен'; return; }}
+  el.className=''; el.style.display='block'; el.textContent='⏳ Проверяем...'; el.style.color='#5a6080';
+  try {{
+    const r = await fetch('/api/auth/time/token', {{
+      method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{token}})
+    }});
     const d = await r.json();
-    if (d.ok) {
-      el.className = 'ok';
-      el.innerHTML = '✅ Подключено! Авторизован как: <strong>' +
-        (d.username || d.email || 'пользователь') + '</strong>' +
-        (d.channel_posts_count != null
-          ? '<br>Постов в any-team-support: <strong>' + d.channel_posts_count + '</strong>'
-          : '') +
-        '<br><br><a href="/settings" style="color:#6366f1">← В настройки</a>';
-    } else {
-      el.className = 'err';
-      el.textContent = '❌ ' + (d.error || 'Неверный токен');
-    }
-  } catch(e) {
-    el.className = 'err'; el.textContent = '❌ ' + e.message;
-  }
-}
-
-// Ctrl+Enter для сохранения
-document.getElementById('token-input').addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveToken();
-});
-</script>
-</body></html>""")
-
-
-@app.get("/auth/time/callback", response_class=HTMLResponse)
-async def time_oauth_callback(request: Request, auth_token: Optional[str] = Cookie(None)):
-    """
-    Callback после SSO в Tbank Time.
-    Mattermost ставит MMAUTHTOKEN в cookie — JS читает и отправляет на бэкенд.
-    Если cookie недоступен из JS (HttpOnly) — показываем инструкцию взять вручную.
-    """
-    return HTMLResponse(content="""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Tbank Time — авторизация</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;
-       display:flex;align-items:center;justify-content:center;min-height:100vh;}
-  .card{background:#111827;border:1px solid #1e2a3a;border-radius:14px;
-        padding:32px 40px;text-align:center;max-width:480px;width:90%;}
-  h2{font-size:1.2rem;margin-bottom:10px;}
-  p{color:#64748b;font-size:.84rem;line-height:1.6;}
-  .ok{color:#22c55e;} .err{color:#ef4444;} .warn{color:#eab308;}
-  .btn{display:inline-block;margin-top:14px;padding:10px 20px;
-       background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-size:.85rem;}
-  .steps{margin-top:16px;background:#1e2a3a;border-radius:8px;padding:14px;text-align:left;}
-  .steps p{color:#94a3b8;font-size:.78rem;margin-bottom:8px;}
-  .steps ol{padding-left:16px;}
-  .steps li{color:#94a3b8;font-size:.78rem;margin-bottom:6px;line-height:1.5;}
-  .steps code{background:#0a0e1a;padding:2px 6px;border-radius:4px;color:#818cf8;font-size:.75rem;}
-  input{width:100%;padding:9px 12px;margin-top:10px;border-radius:7px;
-        border:1px solid #1e2a3a;background:#0a0e1a;color:#e2e8f0;font-size:.83rem;}
-  .save-btn{width:100%;margin-top:8px;padding:10px;background:#22c55e;color:#fff;
-            border:none;border-radius:7px;cursor:pointer;font-size:.84rem;font-weight:500;}
-  .save-btn:hover{opacity:.9;}
-</style></head>
-<body><div class="card">
-  <h2 id="title">⏳ Проверяем авторизацию...</h2>
-  <p id="msg"></p>
-  <div id="manual-block" style="display:none">
-    <div class="steps">
-      <p><strong>Скопируйте токен из браузера:</strong></p>
-      <ol>
-        <li>Убедитесь что вы вошли на <a href="https://time.tbank.ru" target="_blank" style="color:#6366f1">time.tbank.ru</a></li>
-        <li>Нажмите <code>F12</code> → вкладка <code>Application</code></li>
-        <li>Слева: <code>Cookies</code> → <code>https://time.tbank.ru</code></li>
-        <li>Найдите <code>MMAUTHTOKEN</code> → скопируйте <code>Value</code></li>
-      </ol>
-    </div>
-    <input id="token-input" placeholder="Вставьте MMAUTHTOKEN сюда...">
-    <button class="save-btn" onclick="saveToken()">💾 Сохранить и подключить</button>
-    <p id="save-result" style="margin-top:8px;font-size:.8rem;"></p>
-  </div>
-  <div id="success-block" style="display:none">
-    <a href="/settings" class="btn">← Вернуться в настройки</a>
-  </div>
-</div>
-<script>
-async function tryAutoToken() {
-  // Пробуем читать cookie (работает только если не HttpOnly)
-  const cookies = Object.fromEntries(
-    document.cookie.split('; ').map(c => c.split('=').map(decodeURIComponent))
-  );
-  const token = cookies['MMAUTHTOKEN'];
-  if (token) {
-    await saveTokenValue(token);
-    return;
-  }
-  // HttpOnly — не можем читать из JS, показываем инструкцию
-  showManual('Токен защищён (HttpOnly). Скопируйте его вручную:');
-}
-
-async function saveToken() {
-  const token = document.getElementById('token-input').value.trim();
-  if (!token) {
-    document.getElementById('save-result').textContent = '❌ Вставьте токен';
-    document.getElementById('save-result').style.color = 'var(--red, #ef4444)';
-    return;
-  }
-  await saveTokenValue(token);
-}
-
-async function saveTokenValue(token) {
-  document.getElementById('title').textContent = '⏳ Проверяем токен...';
-  try {
-    const r = await fetch('/api/auth/time/token', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token})
-    });
-    const d = await r.json();
-    if (d.ok) {
-      document.getElementById('title').textContent = '✅ Tbank Time подключён!';
-      document.getElementById('msg').innerHTML =
-        'Авторизован как: <b>' + (d.username || d.email || '') + '</b>' +
-        (d.channel_posts_count ? '<br>Постов в канале any-team-support: <b>' + d.channel_posts_count + '</b>' : '');
-      document.getElementById('msg').className = 'ok';
-      document.getElementById('manual-block').style.display = 'none';
-      document.getElementById('success-block').style.display = 'block';
-    } else {
-      showManual('Ошибка: ' + (d.error || 'Не удалось подключиться'));
-    }
-  } catch(e) {
-    showManual('Ошибка: ' + e.message);
-  }
-}
-
-function showManual(msg) {
-  document.getElementById('title').textContent = '🔑 Требуется токен';
-  document.getElementById('msg').textContent = msg;
-  document.getElementById('msg').className = 'warn';
-  document.getElementById('manual-block').style.display = 'block';
-}
-
-tryAutoToken();
-</script></body></html>""")
+    if (d.ok) {{
+      el.className='ok';
+      el.innerHTML = '✅ Подключено! Авторизован как: <strong>' + (d.username||d.email||'?') + '</strong>' +
+        (d.channel_ok ? '<br>✓ Канал any-team-support найден' : '<br>⚠️ Канал не найден — проверьте доступ') +
+        '<br><br><a href="/settings" style="color:#8b84ff">← Вернуться в настройки</a>';
+    }} else {{
+      el.className='err'; el.textContent='❌ ' + (d.error||'Неверный токен');
+    }}
+  }} catch(e) {{ el.className='err'; el.textContent='❌ ' + e.message; }}
+}}
+function disconnectTime() {{
+  if (!confirm('Отключить Tbank Time?')) return false;
+  fetch('/api/auth/time/disconnect', {{method:'POST'}})
+    .then(() => location.reload());
+  return false;
+}}
+document.getElementById('token-input').addEventListener('keydown', e => {{
+  if ((e.ctrlKey||e.metaKey) && e.key==='Enter') saveToken();
+}});
+</script></body></html>''')
 
 
 @app.post("/api/auth/time/token")
@@ -1967,6 +1889,32 @@ async def api_time_save_token(
         "channel_id": channel_id,
         "channel_posts_count": channel_posts_count,
     }
+
+
+@app.post("/api/auth/time/disconnect")
+async def api_time_disconnect(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Отключить Tbank Time — удалить токен из user.settings."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    settings = dict(user.settings or {})
+    settings["tbank_time"] = {}
+    from sqlalchemy.orm.attributes import flag_modified
+    user.settings = settings
+    flag_modified(user, "settings")
+    db.commit()
+    return {"ok": True}
+
 
 
 @app.post("/api/auth/ktalk/test")
