@@ -96,6 +96,25 @@
     {% set tg = user_settings.get('telegram', {}) %}
     {% set kt = user_settings.get('ktalk', {}) %}
     {% set tm = user_settings.get('tbank_time', {}) %}
+
+    <div class="section">
+      <h3>🗺️ Merchrules (Roadmap)</h3>
+      <p class="help" style="margin-bottom:10px;">Ваши личные креды для синхронизации клиентов и задач.</p>
+      {% if mr.get('login') %}
+      <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.84rem;color:#22c55e;">
+        ✅ Сохранено: {{ mr.get('login') }}
+      </div>
+      {% endif %}
+      <div class="field-row">
+        <div class="field"><label>Email / Логин</label><input id="mr-login" value="{{ mr.get('login', '') }}" placeholder="you@company.ru"></div>
+        <div class="field"><label>Пароль</label><input id="mr-pass" type="password" value="{{ mr.get('password', '') }}" placeholder="••••••••"></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-sm" onclick="testMR()">🔍 Проверить подключение</button>
+        <button class="btn btn-sm" style="background:var(--accent)" onclick="syncMR()">🔄 Синхронизировать сейчас</button>
+        <span id="mr-test-result" style="font-size:.82rem;"></span>
+      </div>
+    </div>
     <div class="section">
       <h3>💬 KTalk (tbank.ktalk.ru)</h3>
       <p class="help" style="margin-bottom:10px;">Авторизация через браузер — безопасно, пароль не передаётся в AM Hub.</p>
@@ -342,10 +361,52 @@ function showSaved(id){
 
 async function saveCreds(){
   const data={
+    merchrules:{login:document.getElementById('mr-login').value, password:document.getElementById('mr-pass').value},
     tbank_time:{login:document.getElementById('tm-login').value,password:document.getElementById('tm-pass').value},
   };
   const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   if(r.ok) showSaved('saved-creds');
+}
+
+async function testMR(){
+  const el=document.getElementById('mr-test-result');
+  const login=document.getElementById('mr-login').value;
+  const pass=document.getElementById('mr-pass').value;
+  if(!login||!pass){el.textContent='❌ Введите логин и пароль';el.style.color='var(--red)';return;}
+  el.textContent='⏳ Проверяем...';el.style.color='var(--muted)';
+  // Сначала сохраняем
+  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({merchrules:{login,password:pass}})});
+  // Потом диагностируем
+  try{
+    const r=await fetch('/api/diagnostics/merchrules-auth',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({login,password:pass})});
+    const d=await r.json();
+    if(d.ok){el.textContent='✅ Подключено! ('+d.working.url+')';el.style.color='var(--green)';}
+    else{
+      const first=d.all&&d.all[0];
+      el.textContent='❌ '+(first?'HTTP '+first.status+': '+first.response?.slice(0,80):'Ошибка подключения');
+      el.style.color='var(--red)';
+    }
+  }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
+}
+
+async function syncMR(){
+  const el=document.getElementById('mr-test-result');
+  const login=document.getElementById('mr-login').value;
+  const pass=document.getElementById('mr-pass').value;
+  if(!login||!pass){el.textContent='❌ Введите логин и пароль';el.style.color='var(--red)';return;}
+  el.textContent='⏳ Синхронизируем...';el.style.color='var(--muted)';
+  // Сохраняем креды
+  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({merchrules:{login,password:pass}})});
+  try{
+    const r=await fetch('/api/sync/merchrules',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({login,password:pass})});
+    const d=await r.json();
+    if(d.ok){el.textContent='✅ '+d.message;el.style.color='var(--green)';}
+    else{el.textContent='❌ '+d.error+(d.endpoints_tried?'\n'+d.endpoints_tried.join('\n'):'');el.style.color='var(--red)';}
+  }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
 }
 
 async function disconnectKTalk(){

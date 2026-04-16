@@ -1235,6 +1235,35 @@ async def api_get_token(db: Session = Depends(get_db), auth_token: Optional[str]
     return {"token": auth_token}
 
 
+@app.post("/api/sync/airtable")
+async def api_sync_airtable(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Синхронизация клиентов из Airtable → локальная БД."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from airtable_sync import sync_clients_from_airtable
+    body = await request.json()
+    token = body.get("token") or os.environ.get("AIRTABLE_TOKEN", "")
+    view_id = body.get("view_id", "")
+
+    result = await sync_clients_from_airtable(
+        db=db,
+        token=token,
+        view_id=view_id,
+        default_manager_email=user.email,
+    )
+    return result
+
+
 @app.post("/api/sync/merchrules")
 async def api_sync_merchrules(
     request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
