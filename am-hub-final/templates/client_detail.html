@@ -8,162 +8,396 @@
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
-    .main { max-width:1000px; margin:0 auto; padding:24px; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { max-width:1100px; margin:0 auto; padding:24px; }
     a { color:var(--accent); text-decoration:none; }
     .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
     .back:hover { color:var(--text); }
-    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
-    .header h1 { font-size:1.4rem; }
-    .header .meta { color:var(--muted); font-size:.82rem; }
-    .tabs { display:flex; gap:8px; margin-bottom:20px; }
-    .tab { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
-    .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-    .tab:hover { border-color:var(--accent); color:var(--text); }
-    .section { margin-bottom:24px; }
-    .section h2 { font-size:1rem; font-weight:600; margin-bottom:12px; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; }
+    .header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:12px; }
+    .header h1 { font-size:1.5rem; font-weight:700; }
+    .header-meta { display:flex; gap:8px; align-items:center; margin-top:4px; flex-wrap:wrap; }
+    .seg-badge { padding:3px 10px; border-radius:20px; font-size:.72rem; font-weight:700; background:rgba(99,102,241,.15); color:#818cf8; }
+    .health-bar { height:6px; border-radius:3px; background:var(--border); width:80px; overflow:hidden; }
+    .health-fill { height:100%; border-radius:3px; }
+    .action-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:24px; }
+    .tabs { display:flex; gap:6px; margin-bottom:20px; border-bottom:1px solid var(--border); }
+    .tab { padding:8px 16px; border-radius:8px 8px 0 0; font-size:.82rem; cursor:pointer; border:1px solid transparent; background:transparent; color:var(--muted); transition:all .15s; border-bottom:none; position:relative; bottom:-1px; }
+    .tab.active { background:var(--card); border-color:var(--border); border-bottom-color:var(--card); color:var(--text); font-weight:600; }
+    .tab-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; border-radius:9px; font-size:.65rem; font-weight:700; background:var(--accent); color:#fff; padding:0 5px; margin-left:6px; }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; transition:border-color .15s; }
+    .card:hover { border-color:rgba(99,102,241,.3); }
     .card h3 { font-size:.88rem; font-weight:600; margin-bottom:4px; }
-    .card p { font-size:.82rem; color:var(--muted); }
-    .card .meta { font-size:.72rem; color:var(--muted); margin-top:4px; display:flex; gap:12px; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .meta { font-size:.72rem; color:var(--muted); margin-top:6px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:700; }
     .b-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
     .b-in-progress { background:rgba(168,85,247,.15); color:#c084fc; }
+    .b-review { background:rgba(234,179,8,.15); color:#fbbf24; }
     .b-done { background:rgba(34,197,94,.15); color:#4ade80; }
     .b-blocked { background:rgba(239,68,68,.15); color:#f87171; }
-    .btn { padding:6px 12px; border-radius:8px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:4px; }
-    .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
+    .btn { padding:7px 14px; border-radius:8px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; display:inline-flex; align-items:center; gap:5px; }
+    .btn:hover { border-color:var(--accent); color:var(--accent); }
     .btn-p { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-p:hover { opacity:.9; color:#fff; }
+    .btn-sm { padding:4px 10px; font-size:.72rem; }
+    .btn-ghost { background:transparent; border-color:transparent; color:var(--muted); }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    /* Tasks */
+    .task-row { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:6px; transition:all .15s; }
+    .task-row:hover { border-color:rgba(99,102,241,.3); }
+    .task-status-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .dot-plan { background:#60a5fa; }
+    .dot-in_progress { background:#c084fc; }
+    .dot-review { background:#fbbf24; }
+    .dot-done { background:#4ade80; }
+    .dot-blocked { background:#f87171; box-shadow:0 0 6px #f87171; }
+    .task-title { flex:1; font-size:.85rem; font-weight:500; }
+    .task-title.done-strike { text-decoration:line-through; opacity:.5; }
+    .task-actions { display:flex; gap:6px; opacity:0; transition:opacity .15s; }
+    .task-row:hover .task-actions { opacity:1; }
+    .status-select { font-size:.72rem; border:1px solid var(--border); background:var(--bg); color:var(--text); border-radius:6px; padding:3px 6px; cursor:pointer; }
+    .task-updating { opacity:.5; pointer-events:none; }
+    /* Quick note */
+    .quick-note-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:16px; }
+    .quick-note-wrap textarea { width:100%; min-height:60px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; resize:vertical; outline:none; font-family:inherit; transition:border-color .15s; }
+    .quick-note-wrap textarea:focus { border-color:var(--accent); }
+    .quick-note-actions { display:flex; gap:8px; margin-top:8px; align-items:center; }
+    /* Notes */
+    .note-card { display:flex; gap:12px; padding:12px 14px; background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:6px; transition:border-color .15s; }
+    .note-card:hover { border-color:rgba(99,102,241,.3); }
+    .note-card.pinned { border-left:3px solid var(--yellow); }
+    .note-body { flex:1; }
+    .note-text { font-size:.84rem; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+    .note-footer { display:flex; gap:10px; margin-top:6px; align-items:center; }
+    .note-actions { display:flex; gap:4px; opacity:0; transition:opacity .15s; }
+    .note-card:hover .note-actions { opacity:1; }
+    /* Timeline */
+    .timeline-filters { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+    .tl-filter { padding:4px 12px; border-radius:20px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
+    .tl-filter.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .tl-item { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid rgba(30,42,58,.6); }
+    .tl-item:last-child { border-bottom:none; }
+    .tl-left { display:flex; flex-direction:column; align-items:center; min-width:52px; }
+    .tl-date { font-size:.68rem; color:var(--muted); text-align:center; line-height:1.3; }
+    .tl-dot { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.9rem; margin-top:4px; }
+    .tl-line { flex:1; width:1px; background:var(--border); margin-top:4px; min-height:16px; }
+    .tl-body { flex:1; padding-bottom:4px; }
+    .tl-title { font-size:.84rem; font-weight:600; margin-bottom:3px; }
+    .tl-desc { font-size:.76rem; color:var(--muted); line-height:1.5; }
+    /* Meetings */
+    .meeting-card { background:var(--card); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:10px; padding:12px 14px; margin-bottom:8px; }
+    /* Empty */
+    .empty { text-align:center; padding:48px 20px; color:var(--muted); }
+    .empty-icon { font-size:2.5rem; margin-bottom:12px; }
+    /* Toast */
+    .toast { position:fixed; bottom:24px; right:24px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 18px; font-size:.84rem; z-index:9999; box-shadow:0 8px 24px rgba(0,0,0,.3); transition:opacity .3s; }
+    .toast.ok { border-color:var(--green); color:var(--green); }
+    .toast.err { border-color:var(--red); color:var(--red); }
   </style>
 </head>
 <body>
 <button class="theme-btn" onclick="toggleTheme()">🌓</button>
 <div class="main">
   <a href="/clients" class="back">← Клиенты</a>
+
   <div class="header">
     <div>
       <h1>{{ client.name }}</h1>
-      <div class="meta">{{ client.segment or '—' }} · {{ client.manager_email or '—' }}</div>
+      <div class="header-meta">
+        {% if client.segment %}<span class="seg-badge">{{ client.segment }}</span>{% endif %}
+        {% if client.manager_email %}<span style="color:var(--muted);font-size:.78rem;">{{ client.manager_email }}</span>{% endif %}
+        {% if client.health_score %}
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:.75rem;color:var(--muted);">Health</span>
+          <div class="health-bar"><div class="health-fill" style="width:{{ (client.health_score * 100)|int }}%;background:{% if client.health_score > 0.7 %}var(--green){% elif client.health_score > 0.4 %}var(--yellow){% else %}var(--red){% endif %}"></div></div>
+          <span style="font-size:.75rem;color:var(--muted);">{{ (client.health_score * 100)|int }}%</span>
+        </div>
+        {% endif %}
+        {% if client.last_meeting_date %}
+        <span style="font-size:.75rem;color:var(--muted);">Контакт: {{ client.last_meeting_date.strftime('%d.%m.%Y') }}</span>
+        {% endif %}
+      </div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <div class="action-bar">
       <a href="/prep/{{ client.id }}" class="btn btn-p">📋 Prep</a>
       <a href="/followup/{{ client.id }}" class="btn">✍️ Followup</a>
-      <a href="/onboarding/{{ client.id }}" class="btn">🚀 Онбординг</a>
       <a href="/client/{{ client.id }}/plan" class="btn">📐 План</a>
       <a href="/client/{{ client.id }}/qbr" class="btn">📊 QBR</a>
     </div>
   </div>
 
-  <div class="tabs">
-    <button class="tab active" onclick="showTab('tasks',this)">📋 Задачи ({{ tasks|length }})</button>
-    <button class="tab" onclick="showTab('meetings',this)">📅 Встречи ({{ meetings|length }})</button>
-    <button class="tab" onclick="showTab('notes',this)">📝 Заметки</button>
-    <button class="tab" onclick="showTab('timeline',this)">📜 Таймлайн</button>
+  <!-- Быстрая заметка -->
+  <div class="quick-note-wrap">
+    <textarea id="quick-note-input" placeholder="💬 Быстрая заметка… (Ctrl+Enter для сохранения)"></textarea>
+    <div class="quick-note-actions">
+      <button class="btn btn-p btn-sm" onclick="addQuickNote()">💾 Сохранить</button>
+      <label style="display:flex;align-items:center;gap:5px;font-size:.76rem;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="quick-note-pin"> 📌 Закрепить
+      </label>
+      <span id="quick-note-saved" style="font-size:.76rem;color:var(--green);display:none;">✅ Сохранено</span>
+    </div>
   </div>
 
-  <div id="tab-tasks" class="tab-content">
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('tasks',this)">✅ Задачи <span class="tab-badge">{{ tasks|length }}</span></button>
+    <button class="tab" onclick="showTab('meetings',this)">📅 Встречи <span class="tab-badge">{{ meetings|length }}</span></button>
+    <button class="tab" onclick="showTab('notes',this)">📝 Заметки <span class="tab-badge" id="badge-notes">0</span></button>
+    <button class="tab" onclick="showTab('timeline',this)">📜 История</button>
+  </div>
+
+  <!-- ЗАДАЧИ -->
+  <div id="tab-tasks" class="tab-content active">
     {% if tasks %}
     {% for t in tasks %}
-    <div class="card">
-      <h3>{{ t.title }}</h3>
-      {% if t.description %}<p>{{ t.description[:200] }}</p>{% endif %}
-      <div class="meta">
-        <span class="badge b-{{ t.status|replace('_','-') }}">{{ t.status }}</span>
-        <span>{{ t.priority }}</span>
-        {% if t.due_date %}<span>До: {{ t.due_date.strftime('%d.%m.%Y') }}</span>{% endif %}
-        {% if t.team %}<span>Команда: {{ t.team }}</span>{% endif %}
+    <div class="task-row" id="task-{{ t.id }}" data-status="{{ t.status }}">
+      <div class="task-status-dot dot-{{ t.status }}"></div>
+      <div class="task-title {% if t.status == 'done' %}done-strike{% endif %}">
+        {{ t.title }}
+        {% if t.team %}<span style="font-size:.68rem;color:var(--muted);margin-left:6px;">[{{ t.team }}]</span>{% endif %}
+      </div>
+      {% if t.due_date %}
+      <span style="font-size:.72rem;color:var(--muted);">{{ t.due_date.strftime('%d.%m') }}</span>
+      {% endif %}
+      <div class="task-actions">
+        <select class="status-select" onchange="updateTaskStatus({{ t.id }}, this.value, this)">
+          <option value="plan" {% if t.status=='plan' %}selected{% endif %}>📝 Plan</option>
+          <option value="in_progress" {% if t.status=='in_progress' %}selected{% endif %}>🔄 In Progress</option>
+          <option value="review" {% if t.status=='review' %}selected{% endif %}>👀 Review</option>
+          <option value="done" {% if t.status=='done' %}selected{% endif %}>✅ Done</option>
+          <option value="blocked" {% if t.status=='blocked' %}selected{% endif %}>🔴 Blocked</option>
+        </select>
+        {% if not t.pushed_to_roadmap and client.merchrules_account_id %}
+        <button class="btn btn-sm btn-ghost" onclick="pushToRoadmap({{ t.id }}, this)" title="Push в Merchrules">🚀</button>
+        {% endif %}
       </div>
     </div>
     {% endfor %}
     {% else %}
-    <div style="text-align:center;padding:40px;color:var(--muted);">Нет задач</div>
+    <div class="empty"><div class="empty-icon">✅</div><div class="empty-text">Задач нет</div></div>
     {% endif %}
   </div>
 
-  <div id="tab-meetings" class="tab-content" style="display:none;">
+  <!-- ВСТРЕЧИ -->
+  <div id="tab-meetings" class="tab-content">
     {% if meetings %}
     {% for m in meetings %}
-    <div class="card">
-      <h3>{{ m.title or m.type }}</h3>
-      {% if m.summary %}<p>{{ m.summary[:200] }}</p>{% endif %}
-      <div class="meta">
-        <span>{{ m.date.strftime('%d.%m.%Y %H:%M') if m.date else '' }}</span>
-        <span class="badge b-plan">{{ m.type }}</span>
+    <div class="meeting-card" style="border-left-color:{% if m.type=='qbr' %}#6366f1{% elif m.type=='checkup' %}#22c55e{% elif m.type=='kickoff' %}#f97316{% else %}#64748b{% endif %}">
+      <div style="display:flex;justify-content:space-between;align-items:start;">
+        <div>
+          <div style="font-size:.88rem;font-weight:600;">{{ m.title or m.type|upper }}</div>
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">📅 {{ m.date.strftime('%d.%m.%Y %H:%M') if m.date else '—' }} · <span class="badge b-plan">{{ m.type }}</span></div>
+        </div>
+        {% if m.recording_url %}
+        <a href="{{ m.recording_url }}" target="_blank" class="btn btn-sm">▶️ Запись</a>
+        {% endif %}
       </div>
+      {% if m.summary %}<p style="margin-top:8px;font-size:.82rem;color:var(--muted);">{{ m.summary[:200] }}</p>{% endif %}
+      {% if m.followup_status == 'sent' %}
+      <div style="font-size:.75rem;color:var(--green);margin-top:6px;">✅ Фолоуап отправлен</div>
+      {% elif m.followup_status == 'pending' %}
+      <div style="font-size:.75rem;margin-top:6px;"><a href="/followup/{{ client.id }}" style="color:var(--yellow);">⚠️ Написать фолоуап</a></div>
+      {% endif %}
     </div>
     {% endfor %}
     {% else %}
-    <div style="text-align:center;padding:40px;color:var(--muted);">Нет встреч</div>
+    <div class="empty"><div class="empty-icon">📅</div><div class="empty-text">Встреч нет</div></div>
     {% endif %}
   </div>
 
-  <!-- Notes Tab -->
-  <div id="tab-notes" class="tab-content" style="display:none;">
-    <div id="notes-list"></div>
-    <div style="margin-top:12px;">
-      <div class="field"><textarea id="new-note" placeholder="Новая заметка..." style="width:100%;min-height:60px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;resize:vertical;outline:none;"></textarea></div>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button class="btn btn-sm" onclick="addNote()">💾 Сохранить</button>
-        <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--muted);cursor:pointer;"><input type="checkbox" id="note-pinned"> 📌 Закрепить</label>
-      </div>
+  <!-- ЗАМЕТКИ -->
+  <div id="tab-notes" class="tab-content">
+    <div id="notes-list">
+      <div class="empty"><div class="empty-icon">📝</div><div class="empty-text">Загрузка…</div></div>
     </div>
   </div>
 
-  <!-- Timeline Tab -->
-  <div id="tab-timeline" class="tab-content" style="display:none;">
-    <div id="timeline-list" style="text-align:center;padding:20px;color:var(--muted);">Загрузка...</div>
+  <!-- ИСТОРИЯ (TIMELINE) -->
+  <div id="tab-timeline" class="tab-content">
+    <div class="timeline-filters">
+      <button class="tl-filter active" onclick="filterTimeline('all',this)">Все</button>
+      <button class="tl-filter" onclick="filterTimeline('meeting',this)">📅 Встречи</button>
+      <button class="tl-filter" onclick="filterTimeline('task',this)">✅ Задачи</button>
+      <button class="tl-filter" onclick="filterTimeline('note',this)">📝 Заметки</button>
+    </div>
+    <div id="timeline-list">
+      <div class="empty"><div class="empty-icon">📜</div><div class="empty-text">Загрузка…</div></div>
+    </div>
   </div>
+
 </div>
 
 <script>
 const clientId = {{ client.id }};
-function showTab(id,btn){document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');document.getElementById('tab-'+id).style.display='block';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(id==='notes')loadNotes();if(id==='timeline')loadTimeline();}
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
 
+function toggleTheme(){const h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='light'?'dark':'light');localStorage.setItem('theme',h.getAttribute('data-theme'));}
+const _t=localStorage.getItem('theme');if(_t)document.documentElement.setAttribute('data-theme',_t);
+
+function showTab(id,btn){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+  if(id==='notes') loadNotes();
+  if(id==='timeline') loadTimeline();
+}
+
+function toast(msg,type='ok'){
+  const el=document.createElement('div');
+  el.className='toast '+type;el.textContent=msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.style.opacity='0',2500);
+  setTimeout(()=>el.remove(),3000);
+}
+
+function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// Быстрая заметка
+document.getElementById('quick-note-input').addEventListener('keydown',e=>{
+  if(e.ctrlKey&&e.key==='Enter') addQuickNote();
+});
+
+async function addQuickNote(){
+  const content=document.getElementById('quick-note-input').value.trim();
+  if(!content) return;
+  const pinned=document.getElementById('quick-note-pin').checked;
+  try{
+    const r=await fetch('/api/clients/'+clientId+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,pinned})});
+    if(r.ok){
+      document.getElementById('quick-note-input').value='';
+      document.getElementById('quick-note-pin').checked=false;
+      const s=document.getElementById('quick-note-saved');s.style.display='inline';setTimeout(()=>s.style.display='none',2000);
+      if(document.getElementById('tab-notes').classList.contains('active')) loadNotes();
+      loadNotesBadge();
+    }
+  }catch(e){toast('Ошибка','err');}
+}
+
+// Задачи real-time
+async function updateTaskStatus(taskId,newStatus,sel){
+  const row=document.getElementById('task-'+taskId);
+  row.classList.add('task-updating');
+  try{
+    const r=await fetch('/api/tasks/'+taskId+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})});
+    if(r.ok){
+      row.querySelector('.task-status-dot').className='task-status-dot dot-'+newStatus;
+      row.dataset.status=newStatus;
+      const title=row.querySelector('.task-title');
+      if(newStatus==='done') title.classList.add('done-strike'); else title.classList.remove('done-strike');
+      toast(newStatus==='done'?'✅ Задача выполнена':'🔄 Статус обновлён');
+    } else {sel.value=row.dataset.status;toast('Ошибка','err');}
+  }catch(e){sel.value=row.dataset.status;toast('Ошибка','err');}
+  row.classList.remove('task-updating');
+}
+
+async function pushToRoadmap(taskId,btn){
+  btn.disabled=true;btn.textContent='⏳';
+  try{
+    const r=await fetch('/api/tasks/'+taskId+'/push-roadmap',{method:'POST'});
+    const d=await r.json();
+    if(d.ok){btn.textContent='✅';toast('Отправлено в Roadmap');}
+    else{btn.textContent='❌';toast(d.error||'Ошибка','err');}
+  }catch(e){btn.textContent='❌';}
+}
+
+// Polling задач каждые 30 сек
+async function pollTasks(){
+  try{
+    const r=await fetch('/api/clients/'+clientId+'/tasks-status');
+    if(!r.ok) return;
+    const d=await r.json();
+    for(const t of (d.tasks||[])){
+      const row=document.getElementById('task-'+t.id);
+      if(!row||row.dataset.status===t.status) continue;
+      row.querySelector('.task-status-dot').className='task-status-dot dot-'+t.status;
+      row.dataset.status=t.status;
+      const sel=row.querySelector('.status-select');if(sel) sel.value=t.status;
+      const title=row.querySelector('.task-title');
+      if(t.status==='done') title.classList.add('done-strike'); else title.classList.remove('done-strike');
+    }
+  }catch(e){}
+  setTimeout(pollTasks,30000);
+}
+pollTasks();
+
+// Заметки
 async function loadNotes(){
   try{
     const r=await fetch('/api/clients/'+clientId+'/notes');
     const d=await r.json();
+    const notes=d.notes||[];
+    document.getElementById('badge-notes').textContent=notes.length;
     const el=document.getElementById('notes-list');
-    if(!d.notes.length){el.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);">Нет заметок</div>';return;}
-    el.innerHTML=d.notes.map(n=>'<div class="card" style="margin-bottom:8px;">'+
-      '<div style="display:flex;justify-content:space-between;align-items:start;">'+
-      '<div style="flex:1;">'+(n.pinned?'📌 ':'')+'<span style="font-size:.85rem;">'+n.content.replace(/</g,'&lt;')+'</span>'+
-      '<div class="meta" style="margin-top:4px;">'+(n.created_at||'')+'</div></div>'+
-      '<div style="display:flex;gap:6px;">'+
-      '<button class="btn btn-sm" style="padding:3px 8px;font-size:.7rem;" onclick="deleteNote('+n.id+')">✕</button></div></div></div>').join('');
+    if(!notes.length){el.innerHTML='<div class="empty"><div class="empty-icon">📝</div><div class="empty-text">Заметок нет. Используйте поле выше.</div></div>';return;}
+    el.innerHTML=notes.map(n=>`
+      <div class="note-card ${n.pinned?'pinned':''}">
+        <div class="note-body">
+          <div class="note-text">${n.pinned?'📌 ':''}${escHtml(n.content)}</div>
+          <div class="note-footer">
+            <span style="font-size:.7rem;color:var(--muted);">${n.created_at||''}</span>
+            <div class="note-actions">
+              <button class="btn btn-sm btn-ghost" onclick="togglePin(${n.id},${n.pinned})">${n.pinned?'📌':'📍'}</button>
+              <button class="btn btn-sm btn-ghost" onclick="delNote(${n.id})">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>`).join('');
   }catch(e){console.error(e);}
 }
 
-async function addNote(){
-  const content=document.getElementById('new-note').value.trim();
-  if(!content)return;
-  const pinned=document.getElementById('note-pinned').checked;
-  const r=await fetch('/api/clients/'+clientId+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,pinned})});
-  if(r.ok){document.getElementById('new-note').value='';document.getElementById('note-pinned').checked=false;loadNotes();}
+async function loadNotesBadge(){
+  try{const r=await fetch('/api/clients/'+clientId+'/notes');const d=await r.json();document.getElementById('badge-notes').textContent=(d.notes||[]).length;}catch(e){}
 }
 
-async function deleteNote(id){
-  if(!confirm('Удалить заметку?'))return;
-  const r=await fetch('/api/clients/notes/'+id,{method:'DELETE'});
-  if(r.ok)loadNotes();
+async function togglePin(id,pinned){
+  try{await fetch('/api/clients/notes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_pinned:!pinned})});loadNotes();}catch(e){}
 }
+
+async function delNote(id){
+  if(!confirm('Удалить заметку?')) return;
+  try{await fetch('/api/clients/notes/'+id,{method:'DELETE'});loadNotes();}catch(e){}
+}
+
+// Timeline
+let tlData=[],tlFilter='all';
+const TL_DOTS={'meeting':'rgba(99,102,241,.2)','checkup':'rgba(34,197,94,.2)','qbr':'rgba(99,102,241,.3)','task':'rgba(59,130,246,.2)','note':'rgba(234,179,8,.15)'};
 
 async function loadTimeline(){
+  if(tlData.length){renderTl();return;}
   try{
     const r=await fetch('/api/clients/'+clientId+'/timeline');
     const d=await r.json();
-    const el=document.getElementById('timeline-list');
-    if(!d.events||!d.events.length){el.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);">Нет событий</div>';return;}
-    el.innerHTML=d.events.map(e=>'<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">'+
-      '<div style="font-size:.72rem;color:var(--muted);min-width:80px;">'+(e.date||'')+'</div>'+
-      '<div style="font-size:1rem;">'+(e.icon||'📌')+'</div>'+
-      '<div><div style="font-size:.82rem;font-weight:500;">'+e.title+'</div>'+
-      '<div style="font-size:.72rem;color:var(--muted);">'+(e.desc||'')+'</div></div></div>').join('');
-  }catch(e){console.error(e);}
+    tlData=d.events||[];
+    renderTl();
+  }catch(e){document.getElementById('timeline-list').innerHTML='<div class="empty">Ошибка загрузки</div>';}
 }
+
+function filterTimeline(type,btn){
+  tlFilter=type;
+  document.querySelectorAll('.tl-filter').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTl();
+}
+
+function renderTl(){
+  const el=document.getElementById('timeline-list');
+  const filtered=tlFilter==='all'?tlData:tlData.filter(e=>(e.type||'').startsWith(tlFilter));
+  if(!filtered.length){el.innerHTML='<div class="empty"><div class="empty-icon">📜</div><div class="empty-text">Нет событий</div></div>';return;}
+  el.innerHTML=filtered.map((e,i)=>`
+    <div class="tl-item">
+      <div class="tl-left">
+        <div class="tl-date">${(e.date||'').split('.').join('<br>')}</div>
+        <div class="tl-dot" style="background:${TL_DOTS[e.type]||'rgba(100,116,139,.15)'}">${e.icon||'📌'}</div>
+        ${i<filtered.length-1?'<div class="tl-line"></div>':''}
+      </div>
+      <div class="tl-body">
+        <div class="tl-title">${escHtml(e.title||'')}</div>
+        ${e.desc?`<div class="tl-desc">${escHtml(e.desc)}</div>`:''}
+      </div>
+    </div>`).join('');
+}
+
+loadNotesBadge();
 </script>
 </body>
 </html>

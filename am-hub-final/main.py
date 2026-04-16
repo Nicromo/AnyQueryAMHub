@@ -2692,7 +2692,7 @@ async def api_get_notes(client_id: int, db: Session = Depends(get_db), auth_toke
     if not payload:
         return {"notes": []}
     notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.is_pinned.desc(), ClientNote.updated_at.desc()).all()
-    return {"notes": [{"id": n.id, "content": n.content, "pinned": n.is_pinned, "created_at": n.created_at.isoformat() if n.created_at else None, "user_id": n.user_id} for n in notes]}
+    return {"notes": [{"id": n.id, "content": n.content, "pinned": n.is_pinned, "created_at": n.created_at.strftime("%d.%m.%Y %H:%M") if n.created_at else None, "updated_at": n.updated_at.strftime("%d.%m.%Y %H:%M") if n.updated_at else None, "user_id": n.user_id} for n in notes]}
 
 
 @app.put("/api/clients/notes/{note_id}")
@@ -2735,7 +2735,11 @@ async def api_delete_note(note_id: int, db: Session = Depends(get_db), auth_toke
 # ============================================================================
 
 @app.get("/api/kanban")
-async def api_kanban(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+async def api_kanban(
+    client_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
     """Получить задачи в формате канбан (группировка по статусам)."""
     if not auth_token:
         raise HTTPException(status_code=401)
@@ -2750,6 +2754,8 @@ async def api_kanban(db: Session = Depends(get_db), auth_token: Optional[str] = 
     q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
     if user.role == "manager":
         q = q.filter(Client.manager_email == user.email)
+    if client_id:
+        q = q.filter(Task.client_id == client_id)
     tasks = q.order_by(Task.due_date.asc()).all()
 
     columns = {"plan": [], "in_progress": [], "review": [], "done": [], "blocked": []}
@@ -2760,11 +2766,23 @@ async def api_kanban(db: Session = Depends(get_db), auth_token: Optional[str] = 
         else:
             columns[status].append(t)
 
+    def task_dict(t):
+        return {
+            "id": t.id, "title": t.title, "priority": t.priority, "status": t.status or "plan",
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+            "client_name": t.client.name if t.client else "—",
+            "client_id": t.client_id, "team": t.team,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+
+    # Возвращаем оба формата — columns (для client_detail) и плоский (для kanban страницы)
+    columns_list = [
+        {"id": col, "tasks": [task_dict(t) for t in tlist]}
+        for col, tlist in columns.items()
+    ]
     return {
-        col: [{"id": t.id, "title": t.title, "priority": t.priority, "due_date": t.due_date.isoformat() if t.due_date else None,
-               "client_name": t.client.name if t.client else "—", "client_id": t.client_id, "team": t.team, "created_at": t.created_at.isoformat() if t.created_at else None}
-              for t in tasks_list]
-        for col, tasks_list in columns.items()
+        "columns": columns_list,
+        **{col: [task_dict(t) for t in tlist] for col, tlist in columns.items()}
     }
 
 
@@ -2882,7 +2900,9 @@ async def api_client_timeline(client_id: int, db: Session = Depends(get_db), aut
     meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(20).all()
     for m in meetings:
         events.append({
+            "type": "followup" if m.followup_status == "sent" else "meeting",
             "date": m.date.strftime("%d.%m.%Y") if m.date else "—",
+            "iso_date": m.date.isoformat() if m.date else "",
             "icon": "📅",
             "title": m.title or m.type,
             "desc": (m.summary or "")[:100] + ("..." if m.summary and len(m.summary) > 100 else ""),
@@ -2892,7 +2912,9 @@ async def api_client_timeline(client_id: int, db: Session = Depends(get_db), aut
     tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.created_at.desc()).limit(20).all()
     for t in tasks:
         events.append({
+            "type": "task",
             "date": t.created_at.strftime("%d.%m.%Y") if t.created_at else "—",
+            "iso_date": t.created_at.isoformat() if t.created_at else "",
             "icon": {"plan": "📝", "in_progress": "🔄", "done": "✅", "blocked": "🔴", "review": "👀"}.get(t.status, "📋"),
             "title": t.title,
             "desc": f"Статус: {t.status}" + (f" · {t.priority}" if t.priority else ""),
@@ -2902,21 +2924,48 @@ async def api_client_timeline(client_id: int, db: Session = Depends(get_db), aut
     notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.updated_at.desc()).limit(10).all()
     for n in notes:
         events.append({
+            "type": "note",
             "date": n.updated_at.strftime("%d.%m.%Y") if n.updated_at else "—",
-            "icon": "📝" if not n.is_pinned else "📌",
+            "iso_date": n.updated_at.isoformat() if n.updated_at else "",
+            "icon": "📌" if n.is_pinned else "📝",
             "title": "Заметка" + (" (закреплена)" if n.is_pinned else ""),
             "desc": n.content[:100] + ("..." if len(n.content) > 100 else ""),
         })
 
-    # Сортировка по дате
-    events.sort(key=lambda e: e.get("date", ""), reverse=True)
+    # Фолоуапы как отдельные события
+    followups = db.query(Meeting).filter(
+        Meeting.client_id == client_id,
+        Meeting.followup_status == "sent",
+        Meeting.followup_text != None,
+    ).order_by(Meeting.followup_sent_at.desc()).limit(10).all()
+    for m in followups:
+        events.append({
+            "type": "followup",
+            "date": m.followup_sent_at.strftime("%d.%m.%Y") if m.followup_sent_at else "—",
+            "iso_date": m.followup_sent_at.isoformat() if m.followup_sent_at else "",
+            "icon": "✍️",
+            "title": f"Фолоуап: {m.title or m.type}",
+            "desc": (m.followup_text or "")[:100],
+        })
+
+    # Сортировка по iso_date
+    events.sort(key=lambda e: e.get("iso_date", ""), reverse=True)
 
     return {"events": events[:50]}
 
 
-# ============================================================================
-# SMART CHECKUPS
-# ============================================================================
+@app.get("/api/clients/{client_id}/tasks-status")
+async def api_client_tasks_status(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Лёгкий polling — только статусы задач для real-time обновления."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).all()
+    return {"tasks": [{"id": t.id, "status": t.status} for t in tasks]}
 
 CHECKUP_INTERVALS = {"SS": 180, "SMB": 90, "SME": 60, "ENT": 30, "SME+": 60, "SME-": 60}
 
@@ -4164,6 +4213,12 @@ async def api_inbox_mark_read(request: Request, db: Session = Depends(get_db), a
     db.query(Notification).filter(Notification.user_id == user.id, Notification.is_read == False).update({"is_read": True})
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/inbox/items")
+async def api_inbox_items(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Алиас /api/inbox для совместимости с base.html."""
+    return await api_inbox(db=db, auth_token=auth_token)
 
 
 # ============================================================================

@@ -74,6 +74,11 @@
       <div class="stat-item"        id="stat-tasks">—</div>
     </div>
 
+    <!-- Уведомления (колокольчик) -->
+    <div class="notif-bell" id="notifBell" onclick="toggleNotifPanel()">
+      🔔 <span id="notifBadge" class="notif-badge" style="display:none">0</span>
+    </div>
+
     <div class="sidebar-bottom">
       {% if user %}
         <a href="/profile" style="font-weight:500;color:var(--text)">👤 {{ user.name }}</a>
@@ -81,6 +86,18 @@
       {% endif %}
     </div>
   </nav>
+
+  <!-- Панель уведомлений -->
+  <div id="notifPanel" class="notif-panel" style="display:none">
+    <div class="notif-header">
+      <span>🔔 Уведомления</span>
+      <button onclick="markAllRead()">Всё прочитано</button>
+    </div>
+    <div id="notifList" class="notif-list">
+      <div class="notif-empty">Загрузка...</div>
+    </div>
+  </div>
+  <div id="notifOverlay" class="notif-overlay" style="display:none" onclick="toggleNotifPanel()"></div>
 
   <main class="main">
     {% block content %}{% endblock %}
@@ -139,6 +156,82 @@ document.addEventListener('click', e => {
       if (badge) { badge.textContent = s.open_tasks; badge.style.display = 'inline'; }
     }
   } catch(e) {}
+})();
+
+// ── Уведомления ────────────────────────────────────────────────────────────
+const NOTIF_COLORS = {
+  high: '#ef4444', medium: '#eab308', low: '#64748b',
+  overdue_checkup: '#ef4444', checkup_soon: '#eab308', blocked_task: '#ef4444',
+  info: '#6366f1', success: '#22c55e', warning: '#eab308', alert: '#ef4444'
+};
+
+let notifOpen = false;
+
+function toggleNotifPanel() {
+  notifOpen = !notifOpen;
+  document.getElementById('notifPanel').style.display = notifOpen ? 'flex' : 'none';
+  document.getElementById('notifOverlay').style.display = notifOpen ? 'block' : 'none';
+  if (notifOpen) loadNotifications();
+}
+
+async function loadNotifications() {
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch('/api/notifications').then(r => r.json()),
+      fetch('/api/inbox/items').then(r => r.json()).catch(() => ({items:[]}))
+    ]);
+
+    const notifs = r1.notifications || [];
+    const inbox  = r2.items || [];
+    const all = [
+      ...notifs.map(n => ({...n, _src:'notif'})),
+      ...inbox.filter(i => i.type === 'notification').map(i => ({...i, _src:'inbox'}))
+    ];
+
+    const list = document.getElementById('notifList');
+    if (!all.length) {
+      list.innerHTML = '<div class="notif-empty">✅ Всё под контролем</div>';
+      return;
+    }
+
+    list.innerHTML = all.map(n => {
+      const color = NOTIF_COLORS[n.priority] || NOTIF_COLORS[n.type] || '#64748b';
+      const link = n.client_id ? `/client/${n.client_id}` : '#';
+      return `<a href="${link}" class="notif-item" style="border-left-color:${color}">
+        <div class="notif-item-title">${n.title || n.message || ''}</div>
+        ${n.message && n.title ? `<div class="notif-item-msg">${n.message}</div>` : ''}
+        ${n.date ? `<div class="notif-item-date">${n.date}</div>` : ''}
+      </a>`;
+    }).join('');
+
+    // Бейдж
+    updateBadge(all.length);
+  } catch(e) {}
+}
+
+function updateBadge(count) {
+  const badge = document.getElementById('notifBadge');
+  if (!badge) return;
+  if (count > 0) { badge.textContent = count > 99 ? '99+' : count; badge.style.display = 'inline-flex'; }
+  else { badge.style.display = 'none'; }
+}
+
+async function markAllRead() {
+  try {
+    await fetch('/api/inbox/mark-read', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+    document.getElementById('notifList').innerHTML = '<div class="notif-empty">✅ Всё прочитано</div>';
+    updateBadge(0);
+  } catch(e) {}
+}
+
+// Polling каждые 60 сек
+(async function pollNotifications() {
+  try {
+    const r = await fetch('/api/notifications').then(r => r.json());
+    const count = (r.notifications || []).filter(n => n.priority === 'high').length;
+    updateBadge(count);
+  } catch(e) {}
+  setTimeout(pollNotifications, 60000);
 })();
 </script>
 </body>
