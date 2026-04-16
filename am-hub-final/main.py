@@ -1282,7 +1282,10 @@ async def api_sync_merchrules(
     if not user:
         raise HTTPException(status_code=401)
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     settings = user.settings or {}
     mr = settings.get("merchrules", {})
     login = body.get("login") or mr.get("login") or env.MR_LOGIN
@@ -1298,7 +1301,9 @@ async def api_sync_merchrules(
     if site_ids_input:
         settings["merchrules_site_ids"] = site_ids_input
     settings["merchrules"] = mr
-    user.settings = settings
+    user.settings = dict(settings)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
     db.commit()
 
     # Пробуем авторизацию — все URL + все варианты поля логина
@@ -1683,7 +1688,9 @@ async def api_ktalk_save_token(
     kt["access_token"] = access_token
     kt["login"] = user_info.get("email", kt.get("login", ""))
     settings["ktalk"] = kt
-    user.settings = settings
+    user.settings = dict(settings)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
     db.commit()
     return {"ok": True, "user": user_info}
 
@@ -1871,7 +1878,9 @@ async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_t
                 settings[service] = {}
             settings[service].update(data[service])
 
-    user.settings = settings
+    user.settings = dict(settings)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
     db.commit()
     return {"ok": True}
 
@@ -2400,7 +2409,9 @@ async def api_complete_onboarding(db: Session = Depends(get_db), auth_token: Opt
         raise HTTPException(status_code=401)
     settings = user.settings or {}
     settings["onboarding_complete"] = True
-    user.settings = settings
+    user.settings = dict(settings)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
     db.commit()
     return {"ok": True}
 
@@ -2665,7 +2676,9 @@ async def api_my_day_schedule(request: Request, db: Session = Depends(get_db), a
     settings = user.settings or {}
     settings["my_day_schedule"] = data.get("schedule", [])
     settings["my_day_date"] = data.get("date")
-    user.settings = settings
+    user.settings = dict(settings)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
     db.commit()
     return {"ok": True}
 
@@ -2948,6 +2961,82 @@ async def api_calendar_events(start: str = "", end: str = "", db: Session = Depe
         })
 
     return {"events": events}
+
+
+# ============================================================================
+# PROFILE
+# ============================================================================
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("profile.html", {"request": request, "user": user})
+
+
+@app.post("/api/profile/update")
+async def api_profile_update(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Обновить имя/фамилию/telegram_id."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    if "first_name" in data:
+        user.first_name = data["first_name"].strip()
+    if "last_name" in data:
+        user.last_name = data["last_name"].strip()
+    if "telegram_id" in data:
+        tg = data["telegram_id"].strip()
+        # Проверяем что такой TG ID не занят другим юзером
+        if tg and db.query(User).filter(User.telegram_id == tg, User.id != user.id).first():
+            return {"ok": False, "error": "Этот Telegram ID уже привязан к другому аккаунту"}
+        user.telegram_id = tg or None
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/profile/password")
+async def api_change_password(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сменить пароль."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    current = data.get("current_password", "")
+    new_pw = data.get("new_password", "")
+    confirm = data.get("confirm_password", "")
+
+    if not new_pw or len(new_pw) < 8:
+        return {"ok": False, "error": "Новый пароль должен быть не менее 8 символов"}
+    if new_pw != confirm:
+        return {"ok": False, "error": "Пароли не совпадают"}
+    if user.hashed_password and not verify_password(current, user.hashed_password):
+        return {"ok": False, "error": "Неверный текущий пароль"}
+
+    user.hashed_password = hash_password(new_pw)
+    db.commit()
+    return {"ok": True}
 
 
 # ============================================================================
@@ -4120,7 +4209,9 @@ async def api_save_draft(request: Request, db: Session = Depends(get_db), auth_t
     drafts = settings.get("drafts", [])
     drafts.append({**data, "saved_at": datetime.utcnow().isoformat(), "user_id": user.id})
     settings["drafts"] = drafts[-50:]  # keep last 50
-    user.settings = settings
+    user.settings = dict(settings)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
     db.commit()
     return {"ok": True}
 
