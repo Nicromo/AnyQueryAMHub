@@ -107,7 +107,7 @@ function renderCalendar(){
     const dateStr=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const isToday=dateStr===today.toISOString().slice(0,10);
     const dayEvents=eventsCache.filter(e=>e.start&&e.start.startsWith(dateStr));
-    let eventsHtml=dayEvents.slice(0,3).map(e=>'<div class="cal-event" style="background:'+(e.color||'var(--accent)')+'22;color:'+(e.color||'var(--accent'))+';"><a href="'+(e.url||'#')+'">'+e.title+'</a></div>').join('');
+    let eventsHtml=dayEvents.slice(0,3).map(e=>'<div class="cal-event" style="background:'+(e.color||'var(--accent)')+'22;color:'+(e.color||'var(--accent)')+';"><a href="'+(e.url||'#')+'">'+e.title+'</a></div>').join('');
     if(dayEvents.length>3) eventsHtml+='<div style="font-size:.62rem;color:var(--muted);">+'+(dayEvents.length-3)+' ещё</div>';
     grid.innerHTML+='<div class="cal-day'+(isToday?' today':'')+'"><div class="cal-day-num">'+d+'</div>'+eventsHtml+'</div>';
   }

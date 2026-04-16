@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN", "")
-AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "appEAS1rPKpevoIel")
-AIRTABLE_TABLE_ID = os.getenv("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn")
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "")
+AIRTABLE_TABLE_ID = os.getenv("AIRTABLE_TABLE_ID", "")
 AIRTABLE_VIEW_ID = os.getenv("AIRTABLE_VIEW_ID", "viwocTz78z44WlAu1")
 
 AIRTABLE_API_URL = "https://api.airtable.com/v0"

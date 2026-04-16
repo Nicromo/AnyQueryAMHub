@@ -350,3 +350,183 @@ if __name__ == "__main__":
             print(f"First event: {events[0].get('title')}")
 
     asyncio.run(test())
+
+
+# ── Push: отправка сообщений ───────────────────────────────────────────────────
+
+async def send_message(
+    channel_id: str,
+    text: str,
+    token_override: str = "",
+    space_override: str = "",
+) -> Dict[str, Any]:
+    """
+    Отправить сообщение в канал/чат Ktalk.
+    Ktalk использует Mattermost-совместимый API.
+    channel_id — ID канала (можно получить через get_channels).
+    """
+    space = space_override or KTALK_SPACE
+    base = f"https://{space}.ktalk.ru" if space else ""
+    tok = token_override or KTALK_API_TOKEN
+    if not base or not tok:
+        return {"ok": False, "error": "KTALK_SPACE / KTALK_API_TOKEN не заданы"}
+
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tok}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{base}/api/v4/posts",
+                headers=headers,
+                json={"channel_id": channel_id, "message": text},
+            )
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                return {"ok": True, "post_id": data.get("id", "")}
+            return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        logger.error(f"Ktalk send_message error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+async def send_followup(
+    channel_id: str,
+    client_name: str,
+    followup_text: str,
+    meeting_date: Optional[datetime] = None,
+    token_override: str = "",
+    space_override: str = "",
+) -> Dict[str, Any]:
+    """Отправить оформленный фолоуап после встречи в Ktalk-канал."""
+    date_str = meeting_date.strftime("%d.%m.%Y") if meeting_date else ""
+    header = f"📋 **Итоги встречи{' от ' + date_str if date_str else ''} — {client_name}**\n\n"
+    return await send_message(channel_id, header + followup_text, token_override, space_override)
+
+
+async def get_channels(
+    token_override: str = "",
+    space_override: str = "",
+) -> List[Dict[str, Any]]:
+    """Получить список доступных каналов пользователя."""
+    space = space_override or KTALK_SPACE
+    base = f"https://{space}.ktalk.ru" if space else ""
+    tok = token_override or KTALK_API_TOKEN
+    if not base or not tok:
+        return []
+
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tok}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Получаем текущего пользователя
+            me_resp = await client.get(f"{base}/api/v4/users/me", headers=headers)
+            if me_resp.status_code != 200:
+                return []
+            user_id = me_resp.json().get("id", "")
+
+            # Получаем каналы
+            resp = await client.get(
+                f"{base}/api/v4/users/{user_id}/channels",
+                headers=headers,
+                params={"per_page": 200},
+            )
+            if resp.status_code == 200:
+                channels = resp.json()
+                return [
+                    {
+                        "id": c.get("id"),
+                        "name": c.get("display_name") or c.get("name", ""),
+                        "type": c.get("type", ""),  # O=open, P=private, D=direct
+                    }
+                    for c in channels
+                ]
+    except Exception as e:
+        logger.error(f"Ktalk get_channels error: {e}")
+    return []
+
+
+# ── Push: отправка сообщений ──────────────────────────────────────────────────
+
+async def send_message(channel_id: str, text: str, token: str = "") -> bool:
+    """
+    Отправить сообщение в канал Ktalk (Mattermost API).
+    channel_id — ID канала (из get_channels).
+    """
+    if not KTALK_BASE_URL or not (token or KTALK_API_TOKEN):
+        return False
+    tok = token or KTALK_API_TOKEN
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tok}"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{KTALK_BASE_URL}/api/v4/posts",
+                headers=headers,
+                json={"channel_id": channel_id, "message": text},
+            )
+            if resp.status_code in (200, 201):
+                logger.info(f"✅ Ktalk message sent to channel {channel_id}")
+                return True
+            logger.warning(f"Ktalk send_message error: {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"❌ Ktalk send_message exception: {e}")
+    return False
+
+
+async def send_direct_message(user_email: str, text: str, token: str = "") -> bool:
+    """
+    Отправить личное сообщение пользователю по email.
+    Находит пользователя, создаёт DM-канал, отправляет.
+    """
+    if not KTALK_BASE_URL or not (token or KTALK_API_TOKEN):
+        return False
+    tok = token or KTALK_API_TOKEN
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tok}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Получаем ID текущего пользователя (отправителя)
+            me_resp = await client.get(f"{KTALK_BASE_URL}/api/v4/users/me", headers=headers)
+            if me_resp.status_code != 200:
+                return False
+            my_id = me_resp.json().get("id", "")
+
+            # Ищем получателя по email
+            user_resp = await client.get(
+                f"{KTALK_BASE_URL}/api/v4/users/email/{user_email}",
+                headers=headers,
+            )
+            if user_resp.status_code != 200:
+                logger.warning(f"Ktalk user not found: {user_email}")
+                return False
+            target_id = user_resp.json().get("id", "")
+
+            # Создаём DM-канал
+            dm_resp = await client.post(
+                f"{KTALK_BASE_URL}/api/v4/channels/direct",
+                headers=headers,
+                json=[my_id, target_id],
+            )
+            if dm_resp.status_code not in (200, 201):
+                return False
+            channel_id = dm_resp.json().get("id", "")
+
+            # Отправляем
+            return await send_message(channel_id, text, tok)
+    except Exception as e:
+        logger.error(f"❌ Ktalk send_direct_message exception: {e}")
+    return False
+
+
+async def send_followup_to_channel(
+    channel_id: str,
+    client_name: str,
+    followup_text: str,
+    meeting_date: Optional[datetime] = None,
+    token: str = "",
+) -> bool:
+    """
+    Отправить оформленный фолоуап в канал Ktalk.
+    """
+    date_str = meeting_date.strftime("%d.%m.%Y") if meeting_date else ""
+    header = f"**📋 Итоги встречи: {client_name}**"
+    if date_str:
+        header += f" ({date_str})"
+    full_text = f"{header}\n\n{followup_text}"
+    return await send_message(channel_id, full_text, token)

@@ -304,6 +304,25 @@ async function importTasks(){
     }
   }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
 }
+
+async function doSyncAirtable(){
+  const btn=document.getElementById('atSyncBtn');
+  const el=document.getElementById('atResult');
+  btn.disabled=true; btn.textContent='⏳ Синхронизация...';
+  el.className='result ok'; el.textContent='⏳ Подключаемся к Airtable...';
+  const token=document.getElementById('at-pat').value;
+  try{
+    const r=await fetch('/api/sync/airtable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+    const d=await r.json();
+    if(d.ok||d.synced){
+      el.textContent='✅ Синхронизировано: '+(d.synced||d.clients_synced||0)+' клиентов';
+    }else{
+      el.className='result err';
+      el.textContent='❌ '+(d.error||'Ошибка синхронизации');
+    }
+  }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
+  btn.disabled=false; btn.textContent='🔄 Синхронизировать Airtable';
+}
 </script>
 </body>
 </html>

@@ -90,8 +90,8 @@ class Env:
     # Airtable — поддерживаем оба имени: AIRTABLE_TOKEN и AIRTABLE_PAT
     AIRTABLE_PAT  = property(lambda self: _env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT"))
     AIRTABLE_BASE = property(lambda self: _env("AIRTABLE_BASE_ID"))
-    AIRTABLE_TABLE = property(lambda self: _env("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn"))
-    AIRTABLE_QBR_TABLE = property(lambda self: _env("AIRTABLE_QBR_TABLE_ID", "tblqQbChhRYoZoxWu"))
+    AIRTABLE_TABLE = property(lambda self: _env("AIRTABLE_TABLE_ID"))
+    AIRTABLE_QBR_TABLE = property(lambda self: _env("AIRTABLE_QBR_TABLE_ID"))
     AIRTABLE_ACTIVE = property(lambda self: bool(_env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT")))
     # Google Sheets — вырезаем ID из полного URL если передан
     SHEETS_ID     = property(lambda self: _extract_sheets_id(_env("SHEETS_SPREADSHEET_ID")))
@@ -1885,9 +1885,51 @@ async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_t
     return {"ok": True}
 
 
-# ============================================================================
-# ROOT
-# ============================================================================
+@app.post("/api/settings/rules")
+async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить правила работы менеджера."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    settings = dict(user.settings or {})
+    settings["rules"] = {**(settings.get("rules") or {}), **data}
+    user.settings = settings
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/settings/prefs")
+async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить предпочтения (тема, уведомления и т.д.)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    settings = dict(user.settings or {})
+    settings["preferences"] = {**(settings.get("preferences") or {}), **data}
+    user.settings = settings
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
+    db.commit()
+    return {"ok": True}
+
+
+
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, auth_token: Optional[str] = Cookie(None)):
@@ -1976,6 +2018,38 @@ async def api_send_followup(meeting_id: int, request: Request, db: Session = Dep
         client.last_meeting_date = meeting.date or datetime.now()
 
     db.commit()
+
+    # Push в Ktalk — если настроен канал
+    if user and followup_text:
+        try:
+            settings = user.settings or {}
+            kt = settings.get("ktalk", {})
+            channel_id = kt.get("followup_channel_id") or kt.get("channel_id")
+            if channel_id:
+                from integrations.ktalk import send_followup as ktalk_send_followup
+                await ktalk_send_followup(
+                    channel_id=channel_id,
+                    client_name=client.name if client else "",
+                    followup_text=followup_text,
+                    meeting_date=meeting.date,
+                    token_override=kt.get("access_token", ""),
+                    space_override=kt.get("space", ""),
+                )
+        except Exception as e:
+            logger.warning(f"Ktalk followup push failed: {e}")
+
+    # Push в Airtable — обновляем дату встречи
+    if client and client.airtable_record_id:
+        try:
+            from integrations.airtable import update_meeting_date
+            await update_meeting_date(
+                record_id=client.airtable_record_id,
+                meeting_date=meeting.date or datetime.now(),
+                comment=f"Фолоуап: {(followup_text or '')[:200]}",
+            )
+        except Exception as e:
+            logger.warning(f"Airtable followup push failed: {e}")
+
     return {"ok": True, "task_id": task.id}
 
 
@@ -2055,47 +2129,84 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
     if not task:
         raise HTTPException(status_code=404)
 
-    # Получаем креды пользователя
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    settings = user.settings or {} if user else {}
+    settings = (user.settings or {}) if user else {}
     mr = settings.get("merchrules", {})
     login = mr.get("login") or env.MR_LOGIN
     password = mr.get("password") or env.MR_PASSWORD
+    base_url = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
 
     if not login or not password:
-        return {"error": "Нужны креды Merchrules (настройки → креды)"}
+        return {"error": "Нужны креды Merchrules (Настройки → Креды)"}
 
     client = db.query(Client).filter(Client.id == task.client_id).first()
     if not client or not client.merchrules_account_id:
-        return {"error": "У клиента нет merchrules_account_id"}
+        return {"error": "У клиента нет merchrules_account_id — синхронизируйте клиента сначала"}
 
-    # Push via CSV (one task)
     import httpx, io
-    csv_content = f"title,description,status,priority,team,task_type,assignee,product,link,due_date\n"
-    csv_content += f'"{task.title}","{task.description or ""}",{task.status},{task.priority},{task.team or ""},{task.task_type or ""},any,,,'
     try:
         async with httpx.AsyncClient(timeout=30) as hx:
-            token_resp = await hx.post(
-                "https://merchrules-qa.any-platform.ru/backend-v2/auth/login",
-                json={"username": login, "password": password},
-            )
-            if token_resp.status_code != 200:
-                return {"error": "Ошибка авторизации Merchrules"}
-            token = token_resp.json().get("token")
+            # Авторизация — перебираем поля
+            token = None
+            for field in ("email", "login", "username"):
+                try:
+                    r = await hx.post(
+                        f"{base_url}/backend-v2/auth/login",
+                        json={field: login, "password": password},
+                        timeout=10,
+                    )
+                    if r.status_code == 200:
+                        token = r.json().get("token") or r.json().get("access_token") or r.json().get("accessToken")
+                        if token:
+                            break
+                except Exception:
+                    continue
 
-            files = {"file": ("task.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
+            if not token:
+                return {"error": "Ошибка авторизации Merchrules — проверьте логин/пароль"}
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Пробуем JSON API сначала
+            task_payload = {
+                "title": task.title,
+                "description": task.description or "",
+                "status": task.status,
+                "priority": task.priority or "medium",
+                "site_id": client.merchrules_account_id,
+            }
+            if task.team:
+                task_payload["team"] = task.team
+            if task.due_date:
+                task_payload["due_date"] = task.due_date.strftime("%Y-%m-%d")
+
             resp = await hx.post(
-                "https://merchrules-qa.any-platform.ru/backend-v2/import/tasks/csv",
-                data={"site_id": client.merchrules_account_id},
-                files=files,
-                headers={"Authorization": f"Bearer {token}"},
+                f"{base_url}/backend-v2/tasks",
+                json=task_payload,
+                headers=headers,
+                timeout=15,
             )
-        if resp.status_code == 200:
+
+            # Fallback: CSV import
+            if resp.status_code not in (200, 201):
+                csv_content = "title,description,status,priority,team,due_date\n"
+                csv_content += f'"{task.title}","{task.description or ""}",{task.status},{task.priority or "medium"},{task.team or ""},{task.due_date.strftime("%Y-%m-%d") if task.due_date else ""}'
+                files = {"file": ("task.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
+                resp = await hx.post(
+                    f"{base_url}/backend-v2/import/tasks/csv",
+                    data={"site_id": client.merchrules_account_id},
+                    files=files,
+                    headers=headers,
+                    timeout=15,
+                )
+
+        if resp.status_code in (200, 201):
             task.pushed_to_roadmap = True
             task.roadmap_pushed_at = datetime.now()
+            from sqlalchemy.orm.attributes import flag_modified
             db.commit()
-            return {"ok": True, "roadmap": resp.json()}
-        return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+            return {"ok": True, "message": f"Задача «{task.title}» отправлена в Roadmap"}
+        return {"error": f"Merchrules вернул HTTP {resp.status_code}: {resp.text[:200]}"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -2653,6 +2764,36 @@ async def api_update_task_status(task_id: int, request: Request, db: Session = D
         task.confirmed_at = datetime.utcnow()
         task.confirmed_by = user.email if user else None
     db.commit()
+
+    # Push статуса в Merchrules если задача оттуда
+    if task.merchrules_task_id and user:
+        try:
+            settings = (user.settings or {})
+            mr = settings.get("merchrules", {})
+            login = mr.get("login") or env.MR_LOGIN
+            password = mr.get("password") or env.MR_PASSWORD
+            base_url = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+            if login and password:
+                import httpx as _httpx
+                async with _httpx.AsyncClient(timeout=15) as hx:
+                    for field in ("email", "login", "username"):
+                        r = await hx.post(
+                            f"{base_url}/backend-v2/auth/login",
+                            json={field: login, "password": password}, timeout=8,
+                        )
+                        if r.status_code == 200:
+                            tok = r.json().get("token") or r.json().get("access_token") or r.json().get("accessToken")
+                            if tok:
+                                await hx.patch(
+                                    f"{base_url}/backend-v2/tasks/{task.merchrules_task_id}",
+                                    json={"status": new_status},
+                                    headers={"Authorization": f"Bearer {tok}"},
+                                    timeout=8,
+                                )
+                                break
+        except Exception as e:
+            logger.warning(f"Merchrules task status push failed: {e}")
+
     return {"ok": True}
 
 
@@ -4298,3 +4439,103 @@ async def api_meetings_today(db: Session = Depends(get_db), auth_token: Optional
             "type": m.type,
         } for m in meetings]
     }
+
+# ============================================================================
+# MISSING ENDPOINTS (referenced from templates)
+# ============================================================================
+
+@app.get("/api/stats")
+async def api_stats(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Быстрая статистика для sidebar — вызывается на каждой странице."""
+    if not auth_token:
+        return {"overdue": 0, "warning": 0, "open_tasks": 0}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"overdue": 0, "warning": 0, "open_tasks": 0}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"overdue": 0, "warning": 0, "open_tasks": 0}
+
+    now = datetime.now()
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+
+    overdue = warning = 0
+    for c in clients:
+        last = c.last_meeting_date or c.last_checkup
+        if not last:
+            continue
+        days = (now - last).days
+        from models import CHECKUP_INTERVALS
+        interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+        if days > interval:
+            overdue += 1
+        elif days > interval - 14:
+            warning += 1
+
+    tq = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+        Task.status.in_(["plan", "in_progress", "blocked"])
+    )
+    if user.role == "manager":
+        tq = tq.filter(Client.manager_email == user.email)
+    open_tasks = tq.count()
+
+    return {"overdue": overdue, "warning": warning, "open_tasks": open_tasks}
+
+
+@app.get("/api/settings/my-clients")
+async def api_my_clients(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Список клиентов текущего менеджера."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.order_by(Client.name).all()
+    return {"clients": [{"id": c.id, "name": c.name, "segment": c.segment} for c in clients]}
+
+
+@app.get("/api/clients")
+async def api_clients_list(
+    segment: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """API список клиентов с фильтрами."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    if segment:
+        q = q.filter(Client.segment == segment)
+    if search:
+        q = q.filter(Client.name.ilike(f"%{search}%"))
+    clients = q.order_by(Client.name).all()
+
+    return {"clients": [{
+        "id": c.id, "name": c.name, "segment": c.segment,
+        "health_score": c.health_score, "manager_email": c.manager_email,
+        "merchrules_account_id": c.merchrules_account_id,
+        "last_meeting_date": c.last_meeting_date.isoformat() if c.last_meeting_date else None,
+    } for c in clients]}

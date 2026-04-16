@@ -109,7 +109,7 @@ async function loadKanban(){
         const due = t.due_date ? t.due_date.slice(0,10) : '';
         const overdue = due && due < today;
         const prioBadge = t.priority ? '<span class="k-badge k-badge-'+t.priority+'">'+t.priority+'</span>' : '';
-        const dueBadge = due ? '<span class="k-due'+(overdue?' overdue':'')">'+(overdue?'⚠️ ':'')+due+'</span>' : '';
+        const dueBadge = due ? '<span class="k-due'+(overdue?' overdue':'')+'">'+(overdue?'⚠️ ':'')+due+'</span>' : '';
         return '<div class="k-card" draggable="true" data-id="'+t.id+'" data-status="'+status+'">'+
           '<div class="k-card-title">'+(t.title||'Без названия')+'</div>'+
           '<div class="k-card-meta">'+prioBadge+dueBadge+'<span>'+t.client_name+'</span></div></div>';
