@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QBR: {{ client.name }} — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; max-width:900px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    .back:hover { color:var(--text); }
+    h1 { font-size:1.3rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+    .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .field { margin-bottom:12px; }
+    .field label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px; }
+    .field input, .field textarea { width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; }
+    .field textarea { min-height:80px; resize:vertical; }
+    .field input:focus, .field textarea:focus { border-color:var(--accent); }
+    .item-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .item-row input { flex:1; }
+    .item-row .remove { cursor:pointer; color:var(--red); font-size:1.1rem; }
+    .btn { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:none; background:var(--accent); color:#fff; transition:filter .15s; }
+    .btn:hover { filter:brightness(1.15); }
+    .btn-sm { padding:5px 10px; font-size:.75rem; }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .saved-msg { font-size:.78rem; color:var(--green); margin-top:8px; display:none; }
+    .saved-msg.show { display:block; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .badge { display:inline-block; padding:3px 10px; border-radius:6px; font-size:.7rem; font-weight:600; }
+    .badge-draft { background:rgba(99,102,241,.15); color:var(--accent); }
+    .badge-completed { background:rgba(34,197,94,.15); color:var(--green); }
+    /* Modal */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); backdrop-filter:blur(4px); z-index:200; align-items:center; justify-content:center; }
+    .modal-overlay.visible { display:flex; }
+    .modal { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:28px; max-width:600px; width:90%; max-height:85vh; overflow-y:auto; }
+    .modal h3 { margin-bottom:16px; font-size:1.1rem; }
+    .modal-close { float:right; cursor:pointer; font-size:1.2rem; color:var(--muted); background:none; border:none; }
+    .modal-close:hover { color:var(--text); }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
+  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
+  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+  <h1>📊 QBR: {{ client.name }}</h1>
+  <p class="sub">{{ client.segment or '' }} · {% if qbr %}{{ qbr.quarter }}{% else %}Новый QBR{% endif %}
+    {% if qbr %}<span class="badge badge-{{ qbr.status }}">{{ qbr.status }}</span>{% endif %}
+  </p>
+
+  <div class="section">
+    <h3>📅 Дата проведения</h3>
+    <div class="field">
+      <input type="date" id="qbr-date" value="{{ qbr.date.strftime('%Y-%m-%d') if qbr and qbr.date else '' }}">
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>🏆 Достижения за квартал</h3>
+    <div id="achievements-list">
+      {% for a in qbr.achievements or [] %}
+      <div class="item-row"><input type="text" value="{{ a }}" placeholder="Достижение..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addItem('achievements-list','Достижение...')">+ Добавить</button>
+  </div>
+
+  <div class="section">
+    <h3>⚠️ Проблемы</h3>
+    <div id="issues-list">
+      {% for i in qbr.issues or [] %}
+      <div class="item-row"><input type="text" value="{{ i }}" placeholder="Проблема..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addItem('issues-list','Проблема...')">+ Добавить</button>
+  </div>
+
+  <div class="section">
+    <h3> Ключевые инсайты</h3>
+    <div id="insights-list">
+      {% for ins in qbr.key_insights or [] %}
+      <div class="item-row"><input type="text" value="{{ ins }}" placeholder="Инсайт..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addItem('insights-list','Инсайт...')">+ Добавить</button>
+  </div>
+
+  <div class="section">
+    <h3>🎯 Цели на следующий квартал</h3>
+    <div id="goals-list">
+      {% for g in qbr.next_quarter_goals or [] %}
+      <div class="item-row"><input type="text" value="{{ g }}" placeholder="Цель..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addItem('goals-list','Цель...')">+ Добавить</button>
+  </div>
+
+  <div class="section">
+    <h3>📋 Будущие работы</h3>
+    <div id="future-list">
+      {% for fw in qbr.future_work or [] %}
+      <div class="item-row">
+        <input type="text" value="{{ fw.task or '' }}" placeholder="Задача..." class="fw-task">
+        <input type="text" value="{{ fw.quarter or '' }}" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;">
+        <select class="fw-priority" style="max-width:100px;">
+          <option value="high" {{ 'selected' if fw.priority == 'high' else '' }}>Высокий</option>
+          <option value="medium" {{ 'selected' if fw.priority == 'medium' else '' }}>Средний</option>
+          <option value="low" {{ 'selected' if fw.priority == 'low' else '' }}>Низкий</option>
+        </select>
+        <span class="remove" onclick="this.parentElement.remove()">✕</span>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addFutureWork()">+ Добавить работу</button>
+  </div>
+
+  <div class="section">
+    <h3>📝 Итоги</h3>
+    <div class="field">
+      <textarea id="summary" placeholder="Краткое резюме QBR...">{{ qbr.summary or '' }}</textarea>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>📄 Презентация</h3>
+    <div class="field">
+      <label>Ссылка на презентацию (Google Slides, Figma, etc.)</label>
+      <input type="url" id="presentation-url" value="{{ qbr.presentation_url or '' }}" placeholder="https://docs.google.com/presentation/...">
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>📊 Выжимка для руководства</h3>
+    <div class="field">
+      <textarea id="exec-summary" placeholder="Краткая выжимка ключевых метрик и решений для руководства...">{{ qbr.executive_summary or '' }}</textarea>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <button class="btn" onclick="saveQBR()">💾 Сохранить QBR</button>
+    <button class="btn btn-outline" onclick="openStatusModal()">📊 Изменить статус</button>
+    <span class="saved-msg" id="saved">✅ Сохранено</span>
+  </div>
+</div>
+
+<!-- Status Modal -->
+<div class="modal-overlay" id="statusModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeStatusModal()">✕</button>
+    <h3>📊 Статус QBR</h3>
+    <div class="field">
+      <label>Текущий статус</label>
+      <select id="qbr-status">
+        <option value="draft" {{ 'selected' if qbr and qbr.status == 'draft' else '' }}>📝 Черновик</option>
+        <option value="scheduled" {{ 'selected' if qbr and qbr.status == 'scheduled' else '' }}>📅 Запланирован</option>
+        <option value="completed" {{ 'selected' if qbr and qbr.status == 'completed' else '' }}>✅ Завершён</option>
+        <option value="cancelled" {{ 'selected' if qbr and qbr.status == 'cancelled' else '' }}>❌ Отменён</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn" onclick="saveStatus()">Сохранить</button>
+      <button class="btn btn-outline" onclick="closeStatusModal()">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+function addItem(listId,placeholder){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="'+placeholder+'"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById(listId).appendChild(d);
+}
+function addFutureWork(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Задача..." class="fw-task"><input type="text" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;"><select class="fw-priority" style="max-width:100px;"><option value="high">Высокий</option><option value="medium" selected>Средний</option><option value="low">Низкий</option></select><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('future-list').appendChild(d);
+}
+function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
+function getFutureWork(){
+  const items=[];
+  document.querySelectorAll('#future-list .item-row').forEach(row=>{
+    const task=row.querySelector('.fw-task').value;
+    if(task) items.push({task, quarter:row.querySelector('.fw-quarter').value, priority:row.querySelector('.fw-priority').value});
+  });
+  return items;
+}
+async function saveQBR(){
+  const data={
+    date:document.getElementById('qbr-date').value,
+    achievements:getListValues('achievements-list'),
+    issues:getListValues('issues-list'),
+    key_insights:getListValues('insights-list'),
+    next_quarter_goals:getListValues('goals-list'),
+    future_work:getFutureWork(),
+    summary:document.getElementById('summary').value,
+    presentation_url:document.getElementById('presentation-url').value,
+    executive_summary:document.getElementById('exec-summary').value,
+    status:'draft'
+  };
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+}
+function openStatusModal(){document.getElementById('statusModal').classList.add('visible');}
+function closeStatusModal(){document.getElementById('statusModal').classList.remove('visible');}
+async function saveStatus(){
+  const status=document.getElementById('qbr-status').value;
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  if(r.ok){closeStatusModal();location.reload();}
+}
+</script>
+</body>
+</html>

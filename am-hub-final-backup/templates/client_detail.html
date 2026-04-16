@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ client.name }} — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
+    .main { max-width:1000px; margin:0 auto; padding:24px; }
+    a { color:var(--accent); text-decoration:none; }
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    .back:hover { color:var(--text); }
+    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .header h1 { font-size:1.4rem; }
+    .header .meta { color:var(--muted); font-size:.82rem; }
+    .tabs { display:flex; gap:8px; margin-bottom:20px; }
+    .tab { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
+    .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .tab:hover { border-color:var(--accent); color:var(--text); }
+    .section { margin-bottom:24px; }
+    .section h2 { font-size:1rem; font-weight:600; margin-bottom:12px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; }
+    .card h3 { font-size:.88rem; font-weight:600; margin-bottom:4px; }
+    .card p { font-size:.82rem; color:var(--muted); }
+    .card .meta { font-size:.72rem; color:var(--muted); margin-top:4px; display:flex; gap:12px; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .b-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .b-in-progress { background:rgba(168,85,247,.15); color:#c084fc; }
+    .b-done { background:rgba(34,197,94,.15); color:#4ade80; }
+    .b-blocked { background:rgba(239,68,68,.15); color:#f87171; }
+    .btn { padding:6px 12px; border-radius:8px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:4px; }
+    .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
+    .btn-p { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="main">
+  <a href="/clients" class="back">← Клиенты</a>
+  <div class="header">
+    <div>
+      <h1>{{ client.name }}</h1>
+      <div class="meta">{{ client.segment or '—' }} · {{ client.manager_email or '—' }}</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <a href="/prep/{{ client.id }}" class="btn btn-p">📋 Prep</a>
+      <a href="/followup/{{ client.id }}" class="btn">✍️ Followup</a>
+      <a href="/client/{{ client.id }}/plan" class="btn">📐 План</a>
+      <a href="/client/{{ client.id }}/qbr" class="btn">📊 QBR</a>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('tasks',this)">📋 Задачи ({{ tasks|length }})</button>
+    <button class="tab" onclick="showTab('meetings',this)">📅 Встречи ({{ meetings|length }})</button>
+    <button class="tab" onclick="showTab('notes',this)">📝 Заметки</button>
+    <button class="tab" onclick="showTab('timeline',this)">📜 Таймлайн</button>
+  </div>
+
+  <div id="tab-tasks" class="tab-content">
+    {% if tasks %}
+    {% for t in tasks %}
+    <div class="card">
+      <h3>{{ t.title }}</h3>
+      {% if t.description %}<p>{{ t.description[:200] }}</p>{% endif %}
+      <div class="meta">
+        <span class="badge b-{{ t.status|replace('_','-') }}">{{ t.status }}</span>
+        <span>{{ t.priority }}</span>
+        {% if t.due_date %}<span>До: {{ t.due_date.strftime('%d.%m.%Y') }}</span>{% endif %}
+        {% if t.team %}<span>Команда: {{ t.team }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div style="text-align:center;padding:40px;color:var(--muted);">Нет задач</div>
+    {% endif %}
+  </div>
+
+  <div id="tab-meetings" class="tab-content" style="display:none;">
+    {% if meetings %}
+    {% for m in meetings %}
+    <div class="card">
+      <h3>{{ m.title or m.type }}</h3>
+      {% if m.summary %}<p>{{ m.summary[:200] }}</p>{% endif %}
+      <div class="meta">
+        <span>{{ m.date.strftime('%d.%m.%Y %H:%M') if m.date else '' }}</span>
+        <span class="badge b-plan">{{ m.type }}</span>
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div style="text-align:center;padding:40px;color:var(--muted);">Нет встреч</div>
+    {% endif %}
+  </div>
+
+  <!-- Notes Tab -->
+  <div id="tab-notes" class="tab-content" style="display:none;">
+    <div id="notes-list"></div>
+    <div style="margin-top:12px;">
+      <div class="field"><textarea id="new-note" placeholder="Новая заметка..." style="width:100%;min-height:60px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;resize:vertical;outline:none;"></textarea></div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-sm" onclick="addNote()">💾 Сохранить</button>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--muted);cursor:pointer;"><input type="checkbox" id="note-pinned"> 📌 Закрепить</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline Tab -->
+  <div id="tab-timeline" class="tab-content" style="display:none;">
+    <div id="timeline-list" style="text-align:center;padding:20px;color:var(--muted);">Загрузка...</div>
+  </div>
+</div>
+
+<script>
+const clientId = {{ client.id }};
+function showTab(id,btn){document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');document.getElementById('tab-'+id).style.display='block';document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(id==='notes')loadNotes();if(id==='timeline')loadTimeline();}
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+async function loadNotes(){
+  try{
+    const r=await fetch('/api/clients/'+clientId+'/notes');
+    const d=await r.json();
+    const el=document.getElementById('notes-list');
+    if(!d.notes.length){el.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);">Нет заметок</div>';return;}
+    el.innerHTML=d.notes.map(n=>'<div class="card" style="margin-bottom:8px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:start;">'+
+      '<div style="flex:1;">'+(n.pinned?'📌 ':'')+'<span style="font-size:.85rem;">'+n.content.replace(/</g,'&lt;')+'</span>'+
+      '<div class="meta" style="margin-top:4px;">'+(n.created_at||'')+'</div></div>'+
+      '<div style="display:flex;gap:6px;">'+
+      '<button class="btn btn-sm" style="padding:3px 8px;font-size:.7rem;" onclick="deleteNote('+n.id+')">✕</button></div></div></div>').join('');
+  }catch(e){console.error(e);}
+}
+
+async function addNote(){
+  const content=document.getElementById('new-note').value.trim();
+  if(!content)return;
+  const pinned=document.getElementById('note-pinned').checked;
+  const r=await fetch('/api/clients/'+clientId+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,pinned})});
+  if(r.ok){document.getElementById('new-note').value='';document.getElementById('note-pinned').checked=false;loadNotes();}
+}
+
+async function deleteNote(id){
+  if(!confirm('Удалить заметку?'))return;
+  const r=await fetch('/api/clients/notes/'+id,{method:'DELETE'});
+  if(r.ok)loadNotes();
+}
+
+async function loadTimeline(){
+  try{
+    const r=await fetch('/api/clients/'+clientId+'/timeline');
+    const d=await r.json();
+    const el=document.getElementById('timeline-list');
+    if(!d.events||!d.events.length){el.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);">Нет событий</div>';return;}
+    el.innerHTML=d.events.map(e=>'<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">'+
+      '<div style="font-size:.72rem;color:var(--muted);min-width:80px;">'+(e.date||'')+'</div>'+
+      '<div style="font-size:1rem;">'+(e.icon||'📌')+'</div>'+
+      '<div><div style="font-size:.82rem;font-weight:500;">'+e.title+'</div>'+
+      '<div style="font-size:.72rem;color:var(--muted);">'+(e.desc||'')+'</div></div></div>').join('');
+  }catch(e){console.error(e);}
+}
+</script>
+</body>
+</html>

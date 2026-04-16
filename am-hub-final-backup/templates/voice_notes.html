@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Голосовые заметки — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; max-width:700px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    h1 { font-size:1.4rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; }
+    .btn { padding:10px 20px; border-radius:10px; font-size:.85rem; font-weight:600; cursor:pointer; border:none; background:var(--accent); color:#fff; }
+    .btn:hover { filter:brightness(1.15); }
+    .btn-red { background:var(--red); }
+    .btn-green { background:var(--green); }
+    .field select, .field input, .field textarea { width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; margin-bottom:12px; }
+    .recorder { display:flex; align-items:center; justify-content:center; gap:16px; padding:30px; }
+    .rec-btn { width:60px; height:60px; border-radius:50%; border:none; font-size:1.5rem; cursor:pointer; transition:all .2s; }
+    .rec-btn.idle { background:var(--red); color:#fff; }
+    .rec-btn.recording { background:var(--red); color:#fff; animation:pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.1);} }
+    .rec-timer { font-size:1.5rem; font-weight:700; color:var(--muted); }
+    .note-item { background:var(--bg); border-radius:8px; padding:12px; margin-bottom:8px; }
+    .note-item .text { font-size:.85rem; margin-bottom:4px; }
+    .note-item .meta { font-size:.72rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
+  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
+  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/inbox"><span>📬</span> Inbox</a>
+  <a class="nav-item active" href="/voice-notes"><span>🎤</span> Голосовые</a>
+  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <h1>🎤 Голосовые заметки</h1>
+  <p class="sub">Надиктуйте итог встречи — текст + задача создадутся автоматически</p>
+
+  <div class="section">
+    <h3>Записать заметку</h3>
+    <div class="field">
+      <label>Клиент</label>
+      <select id="vn-client"><option value="">— Выберите клиента —</option></select>
+    </div>
+
+    <div class="recorder">
+      <button class="rec-btn idle" id="recBtn" onclick="toggleRecording()">🎤</button>
+      <div class="rec-timer" id="recTimer">00:00</div>
+    </div>
+
+    <div class="field">
+      <label>Текст (распознанный или введённый вручную)</label>
+      <textarea id="vn-text" rows="4" placeholder="Надиктуйте или введите текст..."></textarea>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-green" onclick="saveNote(false)">💾 Сохранить заметку</button>
+      <button class="btn" onclick="saveNote(true)">💾 + Создать задачу</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Предыдущие заметки</h3>
+    <div id="notes-list"></div>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+// Load clients
+async function loadClients(){
+  try{
+    const r=await fetch('/api/clients');
+    // If endpoint doesn't exist, try dashboard data
+  }catch(e){}
+  // Fallback: try to get from dashboard
+  try{
+    const r=await fetch('/dashboard');
+    // Can't parse HTML easily, skip for now
+  }catch(e){}
+}
+
+// Voice recording
+let mediaRecorder=null;
+let audioChunks=[];
+let recording=false;
+let recInterval=null;
+let recSeconds=0;
+
+async function toggleRecording(){
+  const btn=document.getElementById('recBtn');
+  if(!recording){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      mediaRecorder=new MediaRecorder(stream);
+      audioChunks=[];
+      mediaRecorder.ondataavailable=e=>{audioChunks.push(e.data);};
+      mediaRecorder.onstop=()=>{
+        const blob=new Blob(audioChunks,{type:'audio/webm'});
+        // In production, send to server for transcription
+        // For now, just show text area
+        stream.getTracks().forEach(t=>t.stop());
+      };
+      mediaRecorder.start();
+      recording=true;
+      btn.className='rec-btn recording';
+      btn.textContent='⏹';
+      recSeconds=0;
+      recInterval=setInterval(()=>{
+        recSeconds++;
+        const m=String(Math.floor(recSeconds/60)).padStart(2,'0');
+        const s=String(recSeconds%60).padStart(2,'0');
+        document.getElementById('recTimer').textContent=m+':'+s;
+      },1000);
+    }catch(e){
+      alert('Нет доступа к микрофону. Введите текст вручную.');
+    }
+  }else{
+    mediaRecorder.stop();
+    recording=false;
+    btn.className='rec-btn idle';
+    btn.textContent='🎤';
+    clearInterval(recInterval);
+    document.getElementById('recTimer').textContent='00:00';
+  }
+}
+
+async function saveNote(createTask){
+  const text=document.getElementById('vn-text').value.trim();
+  const clientId=document.getElementById('vn-client').value;
+  if(!text){alert('Введите текст заметки');return;}
+  try{
+    const r=await fetch('/api/voice-notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:parseInt(clientId)||null,text,duration:recSeconds,create_task:createTask})});
+    if(r.ok){alert('✅ Заметка сохранена!');document.getElementById('vn-text').value='';loadNotes();}
+  }catch(e){alert('Ошибка: '+e.message);}
+}
+
+async function loadNotes(){
+  // Load voice notes if endpoint exists
+  document.getElementById('notes-list').innerHTML='<div style="color:var(--muted);font-size:.82rem;">Заметки сохраняются через API</div>';
+}
+loadNotes();
+</script>
+</body>
+</html>

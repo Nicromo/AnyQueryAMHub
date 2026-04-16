@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Клиенты — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
+    .main { margin-left:240px; padding:24px 28px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); background:rgba(255,255,255,.03); text-decoration:none; }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+    h1 { font-size:1.4rem; }
+    .filter-bar { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+    .fbtn { padding:5px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
+    .fbtn:hover { border-color:var(--accent); color:var(--text); }
+    .fbtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .tbl-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+    .tbl-head { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+    .tbl-head h3 { font-size:.9rem; font-weight:600; }
+    .search { padding:7px 12px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text); font-size:.8rem; outline:none; width:200px; }
+    .search:focus { border-color:var(--accent); }
+    table { width:100%; border-collapse:collapse; }
+    th { padding:10px 14px; text-align:left; font-size:.68rem; color:var(--muted); text-transform:uppercase; border-bottom:1px solid var(--border); }
+    td { padding:10px 14px; font-size:.82rem; border-bottom:1px solid rgba(255,255,255,.03); }
+    tr:hover td { background:rgba(255,255,255,.02); }
+    .c-name { font-weight:600; }
+    .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+    .dot.g { background:var(--green); }
+    .dot.y { background:var(--yellow); }
+    .dot.r { background:var(--red); }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .badge-ENT { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .badge-SME-plus { background:rgba(168,85,247,.15); color:#c084fc; }
+    .badge-SME-minus { background:rgba(168,85,247,.15); color:#a78bfa; }
+    .badge-SMB { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-SS { background:rgba(249,115,22,.15); color:#fb923c; }
+    .btn { padding:6px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; }
+    .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item active" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
+  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
+  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+<div class="main">
+  <div class="topbar">
+    <div><h1>👥 Клиенты</h1><div style="color:var(--muted);font-size:.82rem;">{{ clients|length }} записей</div></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm" onclick="openSearch()" title="Поиск (Ctrl+K)">🔍</button>
+    </div>
+  </div>
+
+  <!-- Search Modal (shared) -->
+  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+        <span style="font-size:1.1rem;">🔍</span>
+        <input id="searchInput" type="text" placeholder="Поиск..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;" autocomplete="off">
+        <kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd>
+      </div>
+      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
+      <div id="searchEmpty" style="padding:30px;text-align:center;color:var(--muted);font-size:.85rem;display:none;">Начните вводить</div>
+    </div>
+  </div>
+  <style>.search-cat{padding:6px 16px 4px;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;}.search-item{padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s;}.search-item:hover{background:rgba(255,255,255,.04);}.search-item .s-icon{font-size:1rem;flex-shrink:0;width:20px;text-align:center;}.search-item .s-text{flex:1;min-width:0;}.search-item .s-title{font-size:.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.search-item .s-sub{font-size:.72rem;color:var(--muted);}.search-item .s-badge{font-size:.65rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,.15);color:var(--accent);font-weight:600;flex-shrink:0;}</style>
+  <div class="filter-bar">
+    <button class="fbtn active" onclick="filterSeg('')">Все</button>
+    {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
+    <button class="fbtn" onclick="filterSeg('{{ seg }}')">{{ seg }} ({{ counts[seg] or 0 }})</button>
+    {% endfor %}
+  </div>
+  <div class="tbl-card">
+    <div class="tbl-head"><h3>Список</h3><input type="text" class="search" placeholder="🔍 Поиск..." oninput="filterTbl(this.value)"></div>
+    <table>
+      <thead><tr><th></th><th>Клиент</th><th>Сегмент</th><th>Последняя встреча</th><th></th></tr></thead>
+      <tbody id="tbody">
+          {% for c in clients %}
+          <tr data-seg="{{ c.segment or '' }}" data-name="{{ c.name|lower }}">
+            {% set color = 'g' if c.status.color == 'green' else 'y' if c.status.color == 'yellow' else 'r' %}
+            <td><span class="dot dot-{{ color }}"></span></td>
+            <td class="c-name"><a href="/client/{{ c.id }}">{{ c.name }}</a></td>
+            {% set seg_class = 'badge-' + (c.segment|replace('+','-plus')|replace('-','-minus')|replace(' ','')) %}
+            <td><span class="badge {{ seg_class }}">{{ c.segment or '—' }}</span></td>
+            <td style="color:var(--muted);font-size:.78rem;">
+              {% if c.last_meeting_date %}{{ c.last_meeting_date.strftime('%d.%m.%Y') }}{% else %}—{% endif %}
+            </td>
+            <td><a href="/prep/{{ c.id }}" class="btn" style="padding:3px 8px;font-size:.7rem;">📋 Prep</a></td>
+          </tr>
+          {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+function filterSeg(seg){document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=(!seg||tr.dataset.seg===seg)?'':'none';});}
+function filterTbl(q){q=q.toLowerCase();document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+// Global Search
+let searchTimeout=null;
+function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').value='';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';}
+function closeSearch(){document.getElementById('searchModal').style.display='none';}
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')closeSearch();});
+document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))closeSearch();});
+document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}document.getElementById('searchEmpty').style.display='none';searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div></div></div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+'</div></div></div>';});}if(d.meetings.length){html+='<div class="search-cat">📅 Встречи</div>';d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div></div></div>';});}if(d.notes.length){html+='<div class="search-cat">📝 Заметки</div>';d.notes.forEach(n=>{html+='<div class="search-item" onclick="location.href=\''+n.url+'\'"><span class="s-icon">📝</span><div class="s-text"><div class="s-title">'+n.content.slice(0,60)+'</div></div></div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){console.error(e);}},300);});
+</script>
+</body>
+</html>

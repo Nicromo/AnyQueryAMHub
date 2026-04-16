@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>План: {{ client.name }} — AM Hub</title>
+  <style>
+    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
+    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; max-width:900px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    .back:hover { color:var(--text); }
+    h1 { font-size:1.3rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+    .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .field { margin-bottom:12px; }
+    .field label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px; }
+    .field input, .field textarea, .field select { width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; }
+    .field textarea { min-height:80px; resize:vertical; }
+    .field input:focus, .field textarea:focus { border-color:var(--accent); }
+    .item-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .item-row input { flex:1; }
+    .item-row .remove { cursor:pointer; color:var(--red); font-size:1.1rem; }
+    .btn { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:none; background:var(--accent); color:#fff; transition:filter .15s; }
+    .btn:hover { filter:brightness(1.15); }
+    .btn-sm { padding:5px 10px; font-size:.75rem; }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .saved-msg { font-size:.78rem; color:var(--green); margin-top:8px; display:none; }
+    .saved-msg.show { display:block; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
+  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
+  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+  <h1>📐 План работы: {{ client.name }}</h1>
+  <p class="sub">{{ client.segment or '' }} · Обновлено: {{ plan.updated_at.strftime('%d.%m.%Y') if plan.updated_at else '—' }}</p>
+
+  <div class="section">
+    <h3>🎯 Цели на квартал</h3>
+    <div id="goals-list">
+      {% for g in plan.quarterly_goals or [] %}
+      <div class="item-row">
+        <input type="text" value="{{ g.goal or '' }}" placeholder="Цель..." class="goal-input">
+        <input type="text" value="{{ g.target or '' }}" placeholder="Метрика..." class="goal-target" style="max-width:150px;">
+        <span class="remove" onclick="this.parentElement.remove()">✕</span>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addGoal()">+ Добавить цель</button>
+  </div>
+
+  <div class="section">
+    <h3>✅ Действия</h3>
+    <div id="actions-list">
+      {% for a in plan.action_items or [] %}
+      <div class="item-row">
+        <input type="text" value="{{ a.action or '' }}" placeholder="Действие..." class="action-input">
+        <input type="text" value="{{ a.assignee or '' }}" placeholder="Кто..." class="action-assignee" style="max-width:120px;">
+        <input type="date" value="{{ a.due or '' }}" class="action-due" style="max-width:140px;">
+        <span class="remove" onclick="this.parentElement.remove()">✕</span>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addAction()">+ Добавить действие</button>
+  </div>
+
+  <div class="section">
+    <h3>📝 Стратегия</h3>
+    <div class="field">
+      <textarea id="strategy" placeholder="Общая стратегия по клиенту...">{{ plan.strategy or '' }}</textarea>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>📋 Заметки</h3>
+    <div class="field">
+      <textarea id="notes" placeholder="Заметки, наблюдения, контекст...">{{ plan.notes or '' }}</textarea>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center;">
+    <button class="btn" onclick="savePlan()">💾 Сохранить план</button>
+    <span class="saved-msg" id="saved">✅ Сохранено</span>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+function addGoal(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Цель..." class="goal-input"><input type="text" placeholder="Метрика..." class="goal-target" style="max-width:150px;"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('goals-list').appendChild(d);
+}
+function addAction(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Действие..." class="action-input"><input type="text" placeholder="Кто..." class="action-assignee" style="max-width:120px;"><input type="date" class="action-due" style="max-width:140px;"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('actions-list').appendChild(d);
+}
+
+async function savePlan(){
+  const goals=[];
+  document.querySelectorAll('#goals-list .item-row').forEach(row=>{
+    const g=row.querySelector('.goal-input').value;
+    if(g) goals.push({goal:g, target:row.querySelector('.goal-target').value, status:'active'});
+  });
+  const actions=[];
+  document.querySelectorAll('#actions-list .item-row').forEach(row=>{
+    const a=row.querySelector('.action-input').value;
+    if(a) actions.push({action:a, assignee:row.querySelector('.action-assignee').value, due:row.querySelector('.action-due').value, done:false});
+  });
+  const data={quarterly_goals:goals, action_items:actions, strategy:document.getElementById('strategy').value, notes:document.getElementById('notes').value};
+  const r=await fetch('/api/clients/{{ client.id }}/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+}
+</script>
+</body>
+</html>

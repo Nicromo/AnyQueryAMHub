@@ -256,6 +256,72 @@ def db_init():
         console.print(f"❌ Error: {e}", style="red")
 
 
+@app.command()
+def db_seed():
+    """Seed database with test data"""
+    try:
+        console.print("🌱 Seeding database...", style="yellow")
+        
+        with SessionLocal() as db:
+            # Check if already seeded
+            if db.query(User).count() > 0:
+                console.print("⚠️  Database already has data. Skipping seed.", style="dim")
+                return
+            
+            # Create test account
+            account = Account(
+                name="Test Account",
+                subscription="pro",
+                created_at=datetime.now(),
+            )
+            db.add(account)
+            db.flush()
+            
+            # Create test admin user
+            admin = User(
+                email="admin@example.com",
+                name="Admin User",
+                password_hash=hash_password("admin123"),
+                role="admin",
+                account_id=account.id,
+                created_at=datetime.now(),
+            )
+            db.add(admin)
+            
+            # Create test manager
+            manager = User(
+                email="manager@example.com",
+                name="Manager User",
+                password_hash=hash_password("manager123"),
+                role="manager",
+                account_id=account.id,
+                created_at=datetime.now(),
+            )
+            db.add(manager)
+            
+            # Create test clients
+            for i in range(3):
+                client = Client(
+                    name=f"Test Client {i+1}",
+                    email=f"client{i+1}@example.com",
+                    segment="smb",
+                    manager_email="manager@example.com",
+                    account_id=account.id,
+                    status="active",
+                    health_score=75 + i * 5,
+                    created_at=datetime.now(),
+                )
+                db.add(client)
+            
+            db.commit()
+            
+            console.print("✅ Database seeded successfully", style="green")
+            console.print("\n📝 Test Credentials:")
+            console.print("   Admin:   admin@example.com / admin123")
+            console.print("   Manager: manager@example.com / manager123")
+    
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
 
 
 @app.command()

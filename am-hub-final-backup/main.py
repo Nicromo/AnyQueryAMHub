@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from fastapi import (
     FastAPI, Request, Depends, HTTPException, Query, Cookie,
-    Form, status, UploadFile, File
+    Form, status
 )
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,84 +47,6 @@ from ai_assistant import generate_prep_brief, generate_smart_followup, detect_ac
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-
-# ============================================================================
-# ENV HELPERS — единый источник конфигурации
-# ============================================================================
-
-def _env(key: str, default: str = "") -> str:
-    return os.environ.get(key, default)
-
-def _env_bool(key: str) -> bool:
-    return bool(os.environ.get(key, ""))
-
-def _extract_sheets_id(val: str) -> str:
-    """Вырезает spreadsheet ID из полного URL или возвращает как есть."""
-    if not val:
-        return ""
-    # https://docs.google.com/spreadsheets/d/ID/edit...
-    import re
-    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", val)
-    if m:
-        return m.group(1)
-    return val
-
-
-class Env:
-    """Централизованный доступ к переменным окружения."""
-    # Merchrules
-    MR_LOGIN      = property(lambda self: _env("MERCHRULES_LOGIN"))
-    MR_PASSWORD   = property(lambda self: _env("MERCHRULES_PASSWORD"))
-    MR_URL        = property(lambda self: _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"))
-    MR_ACTIVE     = property(lambda self: bool(_env("MERCHRULES_LOGIN") and _env("MERCHRULES_PASSWORD")))
-    # AI
-    GROQ_KEY      = property(lambda self: _env("GROQ_API_KEY") or _env("API_GROQ"))
-    QWEN_KEY      = property(lambda self: _env("QWEN_API_KEY"))
-    AI_ACTIVE     = property(lambda self: bool(_env("GROQ_API_KEY") or _env("API_GROQ") or _env("QWEN_API_KEY")))
-    AI_TYPE       = property(lambda self: "qwen" if _env("QWEN_API_KEY") else ("groq" if (_env("GROQ_API_KEY") or _env("API_GROQ")) else ""))
-    # Telegram
-    TG_TOKEN      = property(lambda self: _env("TG_BOT_TOKEN") or _env("TELEGRAM_BOT_TOKEN"))
-    TG_CHAT_ID    = property(lambda self: _env("TG_NOTIFY_CHAT_ID") or _env("TELEGRAM_CHAT_ID"))
-    TG_ACTIVE     = property(lambda self: bool(_env("TG_BOT_TOKEN") or _env("TELEGRAM_BOT_TOKEN")))
-    # Airtable — поддерживаем оба имени: AIRTABLE_TOKEN и AIRTABLE_PAT
-    AIRTABLE_PAT  = property(lambda self: _env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT"))
-    AIRTABLE_BASE = property(lambda self: _env("AIRTABLE_BASE_ID"))
-    AIRTABLE_TABLE = property(lambda self: _env("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn"))
-    AIRTABLE_QBR_TABLE = property(lambda self: _env("AIRTABLE_QBR_TABLE_ID", "tblqQbChhRYoZoxWu"))
-    AIRTABLE_ACTIVE = property(lambda self: bool(_env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT")))
-    # Google Sheets — вырезаем ID из полного URL если передан
-    SHEETS_ID     = property(lambda self: _extract_sheets_id(_env("SHEETS_SPREADSHEET_ID")))
-    SHEETS_ACTIVE = property(lambda self: bool(_env("SHEETS_SPREADSHEET_ID")))
-    # Ktalk
-    KTALK_SPACE   = property(lambda self: _env("KTALK_SPACE"))
-    KTALK_TOKEN   = property(lambda self: _env("KTALK_API_TOKEN"))
-    KTALK_WEBHOOK = property(lambda self: _env("KTALK_WEBHOOK_URL"))
-    KTALK_ACTIVE  = property(lambda self: bool(_env("KTALK_SPACE") and _env("KTALK_API_TOKEN")))
-    # Tbank Time
-    TIME_TOKEN    = property(lambda self: _env("TIME_API_TOKEN") or _env("TIME_SESSION_COOKIE"))
-    TIME_ACTIVE   = property(lambda self: bool(_env("TIME_API_TOKEN") or _env("TIME_SESSION_COOKIE")))
-    # Ktalk
-    KTALK_SPACE   = property(lambda self: _env("KTALK_SPACE"))
-    KTALK_TOKEN   = property(lambda self: _env("KTALK_API_TOKEN"))
-    KTALK_ACTIVE  = property(lambda self: bool(_env("KTALK_API_TOKEN") and _env("KTALK_SPACE")))
-    KTALK_WEBHOOK = property(lambda self: _env("KTALK_WEBHOOK_URL"))
-    # Tbank Time
-    TIME_TOKEN    = property(lambda self: _env("TIME_API_TOKEN"))
-    TIME_URL      = property(lambda self: _env("TIME_BASE_URL", "https://time.tbank.ru"))
-    TIME_ACTIVE   = property(lambda self: bool(_env("TIME_API_TOKEN")))
-    # Airtable
-    AIRTABLE_PAT  = property(lambda self: _env("AIRTABLE_PAT"))
-    AIRTABLE_BASE = property(lambda self: _env("AIRTABLE_BASE_ID"))
-    AIRTABLE_ACTIVE = property(lambda self: bool(_env("AIRTABLE_PAT")))
-    # Google Sheets
-    SHEETS_ID     = property(lambda self: _env("SHEETS_SPREADSHEET_ID"))
-    SHEETS_ACTIVE = property(lambda self: bool(_env("SHEETS_SPREADSHEET_ID")))
-    # App
-    APP_URL       = property(lambda self: _env("RAILWAY_PUBLIC_DOMAIN") or _env("APP_URL"))
-    SECRET_KEY    = property(lambda self: _env("SECRET_KEY", "your-secret-key-change-in-production"))
-
-env = Env()
 
 templates = Jinja2Templates(directory="templates")
 
@@ -304,18 +226,16 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"Migration {table_name}: {e}")
 
             if db.query(User).count() == 0:
-                import secrets, string
-                random_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
                 admin = User(
                     email="admin@company.ru",
                     first_name="Администратор",
                     role="admin",
-                    hashed_password=hash_password(random_password),
+                    hashed_password=hash_password("admin123"),
                     settings={},
                 )
                 db.add(admin)
                 db.commit()
-                logger.warning(f"✅ Default admin created: admin@company.ru / {random_password} — СМЕНИТЕ ПАРОЛЬ!")
+                logger.info("✅ Default admin created")
         logger.info("✅ Database ready")
 
         # Start scheduler
@@ -330,7 +250,7 @@ async def lifespan(app: FastAPI):
         try:
             from tg_bot import set_webhook, BOT_TOKEN as TG_TOKEN
             if TG_TOKEN:
-                domain = env.APP_URL
+                domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", os.environ.get("APP_URL", ""))
                 if domain:
                     await set_webhook(f"{domain}/webhook/telegram")
                     logger.info(f"✅ TG webhook: {domain}/webhook/telegram")
@@ -367,12 +287,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ============================================================================
 
 def _get_user_cred(user: User) -> tuple:
-    """Получить Merchrules логин/пароль: сначала из user.settings, потом из env."""
-    settings = (user.settings or {}) if user else {}
-    mr = settings.get("merchrules", {})
-    login = mr.get("login") or env.MR_LOGIN
-    password = mr.get("password") or env.MR_PASSWORD
-    return login, password
+    """Получить креды пользователя из env"""
+    return os.environ.get("MERCHRULES_LOGIN", ""), os.environ.get("MERCHRULES_PASSWORD", "")
 
 
 # ============================================================================
@@ -701,14 +617,6 @@ async def followup_page(request: Request, client_id: int, db: Session = Depends(
     tasks = db.query(Task).filter(Task.client_id == client_id).all()
     meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(3).all()
 
-    # Последняя встреча с pending followup (или просто последняя)
-    meeting = db.query(Meeting).filter(
-        Meeting.client_id == client_id,
-        Meeting.followup_status == "pending"
-    ).order_by(Meeting.date.desc()).first()
-    if not meeting:
-        meeting = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).first()
-
     try:
         followup_text = generate_smart_followup(client, tasks, meetings)
     except Exception as e:
@@ -717,34 +625,6 @@ async def followup_page(request: Request, client_id: int, db: Session = Depends(
     return templates.TemplateResponse("followup.html", {
         "request": request, "user": user, "client": client,
         "tasks": tasks, "meetings": meetings, "followup_text": followup_text,
-        "meeting": meeting, "now": datetime.now(),
-    })
-
-
-# ============================================================================
-# ONBOARDING PARTNER
-# ============================================================================
-
-@app.get("/onboarding/{client_id}", response_class=HTMLResponse)
-async def onboarding_partner_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    return templates.TemplateResponse("onboarding_partner.html", {
-        "request": request, "user": user, "client": client,
         "now": datetime.now(),
     })
 
@@ -811,8 +691,7 @@ async def sync_page(request: Request, db: Session = Depends(get_db), auth_token:
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    mr_login_val, _ = _get_user_cred(user)
-    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": mr_login_val})
+    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": os.environ.get("MERCHRULES_LOGIN", "")})
 
 
 # ============================================================================
@@ -883,32 +762,71 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
-    mr_login_val, mr_password_val = _get_user_cred(user)
-    u_settings = user.settings or {}
-    ktalk_s = u_settings.get("ktalk", {})
-    airtable_s = u_settings.get("airtable", {})
-    sheets_s = u_settings.get("sheets", {})
-    groq_s = u_settings.get("groq", {})
-    tbank_s = u_settings.get("tbank_time", {})
-    tg_s = u_settings.get("telegram", {})
-    airtable_active = bool(airtable_s.get("pat") or env.AIRTABLE_PAT)
-    sheets_active = bool(sheets_s.get("spreadsheet_id") or env.SHEETS_ID)
-    ai_active = bool(groq_s.get("api_key") or env.AI_ACTIVE)
-    ai_type = "qwen" if env.QWEN_KEY else ("groq" if (groq_s.get("api_key") or env.GROQ_KEY) else "")
+    mr_login = os.environ.get("MERCHRULES_LOGIN", "")
+    airtable_active = bool(os.environ.get("AIRTABLE_PAT"))
+    sheets_active = bool(os.environ.get("SHEETS_SPREADSHEET_ID"))
+    ai_active = bool(os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ") or os.environ.get("QWEN_API_KEY"))
+    ai_type = "qwen" if os.environ.get("QWEN_API_KEY") else ("groq" if (os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ")) else "")
     integrations_data = {
-        "mr_active": bool(mr_login_val and mr_password_val),
-        "mr_login": mr_login_val,
+        "mr_active": bool(os.environ.get("MERCHRULES_LOGIN") and os.environ.get("MERCHRULES_PASSWORD")),
+        "mr_login": mr_login,
         "airtable_active": airtable_active,
         "sheets_active": sheets_active,
-        "sheets_id": env.SHEETS_ID,
-        "tg_active": bool(env.TG_TOKEN),
+        "sheets_id": os.environ.get("SHEETS_SPREADSHEET_ID", ""),
+        "tg_active": bool(os.environ.get("TG_BOT_TOKEN")),
         "ai_active": ai_active,
         "ai_type": ai_type,
-        "ktalk_active": bool(env.KTALK_TOKEN and env.KTALK_SPACE),
+        "ktalk_active": bool(os.environ.get("KTALK_API_TOKEN") and os.environ.get("KTALK_SPACE")),
         "ktalk_space": os.environ.get("KTALK_SPACE", ""),
-        "time_active": bool(env.TIME_TOKEN),
+        "time_active": bool(os.environ.get("TIME_API_TOKEN")),
     }
     return templates.TemplateResponse("integrations.html", {"request": request, "user": user, **integrations_data})
+
+
+# ============================================================================
+# SETTINGS API
+# ============================================================================
+
+@app.post("/api/settings/rules")
+async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    settings["rules"] = data
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/settings/prefs")
+async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    if "preferences" not in settings:
+        settings["preferences"] = {}
+    settings["preferences"].update(data)
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
 
 
 # ============================================================================
@@ -955,7 +873,7 @@ async def test_ktalk(space: str = "", token: str = ""):
 async def test_tbank(token: str = ""):
     if not token:
         return {"error": "Need token"}
-    time_url = env.TIME_URL
+    time_url = os.environ.get("TIME_BASE_URL", "https://time.tbank.ru")
     import httpx
     try:
         async with httpx.AsyncClient(timeout=10) as hx:
@@ -1019,7 +937,7 @@ async def api_ktalk_notify(
         raise HTTPException(status_code=401)
 
     data = await request.json()
-    webhook_url = env.KTALK_WEBHOOK
+    webhook_url = os.environ.get("KTALK_WEBHOOK_URL", "")
     if not webhook_url:
         return {"error": "KTALK_WEBHOOK_URL not set"}
 
@@ -1049,7 +967,7 @@ async def api_ktalk_followup(
     summary = data.get("summary", "")
     tasks = data.get("tasks", [])
 
-    webhook_url = env.KTALK_WEBHOOK
+    webhook_url = os.environ.get("KTALK_WEBHOOK_URL", "")
     if not webhook_url:
         return {"error": "KTALK_WEBHOOK_URL not set"}
 
@@ -1067,204 +985,67 @@ async def api_ktalk_followup(
 
 
 # ============================================================================
-# API: MERCHRULES SYNC
+# API: TBANK TIME (tickets)
 # ============================================================================
 
-@app.post("/api/sync/extension")
-async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
-    """
-    Приём данных синхронизации от Chrome-расширения AM Hub Sync.
-    Авторизация через Bearer токен (JWT) в заголовке Authorization.
-    """
-    # Авторизация через Bearer header (расширение не использует cookie)
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.removeprefix("Bearer ").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Bearer token required")
-
-    from auth import decode_access_token
-    payload_jwt = decode_access_token(token)
-    if not payload_jwt:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.id == int(payload_jwt.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    data = await request.json()
-    accounts = data.get("accounts", [])
-
-    if not accounts:
-        return {"ok": False, "error": "No accounts in payload"}
-
-    clients_synced = 0
-    tasks_synced = 0
-    meetings_synced = 0
-
-    for acc in accounts:
-        site_id = str(acc.get("id", "")).strip()
-        if not site_id:
-            continue
-
-        # Найти или создать клиента
-        client = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
-        if not client:
-            client = Client(
-                merchrules_account_id=site_id,
-                name=acc.get("name") or f"Site {site_id}",
-                manager_email=user.email,
-                segment=acc.get("segment") or "SMB",
-                domain=acc.get("domain"),
-            )
-            db.add(client)
-            db.flush()
-        else:
-            # Обновляем имя и сегмент если пришли
-            if acc.get("name"):
-                client.name = acc["name"]
-            if acc.get("segment"):
-                client.segment = acc["segment"]
-            if acc.get("domain"):
-                client.domain = acc["domain"]
-            if acc.get("health_score") is not None:
-                client.health_score = float(acc["health_score"])
-
-        # Гарантируем привязку к менеджеру
-        if not client.manager_email:
-            client.manager_email = user.email
-
-        clients_synced += 1
-
-        # Задачи
-        for t in acc.get("tasks", []):
-            mr_task_id = str(t.get("id", "")).strip()
-            if not mr_task_id:
-                continue
-            existing = db.query(Task).filter(Task.merchrules_task_id == mr_task_id).first()
-            if existing:
-                # Обновляем статус
-                existing.status = t.get("status", existing.status)
-                existing.priority = t.get("priority", existing.priority)
-            else:
-                due = None
-                if t.get("due_date"):
-                    try:
-                        due = datetime.fromisoformat(str(t["due_date"])[:19])
-                    except Exception:
-                        pass
-                db.add(Task(
-                    client_id=client.id,
-                    merchrules_task_id=mr_task_id,
-                    title=t.get("title") or "",
-                    status=t.get("status") or "plan",
-                    priority=t.get("priority") or "medium",
-                    source="roadmap",
-                    due_date=due,
-                    team=t.get("team"),
-                    task_type=t.get("task_type"),
-                ))
-                tasks_synced += 1
-
-        # Встречи
-        for m in acc.get("meetings", []):
-            mr_meeting_id = str(m.get("id", "")).strip()
-            if not mr_meeting_id:
-                continue
-            ext_id = f"mr_{mr_meeting_id}"
-            existing = db.query(Meeting).filter(Meeting.external_id == ext_id).first()
-            if not existing:
-                meeting_date = None
-                raw_date = m.get("date")
-                if raw_date:
-                    try:
-                        meeting_date = datetime.fromisoformat(str(raw_date)[:19])
-                    except Exception:
-                        pass
-                if meeting_date:
-                    db.add(Meeting(
-                        client_id=client.id,
-                        date=meeting_date,
-                        type=m.get("type") or "meeting",
-                        title=m.get("title"),
-                        summary=m.get("summary"),
-                        source="merchrules",
-                        external_id=ext_id,
-                        followup_status="pending",
-                    ))
-                    meetings_synced += 1
-                    # Обновляем last_meeting_date на клиенте
-                    if not client.last_meeting_date or meeting_date > client.last_meeting_date:
-                        client.last_meeting_date = meeting_date
-
-        # Метрики
-        metrics = acc.get("metrics")
-        if metrics and isinstance(metrics, dict):
-            hs = metrics.get("health_score") or metrics.get("healthScore")
-            if hs is not None:
-                client.health_score = float(hs)
-
-    db.commit()
-
-    # Логируем
-    db.add(SyncLog(
-        integration="extension",
-        resource_type="accounts",
-        action="push",
-        status="success",
-        records_processed=clients_synced,
-        sync_data={"tasks": tasks_synced, "meetings": meetings_synced},
-    ))
-    db.commit()
-
-    logger.info(f"Extension sync: {clients_synced} clients, {tasks_synced} tasks, {meetings_synced} meetings (user={user.email})")
-    return {
-        "ok": True,
-        "clients_synced": clients_synced,
-        "tasks_synced": tasks_synced,
-        "meetings_synced": meetings_synced,
-    }
-
-
-@app.get("/api/auth/token")
-async def api_get_token(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Вернуть JWT токен текущего пользователя — для настройки расширения."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload_jwt = decode_access_token(auth_token)
-    if not payload_jwt:
-        raise HTTPException(status_code=401)
-    return {"token": auth_token}
-
-
-@app.post("/api/sync/airtable")
-async def api_sync_airtable(
-    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+@app.get("/api/tbank/tickets/{client_name}")
+async def api_tbank_tickets(
+    client_name: str, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
 ):
-    """Синхронизация клиентов из Airtable → локальная БД."""
+    """Get support tickets for a client from Tbank Time"""
     if not auth_token:
         raise HTTPException(status_code=401)
     from auth import decode_access_token
     payload = decode_access_token(auth_token)
     if not payload:
         raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
+
+    time_token = os.environ.get("TIME_API_TOKEN", "")
+    if not time_token:
+        return {"error": "TIME_API_TOKEN not set", "tickets": []}
+
+    from integrations.tbank_time import sync_tickets_for_client
+    try:
+        result = await sync_tickets_for_client(client_name)
+        return result
+    except Exception as e:
+        return {"error": str(e), "open_count": 0, "total_count": 0, "last_ticket": None}
+
+
+@app.get("/api/tbank/tickets")
+async def api_tbank_all_tickets(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Get all open support tickets"""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
         raise HTTPException(status_code=401)
 
-    from airtable_sync import sync_clients_from_airtable
-    body = await request.json()
-    token = body.get("token") or os.environ.get("AIRTABLE_TOKEN", "")
-    view_id = body.get("view_id", "")
+    time_token = os.environ.get("TIME_API_TOKEN", "")
+    if not time_token:
+        return {"error": "TIME_API_TOKEN not set", "tickets": []}
 
-    result = await sync_clients_from_airtable(
-        db=db,
-        token=token,
-        view_id=view_id,
-        default_manager_email=user.email,
-    )
-    return result
+    from integrations.tbank_time import get_support_tickets
+    try:
+        clients = db.query(Client).all()
+        all_tickets = []
+        for c in clients:
+            if c.name:
+                tickets = await get_support_tickets(c.name)
+                for t in tickets:
+                    t["client"] = c.name
+                all_tickets.extend(tickets)
+        return {"tickets": all_tickets, "total": len(all_tickets)}
+    except Exception as e:
+        return {"error": str(e), "tickets": [], "total": 0}
 
+
+# ============================================================================
+# API: MERCHRULES SYNC
+# ============================================================================
 
 @app.post("/api/sync/merchrules")
 async def api_sync_merchrules(
@@ -1285,8 +1066,8 @@ async def api_sync_merchrules(
     body = await request.json()
     settings = user.settings or {}
     mr = settings.get("merchrules", {})
-    login = body.get("login") or mr.get("login") or env.MR_LOGIN
-    password = body.get("password") or mr.get("password") or env.MR_PASSWORD
+    login = body.get("login") or mr.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
+    password = body.get("password") or mr.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
     site_ids_input = body.get("site_ids") or mr.get("site_ids") or settings.get("merchrules_site_ids", [])
 
     if not login or not password:
@@ -1303,11 +1084,10 @@ async def api_sync_merchrules(
 
     # Пробуем авторизацию — все URL + все варианты поля логина
     import httpx
-    urls_to_try = list(dict.fromkeys([
-        _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
-        "https://merchrules.any-platform.ru",
+    urls_to_try = [
         "https://merchrules-qa.any-platform.ru",
-    ]))
+        "https://merchrules.any-platform.ru",
+    ]
     login_fields = ["email", "login", "username"]
     base_url = None
     token = None
@@ -1402,144 +1182,64 @@ async def api_sync_merchrules(
 
                 synced_clients += 1
         else:
-            # Без site_ids — получаем все аккаунты менеджера
-            accounts = []
-            accounts_endpoint_log = []
-
-            # Пробуем несколько возможных endpoint'ов
-            for ep in [
-                f"{base_url}/backend-v2/accounts",
-                f"{base_url}/backend-v2/sites",
-                f"{base_url}/backend-v2/accounts?limit=500",
-                f"{base_url}/backend-v2/sites?limit=500",
-            ]:
-                try:
-                    r = await hx.get(ep, headers=headers, timeout=20)
-                    accounts_endpoint_log.append(f"{ep} → {r.status_code}")
-                    if r.status_code == 200:
-                        data = r.json()
-                        # Пробуем разные ключи в ответе
-                        for key in ("accounts", "sites", "items", "data", "results"):
-                            if isinstance(data.get(key), list) and data[key]:
-                                accounts = data[key]
-                                break
-                        # Если ответ сам список
-                        if not accounts and isinstance(data, list):
-                            accounts = data
-                        if accounts:
-                            logger.info(f"✅ Accounts from {ep}: {len(accounts)}")
-                            break
-                except Exception as e:
-                    accounts_endpoint_log.append(f"{ep} → error: {e}")
+            # Без site_ids — пробуем получить accounts
+            try:
+                r = await hx.get(f"{base_url}/backend-v2/accounts", headers=headers, timeout=15)
+                accounts = r.json().get("accounts", []) if r.status_code == 200 else []
+            except:
+                accounts = []
 
             if not accounts:
-                return {
-                    "error": "Не удалось получить список аккаунтов. Попробуйте указать Site ID вручную.",
-                    "endpoints_tried": accounts_endpoint_log,
-                    "hint": "Укажите site_id через запятую в поле Site ID, например: 2262, 5335, 8049"
-                }
+                return {"error": f"Нет аккаунтов (HTTP {r.status_code if 'r' in dir() else 'N/A'}). Укажите site_id в настройках (через запятую), например: 2262, 5335"}
 
-            logger.info(f"Syncing {len(accounts)} accounts for {user.email}")
-
-            for acc in accounts:
-                aid = acc.get("id") or acc.get("site_id") or acc.get("siteId")
+            for acc in accounts[:30]:
+                aid = acc.get("id")
                 if not aid:
                     continue
                 site_id = str(aid)
-
-                # Название аккаунта — пробуем разные поля
-                acc_name = (
-                    acc.get("name") or acc.get("title") or
-                    acc.get("company") or acc.get("domain") or
-                    f"Account {site_id}"
-                )
-
-                # Сегмент если есть
-                acc_segment = acc.get("segment") or acc.get("tariff") or acc.get("plan") or None
-
                 c = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
                 if not c:
-                    c = Client(
-                        merchrules_account_id=site_id,
-                        name=acc_name,
-                        manager_email=user.email,
-                        segment=acc_segment,
-                    )
+                    c = Client(merchrules_account_id=site_id, name=acc.get("name",f"Account {site_id}"), manager_email=user.email)
                     db.add(c)
                     db.flush()
                 else:
-                    # Обновляем имя и менеджера
-                    c.name = acc_name
-                    if not c.manager_email:
-                        c.manager_email = user.email
-                    if acc_segment and not c.segment:
-                        c.segment = acc_segment
+                    c.name = acc.get("name") or c.name
 
                 # Tasks
                 try:
-                    r_tasks = await hx.get(
-                        f"{base_url}/backend-v2/tasks",
-                        params={"site_id": site_id, "limit": 100},
-                        headers=headers, timeout=15,
-                    )
+                    r_tasks = await hx.get(f"{base_url}/backend-v2/tasks", params={"site_id": site_id, "limit": 50}, headers=headers, timeout=15)
                     if r_tasks.status_code == 200:
-                        td = r_tasks.json()
-                        tasks_list = td.get("tasks") or td.get("items") or (td if isinstance(td, list) else [])
-                        for t in tasks_list:
-                            tid = str(t.get("id", ""))
-                            if not tid:
-                                continue
-                            existing = db.query(Task).filter(Task.merchrules_task_id == tid).first()
+                        tasks_data = r_tasks.json()
+                        tasks_list = tasks_data.get("tasks") or tasks_data.get("items") or []
+                        for t in tasks_list[:20]:
+                            existing = db.query(Task).filter(Task.merchrules_task_id == str(t.get("id"))).first()
                             if not existing:
-                                db.add(Task(
-                                    client_id=c.id,
-                                    merchrules_task_id=tid,
-                                    title=t.get("title") or t.get("name") or "",
-                                    status=t.get("status", "plan"),
-                                    priority=t.get("priority", "medium"),
-                                    source="roadmap",
-                                    team=t.get("team") or t.get("assignee") or None,
-                                ))
+                                db.add(Task(client_id=c.id, merchrules_task_id=str(t.get("id")),
+                                    title=t.get("title",""), status=t.get("status","plan"),
+                                    priority=t.get("priority","medium"), source="roadmap"))
                                 synced_tasks += 1
-                            else:
-                                # Обновляем статус
-                                existing.status = t.get("status", existing.status)
-                except Exception as e:
-                    logger.warning(f"Tasks fetch failed for site {site_id}: {e}")
+                except:
+                    pass
 
-                # Meetings — последняя дата
+                # Meetings
                 try:
-                    r_meetings = await hx.get(
-                        f"{base_url}/backend-v2/meetings",
-                        params={"site_id": site_id, "limit": 10},
-                        headers=headers, timeout=15,
-                    )
+                    r_meetings = await hx.get(f"{base_url}/backend-v2/meetings", params={"site_id": site_id, "limit": 10}, headers=headers, timeout=15)
                     if r_meetings.status_code == 200:
-                        md = r_meetings.json()
-                        meetings_list = md.get("meetings") or md.get("items") or (md if isinstance(md, list) else [])
-                        dates = []
-                        for m in meetings_list:
-                            d = m.get("date") or m.get("meeting_date") or m.get("createdAt", "")
-                            if d:
-                                dates.append(str(d)[:19])
-                        if dates:
+                        meetings_data = r_meetings.json()
+                        meetings_list = meetings_data.get("meetings") or meetings_data.get("items") or []
+                        if meetings_list:
+                            last_mtg = max(meetings_list, key=lambda m: m.get("date", ""))
                             try:
-                                c.last_meeting_date = datetime.fromisoformat(max(dates))
-                            except Exception:
+                                c.last_meeting_date = datetime.fromisoformat(last_mtg.get("date", "")[:19])
+                            except:
                                 pass
-                except Exception as e:
-                    logger.warning(f"Meetings fetch failed for site {site_id}: {e}")
+                except:
+                    pass
 
                 synced_clients += 1
 
         db.commit()
-        return {
-            "ok": True,
-            "clients_synced": synced_clients,
-            "tasks_synced": synced_tasks,
-            "base_url": base_url,
-            "message": f"Синхронизировано: {synced_clients} клиентов, {synced_tasks} задач",
-        }
+        return {"ok": True, "clients_synced": synced_clients, "tasks_synced": synced_tasks, "base_url": base_url}
     except Exception as e:
         db.rollback()
         logger.error(f"Merchrules sync error: {e}")
@@ -1876,6 +1576,48 @@ async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_t
     return {"ok": True}
 
 
+@app.post("/api/settings/rules")
+async def api_save_rules(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    settings["rules"] = data
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/settings/prefs")
+async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = user.settings or {}
+    if "preferences" not in settings:
+        settings["preferences"] = {}
+    settings["preferences"].update(data)
+    user.settings = settings
+    db.commit()
+    return {"ok": True}
+
+
 # ============================================================================
 # ROOT
 # ============================================================================
@@ -2050,8 +1792,8 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     settings = user.settings or {} if user else {}
     mr = settings.get("merchrules", {})
-    login = mr.get("login") or env.MR_LOGIN
-    password = mr.get("password") or env.MR_PASSWORD
+    login = mr.get("login") or os.environ.get("MERCHRULES_LOGIN", "")
+    password = mr.get("password") or os.environ.get("MERCHRULES_PASSWORD", "")
 
     if not login or not password:
         return {"error": "Нужны креды Merchrules (настройки → креды)"}
@@ -2247,7 +1989,7 @@ async def api_tbank_tickets(client_name: str, db: Session = Depends(get_db), aut
     if not payload:
         raise HTTPException(status_code=401)
 
-    time_token = env.TIME_TOKEN
+    time_token = os.environ.get("TIME_API_TOKEN", "")
     if not time_token:
         return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
 
@@ -2269,7 +2011,7 @@ async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optio
     if not payload:
         raise HTTPException(status_code=401)
 
-    time_token = env.TIME_TOKEN
+    time_token = os.environ.get("TIME_API_TOKEN", "")
     if not time_token:
         return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
 
@@ -2951,484 +2693,6 @@ async def api_calendar_events(start: str = "", end: str = "", db: Session = Depe
 
 
 # ============================================================================
-# DIAGNOSTICS & IMPORT
-# ============================================================================
-
-@app.get("/api/diagnostics/outbound-ip")
-async def api_outbound_ip(auth_token: Optional[str] = Cookie(None)):
-    """
-    Возвращает внешний IP Railway-сервера.
-    Этот IP нужно добавить в whitelist Merchrules.
-    """
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            # Используем несколько сервисов для надёжности
-            for url in ["https://api.ipify.org?format=json", "https://ifconfig.me/ip"]:
-                try:
-                    resp = await client.get(url)
-                    if resp.status_code == 200:
-                        text = resp.text.strip()
-                        ip = resp.json().get("ip", text) if "json" in url else text
-                        return {"ip": ip, "note": "Добавьте этот IP в whitelist Merchrules"}
-                except Exception:
-                    continue
-    except Exception as e:
-        return {"error": str(e)}
-    return {"error": "Не удалось определить IP"}
-
-
-@app.post("/api/diagnostics/merchrules-auth")
-async def api_diag_merchrules_auth(
-    request: Request,
-    auth_token: Optional[str] = Cookie(None),
-):
-    """
-    Диагностика авторизации Merchrules.
-    Показывает точный HTTP-статус и ответ для каждой попытки.
-    """
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-
-    body = await request.json()
-    login = body.get("login", "")
-    password = body.get("password", "")
-    if not login or not password:
-        return {"error": "Нужны login и password"}
-
-    import httpx
-    results = []
-    urls = list(dict.fromkeys([
-        os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
-        "https://merchrules.any-platform.ru",
-        "https://merchrules-qa.any-platform.ru",
-    ]))
-    fields = ["email", "login", "username"]
-
-    async with httpx.AsyncClient(timeout=15) as hx:
-        for url in urls:
-            for field in fields:
-                try:
-                    resp = await hx.post(
-                        f"{url}/backend-v2/auth/login",
-                        json={field: login, "password": password},
-                        timeout=10,
-                    )
-                    body_text = resp.text[:300]
-                    has_token = False
-                    if resp.status_code == 200:
-                        try:
-                            j = resp.json()
-                            has_token = bool(j.get("token") or j.get("access_token") or j.get("accessToken"))
-                        except Exception:
-                            pass
-                    results.append({
-                        "url": url,
-                        "field": field,
-                        "status": resp.status_code,
-                        "has_token": has_token,
-                        "response": body_text,
-                    })
-                    # Нашли рабочий — дальше не пробуем
-                    if resp.status_code == 200 and has_token:
-                        return {"ok": True, "working": results[-1], "all": results}
-                except Exception as e:
-                    results.append({
-                        "url": url,
-                        "field": field,
-                        "status": "error",
-                        "error": str(e),
-                    })
-
-    return {"ok": False, "all": results}
-
-
-
-async def api_import_clients_csv(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    auth_token: Optional[str] = Cookie(None),
-):
-    """
-    Импорт клиентов из CSV/Excel файла.
-
-    Ожидаемые колонки (гибко — ищет по ключевым словам):
-      name / название / клиент
-      segment / сегмент
-      manager_email / менеджер
-      site_id / site_ids / merchrules_id
-      health_score
-    """
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    content = await file.read()
-    filename = file.filename or ""
-
-    # Парсим файл
-    try:
-        import pandas as pd, io
-        if filename.endswith(".xlsx") or filename.endswith(".xls"):
-            df = pd.read_excel(io.BytesIO(content))
-        else:
-            # Пробуем разные кодировки и разделители
-            for enc in ("utf-8", "cp1251", "latin-1"):
-                try:
-                    df = pd.read_csv(io.BytesIO(content), encoding=enc, sep=None, engine="python")
-                    break
-                except Exception:
-                    continue
-            else:
-                return {"error": "Не удалось прочитать файл. Поддерживаются CSV и XLSX."}
-    except Exception as e:
-        return {"error": f"Ошибка чтения файла: {e}"}
-
-    # Нормализуем названия колонок
-    df.columns = [str(c).strip().lower() for c in df.columns]
-
-    def find_col(df, variants):
-        for v in variants:
-            for c in df.columns:
-                if v in c:
-                    return c
-        return None
-
-    col_name    = find_col(df, ["name", "название", "клиент", "company", "account"])
-    col_segment = find_col(df, ["segment", "сегмент", "тип"])
-    col_manager = find_col(df, ["manager", "менеджер", "email"])
-    col_site    = find_col(df, ["site_id", "site", "merchrules", "account_id"])
-    col_health  = find_col(df, ["health", "score", "хелс"])
-
-    if not col_name:
-        return {"error": f"Не найдена колонка с именем клиента. Колонки в файле: {list(df.columns)}"}
-
-    created = updated = skipped = 0
-    errors = []
-
-    for idx, row in df.iterrows():
-        name = str(row.get(col_name, "")).strip()
-        if not name or name.lower() in ("nan", "none", ""):
-            skipped += 1
-            continue
-
-        segment   = str(row.get(col_segment, "")).strip() if col_segment else ""
-        manager   = str(row.get(col_manager, "")).strip() if col_manager else user.email
-        site_id   = str(row.get(col_site, "")).strip() if col_site else ""
-        health    = None
-        if col_health:
-            try:
-                health = float(str(row.get(col_health, "")).replace(",", ".").replace("%", ""))
-                if health > 1:
-                    health = health / 100
-            except Exception:
-                pass
-
-        # Ищем существующего клиента
-        existing = None
-        if site_id and site_id not in ("nan", ""):
-            existing = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
-        if not existing:
-            existing = db.query(Client).filter(Client.name == name).first()
-
-        if existing:
-            # Обновляем только непустые поля
-            if segment and segment not in ("nan", ""):
-                existing.segment = segment
-            if manager and manager not in ("nan", "") and "@" in manager:
-                existing.manager_email = manager
-            if site_id and site_id not in ("nan", ""):
-                existing.merchrules_account_id = site_id
-            if health is not None:
-                existing.health_score = health
-            updated += 1
-        else:
-            c = Client(
-                name=name,
-                segment=segment if segment not in ("nan", "") else None,
-                manager_email=manager if "@" in manager else user.email,
-                merchrules_account_id=site_id if site_id not in ("nan", "") else None,
-                health_score=health,
-            )
-            db.add(c)
-            created += 1
-
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        return {"error": f"Ошибка сохранения: {e}"}
-
-    return {
-        "ok": True,
-        "created": created,
-        "updated": updated,
-        "skipped": skipped,
-        "total_rows": len(df),
-        "columns_detected": {
-            "name": col_name, "segment": col_segment,
-            "manager": col_manager, "site_id": col_site,
-        }
-    }
-
-
-@app.post("/api/import/tasks-csv")
-async def api_import_tasks_csv(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    auth_token: Optional[str] = Cookie(None),
-):
-    """
-    Импорт задач из CSV/Excel файла.
-
-    Ожидаемые колонки:
-      title / название / задача
-      client / клиент / account
-      status / статус
-      priority / приоритет
-      due_date / дедлайн / срок
-      team / команда
-    """
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    content = await file.read()
-    filename = file.filename or ""
-
-    try:
-        import pandas as pd, io
-        if filename.endswith(".xlsx") or filename.endswith(".xls"):
-            df = pd.read_excel(io.BytesIO(content))
-        else:
-            for enc in ("utf-8", "cp1251", "latin-1"):
-                try:
-                    df = pd.read_csv(io.BytesIO(content), encoding=enc, sep=None, engine="python")
-                    break
-                except Exception:
-                    continue
-            else:
-                return {"error": "Не удалось прочитать файл"}
-    except Exception as e:
-        return {"error": f"Ошибка чтения файла: {e}"}
-
-    df.columns = [str(c).strip().lower() for c in df.columns]
-
-    def find_col(df, variants):
-        for v in variants:
-            for c in df.columns:
-                if v in c:
-                    return c
-        return None
-
-    col_title    = find_col(df, ["title", "название", "задача", "task", "name"])
-    col_client   = find_col(df, ["client", "клиент", "account", "аккаунт", "site"])
-    col_status   = find_col(df, ["status", "статус"])
-    col_priority = find_col(df, ["priority", "приоритет"])
-    col_due      = find_col(df, ["due", "дедлайн", "срок", "date"])
-    col_team     = find_col(df, ["team", "команда"])
-    col_mr_id    = find_col(df, ["merchrules_task", "task_id", "mr_id", "id"])
-
-    if not col_title:
-        return {"error": f"Не найдена колонка с названием задачи. Колонки: {list(df.columns)}"}
-
-    STATUS_MAP = {
-        "plan": "plan", "в работе": "in_progress", "in_progress": "in_progress",
-        "review": "review", "done": "done", "готово": "done",
-        "blocked": "blocked", "заблок": "blocked",
-    }
-
-    created = skipped = 0
-    # Кешируем клиентов для поиска
-    all_clients = {c.name.lower(): c for c in db.query(Client).all()}
-
-    for idx, row in df.iterrows():
-        title = str(row.get(col_title, "")).strip()
-        if not title or title.lower() in ("nan", "none", ""):
-            skipped += 1
-            continue
-
-        # Ищем клиента
-        client_id = None
-        if col_client:
-            client_name = str(row.get(col_client, "")).strip().lower()
-            if client_name and client_name not in ("nan", ""):
-                # Точное совпадение
-                c = all_clients.get(client_name)
-                if not c:
-                    # Частичное совпадение
-                    for cname, cobj in all_clients.items():
-                        if client_name in cname or cname in client_name:
-                            c = cobj
-                            break
-                if c:
-                    client_id = c.id
-
-        # Статус
-        raw_status = str(row.get(col_status, "plan")).strip().lower() if col_status else "plan"
-        status_val = STATUS_MAP.get(raw_status, "plan")
-
-        # Дедлайн
-        due_date = None
-        if col_due:
-            raw_due = str(row.get(col_due, "")).strip()
-            if raw_due and raw_due not in ("nan", ""):
-                for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y"):
-                    try:
-                        due_date = datetime.strptime(raw_due[:10], fmt)
-                        break
-                    except Exception:
-                        continue
-
-        # Проверяем дубль по merchrules_task_id
-        mr_id = str(row.get(col_mr_id, "")).strip() if col_mr_id else ""
-        if mr_id and mr_id not in ("nan", ""):
-            existing = db.query(Task).filter(Task.merchrules_task_id == mr_id).first()
-            if existing:
-                skipped += 1
-                continue
-
-        task = Task(
-            client_id=client_id,
-            title=title,
-            status=status_val,
-            priority=str(row.get(col_priority, "medium")).strip().lower() if col_priority else "medium",
-            due_date=due_date,
-            team=str(row.get(col_team, "")).strip() if col_team else None,
-            source="import",
-            merchrules_task_id=mr_id if mr_id not in ("nan", "") else None,
-        )
-        db.add(task)
-        created += 1
-
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        return {"error": f"Ошибка сохранения: {e}"}
-
-    return {
-        "ok": True,
-        "created": created,
-        "skipped": skipped,
-        "total_rows": len(df),
-    }
-
-
-# ============================================================================
-# MEETING SLOTS
-# ============================================================================
-
-@app.get("/meetings", response_class=HTMLResponse)
-async def meetings_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Страница встреч со слотами дня."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("meetings.html", {"request": request, "user": user})
-
-
-@app.get("/api/meetings/slots")
-async def api_meetings_slots(
-    date: Optional[str] = None,
-    db: Session = Depends(get_db),
-    auth_token: Optional[str] = Cookie(None),
-):
-    """
-    Получить слоты дня (встречи + prep/followup задачи).
-    date: ISO строка даты, по умолчанию — сегодня МСК.
-    """
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    from meeting_slots import get_day_slots
-    target_date = datetime.now(MSK).replace(tzinfo=None)
-    if date:
-        try:
-            target_date = datetime.fromisoformat(date)
-        except ValueError:
-            pass
-
-    slots = get_day_slots(db, user.email, target_date)
-    return {"slots": slots, "date": target_date.strftime("%Y-%m-%d")}
-
-
-@app.post("/api/meetings/sync-slots")
-async def api_sync_meeting_slots(
-    db: Session = Depends(get_db),
-    auth_token: Optional[str] = Cookie(None),
-):
-    """Принудительно создать слоты для всех предстоящих встреч."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-
-    from meeting_slots import create_slots_for_meeting
-    now = datetime.utcnow()
-    window_end = now + timedelta(days=7)
-
-    q = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
-        Meeting.date >= now,
-        Meeting.date <= window_end,
-    )
-    if user.role == "manager":
-        q = q.filter(Client.manager_email == user.email)
-
-    meetings = q.all()
-    total = 0
-    for m in meetings:
-        created = create_slots_for_meeting(db, m)
-        total += len(created)
-
-    return {"ok": True, "slots_created": total, "meetings_processed": len(meetings)}
-
-
-@app.get("/api/integrations/test/outlook")
-async def api_test_outlook():
-    """Тест подключения к Outlook."""
-    from integrations.outlook import test_connection
-    result = await test_connection()
-    return result
-
-
-# ============================================================================
 # ANALYTICS
 # ============================================================================
 
@@ -3666,8 +2930,8 @@ Health Score: {(client.health_score or 0)*100:.0f}%
 
 async def _ai_chat(system: str, user: str, max_tokens: int = 1000) -> str:
     """AI чат через Groq или Qwen."""
-    groq_key = env.GROQ_KEY
-    qwen_key = env.QWEN_KEY
+    groq_key = os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ", "")
+    qwen_key = os.environ.get("QWEN_API_KEY", "")
 
     if groq_key:
         import httpx
