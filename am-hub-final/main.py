@@ -952,21 +952,40 @@ async def test_ktalk(space: str = "", token: str = ""):
 
 
 @app.get("/api/integrations/test/tbank")
-async def test_tbank(token: str = ""):
+async def test_tbank(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Проверить подключение к Tbank Time (Mattermost)."""
+    if not auth_token:
+        return {"ok": False, "error": "Не авторизован"}
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return {"ok": False, "error": "Не авторизован"}
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return {"ok": False, "error": "Пользователь не найден"}
+
+    u_settings = user.settings or {}
+    tm = u_settings.get("tbank_time", {})
+    token = tm.get("mmauthtoken") or tm.get("session_cookie") or os.environ.get("TIME_API_TOKEN", "")
+
     if not token:
-        return {"error": "Need token"}
-    time_url = env.TIME_URL
+        return {"ok": False, "error": "Нет токена — войдите через «Войти через Tbank Time»"}
+
     import httpx
     try:
         async with httpx.AsyncClient(timeout=10) as hx:
-            resp = await hx.get(f"{time_url}/api/v1/tickets",
-                params={"limit": 1},
-                headers={"Authorization": f"Bearer {token}"})
+            resp = await hx.get(
+                "https://time.tbank.ru/api/v4/users/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
         if resp.status_code == 200:
-            return {"ok": True}
-        return {"error": f"HTTP {resp.status_code}"}
+            me = resp.json()
+            return {"ok": True, "username": me.get("username"), "email": me.get("email")}
+        if resp.status_code == 401:
+            return {"ok": False, "error": "Токен истёк — войдите заново"}
+        return {"ok": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"ok": False, "error": str(e)}
 
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
@@ -1581,6 +1600,373 @@ async def api_test_taim(request: Request, auth_token: Optional[str] = Cookie(Non
         summary = await taim.get_summary(login_id, password)
         return {**result, **summary, "password": None}
     return result
+
+
+# ============================================================================
+# AUTH: TBANK TIME (SSO через TinkoffID)
+# ============================================================================
+
+@app.get("/auth/time", response_class=HTMLResponse)
+async def time_oauth_start(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """
+    Запускает SSO авторизацию в Tbank Time (Mattermost + TinkoffID + SMS).
+
+    Флоу:
+    1. Открывает time.tbank.ru/oauth/tinkoff_id/login
+    2. TinkoffID SSO: логин + пароль + SMS
+    3. После входа MMAUTHTOKEN ставится в cookie на time.tbank.ru
+    4. Менеджер копирует токен через DevTools и вставляет в хаб
+
+    Автоматический перехват невозможен — MMAUTHTOKEN HttpOnly на чужом домене.
+    """
+    if not auth_token:
+        return RedirectResponse(url="/login")
+
+    # Показываем страницу-инструкцию вместо прямого редиректа
+    # (прямой редирект бесполезен — cookie не передаётся на наш домен)
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Войти в Tbank Time</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;
+       display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;}
+  .card{background:#111827;border:1px solid #1e2a3a;border-radius:14px;
+        padding:28px 32px;max-width:500px;width:100%;}
+  h2{font-size:1.15rem;margin-bottom:6px;}
+  .sub{color:#64748b;font-size:.82rem;margin-bottom:20px;}
+  .step{display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;}
+  .step-num{background:#6366f1;color:#fff;border-radius:50%;width:24px;height:24px;
+            display:flex;align-items:center;justify-content:center;font-size:.75rem;
+            font-weight:700;flex-shrink:0;margin-top:1px;}
+  .step-text{font-size:.84rem;line-height:1.6;color:#cbd5e1;}
+  code{background:#0a0e1a;padding:2px 6px;border-radius:4px;color:#818cf8;font-size:.78rem;}
+  .open-btn{display:block;width:100%;padding:12px;background:#6366f1;color:#fff;border:none;
+            border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;text-align:center;
+            text-decoration:none;margin-bottom:16px;}
+  .open-btn:hover{opacity:.9;}
+  .divider{border:none;border-top:1px solid #1e2a3a;margin:16px 0;}
+  label{font-size:.8rem;color:#94a3b8;display:block;margin-bottom:6px;}
+  input{width:100%;padding:10px 12px;border-radius:7px;border:1px solid #1e2a3a;
+        background:#0a0e1a;color:#e2e8f0;font-size:.84rem;}
+  input:focus{border-color:#6366f1;outline:none;}
+  .save-btn{width:100%;margin-top:8px;padding:11px;background:#22c55e;color:#fff;
+            border:none;border-radius:7px;cursor:pointer;font-size:.86rem;font-weight:600;}
+  .save-btn:hover{opacity:.9;}
+  #result{margin-top:10px;font-size:.82rem;text-align:center;}
+  .ok{color:#22c55e;} .err{color:#ef4444;} .warn{color:#eab308;}
+  .help-link{color:#6366f1;font-size:.78rem;}
+</style>
+</head>
+<body><div class="card">
+  <h2>🔑 Подключение Tbank Time</h2>
+  <p class="sub">Нужен доступ к тикетам в канале <code>any-team-support</code></p>
+
+  <a href="https://time.tbank.ru" target="_blank" class="open-btn">
+    🚀 Шаг 1: Открыть Tbank Time и войти
+  </a>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-text">
+      Нажмите кнопку выше — откроется <strong>time.tbank.ru</strong><br>
+      Войдите через SSO Т-Банка: логин → пароль → SMS-код
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-text">
+      После входа нажмите <code>F12</code> → вкладка <code>Application</code> (Chrome)<br>
+      или <code>Storage</code> (Firefox)
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-text">
+      Слева: <code>Cookies</code> → <code>https://time.tbank.ru</code><br>
+      Найдите <code>MMAUTHTOKEN</code> → скопируйте значение из колонки <code>Value</code>
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-text">
+      Вставьте скопированный токен в поле ниже и нажмите «Сохранить»
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <label>MMAUTHTOKEN (из DevTools → Cookies → time.tbank.ru)</label>
+  <input id="token-input" type="password"
+         placeholder="Вставьте MMAUTHTOKEN сюда...">
+  <button class="save-btn" onclick="saveToken()">💾 Сохранить и проверить</button>
+  <div id="result"></div>
+
+  <div style="margin-top:14px;text-align:center;">
+    <a href="/settings" class="help-link">← Вернуться в настройки</a>
+  </div>
+</div>
+<script>
+async function saveToken() {
+  const token = document.getElementById('token-input').value.trim();
+  const el = document.getElementById('result');
+  if (!token) {
+    el.className = 'err'; el.textContent = '❌ Вставьте токен'; return;
+  }
+  el.className = 'warn'; el.textContent = '⏳ Проверяем токен...';
+  try {
+    const r = await fetch('/api/auth/time/token', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      el.className = 'ok';
+      el.innerHTML = '✅ Подключено! Авторизован как: <strong>' +
+        (d.username || d.email || 'пользователь') + '</strong>' +
+        (d.channel_posts_count != null
+          ? '<br>Постов в any-team-support: <strong>' + d.channel_posts_count + '</strong>'
+          : '') +
+        '<br><br><a href="/settings" style="color:#6366f1">← В настройки</a>';
+    } else {
+      el.className = 'err';
+      el.textContent = '❌ ' + (d.error || 'Неверный токен');
+    }
+  } catch(e) {
+    el.className = 'err'; el.textContent = '❌ ' + e.message;
+  }
+}
+
+// Ctrl+Enter для сохранения
+document.getElementById('token-input').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveToken();
+});
+</script>
+</body></html>""")
+
+
+@app.get("/auth/time/callback", response_class=HTMLResponse)
+async def time_oauth_callback(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """
+    Callback после SSO в Tbank Time.
+    Mattermost ставит MMAUTHTOKEN в cookie — JS читает и отправляет на бэкенд.
+    Если cookie недоступен из JS (HttpOnly) — показываем инструкцию взять вручную.
+    """
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Tbank Time — авторизация</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;
+       display:flex;align-items:center;justify-content:center;min-height:100vh;}
+  .card{background:#111827;border:1px solid #1e2a3a;border-radius:14px;
+        padding:32px 40px;text-align:center;max-width:480px;width:90%;}
+  h2{font-size:1.2rem;margin-bottom:10px;}
+  p{color:#64748b;font-size:.84rem;line-height:1.6;}
+  .ok{color:#22c55e;} .err{color:#ef4444;} .warn{color:#eab308;}
+  .btn{display:inline-block;margin-top:14px;padding:10px 20px;
+       background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-size:.85rem;}
+  .steps{margin-top:16px;background:#1e2a3a;border-radius:8px;padding:14px;text-align:left;}
+  .steps p{color:#94a3b8;font-size:.78rem;margin-bottom:8px;}
+  .steps ol{padding-left:16px;}
+  .steps li{color:#94a3b8;font-size:.78rem;margin-bottom:6px;line-height:1.5;}
+  .steps code{background:#0a0e1a;padding:2px 6px;border-radius:4px;color:#818cf8;font-size:.75rem;}
+  input{width:100%;padding:9px 12px;margin-top:10px;border-radius:7px;
+        border:1px solid #1e2a3a;background:#0a0e1a;color:#e2e8f0;font-size:.83rem;}
+  .save-btn{width:100%;margin-top:8px;padding:10px;background:#22c55e;color:#fff;
+            border:none;border-radius:7px;cursor:pointer;font-size:.84rem;font-weight:500;}
+  .save-btn:hover{opacity:.9;}
+</style></head>
+<body><div class="card">
+  <h2 id="title">⏳ Проверяем авторизацию...</h2>
+  <p id="msg"></p>
+  <div id="manual-block" style="display:none">
+    <div class="steps">
+      <p><strong>Скопируйте токен из браузера:</strong></p>
+      <ol>
+        <li>Убедитесь что вы вошли на <a href="https://time.tbank.ru" target="_blank" style="color:#6366f1">time.tbank.ru</a></li>
+        <li>Нажмите <code>F12</code> → вкладка <code>Application</code></li>
+        <li>Слева: <code>Cookies</code> → <code>https://time.tbank.ru</code></li>
+        <li>Найдите <code>MMAUTHTOKEN</code> → скопируйте <code>Value</code></li>
+      </ol>
+    </div>
+    <input id="token-input" placeholder="Вставьте MMAUTHTOKEN сюда...">
+    <button class="save-btn" onclick="saveToken()">💾 Сохранить и подключить</button>
+    <p id="save-result" style="margin-top:8px;font-size:.8rem;"></p>
+  </div>
+  <div id="success-block" style="display:none">
+    <a href="/settings" class="btn">← Вернуться в настройки</a>
+  </div>
+</div>
+<script>
+async function tryAutoToken() {
+  // Пробуем читать cookie (работает только если не HttpOnly)
+  const cookies = Object.fromEntries(
+    document.cookie.split('; ').map(c => c.split('=').map(decodeURIComponent))
+  );
+  const token = cookies['MMAUTHTOKEN'];
+  if (token) {
+    await saveTokenValue(token);
+    return;
+  }
+  // HttpOnly — не можем читать из JS, показываем инструкцию
+  showManual('Токен защищён (HttpOnly). Скопируйте его вручную:');
+}
+
+async function saveToken() {
+  const token = document.getElementById('token-input').value.trim();
+  if (!token) {
+    document.getElementById('save-result').textContent = '❌ Вставьте токен';
+    document.getElementById('save-result').style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  await saveTokenValue(token);
+}
+
+async function saveTokenValue(token) {
+  document.getElementById('title').textContent = '⏳ Проверяем токен...';
+  try {
+    const r = await fetch('/api/auth/time/token', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('title').textContent = '✅ Tbank Time подключён!';
+      document.getElementById('msg').innerHTML =
+        'Авторизован как: <b>' + (d.username || d.email || '') + '</b>' +
+        (d.channel_posts_count ? '<br>Постов в канале any-team-support: <b>' + d.channel_posts_count + '</b>' : '');
+      document.getElementById('msg').className = 'ok';
+      document.getElementById('manual-block').style.display = 'none';
+      document.getElementById('success-block').style.display = 'block';
+    } else {
+      showManual('Ошибка: ' + (d.error || 'Не удалось подключиться'));
+    }
+  } catch(e) {
+    showManual('Ошибка: ' + e.message);
+  }
+}
+
+function showManual(msg) {
+  document.getElementById('title').textContent = '🔑 Требуется токен';
+  document.getElementById('msg').textContent = msg;
+  document.getElementById('msg').className = 'warn';
+  document.getElementById('manual-block').style.display = 'block';
+}
+
+tryAutoToken();
+</script></body></html>""")
+
+
+@app.post("/api/auth/time/token")
+async def api_time_save_token(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Сохранить MMAUTHTOKEN, проверить доступ к каналу any-team-support."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    token = data.get("token", "").strip()
+    if not token:
+        return {"ok": False, "error": "Токен не передан"}
+
+    # Проверяем токен — запрашиваем данные пользователя
+    import httpx
+    TIME_BASE = "https://time.tbank.ru"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            # 1. Получаем текущего пользователя
+            me_resp = await hx.get(f"{TIME_BASE}/api/v4/users/me", headers=headers)
+            if me_resp.status_code == 401:
+                return {"ok": False, "error": "Токен недействителен или истёк — войдите заново"}
+            if me_resp.status_code != 200:
+                return {"ok": False, "error": f"HTTP {me_resp.status_code} при проверке токена"}
+
+            me = me_resp.json()
+            username = me.get("username", "")
+            email = me.get("email", "")
+
+            # 2. Ищем канал any-team-support
+            channel_posts_count = None
+            channel_id = None
+            try:
+                # Получаем канал по team/channel name
+                ch_resp = await hx.get(
+                    f"{TIME_BASE}/api/v4/teams/name/tinkoff/channels/name/any-team-support",
+                    headers=headers,
+                )
+                if ch_resp.status_code == 200:
+                    channel_id = ch_resp.json().get("id")
+                elif ch_resp.status_code == 404:
+                    # Пробуем найти через поиск
+                    search_resp = await hx.post(
+                        f"{TIME_BASE}/api/v4/channels/search",
+                        headers=headers,
+                        json={"term": "any-team-support"},
+                    )
+                    if search_resp.status_code == 200:
+                        channels = search_resp.json()
+                        for ch in (channels if isinstance(channels, list) else []):
+                            if "any-team-support" in (ch.get("name") or ""):
+                                channel_id = ch.get("id")
+                                break
+            except Exception:
+                pass
+
+            if channel_id:
+                try:
+                    posts_resp = await hx.get(
+                        f"{TIME_BASE}/api/v4/channels/{channel_id}/posts",
+                        headers=headers,
+                        params={"per_page": 1},
+                    )
+                    if posts_resp.status_code == 200:
+                        channel_posts_count = posts_resp.json().get("order", []).__len__()
+                except Exception:
+                    pass
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    # Сохраняем токен и channel_id в user.settings
+    settings = dict(user.settings or {})
+    tm = dict(settings.get("tbank_time", {}))
+    tm["session_cookie"] = token
+    tm["mmauthtoken"] = token
+    tm["username"] = username
+    tm["email"] = email
+    if channel_id:
+        tm["support_channel_id"] = channel_id
+    settings["tbank_time"] = tm
+
+    from sqlalchemy.orm.attributes import flag_modified
+    user.settings = settings
+    flag_modified(user, "settings")
+    db.commit()
+
+    logger.info(f"✅ Time token saved for {user.email} (username={username}, channel_id={channel_id})")
+    return {
+        "ok": True,
+        "username": username,
+        "email": email,
+        "channel_id": channel_id,
+        "channel_posts_count": channel_posts_count,
+    }
 
 
 @app.post("/api/auth/ktalk/test")
