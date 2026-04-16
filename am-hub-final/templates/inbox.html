@@ -1,13 +1,10 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Inbox — AM Hub</title>
-  <style>
-    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
-    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
-    * { margin:0; padding:0; box-sizing:border-box; }
+{% extends "base.html" %}
+{% block title %}Входящие — AM Hub{% endblock %}
+{% block page_title %}Входящие{% endblock %}
+
+{% block head %}
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
     body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
     .main { margin-left:240px; padding:24px 28px; }
     .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
@@ -32,29 +29,11 @@
     .badge-overdue { background:rgba(239,68,68,.15); color:var(--red); }
     .badge-blocked { background:rgba(239,68,68,.15); color:var(--red); }
     .badge-notification { background:rgba(99,102,241,.15); color:var(--accent); }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
-  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item active" href="/inbox"><span>📬</span> Inbox</a>
-  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
+</style>
+{% endblock %}
 
-<div class="main">
-  <h1>📬 Inbox</h1>
+{% block content %}
+<h1>📬 Inbox</h1>
   <p class="sub">Уведомления, просрочки, заблокированные задачи</p>
   <div id="inbox-list">Загрузка...</div>
 </div>
@@ -78,5 +57,4 @@ async function loadInbox(){
 }
 loadInbox();
 </script>
-</body>
-</html>
+{% endblock %}

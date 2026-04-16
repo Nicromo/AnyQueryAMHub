@@ -1,12 +1,10 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Уведомления — AM Hub</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css">
-  <style>
+{% extends "base.html" %}
+{% block title %}Уведомления — AM Hub{% endblock %}
+{% block page_title %}Уведомления{% endblock %}
+
+{% block head %}
+<style>
+
     .notif-row{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--border);text-decoration:none;color:var(--text);transition:background .1s;}
     .notif-row:hover{background:var(--surface-2,rgba(255,255,255,.03));}
     .notif-row.unread{background:rgba(99,102,241,.04);}
@@ -17,22 +15,12 @@
     .notif-date{font-size:.72rem;color:var(--muted);white-space:nowrap;}
     .filter-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;}
     .filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
-  </style>
-</head>
-<body>
-<div class="layout">
-  <nav class="sidebar">
-    <div class="sidebar-logo">AM <span>Hub</span></div>
-    <a class="nav-link" href="/dashboard">📊 Дашборд</a>
-    <a class="nav-link" href="/today">☀️ Сегодня</a>
-    <a class="nav-link active" href="/notifications">🔔 Уведомления</a>
-    <a class="nav-link" href="/clients">👥 Клиенты</a>
-    <a class="nav-link" href="/tasks">✅ Задачи</a>
-    <a class="nav-link" href="/kpi">📈 Мой KPI</a>
-    <a class="nav-link" href="/settings">⚙️ Настройки</a>
-    <div class="sidebar-bottom"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-  </nav>
-  <main class="main">
+  
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="main">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
       <h1 style="font-size:1.4rem;font-weight:700;">🔔 Уведомления</h1>
       <div style="display:flex;gap:8px;">
@@ -127,5 +115,4 @@ async function markAllRead() {
 
 loadLiveNotifs();
 </script>
-</body>
-</html>
+{% endblock %}

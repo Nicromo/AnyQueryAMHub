@@ -1,10 +1,9 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QBR: {{ client.name }} — AM Hub</title>
-  <style>
+{% extends "base.html" %}
+{% block title %}QBR: {{ client.name }} — AM Hub{% endblock %}
+{% block page_title %}QBR: {{ client.name }}{% endblock %}
+{% block head %}
+
+<style>
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -50,26 +49,10 @@
     .modal-close { float:right; cursor:pointer; font-size:1.2rem; color:var(--muted); background:none; border:none; }
     .modal-close:hover { color:var(--text); }
   </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
-  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
+{% endblock %}
 
-<div class="main">
-  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+{% block content %}
+<a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
   <h1>📊 QBR: {{ client.name }}</h1>
   <p class="sub">{{ client.segment or '' }} · {% if qbr %}{{ qbr.quarter }}{% else %}Новый QBR{% endif %}
     {% if qbr %}<span class="badge badge-{{ qbr.status }}">{{ qbr.status }}</span>{% endif %}
@@ -238,3 +221,52 @@ async function saveStatus(){
 </script>
 </body>
 </html>
+
+<script>
+
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+function addItem(listId,placeholder){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="'+placeholder+'"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById(listId).appendChild(d);
+}
+function addFutureWork(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Задача..." class="fw-task"><input type="text" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;"><select class="fw-priority" style="max-width:100px;"><option value="high">Высокий</option><option value="medium" selected>Средний</option><option value="low">Низкий</option></select><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('future-list').appendChild(d);
+}
+function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
+function getFutureWork(){
+  const items=[];
+  document.querySelectorAll('#future-list .item-row').forEach(row=>{
+    const task=row.querySelector('.fw-task').value;
+    if(task) items.push({task, quarter:row.querySelector('.fw-quarter').value, priority:row.querySelector('.fw-priority').value});
+  });
+  return items;
+}
+async function saveQBR(){
+  const data={
+    date:document.getElementById('qbr-date').value,
+    achievements:getListValues('achievements-list'),
+    issues:getListValues('issues-list'),
+    key_insights:getListValues('insights-list'),
+    next_quarter_goals:getListValues('goals-list'),
+    future_work:getFutureWork(),
+    summary:document.getElementById('summary').value,
+    presentation_url:document.getElementById('presentation-url').value,
+    executive_summary:document.getElementById('exec-summary').value,
+    status:'draft'
+  };
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+}
+function openStatusModal(){document.getElementById('statusModal').classList.add('visible');}
+function closeStatusModal(){document.getElementById('statusModal').classList.remove('visible');}
+async function saveStatus(){
+  const status=document.getElementById('qbr-status').value;
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  if(r.ok){closeStatusModal();location.reload();}
+}
+
+</script>
+{% endblock %}

@@ -1,13 +1,10 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>План: {{ client.name }} — AM Hub</title>
-  <style>
-    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
-    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
-    * { margin:0; padding:0; box-sizing:border-box; }
+{% extends "base.html" %}
+{% block title %}План аккаунта — AM Hub{% endblock %}
+{% block page_title %}План аккаунта{% endblock %}
+
+{% block head %}
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
     body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
     .main { margin-left:240px; padding:24px 28px; max-width:900px; }
     .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
@@ -39,27 +36,11 @@
     .saved-msg { font-size:.78rem; color:var(--green); margin-top:8px; display:none; }
     .saved-msg.show { display:block; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
-  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
+</style>
+{% endblock %}
 
-<div class="main">
-  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+{% block content %}
+<a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
   <h1>📐 План работы: {{ client.name }}</h1>
   <p class="sub">{{ client.segment or '' }} · Обновлено: {{ plan.updated_at.strftime('%d.%m.%Y') if plan.updated_at else '—' }}</p>
 
@@ -143,5 +124,4 @@ async function savePlan(){
   if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
 }
 </script>
-</body>
-</html>
+{% endblock %}

@@ -1,10 +1,277 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Followup: {{ client.name }} — AM Hub</title>
-  <style>
+{% extends "base.html" %}
+{% block title %}Followup: {{ client.name }} — AM Hub<script>
+
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
+
+function showTab(name){
+  const names=['followup','summary','tasks','send'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',names[i]===name));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if(name==='send') updatePreview();
+}
+
+function setMood(btn){document.querySelectorAll('.mood-btns .mood-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function setChannel(btn){document.querySelectorAll('[data-ch]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');updatePreview();}
+
+function updatePreview(){
+  document.getElementById('previewText').textContent=document.getElementById('followupText').value;
+}
+
+let newTasks=[];
+function addTask(){
+  const input=document.getElementById('newTaskInput');
+  const prio=document.getElementById('newTaskPriority').value;
+  const title=input.value.trim();
+  if(!title)return;
+  newTasks.push({title,priority:prio});
+  renderNewTasks();
+  input.value='';input.focus();
+}
+
+function renderNewTasks(){
+  const list=document.getElementById('newTasksList');
+  list.innerHTML=newTasks.map((t,i)=>`
+    <div class="task-row">
+      <span class="task-title">📌 ${t.title}</span>
+      <span class="badge badge-plan">${t.priority}</span>
+      <button class="btn btn-sm" onclick="removeTask(${i})" style="padding:2px 8px;font-size:.72rem;">✕</button>
+    </div>`).join('');
+}
+
+function removeTask(i){newTasks.splice(i,1);renderNewTasks();}
+
+async function saveNewTasks(){
+  if(!newTasks.length){showToast('Нет новых задач','var(--yellow)');return;}
+  let saved=0;
+  for(const t of newTasks){
+    try{
+      const r=await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:{{ client.id }},title:t.title,priority:t.priority,source:'followup',status:'plan'})});
+      if(r.ok)saved++;
+    }catch(e){}
+  }
+  newTasks=[];renderNewTasks();
+  showToast(`✅ Сохранено задач: ${saved}`);
+}
+
+async function updateTaskStatus(taskId, done){
+  try{
+    await fetch(`/api/tasks/${taskId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:done?'done':'plan'})});
+    showToast(done?'✅ Задача выполнена':'↩️ Задача возвращена');
+  }catch(e){}
+}
+
+async function regenFollowup(){
+  showToast('🔄 Генерирую...','var(--accent)');
+  try{
+    const r=await fetch('/api/ai/generate-followup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:{{ client.id }}{% if meeting %},meeting_id:{{ meeting.id }}{% endif %}})});
+    const d=await r.json();
+    if(d.followup_text)document.getElementById('followupText').value=d.followup_text;
+    showToast('✅ Перегенерировано');
+  }catch(e){showToast('Ошибка генерации','var(--red)');}
+}
+
+function copyFollowup(){navigator.clipboard.writeText(document.getElementById('followupText').value);showToast('📋 Скопировано');}
+
+// ── Шаблоны фолоуапов ────────────────────────────────────────────────────
+let _tplOpen = false;
+async function toggleTemplates() {
+  const panel = document.getElementById('templates-panel');
+  _tplOpen = !_tplOpen;
+  panel.style.display = _tplOpen ? 'block' : 'none';
+  if (_tplOpen) await loadTemplates();
+}
+
+async function loadTemplates() {
+  try {
+    const r = await fetch('/api/followup-templates');
+    const d = await r.json();
+    const list = document.getElementById('templates-list');
+    const templates = d.templates || [];
+    if (!templates.length) {
+      list.innerHTML = '<span style="font-size:.78rem;color:var(--muted);">Нет сохранённых шаблонов. Напишите фолоуап и нажмите «Сохранить как шаблон».</span>';
+      return;
+    }
+    list.innerHTML = templates.map(t => `
+      <div style="display:flex;align-items:center;gap:4px;background:var(--surface,var(--card));border:1px solid var(--border);border-radius:6px;padding:4px 8px;">
+        <button onclick="applyTemplate(${t.id})" style="background:none;border:none;color:var(--text);cursor:pointer;font-size:.8rem;text-align:left;">📄 ${t.name}</button>
+        <button onclick="deleteTemplate(${t.id})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;" title="Удалить">✕</button>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+async function applyTemplate(id) {
+  try {
+    const r = await fetch('/api/followup-templates');
+    const d = await r.json();
+    const tpl = (d.templates || []).find(t => t.id === id);
+    if (tpl) {
+      document.getElementById('followupText').value = tpl.content;
+      document.getElementById('templates-panel').style.display = 'none';
+      _tplOpen = false;
+      showToast('📄 Шаблон применён');
+    }
+  } catch(e) {}
+}
+
+async function saveAsTemplate() {
+  const content = document.getElementById('followupText').value.trim();
+  if (!content) { showToast('❌ Нет текста для сохранения', 'var(--red)'); return; }
+  const name = prompt('Название шаблона:');
+  if (!name?.trim()) return;
+  try {
+    const r = await fetch('/api/followup-templates', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name.trim(), content, category: 'general'})
+    });
+    const d = await r.json();
+    if (d.ok) showToast('✅ Шаблон сохранён');
+    else showToast('❌ Ошибка', 'var(--red)');
+  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+}
+
+async function deleteTemplate(id) {
+  if (!confirm('Удалить шаблон?')) return;
+  await fetch('/api/followup-templates/' + id, {method: 'DELETE'});
+  await loadTemplates();
+}
+
+// ── Шаблоны фолоуапов ────────────────────────────────────────────────────
+let _templatesLoaded = false;
+
+async function toggleTemplates() {
+  const panel = document.getElementById('templates-panel');
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen && !_templatesLoaded) {
+    _templatesLoaded = true;
+    await loadTemplates();
+  }
+}
+
+async function loadTemplates() {
+  const list = document.getElementById('templates-list');
+  try {
+    const r = await fetch('/api/followup-templates');
+    const d = await r.json();
+    const tpls = d.templates || [];
+    if (!tpls.length) {
+      list.innerHTML = '<span style="font-size:.78rem;color:var(--muted);">Нет сохранённых шаблонов. Нажмите «Сохранить как шаблон»</span>';
+      return;
+    }
+    const CAT_COLORS = {general:'#64748b', qbr:'#6366f1', checkup:'#22c55e', sync:'#3b82f6', kickoff:'#f97316'};
+    list.innerHTML = tpls.map(t =>
+      `<div style="display:flex;gap:4px;align-items:center;">
+        <button onclick="applyTemplate(${t.id})"
+          style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2,rgba(255,255,255,.04));
+                 color:var(--text);font-size:.78rem;cursor:pointer;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+          title="${t.content.slice(0,100)}">
+          <span style="color:${CAT_COLORS[t.category]||'#64748b'};margin-right:4px;">●</span>${t.name}
+        </button>
+        <button onclick="deleteTemplate(${t.id})"
+          style="padding:3px 6px;border-radius:5px;border:none;background:none;color:var(--muted);cursor:pointer;font-size:.8rem;"
+          title="Удалить">✕</button>
+      </div>`
+    ).join('');
+  } catch(e) {
+    list.innerHTML = '<span style="font-size:.78rem;color:var(--red);">Ошибка загрузки</span>';
+  }
+}
+
+async function applyTemplate(id) {
+  try {
+    const r = await fetch('/api/followup-templates');
+    const d = await r.json();
+    const tpl = (d.templates || []).find(t => t.id === id);
+    if (tpl) {
+      document.getElementById('followupText').value = tpl.content;
+      document.getElementById('templates-panel').style.display = 'none';
+      showToast('📄 Шаблон применён');
+    }
+  } catch(e) {}
+}
+
+async function saveAsTemplate() {
+  const text = document.getElementById('followupText').value.trim();
+  if (!text) { showToast('❌ Текст пустой', 'var(--red)'); return; }
+  const name = prompt('Название шаблона:');
+  if (!name) return;
+  const catMap = {checkup:'checkup', qbr:'qbr', kickoff:'kickoff', sync:'sync'};
+  const category = catMap[currentType] || 'general';
+  try {
+    const r = await fetch('/api/followup-templates', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, content: text, category})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showToast('✅ Шаблон сохранён');
+      _templatesLoaded = false;
+    }
+  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+}
+
+async function deleteTemplate(id) {
+  if (!confirm('Удалить шаблон?')) return;
+  await fetch('/api/followup-templates/' + id, {method: 'DELETE'});
+  _templatesLoaded = false;
+  await loadTemplates();
+}
+
+{% if meeting %}
+async function sendFollowup(){
+  const r=await fetch('/api/meetings/{{ meeting.id }}/followup/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({followup_text:document.getElementById('followupText').value})});
+  if(r.ok){showToast('✅ Фолоуап отправлен');setTimeout(()=>window.location.href='/client/{{ client.id }}',1500);}
+  else showToast('Ошибка','var(--red)');
+}
+async function skipFollowup(){
+  const r=await fetch('/api/meetings/{{ meeting.id }}/followup/skip',{method:'POST'});
+  if(r.ok){showToast('⏭ Пропущено');setTimeout(()=>window.location.href='/client/{{ client.id }}',1500);}
+}
+{% endif %}
+
+function saveAll(){
+  const data={
+    followup_text:document.getElementById('followupText').value,
+    discussed:document.getElementById('discussed').value,
+    client_commitments:document.getElementById('clientCommitments').value,
+    our_commitments:document.getElementById('ourCommitments').value,
+    next_meeting:document.getElementById('nextMeetingDate').value,
+    mood:document.querySelector('[data-mood].active')?.dataset.mood||'neutral'
+  };
+  localStorage.setItem('followup_{{ client.id }}',JSON.stringify(data));
+  showToast('💾 Сохранено');
+}
+
+function showToast(msg,color='var(--green)'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.background=color;t.style.display='block';
+  setTimeout(()=>t.style.display='none',2500);
+}
+
+// Загружаем сохранённое
+const saved=localStorage.getItem('followup_{{ client.id }}');
+if(saved){
+  try{
+    const d=JSON.parse(saved);
+    if(d.discussed)document.getElementById('discussed').value=d.discussed;
+    if(d.client_commitments)document.getElementById('clientCommitments').value=d.client_commitments;
+    if(d.our_commitments)document.getElementById('ourCommitments').value=d.our_commitments;
+    if(d.next_meeting)document.getElementById('nextMeetingDate').value=d.next_meeting;
+  }catch(e){}
+}
+
+</script>
+{% endblock %}
+{% block page_title %}Followup: {{ client.name }}{% endblock %}
+
+{% block head %}
+
+<style>
+
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -66,26 +333,12 @@
     .status-badge { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; font-size:.75rem; font-weight:600; }
     .status-pending { background:rgba(234,179,8,.15); color:var(--yellow); }
     .status-sent { background:rgba(34,197,94,.15); color:var(--green); }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+  
+</style>
+{% endblock %}
 
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard">📊 Дашборд</a>
-  <a class="nav-item" href="/today">📅 Мой день</a>
-  <a class="nav-item active" href="/clients">👥 Клиенты</a>
-  <a class="nav-item" href="/kanban">📋 Канбан</a>
-  <a class="nav-item" href="/checkups">🩺 Чекапы</a>
-  <a class="nav-item" href="/calendar">📅 Календарь</a>
-  <a class="nav-item" href="/analytics">📈 Аналитика</a>
-  <a class="nav-item" href="/sync">🔄 Sync</a>
-  <a class="nav-item" href="/settings">⚙️ Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
-
-<div class="main">
+{% block content %}
+>
   <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
 
   <div class="page-header">
@@ -409,96 +662,7 @@ async function loadTemplates() {
         <button onclick="deleteTemplate(${t.id})"
           style="padding:3px 6px;border-radius:5px;border:none;background:none;color:var(--muted);cursor:pointer;font-size:.8rem;"
           title="Удалить">✕</button>
-      </div>`
-    ).join('');
-  } catch(e) {
-    list.innerHTML = '<span style="font-size:.78rem;color:var(--red);">Ошибка загрузки</span>';
-  }
-}
 
-async function applyTemplate(id) {
-  try {
-    const r = await fetch('/api/followup-templates');
-    const d = await r.json();
-    const tpl = (d.templates || []).find(t => t.id === id);
-    if (tpl) {
-      document.getElementById('followupText').value = tpl.content;
-      document.getElementById('templates-panel').style.display = 'none';
-      showToast('📄 Шаблон применён');
-    }
-  } catch(e) {}
-}
-
-async function saveAsTemplate() {
-  const text = document.getElementById('followupText').value.trim();
-  if (!text) { showToast('❌ Текст пустой', 'var(--red)'); return; }
-  const name = prompt('Название шаблона:');
-  if (!name) return;
-  const catMap = {checkup:'checkup', qbr:'qbr', kickoff:'kickoff', sync:'sync'};
-  const category = catMap[currentType] || 'general';
-  try {
-    const r = await fetch('/api/followup-templates', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, content: text, category})
-    });
-    const d = await r.json();
-    if (d.ok) {
-      showToast('✅ Шаблон сохранён');
-      _templatesLoaded = false;
-    }
-  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
-}
-
-async function deleteTemplate(id) {
-  if (!confirm('Удалить шаблон?')) return;
-  await fetch('/api/followup-templates/' + id, {method: 'DELETE'});
-  _templatesLoaded = false;
-  await loadTemplates();
-}
-
-{% if meeting %}
-async function sendFollowup(){
-  const r=await fetch('/api/meetings/{{ meeting.id }}/followup/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({followup_text:document.getElementById('followupText').value})});
-  if(r.ok){showToast('✅ Фолоуап отправлен');setTimeout(()=>window.location.href='/client/{{ client.id }}',1500);}
-  else showToast('Ошибка','var(--red)');
-}
-async function skipFollowup(){
-  const r=await fetch('/api/meetings/{{ meeting.id }}/followup/skip',{method:'POST'});
-  if(r.ok){showToast('⏭ Пропущено');setTimeout(()=>window.location.href='/client/{{ client.id }}',1500);}
-}
-{% endif %}
-
-function saveAll(){
-  const data={
-    followup_text:document.getElementById('followupText').value,
-    discussed:document.getElementById('discussed').value,
-    client_commitments:document.getElementById('clientCommitments').value,
-    our_commitments:document.getElementById('ourCommitments').value,
-    next_meeting:document.getElementById('nextMeetingDate').value,
-    mood:document.querySelector('[data-mood].active')?.dataset.mood||'neutral'
-  };
-  localStorage.setItem('followup_{{ client.id }}',JSON.stringify(data));
-  showToast('💾 Сохранено');
-}
-
-function showToast(msg,color='var(--green)'){
-  const t=document.getElementById('toast');
-  t.textContent=msg;t.style.background=color;t.style.display='block';
-  setTimeout(()=>t.style.display='none',2500);
-}
-
-// Загружаем сохранённое
-const saved=localStorage.getItem('followup_{{ client.id }}');
-if(saved){
-  try{
-    const d=JSON.parse(saved);
-    if(d.discussed)document.getElementById('discussed').value=d.discussed;
-    if(d.client_commitments)document.getElementById('clientCommitments').value=d.client_commitments;
-    if(d.our_commitments)document.getElementById('ourCommitments').value=d.our_commitments;
-    if(d.next_meeting)document.getElementById('nextMeetingDate').value=d.next_meeting;
-  }catch(e){}
-}
-</script>
-</body>
-</html>
+{% for script_content in [] %}
+{% endfor %}
+{% endblock %}

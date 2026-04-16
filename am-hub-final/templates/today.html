@@ -1,10 +1,146 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Мой день — AM Hub</title>
-  <style>
+{% extends "base.html" %}
+{% block title %}Мой день — AM Hub<script>
+
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+// Search
+let searchTimeout=null;
+function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';}
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')document.getElementById('searchModal').style.display='none';});
+document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))e.target.style.display='none';});
+document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';return;}searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'">'+c.name+'</div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'">'+t.title+'</div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){}},300);});
+
+// My Day Schedule (drag-and-drop)
+let myDayTasks=[];
+async function loadMyDaySchedule(){try{const r=await fetch('/api/my-day/schedule');const d=await r.json();myDayTasks=d.schedule||[];renderSchedule();}catch(e){}}
+function renderSchedule(){const el=document.getElementById('schedule-list');if(!myDayTasks.length){el.innerHTML='<div style="color:var(--muted);padding:10px;font-size:.82rem;">Перетащите задачи сюда или добавьте вручную</div>';return;}el.innerHTML=myDayTasks.map((t,i)=>'<div class="note-item" draggable="true" ondragstart="dragTask(event,'+i+')" ondragover="event.preventDefault()" ondrop="dropTask(event,'+i+')"><div style="display:flex;align-items:center;gap:8px;"><span style="cursor:grab;">⠿</span><div style="flex:1;"><b>'+t.time+'</b> — '+t.title+'</div><span style="font-size:.72rem;color:var(--muted);">'+(t.client||'')+'</span><button style="background:none;border:none;color:var(--red);cursor:pointer;" onclick="removeMyDayTask('+i+')">✕</button></div></div>').join('');}
+function dragTask(e,i){e.dataTransfer.setData('text/plain',i);}
+function dropTask(e,idx){const from=parseInt(e.dataTransfer.getData('text/plain'));if(isNaN(from)||from===idx)return;const item=myDayTasks.splice(from,1)[0];myDayTasks.splice(idx,0,item);renderSchedule();}
+function removeMyDayTask(i){myDayTasks.splice(i,1);renderSchedule();}
+async function saveMyDaySchedule(){const r=await fetch('/api/my-day/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule:myDayTasks,date:new Date().toISOString().slice(0,10)})});if(r.ok)alert('✅ Сохранено!');}
+loadMyDaySchedule();
+
+// ── Быстрая задача ──────────────────────────────────────────────────────
+async function loadClientsForQuick() {
+  try {
+    const r = await fetch('/api/clients');
+    const d = await r.json();
+    const sel = document.getElementById('quick-task-client');
+    (d.clients || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name + (c.segment ? ' [' + c.segment + ']' : '');
+      sel.appendChild(opt);
+    });
+  } catch(e) {}
+}
+loadClientsForQuick();
+
+// Ctrl+Enter в поле задачи
+document.getElementById('quick-task-title').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); quickCreateTask(); }
+});
+
+async function quickCreateTask() {
+  const title = document.getElementById('quick-task-title').value.trim();
+  const clientId = document.getElementById('quick-task-client').value;
+  const priority = document.getElementById('quick-task-priority').value;
+  const res = document.getElementById('quick-task-result');
+  if (!title) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ Введите название задачи';
+    return;
+  }
+  try {
+    const r = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title, priority,
+        client_id: clientId ? parseInt(clientId) : null,
+        due_date: new Date().toISOString().slice(0, 10),
+        status: 'plan', source: 'manual'
+      })
+    });
+    const d = await r.json();
+    if (d.id || d.ok) {
+      res.style.display = 'block';
+      res.style.color = 'var(--green)';
+      res.textContent = '✅ Задача создана';
+      document.getElementById('quick-task-title').value = '';
+      setTimeout(() => { res.style.display = 'none'; location.reload(); }, 1200);
+    } else {
+      res.style.display = 'block';
+      res.style.color = 'var(--red)';
+      res.textContent = '❌ ' + (d.error || 'Ошибка');
+    }
+  } catch(e) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ ' + e.message;
+  }
+}
+
+// ── Слоты дня ──────────────────────────────────────────────────────────
+async function loadDaySlots() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await fetch('/api/meetings/slots?date=' + today);
+    const d = await r.json();
+    const slots = d.slots || [];
+    if (!slots.length) return;
+    const section = document.getElementById('slots-section');
+    section.style.display = 'block';
+    const SLOT_COLORS = {meeting: '#6366f1', prep: '#eab308', followup: '#8b5cf6', extra: '#06b6d4'};
+    const SLOT_ICONS  = {meeting: '📅', prep: '📋', followup: '✍️', extra: '📌'};
+    document.getElementById('slots-list').innerHTML = slots.map(s => {
+      const type = s.type === 'meeting' ? 'meeting' : (s.slot_type || 'prep');
+      const color = SLOT_COLORS[type] || '#64748b';
+      const icon  = SLOT_ICONS[type] || '📌';
+      const done  = s.status === 'done' || s.followup_status === 'sent';
+      return '<a href="' + (s.url || '#') + '" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;border:1px solid var(--border);margin-bottom:6px;text-decoration:none;color:inherit;border-left:3px solid ' + color + ';opacity:' + (done ? '.5' : '1') + ';">' +
+        '<span style="font-size:.9rem;">' + icon + '</span>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:.83rem;font-weight:500;">' + (done ? '<s>' : '') + s.title + (done ? '</s>' : '') + '</div>' +
+          '<div style="font-size:.72rem;color:var(--muted);">до ' + s.time + (s.client_name ? ' · ' + s.client_name : '') + '</div>' +
+        '</div>' +
+        (done ? '<span style="font-size:.75rem;color:var(--green);">✅</span>' : '') +
+      '</a>';
+    }).join('');
+  } catch(e) {}
+}
+loadDaySlots();
+
+// ── KPI синка ──────────────────────────────────────────────────────────
+async function loadSyncKpi() {
+  try {
+    const [cs, ss] = await Promise.all([
+      fetch('/api/clients').then(r => r.json()),
+      fetch('/api/sync/status').then(r => r.json())
+    ]);
+    const count = (cs.clients || []).length;
+    const mr = ss.merchrules;
+    const ago = mr ? mr.ago : '—';
+    const ok = mr && mr.status === 'success';
+    const el = document.getElementById('kpi-sync-clients');
+    if (el) {
+      el.innerHTML = count + ' <span style="font-size:.65rem;color:' + (ok?'var(--green)':'var(--muted)') + ';">(' + ago + ')</span>';
+    }
+  } catch(e) {}
+}
+loadSyncKpi();
+
+
+</script>
+{% endblock %}
+{% block page_title %}Мой день{% endblock %}
+
+{% block head %}
+
+<style>
+
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -45,28 +181,12 @@
     .search-item { padding:8px 16px; cursor:pointer; display:flex; align-items:center; gap:10px; }
     .search-item:hover { background:rgba(255,255,255,.04); }
     @media(max-width:768px){.main{margin-left:0;padding:16px;}.sidebar{transform:translateX(-100%);transition:transform .2s;}.sidebar.open{transform:translateX(0);}}
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item active" href="/today"><span>📅</span> Мой день</a>
-  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item" href="/inbox"><span>📬</span> Inbox</a>
-  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
+  
+</style>
+{% endblock %}
 
-<div class="main">
+{% block content %}
+>
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
     <div>
       <h1>📅 Мой день</h1>
@@ -280,33 +400,8 @@ async function loadDaySlots() {
         '<div style="flex:1;">' +
           '<div style="font-size:.83rem;font-weight:500;">' + (done ? '<s>' : '') + s.title + (done ? '</s>' : '') + '</div>' +
           '<div style="font-size:.72rem;color:var(--muted);">до ' + s.time + (s.client_name ? ' · ' + s.client_name : '') + '</div>' +
-        '</div>' +
-        (done ? '<span style="font-size:.75rem;color:var(--green);">✅</span>' : '') +
-      '</a>';
-    }).join('');
-  } catch(e) {}
-}
-loadDaySlots();
+        '
 
-// ── KPI синка ──────────────────────────────────────────────────────────
-async function loadSyncKpi() {
-  try {
-    const [cs, ss] = await Promise.all([
-      fetch('/api/clients').then(r => r.json()),
-      fetch('/api/sync/status').then(r => r.json())
-    ]);
-    const count = (cs.clients || []).length;
-    const mr = ss.merchrules;
-    const ago = mr ? mr.ago : '—';
-    const ok = mr && mr.status === 'success';
-    const el = document.getElementById('kpi-sync-clients');
-    if (el) {
-      el.innerHTML = count + ' <span style="font-size:.65rem;color:' + (ok?'var(--green)':'var(--muted)') + ';">(' + ago + ')</span>';
-    }
-  } catch(e) {}
-}
-loadSyncKpi();
-
-</script>
-</body>
-</html>
+{% for script_content in [] %}
+{% endfor %}
+{% endblock %}

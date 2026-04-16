@@ -316,6 +316,117 @@ async function markAllRead() {
   } catch(e) {}
   setTimeout(pollNotifications, 60000);
 })();
+
+// ── WebSocket Real-Time ─────────────────────────────────────────────────────
+(function initWebSocket() {
+  var token = document.cookie.split(';')
+    .map(function(c) { return c.trim(); })
+    .find(function(c) { return c.startsWith('auth_token='); });
+  if (!token) return;
+  var tokenValue = token.split('=').slice(1).join('=');
+  if (!tokenValue) return;
+
+  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var wsUrl = protocol + '//' + window.location.host + '/ws?token=' + encodeURIComponent(tokenValue);
+
+  var ws = null;
+  var reconnectDelay = 1000;
+  var pingTimer = null;
+
+  function connect() {
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch(e) { return; }
+
+    ws.onopen = function() {
+      reconnectDelay = 1000;
+      pingTimer = setInterval(function() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({type: 'ping'}));
+        }
+      }, 25000);
+    };
+
+    ws.onmessage = function(e) {
+      try {
+        var msg = JSON.parse(e.data);
+        handleWsMessage(msg);
+      } catch(err) {}
+    };
+
+    ws.onclose = function() {
+      clearInterval(pingTimer);
+      // Автоматический реконнект
+      setTimeout(connect, Math.min(reconnectDelay, 30000));
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+
+    ws.onerror = function() { ws.close(); };
+  }
+
+  function handleWsMessage(msg) {
+    switch(msg.type) {
+      case 'stats':
+        // Обновляем sidebar stats без запроса к серверу
+        var ov = document.getElementById('stat-overdue');
+        var wn = document.getElementById('stat-warning');
+        var tk = document.getElementById('stat-tasks');
+        var nb = document.getElementById('nav-tasks-badge');
+        var sb = document.getElementById('sidebar-stats');
+        if (ov) ov.textContent = '🔴 ' + msg.overdue + ' просроч.';
+        if (wn) wn.textContent = '🟡 ' + msg.warning + ' скоро';
+        if (tk) tk.textContent = '📋 ' + msg.open_tasks + ' задач';
+        if (sb) sb.style.display = 'flex';
+        if (nb) {
+          if (msg.open_tasks > 0) { nb.textContent = msg.open_tasks; nb.style.display = 'inline'; }
+          else nb.style.display = 'none';
+        }
+        updateBadge(msg.overdue + msg.warning);
+        break;
+
+      case 'notification':
+        // Показываем toast и обновляем бейдж
+        showToastWs(msg.title || msg.message || 'Новое уведомление', msg.priority);
+        var current = parseInt(document.getElementById('notifBadge')?.textContent || '0');
+        updateBadge(current + 1);
+        break;
+
+      case 'task_update':
+        // Если мы на странице с задачами — перезагружаем их
+        if (typeof pollTasks === 'function') pollTasks();
+        if (typeof loadCheckups === 'function') loadCheckups();
+        break;
+
+      case 'client_update':
+        // Если мы на странице клиента — обновляем данные
+        if (typeof renderTasks === 'function' && window.location.pathname.startsWith('/client/')) {
+          if (typeof pollTasks === 'function') pollTasks();
+        }
+        break;
+
+      case 'pong': break;
+      case 'ping':
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({type: 'pong'}));
+        }
+        break;
+    }
+  }
+
+  function showToastWs(msg, priority) {
+    var el = document.createElement('div');
+    el.className = 'toast ' + (priority === 'high' ? 'error' : 'success');
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function() { el.remove(); }, 5000);
+  }
+
+  // Экспортируем для других скриптов
+  window._ws = { send: function(data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); } };
+
+  connect();
+})();
+
 </script>
 </body>
 </html>

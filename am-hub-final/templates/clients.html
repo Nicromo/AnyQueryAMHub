@@ -1,10 +1,26 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Клиенты — AM Hub</title>
-  <style>
+{% extends "base.html" %}
+{% block title %}Клиенты — AM Hub<script>
+
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+function filterSeg(seg){document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=(!seg||tr.dataset.seg===seg)?'':'none';});}
+function filterTbl(q){q=q.toLowerCase();document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+// Global Search
+let searchTimeout=null;
+function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').value='';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';}
+function closeSearch(){document.getElementById('searchModal').style.display='none';}
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')closeSearch();});
+document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))closeSearch();});
+document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}document.getElementById('searchEmpty').style.display='none';searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div></div></div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+'</div></div></div>';});}if(d.meetings.length){html+='<div class="search-cat">📅 Встречи</div>';d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div></div></div>';});}if(d.notes.length){html+='<div class="search-cat">📝 Заметки</div>';d.notes.forEach(n=>{html+='<div class="search-item" onclick="location.href=\''+n.url+'\'"><span class="s-icon">📝</span><div class="s-text"><div class="s-title">'+n.content.slice(0,60)+'</div></div></div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){console.error(e);}},300);});
+
+</script>
+{% endblock %}
+{% block page_title %}Клиенты{% endblock %}
+
+{% block head %}
+
+<style>
+
     :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
     [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -47,26 +63,15 @@
     .btn { padding:6px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; }
     .btn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
-  <a class="nav-item active" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
-<div class="main">
+  
+</style>
+<style>
+.search-cat{padding:6px 16px 4px;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;}.search-item{padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s;}.search-item:hover{background:rgba(255,255,255,.04);}.search-item .s-icon{font-size:1rem;flex-shrink:0;width:20px;text-align:center;}.search-item .s-text{flex:1;min-width:0;}.search-item .s-title{font-size:.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.search-item .s-sub{font-size:.72rem;color:var(--muted);}.search-item .s-badge{font-size:.65rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,.15);color:var(--accent);font-weight:600;flex-shrink:0;}
+</style>
+{% endblock %}
+
+{% block content %}
+>
   <div class="topbar">
     <div><h1>👥 Клиенты</h1><div style="color:var(--muted);font-size:.82rem;">{{ clients|length }} записей</div></div>
     <div style="display:flex;gap:8px;">
@@ -126,7 +131,8 @@ function openSearch(){const m=document.getElementById('searchModal');m.style.dis
 function closeSearch(){document.getElementById('searchModal').style.display='none';}
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')closeSearch();});
 document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))closeSearch();});
-document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}document.getElementById('searchEmpty').style.display='none';searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div></div></div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+'</div></div></div>';});}if(d.meetings.length){html+='<div class="search-cat">📅 Встречи</div>';d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div></div></div>';});}if(d.notes.length){html+='<div class="search-cat">📝 Заметки</div>';d.notes.forEach(n=>{html+='<div class="search-item" onclick="location.href=\''+n.url+'\'"><span class="s-icon">📝</span><div class="s-text"><div class="s-title">'+n.content.slice(0,60)+'</div></div></div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){console.error(e);}},300);});
-</script>
-</body>
-</html>
+document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}document.getElementById('searchEmpty').style.display='none';searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div></div></div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+'</div></div></div>';});}if(d.meetings.length){html+='<div class="search-cat">📅 Встречи</div>';d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div></div></div>';});}if(d.notes.length){html+='<div class="search-cat">📝 Заметки</div>';d.notes.forEach(n=>{html+='<div class="search-item" onclick="location.href=\''+n.url+'\'"><span class="s-icon">📝</span><div class="s-text"><div class="s-title">'+n.content.slice(0,60)+'</div></div></div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено
+
+{% for script_content in [] %}
+{% endfor %}
+{% endblock %}

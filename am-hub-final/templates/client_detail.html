@@ -948,6 +948,57 @@ async function loadCheckupHistory(clientId) {
   }
 }
 
+
+// ── Missing functions (Agent 2 fix) ──────────────────────────
+async function addMeeting() {
+  // Открываем форму создания встречи
+  var modal = document.getElementById('meeting-modal');
+  if (modal) { modal.style.display = 'flex'; return; }
+  // Fallback: переходим на страницу с хешем
+  window.location.href = window.location.pathname + '#meetings';
+}
+
+function showMeetingForm() {
+  var form = document.getElementById('meeting-form');
+  if (form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; return; }
+  addMeeting();
+}
+
+async function addTask() {
+  var titleEl = document.getElementById('new-task-title') || document.getElementById('task-title-input');
+  if (!titleEl || !titleEl.value.trim()) {
+    var t = prompt('Название задачи:');
+    if (!t) return;
+    titleEl = { value: t };
+  }
+  var clientId = window.__clientId || parseInt(window.location.pathname.split('/').pop());
+  var r = await fetch('/api/tasks', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ client_id: clientId, title: titleEl.value.trim(), status: 'plan', priority: 'medium' })
+  });
+  var d = await r.json();
+  if (d.ok || d.id) { toast('✅ Задача создана'); if (typeof pollTasks === 'function') pollTasks(); }
+  else toast('❌ ' + (d.detail || d.error || 'Ошибка'));
+}
+
+function toggleEdit() {
+  // Псевдоним для toggleEditClient
+  if (typeof toggleEditClient === 'function') toggleEditClient();
+}
+
+function saveClientEdit() {
+  // Псевдоним для saveClient
+  if (typeof saveClient === 'function') saveClient();
+}
+
+function generateFollowup() {
+  // Переходим на страницу фолоуапа
+  var clientId = window.__clientId || parseInt(window.location.pathname.split('/').pop());
+  window.location.href = '/followup/' + clientId;
+}
+
+
 </script>
 </body>
 </html>

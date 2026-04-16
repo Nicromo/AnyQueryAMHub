@@ -2042,6 +2042,13 @@ async def api_create_task(
     )
     db.add(task)
     db.commit()
+    db.refresh(task)
+    # WS real-time push
+    try:
+        await ws_invalidate_stats(user.id, db)
+        await ws_notify_user(user.id, "task_update", {"action": "created", "task_id": task.id})
+    except Exception:
+        pass
     return {"ok": True, "id": task.id}
 
 
@@ -3286,6 +3293,236 @@ async def api_tasks_all(db: Session = Depends(get_db), auth_token: Optional[str]
                         "client_id":t.client_id,"client_name":t.client.name if t.client else "—",
                         "description":t.description,"merchrules_task_id":t.merchrules_task_id}
                        for t in tasks]}
+
+
+# ============================================================================
+# MISSING PAGES — страницы из nav без endpoint
+# ============================================================================
+
+@app.get("/hub", response_class=HTMLResponse)
+async def hub_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Командный центр — редирект на dashboard."""
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    return RedirectResponse(url="/dashboard", status_code=302)
+
+@app.get("/top50", response_class=HTMLResponse)
+async def top50_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("top50.html", {"request": request, "user": user})
+
+@app.get("/roadmap", response_class=HTMLResponse)
+async def roadmap_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("roadmap.html", {"request": request, "user": user})
+
+@app.get("/internal-tasks", response_class=HTMLResponse)
+async def internal_tasks_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("internal_tasks.html", {"request": request, "user": user})
+
+@app.get("/qbr-calendar", response_class=HTMLResponse)
+async def qbr_calendar_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("qbr_calendar.html", {"request": request, "user": user})
+
+
+# ── Ktalk DM ────────────────────────────────────────────────────────────────
+@app.post("/api/ktalk/send-dm")
+async def api_ktalk_send_dm(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Отправить DM клиенту через KTalk."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    body = await request.json()
+    client_id = body.get("client_id")
+    message   = body.get("message", "")
+    channel_id = body.get("channel_id")
+
+    if not message:
+        return {"ok": False, "error": "Нет текста сообщения"}
+
+    u_settings = user.settings or {}
+    kt = u_settings.get("ktalk", {})
+    token = kt.get("access_token") or os.environ.get("KTALK_API_TOKEN", "")
+    if not token:
+        return {"ok": False, "error": "KTalk не настроен — войдите в Настройки → KTalk"}
+
+    # Получаем channel_id если не передан
+    if not channel_id and client_id:
+        client = db.query(Client).filter(Client.id == client_id).first()
+        if client:
+            meta = client.integration_metadata or {}
+            channel_id = meta.get("ktalk_channel_id") or kt.get("followup_channel_id")
+
+    if not channel_id:
+        return {"ok": False, "error": "Нет channel_id для отправки"}
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as hx:
+            r = await hx.post(
+                "https://tbank.ktalk.ru/api/v4/posts",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"channel_id": channel_id, "message": message}
+            )
+        if r.status_code in (200, 201):
+            return {"ok": True}
+        return {"ok": False, "error": f"KTalk HTTP {r.status_code}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ── Integration tests ────────────────────────────────────────────────────────
+@app.get("/api/integrations/test/airtable")
+async def api_test_airtable(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    u = user.settings or {}
+    at = u.get("airtable", {})
+    token = at.get("pat") or at.get("token") or os.environ.get("AIRTABLE_TOKEN", "")
+    if not token:
+        return {"ok": False, "error": "Airtable токен не настроен"}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as hx:
+            r = await hx.get("https://api.airtable.com/v0/meta/bases",
+                             headers={"Authorization": f"Bearer {token}"})
+        return {"ok": r.status_code == 200, "error": f"HTTP {r.status_code}" if r.status_code != 200 else None}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/integrations/test/tbank_time")
+@app.get("/api/integrations/test/tbank")
+async def api_test_tbank(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    u = user.settings or {}
+    tm = u.get("tbank_time", {})
+    token = tm.get("session_cookie") or tm.get("mmauthtoken") or tm.get("api_token") or os.environ.get("TIME_API_TOKEN", "")
+    if not token:
+        return {"ok": False, "error": "Tbank Time токен не настроен"}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as hx:
+            r = await hx.get("https://time.tbank.ru/api/v4/users/me",
+                             headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 200:
+            me = r.json()
+            return {"ok": True, "username": me.get("username"), "email": me.get("email")}
+        return {"ok": False, "error": f"HTTP {r.status_code} — токен истёк?"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/integrations/test/{system}")
+async def api_test_integration_generic(system: str, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Заглушка для остальных систем."""
+    return {"ok": False, "error": f"Тест для {system} не реализован"}
+
+
+# ── Import CSV ───────────────────────────────────────────────────────────────
+@app.post("/api/import/clients-csv")
+async def api_import_clients_csv(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Импорт клиентов из CSV файла."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    import io, pandas as pd
+    content_bytes = await file.read()
+    try:
+        df = pd.read_csv(io.BytesIO(content_bytes), dtype=str)
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка чтения CSV: {e}")
+
+    created = updated = skipped = 0
+    from sqlalchemy.orm.attributes import flag_modified
+    for _, row in df.iterrows():
+        name = str(row.get("name") or row.get("название") or row.get("client_name") or "").strip()
+        if not name or name == "nan":
+            skipped += 1
+            continue
+        client = db.query(Client).filter(Client.name == name).first()
+        if client:
+            for field, col in [("segment","segment"),("domain","domain"),("health_score","health_score")]:
+                v = str(row.get(col) or "").strip()
+                if v and v != "nan":
+                    if field == "health_score":
+                        try: setattr(client, field, float(v.replace("%","")))
+                        except: pass
+                    else: setattr(client, field, v)
+            updated += 1
+        else:
+            seg = str(row.get("segment") or "").strip()
+            domain = str(row.get("domain") or "").strip()
+            client = Client(name=name, segment=seg or None, domain=domain or None,
+                           manager_email=user.email)
+            db.add(client)
+            created += 1
+    db.commit()
+    return {"ok": True, "created": created, "updated": updated, "skipped": skipped}
+
+
+# ── Roadmap create ───────────────────────────────────────────────────────────
+@app.post("/api/roadmap/create")
+async def api_roadmap_create(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    body = await request.json()
+    task = Task(client_id=body.get("client_id"), title=body.get("title",""), 
+                status="plan", priority=body.get("priority","medium"),
+                created_at=datetime.utcnow())
+    db.add(task); db.commit(); db.refresh(task)
+    return {"ok": True, "id": task.id}
 
 # ============================================================================
 # MANAGER CABINET — личный кабинет менеджера
@@ -7738,3 +7975,317 @@ async def api_tokens_push(
         logger.info(f"✅ Extension pushed tokens for {user.email}: {updated}")
 
     return {"ok": True, "updated": updated, "user": user.email}
+
+
+# ============================================================================
+# WEBSOCKET — real-time обновления
+# ============================================================================
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import Dict, List
+import asyncio, json as _json
+
+class ConnectionManager:
+    """Менеджер WebSocket соединений. Группирует по user_id."""
+    def __init__(self):
+        self.active: Dict[int, List[WebSocket]] = {}
+
+    async def connect(self, user_id: int, ws: WebSocket):
+        await ws.accept()
+        self.active.setdefault(user_id, []).append(ws)
+
+    def disconnect(self, user_id: int, ws: WebSocket):
+        conns = self.active.get(user_id, [])
+        if ws in conns:
+            conns.remove(ws)
+        if not conns:
+            self.active.pop(user_id, None)
+
+    async def send(self, user_id: int, data: dict):
+        """Отправить данные всем вкладкам пользователя."""
+        dead = []
+        for ws in self.active.get(user_id, []):
+            try:
+                await ws.send_text(_json.dumps(data, ensure_ascii=False, default=str))
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(user_id, ws)
+
+    async def broadcast(self, data: dict):
+        """Отправить всем подключённым пользователям."""
+        for uid in list(self.active.keys()):
+            await self.send(uid, data)
+
+    @property
+    def connected_users(self):
+        return len(self.active)
+
+
+ws_manager = ConnectionManager()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    """
+    WebSocket endpoint для real-time обновлений.
+    Клиент подключается с токеном: ws://host/ws?token=<auth_token>
+    
+    Сервер пушит:
+      {type: "task_update", task: {...}}
+      {type: "notification", ...}
+      {type: "stats", overdue, warning, open_tasks}
+      {type: "ping"}
+    """
+    # Авторизация через query param token
+    if not token:
+        await websocket.close(code=4001)
+        return
+
+    from auth import decode_access_token
+    payload = decode_access_token(token)
+    if not payload:
+        await websocket.close(code=4001)
+        return
+
+    user_id = int(payload.get("sub", 0))
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        await websocket.close(code=4001)
+        return
+
+    await ws_manager.connect(user_id, websocket)
+    logger.info(f"WS connected: user_id={user_id}, total={ws_manager.connected_users}")
+
+    try:
+        # Сразу отправляем текущие stats
+        now = datetime.now()
+        q = db.query(Client)
+        if user.role == "manager":
+            q = q.filter(Client.manager_email == user.email)
+        clients = q.all()
+        overdue = warning = 0
+        for c in clients:
+            last = c.last_meeting_date or c.last_checkup
+            if not last: continue
+            days = (now - last).days
+            interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+            if days > interval: overdue += 1
+            elif days > interval - 14: warning += 1
+        tq = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+            Task.status.in_(["plan", "in_progress", "blocked"])
+        )
+        if user.role == "manager":
+            tq = tq.filter(Client.manager_email == user.email)
+        open_tasks = tq.count()
+
+        await websocket.send_text(_json.dumps({
+            "type": "stats",
+            "overdue": overdue, "warning": warning, "open_tasks": open_tasks
+        }))
+
+        # Heartbeat loop — держим соединение живым
+        while True:
+            try:
+                # Ждём сообщение от клиента (ping) или timeout
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                msg = _json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_text(_json.dumps({"type": "pong"}))
+            except asyncio.TimeoutError:
+                # Каждые 30 сек шлём ping
+                await websocket.send_text(_json.dumps({"type": "ping"}))
+            except WebSocketDisconnect:
+                break
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_manager.disconnect(user_id, websocket)
+        logger.info(f"WS disconnected: user_id={user_id}, total={ws_manager.connected_users}")
+
+
+async def ws_notify_user(user_id: int, event_type: str, data: dict):
+    """
+    Хелпер для push-уведомлений конкретному пользователю.
+    Вызывается из других endpoint'ов после изменения данных.
+    """
+    await ws_manager.send(user_id, {"type": event_type, **data})
+
+
+async def ws_invalidate_stats(user_id: int, db):
+    """Инвалидирует кеш stats и пушит обновлённые данные через WS."""
+    cache_del(f"stats:{user_id}")
+    cache_del(f"notif:{user_id}")
+    # Пушим новые stats если пользователь подключён по WS
+    if user_id in ws_manager.active:
+        now = datetime.now()
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user: return
+        q = db.query(Client)
+        if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+        clients = q.all()
+        overdue = warning = 0
+        for c in clients:
+            last = c.last_meeting_date or c.last_checkup
+            if not last: continue
+            days = (now - last).days
+            interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+            if days > interval: overdue += 1
+            elif days > interval - 14: warning += 1
+        tq = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+            Task.status.in_(["plan", "in_progress", "blocked"])
+        )
+        if user.role == "manager": tq = tq.filter(Client.manager_email == user.email)
+        open_tasks = tq.count()
+        await ws_manager.send(user_id, {
+            "type": "stats", "overdue": overdue,
+            "warning": warning, "open_tasks": open_tasks
+        })
+
+
+# ============================================================================
+# REMAINING MISSING ENDPOINTS
+# ============================================================================
+
+@app.post("/api/checklist/init")
+@app.post("/api/checklist/add")
+@app.post("/api/checklist/clear")
+async def api_checklist(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Чеклист встречи — хранится в user.settings."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    path = str(request.url.path)
+    body = {}
+    try: body = await request.json()
+    except: pass
+
+    from sqlalchemy.orm.attributes import flag_modified
+    settings = dict(user.settings or {})
+
+    if "init" in path:
+        settings["checklist"] = [
+            {"id": 1, "text": "Приветствие и цели встречи", "done": False},
+            {"id": 2, "text": "Статус открытых задач", "done": False},
+            {"id": 3, "text": "Метрики и показатели", "done": False},
+            {"id": 4, "text": "Планы и следующие шаги", "done": False},
+            {"id": 5, "text": "Фолоуап назначен", "done": False},
+        ]
+    elif "add" in path:
+        cl = settings.get("checklist", [])
+        new_id = max((i["id"] for i in cl), default=0) + 1
+        cl.append({"id": new_id, "text": body.get("text", ""), "done": False})
+        settings["checklist"] = cl
+    elif "clear" in path:
+        settings["checklist"] = []
+
+    user.settings = settings
+    flag_modified(user, "settings")
+    db.commit()
+    return {"ok": True, "checklist": settings.get("checklist", [])}
+
+
+@app.get("/api/checklist")
+async def api_checklist_get(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    settings = user.settings or {}
+    return {"checklist": settings.get("checklist", [])}
+
+
+@app.post("/api/internal-task")
+@app.get("/api/internal-task")
+async def api_internal_task(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Внутренние задачи менеджера (не привязаны к клиенту)."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    if request.method == "GET":
+        tasks = db.query(Task).filter(
+            Task.client_id.is_(None),
+            Task.created_at >= datetime.utcnow() - timedelta(days=90)
+        ).order_by(Task.created_at.desc()).limit(50).all()
+        return {"tasks": [{"id":t.id,"title":t.title,"status":t.status,"priority":t.priority,
+                           "due_date":t.due_date.isoformat() if t.due_date else None} for t in tasks]}
+
+    body = await request.json()
+    task = Task(
+        client_id=None, title=body.get("title","Задача"),
+        status=body.get("status","plan"), priority=body.get("priority","medium"),
+        description=body.get("description",""),
+        due_date=datetime.fromisoformat(body["due_date"]) if body.get("due_date") else None,
+        created_at=datetime.utcnow(),
+    )
+    db.add(task); db.commit(); db.refresh(task)
+    return {"ok": True, "id": task.id}
+
+
+@app.post("/api/metrics/upload")
+async def api_metrics_upload(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Загрузка метрик Top-50 (CSV/Excel)."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    import io, pandas as pd
+    content_bytes = await file.read()
+    try:
+        if file.filename and file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content_bytes), dtype=str)
+        else:
+            df = pd.read_excel(io.BytesIO(content_bytes), dtype=str)
+        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка файла: {e}")
+
+    updated = 0
+    from sqlalchemy.orm.attributes import flag_modified
+    for _, row in df.iterrows():
+        name = str(row.get("name") or row.get("название") or row.get("client") or "").strip()
+        if not name or name == "nan": continue
+        client = db.query(Client).filter(Client.name.ilike(f"%{name}%")).first()
+        if not client: continue
+        meta = dict(client.integration_metadata or {})
+        for col in df.columns:
+            v = str(row.get(col) or "").strip()
+            if v and v != "nan" and col not in ("name","название","client"):
+                meta[f"metric_{col}"] = v
+        client.integration_metadata = meta
+        flag_modified(client, "integration_metadata")
+        updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated}

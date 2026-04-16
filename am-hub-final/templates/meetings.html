@@ -1,13 +1,10 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Встречи — AM Hub</title>
-  <style>
-    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; --orange:#f97316; }
-    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
-    * { margin:0; padding:0; box-sizing:border-box; }
+{% extends "base.html" %}
+{% block title %}Встречи — AM Hub{% endblock %}
+{% block page_title %}Встречи{% endblock %}
+
+{% block head %}
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
     body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
     .main { margin-left:240px; padding:24px 28px; }
     .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; overflow-y:auto; }
@@ -69,29 +66,11 @@
     .sync-spinner { display:none; }
     #syncBtn.loading .sync-spinner { display:inline; }
     #syncBtn.loading .sync-label { display:none; }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+</style>
+{% endblock %}
 
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span>☀️</span> Мой день</a>
-  <a class="nav-item active" href="/meetings"><span>📅</span> Встречи</a>
-  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item" href="/checkups"><span>✅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>🗓</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item" href="/tasks"><span>⚙️</span> Задачи</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
-
-<div class="main">
-  <div class="page-header">
+{% block content %}
+<div class="page-header">
     <div>
       <h1>📅 Встречи</h1>
       <div style="color:var(--muted);font-size:.82rem;margin-top:2px;">Таймлайн дня с автослотами подготовки и фолоуапов</div>
@@ -278,5 +257,4 @@ async function syncSlots() {
 
 loadSlots();
 </script>
-</body>
-</html>
+{% endblock %}

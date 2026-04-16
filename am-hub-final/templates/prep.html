@@ -1,13 +1,10 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prep: {{ client.name }} — AM Hub</title>
-  <style>
-    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
-    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
-    * { margin:0; padding:0; box-sizing:border-box; }
+{% extends "base.html" %}
+{% block title %}Подготовка к встрече — AM Hub{% endblock %}
+{% block page_title %}Подготовка к встрече{% endblock %}
+
+{% block head %}
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
     body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
     .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
     .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
@@ -66,27 +63,11 @@
     .type-btn { padding:5px 12px; border-radius:20px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
     .type-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(99,102,241,.1); }
     .meeting-summary { display:none; font-size:.82rem; color:var(--muted); margin-top:8px; padding-top:8px; border-top:1px solid var(--border); line-height:1.5; }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+</style>
+{% endblock %}
 
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard">📊 Дашборд</a>
-  <a class="nav-item" href="/today">📅 Мой день</a>
-  <a class="nav-item active" href="/clients">👥 Клиенты</a>
-  <a class="nav-item" href="/kanban">📋 Канбан</a>
-  <a class="nav-item" href="/checkups">🩺 Чекапы</a>
-  <a class="nav-item" href="/calendar">📅 Календарь</a>
-  <a class="nav-item" href="/analytics">📈 Аналитика</a>
-  <a class="nav-item" href="/sync">🔄 Sync</a>
-  <a class="nav-item" href="/settings">⚙️ Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
-
-<div class="main">
-  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+{% block content %}
+<a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
 
   <div class="page-header">
     <div>
@@ -355,5 +336,4 @@ if(saved){
   }catch(e){renderAgenda(AGENDAS.checkup);}
 }else{renderAgenda(AGENDAS.checkup);}
 </script>
-</body>
-</html>
+{% endblock %}
