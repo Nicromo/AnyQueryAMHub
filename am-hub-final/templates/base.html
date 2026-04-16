@@ -65,15 +65,21 @@
         <span class="icon">📆</span> QBR Календарь
       </a>
 
-      <div class="nav-section-label">Рабочее</div>
+      <div class="nav-section-label">Инструменты</div>
+      <a class="nav-link {% if request.url.path == '/cabinet' %}active{% endif %}" href="/cabinet">
+        <span class="icon">🗂️</span> Мой кабинет
+      </a>
+      <a class="nav-link {% if request.url.path == '/followup-templates' %}active{% endif %}" href="/followup-templates">
+        <span class="icon">📝</span> Шаблоны
+      </a>
+      <a class="nav-link {% if request.url.path == '/auto-tasks' %}active{% endif %}" href="/auto-tasks">
+        <span class="icon">🤖</span> Автозадачи
+      </a>
       <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
         <span class="icon">🗺️</span> Роадмап
       </a>
       <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
         <span class="icon">🔒</span> Внутренние задачи
-      </a>
-      <a class="nav-link {% if request.url.path == '/cabinet' %}active{% endif %}" href="/cabinet">
-        <span class="icon">🗂️</span> Мой кабинет
       </a>
 
       <div class="nav-section-label">Интеграции</div>

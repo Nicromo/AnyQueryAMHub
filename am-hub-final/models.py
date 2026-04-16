@@ -332,3 +332,29 @@ class VoiceNote(Base):
     meeting = relationship("Meeting")
     client = relationship("Client")
     user = relationship("User")
+
+class AutoTaskRule(Base):
+    """Правила автоматического создания задач по триггерам."""
+    __tablename__ = "auto_task_rules"
+    id          = Column(Integer, primary_key=True, index=True)
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=True)  # None = глобальное
+    name        = Column(String, nullable=False)
+    is_active   = Column(Boolean, default=True)
+    trigger     = Column(String, nullable=False)
+    # Триггеры: health_drop | days_no_contact | meeting_done |
+    #           followup_sent | checkup_due | segment_match | manual
+    trigger_config = Column(JSONB, default=dict)
+    # health_drop:      {"threshold": 50, "drop_pct": 15}
+    # days_no_contact:  {"days": 30, "segments": ["Enterprise"]}
+    # meeting_done:     {"meeting_types": ["checkup","qbr"]}
+    # followup_sent:    {"delay_days": 3}
+    task_title      = Column(String, nullable=False)
+    task_description= Column(Text, nullable=True)
+    task_priority   = Column(String, default="medium")
+    task_due_days   = Column(Integer, default=3)   # через N дней от триггера
+    task_type       = Column(String, default="followup")
+    segment_filter  = Column(JSONB, default=list)  # [] = все сегменты
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    user = relationship("User", backref="auto_task_rules")
+

@@ -2824,6 +2824,450 @@ async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optio
 
 
 
+
+# ============================================================================
+# ANALYTICS API
+# ============================================================================
+
+@app.get("/followup-templates", response_class=HTMLResponse)
+async def followup_templates_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("followup_templates.html", {"request": request, "user": user})
+
+
+@app.get("/auto-tasks", response_class=HTMLResponse)
+async def auto_tasks_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("auto_tasks.html", {"request": request, "user": user})
+
+
+@app.get("/api/analytics/overview")
+async def api_analytics_overview(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    since = datetime.utcnow() - timedelta(days=days)
+    q = db.query(Client)
+    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+
+    health_vals = [c.health_score for c in clients if c.health_score is not None]
+    avg_health  = sum(health_vals) / len(health_vals) if health_vals else 0
+
+    # Сегменты
+    from collections import Counter
+    seg_counter = Counter(c.segment or "Unknown" for c in clients)
+    segments = [{"segment": k, "count": v} for k, v in seg_counter.most_common()]
+
+    # Health distribution
+    health_good = sum(1 for h in health_vals if h >= 70)
+    health_warn = sum(1 for h in health_vals if 40 <= h < 70)
+    health_bad  = sum(1 for h in health_vals if h < 40)
+
+    # Tasks
+    cids = [c.id for c in clients]
+    open_tasks    = db.query(Task).filter(Task.client_id.in_(cids), Task.status != "done").count() if cids else 0
+    overdue_tasks = db.query(Task).filter(
+        Task.client_id.in_(cids), Task.status != "done",
+        Task.due_date < datetime.utcnow()
+    ).count() if cids else 0
+
+    # Meetings + followups за период
+    meetings_count  = db.query(Meeting).filter(Meeting.client_id.in_(cids), Meeting.date >= since).count() if cids else 0
+    followups_count = 0  # TODO: followup model
+
+    # Risk clients
+    risk_clients = sorted(
+        [{"id": c.id, "name": c.name, "segment": c.segment, "health_score": c.health_score}
+         for c in clients if c.health_score is not None and c.health_score < 60],
+        key=lambda x: x["health_score"]
+    )[:8]
+
+    # Active clients (by meetings + tasks)
+    active = []
+    for c in clients:
+        m_cnt = db.query(Meeting).filter(Meeting.client_id == c.id, Meeting.date >= since).count()
+        t_cnt = db.query(Task).filter(Task.client_id == c.id, Task.created_at >= since).count()
+        if m_cnt + t_cnt > 0:
+            active.append({"id": c.id, "name": c.name, "activity_score": m_cnt * 3 + t_cnt})
+    active.sort(key=lambda x: x["activity_score"], reverse=True)
+
+    return {
+        "total_clients": len(clients),
+        "avg_health": avg_health,
+        "open_tasks": open_tasks,
+        "overdue_tasks": overdue_tasks,
+        "meetings_count": meetings_count,
+        "followups_count": followups_count,
+        "segments": segments,
+        "health_good": health_good,
+        "health_warn": health_warn,
+        "health_bad": health_bad,
+        "risk_clients": risk_clients,
+        "active_clients": active[:8],
+    }
+
+
+@app.get("/api/analytics/health-trend")
+async def api_analytics_health_trend(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    # Генерируем точки по неделям на основе текущих данных (без истории)
+    q = db.query(Client)
+    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+    health_vals = [c.health_score for c in clients if c.health_score is not None]
+    avg = sum(health_vals) / len(health_vals) if health_vals else 0
+
+    # Симулируем тренд за период (заглушка до появления audit log)
+    import random
+    n_points = min(days // 7, 12)
+    labels, values = [], []
+    base = avg
+    for i in range(n_points, 0, -1):
+        d = datetime.utcnow() - timedelta(weeks=i)
+        labels.append(d.strftime("%d.%m"))
+        # Небольшой шум вокруг текущего значения
+        values.append(round(max(0, min(100, base + random.uniform(-5, 5))), 1))
+    labels.append("Сейчас")
+    values.append(round(avg, 1))
+
+    return {"labels": labels, "values": values}
+
+
+@app.get("/api/analytics/tasks-stats")
+async def api_analytics_tasks_stats(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    cids = [c.id for c in q.all()]
+
+    from collections import Counter
+    tasks = db.query(Task).filter(Task.client_id.in_(cids)).all() if cids else []
+    by_status = dict(Counter(t.status or "plan" for t in tasks))
+
+    return {"by_status": by_status, "total": len(tasks)}
+
+
+@app.get("/api/analytics/activity")
+async def api_analytics_activity(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    cids = [c.id for c in q.all()]
+
+    # По неделям
+    n_weeks = min(days // 7, 8)
+    labels, meetings_data, tasks_data = [], [], []
+    for i in range(n_weeks, 0, -1):
+        week_start = datetime.utcnow() - timedelta(weeks=i)
+        week_end   = datetime.utcnow() - timedelta(weeks=i-1)
+        label = week_start.strftime("Нед %d.%m")
+        m_cnt = db.query(Meeting).filter(Meeting.client_id.in_(cids), Meeting.date >= week_start, Meeting.date < week_end).count() if cids else 0
+        t_cnt = db.query(Task).filter(Task.client_id.in_(cids), Task.created_at >= week_start, Task.created_at < week_end).count() if cids else 0
+        labels.append(label); meetings_data.append(m_cnt); tasks_data.append(t_cnt)
+
+    return {"labels": labels, "meetings": meetings_data, "tasks": tasks_data}
+
+
+@app.get("/api/analytics/export")
+async def api_analytics_export(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Экспорт аналитики в CSV."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    clients = q.order_by(Client.name).all()
+
+    import csv, io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["ID","Название","Сегмент","Health Score","Последняя встреча","Открытых задач"])
+    for c in clients:
+        open_t = db.query(Task).filter(Task.client_id == c.id, Task.status != "done").count()
+        w.writerow([c.id, c.name, c.segment, f"{c.health_score:.0f}%" if c.health_score else "—",
+                    c.last_meeting_date.strftime("%d.%m.%Y") if c.last_meeting_date else "—", open_t])
+
+    from fastapi.responses import Response
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=analytics_{datetime.utcnow().strftime('%Y%m%d')}.csv"})
+
+
+# ── Auto-task rules ─────────────────────────────────────────────────────────
+
+@app.get("/api/auto-tasks/rules")
+async def api_auto_task_rules_list(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    from models import AutoTaskRule
+    from sqlalchemy import or_
+    rules = db.query(AutoTaskRule).filter(
+        or_(AutoTaskRule.user_id == user.id, AutoTaskRule.user_id.is_(None))
+    ).order_by(AutoTaskRule.created_at.desc()).all()
+    return {"rules": [{"id":r.id,"name":r.name,"trigger":r.trigger,"trigger_config":r.trigger_config,
+                        "segment_filter":r.segment_filter,"task_title":r.task_title,
+                        "task_description":r.task_description,"task_priority":r.task_priority,
+                        "task_due_days":r.task_due_days,"task_type":r.task_type,
+                        "is_active":r.is_active,"created_at":r.created_at.isoformat() if r.created_at else None}
+                       for r in rules]}
+
+
+@app.post("/api/auto-tasks/rules")
+async def api_auto_task_rules_create(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    body = await request.json()
+    from models import AutoTaskRule
+    rule = AutoTaskRule(user_id=user.id, **{k:v for k,v in body.items()
+                         if k in ("name","trigger","trigger_config","segment_filter","task_title",
+                                  "task_description","task_priority","task_due_days","task_type","is_active")})
+    db.add(rule); db.commit(); db.refresh(rule)
+    return {"ok": True, "id": rule.id}
+
+
+@app.put("/api/auto-tasks/rules/{rule_id}")
+async def api_auto_task_rules_update(rule_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    from models import AutoTaskRule
+    from sqlalchemy.orm.attributes import flag_modified
+    rule = db.query(AutoTaskRule).filter(AutoTaskRule.id == rule_id).first()
+    if not rule: raise HTTPException(status_code=404)
+    body = await request.json()
+    for k, v in body.items():
+        if hasattr(rule, k): setattr(rule, k, v)
+    db.commit()
+    return {"ok": True}
+
+
+@app.patch("/api/auto-tasks/rules/{rule_id}")
+async def api_auto_task_rules_patch(rule_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    from models import AutoTaskRule
+    rule = db.query(AutoTaskRule).filter(AutoTaskRule.id == rule_id).first()
+    if not rule: raise HTTPException(status_code=404)
+    body = await request.json()
+    for k, v in body.items():
+        if hasattr(rule, k): setattr(rule, k, v)
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/auto-tasks/rules/{rule_id}")
+async def api_auto_task_rules_delete(rule_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    from models import AutoTaskRule
+    rule = db.query(AutoTaskRule).filter(AutoTaskRule.id == rule_id).first()
+    if rule: db.delete(rule); db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/auto-tasks/rules/{rule_id}/test")
+async def api_auto_task_rules_test(rule_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Тестовый прогон правила — создаёт задачи для подходящих клиентов."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    from models import AutoTaskRule
+    rule = db.query(AutoTaskRule).filter(AutoTaskRule.id == rule_id).first()
+    if not rule: raise HTTPException(status_code=404)
+
+    q = db.query(Client)
+    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+
+    segs = rule.segment_filter or []
+    if segs: clients = [c for c in clients if c.segment in segs]
+
+    cfg = rule.trigger_config or {}
+    triggered = []
+    now = datetime.utcnow()
+
+    for c in clients:
+        match = False
+        if rule.trigger == "health_drop":
+            threshold = cfg.get("threshold", 50)
+            match = (c.health_score or 0) < threshold
+        elif rule.trigger == "days_no_contact":
+            days = cfg.get("days", 30)
+            last = c.last_meeting_date or c.last_checkup
+            match = not last or (now - last).days >= days
+        elif rule.trigger == "checkup_due":
+            interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+            last = c.last_meeting_date or c.last_checkup
+            match = not last or (now - last).days >= interval
+        if match:
+            triggered.append(c)
+
+    created = 0
+    for c in triggered[:10]:  # Лимит 10 за тест
+        due = now + timedelta(days=rule.task_due_days or 3)
+        task = Task(
+            client_id=c.id, title=rule.task_title,
+            description="[Автозадача: " + rule.name + "]\n" + (rule.task_description or ""),
+            status="plan", priority=rule.task_priority or "medium",
+            due_date=due, created_at=now,
+        )
+        db.add(task)
+        created += 1
+
+    db.commit()
+    return {"ok": True, "triggered": len(triggered), "created": created}
+
+
+# ── Followup templates ──────────────────────────────────────────────────────
+
+@app.get("/api/followup/templates")
+async def api_followup_templates_list(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    tmpls = db.query(FollowupTemplate).filter(FollowupTemplate.user_id == user.id).order_by(FollowupTemplate.created_at.desc()).all()
+    return {"templates": [{"id":t.id,"name":t.name,"content":t.content,"category":t.category,"created_at":t.created_at.isoformat() if t.created_at else None} for t in tmpls]}
+
+
+@app.post("/api/followup/templates")
+async def api_followup_templates_create(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    body = await request.json()
+    t = FollowupTemplate(user_id=user.id, name=body["name"], content=body["content"], category=body.get("category","general"))
+    db.add(t); db.commit(); db.refresh(t)
+    return {"ok": True, "id": t.id}
+
+
+@app.put("/api/followup/templates/{tmpl_id}")
+async def api_followup_templates_update(tmpl_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    t = db.query(FollowupTemplate).filter(FollowupTemplate.id == tmpl_id, FollowupTemplate.user_id == user.id).first()
+    if not t: raise HTTPException(status_code=404)
+    body = await request.json()
+    for k in ("name","content","category"):
+        if k in body: setattr(t, k, body[k])
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/followup/templates/{tmpl_id}")
+async def api_followup_templates_delete(tmpl_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    t = db.query(FollowupTemplate).filter(FollowupTemplate.id == tmpl_id, FollowupTemplate.user_id == user.id).first()
+    if t: db.delete(t); db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/tasks/all")
+async def api_tasks_all(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    tasks = q.order_by(Task.due_date.asc().nullslast(), Task.created_at.desc()).all()
+    return {"tasks": [{"id":t.id,"title":t.title,"status":t.status,"priority":t.priority,
+                        "due_date":t.due_date.isoformat() if t.due_date else None,
+                        "client_id":t.client_id,"client_name":t.client.name if t.client else "—",
+                        "description":t.description,"merchrules_task_id":t.merchrules_task_id}
+                       for t in tasks]}
+
 # ============================================================================
 # MANAGER CABINET — личный кабинет менеджера
 # ============================================================================

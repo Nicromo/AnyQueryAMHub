@@ -1,98 +1,295 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Задачи — AM Hub</title>
-  <style>
-    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --red:#ef4444; --yellow:#eab308; }
-    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s; }
-    .main { margin-left:240px; padding:24px 28px; }
-    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
-    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
-    .sidebar-logo h1 { font-size:1.1rem; }
-    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
-    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
-    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
-    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
-    a { color:var(--accent); text-decoration:none; }
-    h1 { font-size:1.4rem; margin-bottom:16px; }
-    .filter-bar { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
-    .fbtn { padding:5px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; text-decoration:none; display:inline-block; }
-    .fbtn:hover { border-color:var(--accent); color:var(--text); text-decoration:none; }
-    .fbtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; transition:border .15s; }
-    .card:hover { border-color:var(--accent); }
-    .card h3 { font-size:.88rem; font-weight:600; margin-bottom:2px; }
-    .card .client { font-size:.82rem; color:var(--muted); margin-bottom:4px; }
-    .card .meta { font-size:.72rem; color:var(--muted); display:flex; gap:12px; flex-wrap:wrap; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
-    .b-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
-    .b-in-progress { background:rgba(168,85,247,.15); color:#c084fc; }
-    .b-done { background:rgba(34,197,94,.15); color:#4ade80; }
-    .b-blocked { background:rgba(239,68,68,.15); color:#f87171; }
-    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
-  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item active" href="/tasks"><span>📋</span> Задачи</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
-<div class="main">
-  <h1 style="display:flex;align-items:center;justify-content:space-between;">📋 Задачи <button class="btn btn-sm" onclick="openSearch()" title="Поиск (Ctrl+K)">🔍</button></h1>
+{% extends "base.html" %}
+{% block title %}Задачи — AM Hub{% endblock %}
+{% block page_title %}Задачи{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Все задачи вашего портфеля</div>{% endblock %}
+{% block page_actions %}
+<button class="btn btn-primary btn-sm" onclick="openNewTask()">+ Новая задача</button>
+{% endblock %}
 
-  <!-- Search Modal -->
-  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.4);">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">🔍</span><input id="searchInput" type="text" placeholder="Поиск..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;" autocomplete="off"><kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd></div>
-      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
-      <div id="searchEmpty" style="padding:30px;text-align:center;color:var(--muted);font-size:.85rem;display:none;">Начните вводить</div>
-    </div>
+{% block content %}
+<style>
+.task-filters{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center;}
+.task-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;}
+.sync-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;font-size:.65rem;font-weight:600;}
+.sync-ok{background:var(--green-bg);color:var(--green);}
+.sync-no{background:var(--surface-3);color:var(--text-muted);}
+.priority-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.p-high{background:var(--red);} .p-medium{background:var(--yellow);} .p-low{background:var(--blue);}
+</style>
+
+<!-- Filters + Search -->
+<div class="task-filters">
+  <input type="text" id="task-search" class="form-control" style="max-width:220px"
+         placeholder="Поиск задачи..." oninput="filterTasks()">
+  <select id="f-status" class="form-control" style="width:130px" onchange="filterTasks()">
+    <option value="">Все статусы</option>
+    <option value="plan">Планирование</option>
+    <option value="in_progress">В работе</option>
+    <option value="review">Ревью</option>
+    <option value="blocked">Заблокирована</option>
+    <option value="done">Выполнена</option>
+  </select>
+  <select id="f-priority" class="form-control" style="width:120px" onchange="filterTasks()">
+    <option value="">Все приоритеты</option>
+    <option value="high">Высокий</option>
+    <option value="medium">Средний</option>
+    <option value="low">Низкий</option>
+  </select>
+  <select id="f-sync" class="form-control" style="width:140px" onchange="filterTasks()">
+    <option value="">Все задачи</option>
+    <option value="synced">Синхронизированы</option>
+    <option value="local">Только локальные</option>
+  </select>
+  <div style="margin-left:auto;display:flex;gap:6px">
+    <button class="btn btn-sm" onclick="syncAll()" id="sync-btn">🔄 Синх. все</button>
+    <span id="sync-status" style="font-size:.76rem;color:var(--text-dim);align-self:center"></span>
   </div>
-  <style>.search-cat{padding:6px 16px 4px;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;}.search-item{padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s;}.search-item:hover{background:rgba(255,255,255,.04);}.search-item .s-icon{font-size:1rem;flex-shrink:0;width:20px;text-align:center;}.search-item .s-text{flex:1;min-width:0;}.search-item .s-title{font-size:.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.search-item .s-sub{font-size:.72rem;color:var(--muted);}.search-item .s-badge{font-size:.65rem;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,.15);color:var(--accent);font-weight:600;flex-shrink:0;}</style>
-  <div class="filter-bar">
-    <a class="fbtn {% if status_filter == 'all' %}active{% endif %}" href="?status=all">Все ({{ tasks|length }})</a>
-    <a class="fbtn {% if status_filter == 'plan' %}active{% endif %}" href="?status=plan">Plan</a>
-    <a class="fbtn {% if status_filter == 'in_progress' %}active{% endif %}" href="?status=in_progress">In Progress</a>
-    <a class="fbtn {% if status_filter == 'done' %}active{% endif %}" href="?status=done">Done</a>
-    <a class="fbtn {% if status_filter == 'blocked' %}active{% endif %}" href="?status=blocked">Blocked</a>
-  </div>
-  {% for t in tasks %}
-  <a href="/client/{{ t.client_id }}" class="card" style="display:block;text-decoration:none;color:inherit;">
-    <h3>{{ t.title }}</h3>
-    {% if t.client %}<div class="client">{{ t.client.name }}</div>{% endif %}
-    {% if t.description %}<div style="font-size:.8rem;color:var(--muted);margin-bottom:4px;">{{ t.description[:150] }}</div>{% endif %}
-    <div class="meta">
-      <span class="badge b-{{ t.status|replace('_','-') }}">{{ t.status }}</span>
-      <span>{{ t.priority }}</span>
-      {% if t.due_date %}<span>До: {{ t.due_date.strftime('%d.%m') }}</span>{% endif %}
-      {% if t.team %}<span>{{ t.team }}</span>{% endif %}
-    </div>
-  </a>
-  {% endfor %}
-  {% if not tasks %}
-  <div style="text-align:center;padding:40px;color:var(--muted);">Нет задач</div>
-  {% endif %}
 </div>
+
+<!-- Stats chips -->
+<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap" id="task-stats"></div>
+
+<!-- Table -->
+<div class="task-table-wrap">
+  <table>
+    <thead><tr>
+      <th style="width:24px"></th>
+      <th>Задача</th>
+      <th>Клиент</th>
+      <th>Статус</th>
+      <th>Приоритет</th>
+      <th>Срок</th>
+      <th>Sync</th>
+      <th style="width:80px"></th>
+    </tr></thead>
+    <tbody id="task-tbody">
+      <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-muted)">⏳ Загрузка...</td></tr>
+    </tbody>
+  </table>
+</div>
+<div style="font-size:.75rem;color:var(--text-muted);margin-top:8px" id="task-count"></div>
+
+<!-- New/Edit task modal -->
+<div class="modal-overlay" id="taskModal" style="display:none" onclick="if(event.target===this)closeTask()">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="task-modal-title">Новая задача</span>
+      <button class="modal-close" onclick="closeTask()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field" style="grid-column:1/-1">
+          <label>Название</label>
+          <input type="text" id="t-title" class="form-control" placeholder="Описание задачи...">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Клиент</label>
+          <select id="t-client" class="form-control"></select>
+        </div>
+        <div class="field">
+          <label>Статус</label>
+          <select id="t-status" class="form-control">
+            <option value="plan">Планирование</option>
+            <option value="in_progress">В работе</option>
+            <option value="review">Ревью</option>
+            <option value="blocked">Заблокирована</option>
+            <option value="done">Выполнена</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Приоритет</label>
+          <select id="t-priority" class="form-control">
+            <option value="medium">Средний</option>
+            <option value="high">Высокий</option>
+            <option value="low">Низкий</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Срок</label>
+          <input type="date" id="t-due" class="form-control">
+        </div>
+      </div>
+      <div class="field">
+        <label>Описание</label>
+        <textarea id="t-desc" class="form-control" rows="2" placeholder="Детали..."></textarea>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="t-push-mr"> Синхронизировать с Merchrules
+        </label>
+        <div class="help">Задача будет создана в Roadmap Merchrules</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeTask()">Отмена</button>
+      <button class="btn btn-primary" onclick="saveTask()">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
+
 <script>
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
-let searchTimeout=null;function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').value='';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';}function closeSearch(){document.getElementById('searchModal').style.display='none';}document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')closeSearch();});document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))closeSearch();});document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}document.getElementById('searchEmpty').style.display='none';searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div></div></div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+'</div></div></div>';});}if(d.meetings.length){html+='<div class="search-cat">📅 Встречи</div>';d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div></div></div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){console.error(e);}},300);});
+var allTasks = []; var editId = null;
+var STAT_LABELS = {plan:'Планирование',in_progress:'В работе',review:'Ревью',done:'Выполнено',blocked:'Заблокировано'};
+var STAT_COLORS = {plan:'var(--text-muted)',in_progress:'var(--accent)',review:'var(--yellow)',done:'var(--green)',blocked:'var(--red)'};
+
+(async function load() {
+  var d = await fetch('/api/tasks/all').then(function(r){return r.json();}).catch(function(){return {tasks:[]};});
+  allTasks = d.tasks || [];
+  renderStats(allTasks);
+  renderTasks(allTasks);
+  loadClientOptions();
+})();
+
+function renderStats(list) {
+  var counts = {};
+  list.forEach(function(t){ counts[t.status] = (counts[t.status]||0)+1; });
+  document.getElementById('task-stats').innerHTML =
+    Object.entries(STAT_LABELS).map(function(e) {
+      var k=e[0], v=e[1];
+      return '<span class="badge badge-neutral" style="font-size:.72rem">'
+        +'<span style="width:6px;height:6px;border-radius:50%;background:'+STAT_COLORS[k]+';display:inline-block;margin-right:4px"></span>'
+        +v+': '+(counts[k]||0)+'</span>';
+    }).join('');
+}
+
+function filterTasks() {
+  var q    = document.getElementById('task-search').value.toLowerCase();
+  var st   = document.getElementById('f-status').value;
+  var pr   = document.getElementById('f-priority').value;
+  var sync = document.getElementById('f-sync').value;
+  var filtered = allTasks.filter(function(t) {
+    return (!q || (t.title||'').toLowerCase().includes(q) || (t.client_name||'').toLowerCase().includes(q))
+        && (!st   || t.status === st)
+        && (!pr   || t.priority === pr)
+        && (!sync || (sync==='synced' ? t.merchrules_task_id : !t.merchrules_task_id));
+  });
+  renderTasks(filtered);
+}
+
+function renderTasks(list) {
+  document.getElementById('task-count').textContent = 'Показано: '+list.length+' задач';
+  var now = new Date();
+  document.getElementById('task-tbody').innerHTML = list.length
+    ? list.map(function(t) {
+        var due = t.due_date ? new Date(t.due_date) : null;
+        var overdue = due && due < now && t.status !== 'done';
+        var dueStr = due ? due.toLocaleDateString('ru-RU',{day:'numeric',month:'short'}) : '—';
+        var priCls = {high:'p-high',medium:'p-medium',low:'p-low'}[t.priority||'medium']||'p-medium';
+        var stColor = STAT_COLORS[t.status]||'var(--text-muted)';
+        var synced = t.merchrules_task_id;
+        return '<tr onclick="editTask('+t.id+')" style="cursor:pointer">'
+          +'<td><div class="priority-dot '+priCls+'"></div></td>'
+          +'<td class="td-accent" style="max-width:280px"><div class="truncate">'+t.title+'</div></td>'
+          +'<td><a href="/client/'+t.client_id+'" onclick="event.stopPropagation()" style="color:var(--text-dim);font-size:.78rem">'+t.client_name+'</a></td>'
+          +'<td><span style="font-size:.76rem;font-weight:500;color:'+stColor+'">'+STAT_LABELS[t.status]+'</span></td>'
+          +'<td><span style="font-size:.74rem;color:var(--text-dim)">'+{high:'🔴 Высокий',medium:'🟡 Средний',low:'🔵 Низкий'}[t.priority||'medium']+'</span></td>'
+          +'<td style="font-size:.76rem;color:'+(overdue?'var(--red)':'var(--text-dim)')+'">'+dueStr+'</td>'
+          +'<td><span class="sync-badge '+(synced?'sync-ok':'sync-no')+'">'+(synced?'✅ MR':'—')+'</span></td>'
+          +'<td onclick="event.stopPropagation()" style="display:flex;gap:4px">'
+          +'<button class="btn btn-ghost btn-sm btn-icon" onclick="pushToMR('+t.id+',this)" title="Push в Merchrules">🔗</button>'
+          +'<button class="btn btn-ghost btn-sm btn-icon" onclick="deleteTask('+t.id+')" title="Удалить">✕</button>'
+          +'</td></tr>';
+      }).join('')
+    : '<tr><td colspan="8"><div class="empty" style="padding:32px"><div class="empty-icon">✅</div><div class="empty-text">Нет задач по выбранным фильтрам</div></div></td></tr>';
+}
+
+async function loadClientOptions() {
+  var d = await fetch('/api/cabinet/my-clients').then(function(r){return r.json();}).catch(function(){return {clients:[]};});
+  var sel = document.getElementById('t-client');
+  sel.innerHTML = '<option value="">— Выберите клиента —</option>'
+    + (d.clients||[]).map(function(c){return '<option value="'+c.id+'">'+c.name+'</option>';}).join('');
+}
+
+function openNewTask() {
+  editId = null;
+  document.getElementById('task-modal-title').textContent = 'Новая задача';
+  ['t-title','t-desc'].forEach(function(id){document.getElementById(id).value='';});
+  document.getElementById('t-status').value = 'plan';
+  document.getElementById('t-priority').value = 'medium';
+  document.getElementById('t-due').value = '';
+  document.getElementById('t-push-mr').checked = false;
+  document.getElementById('taskModal').style.display = 'flex';
+}
+
+function editTask(id) {
+  var t = allTasks.find(function(t){return t.id===id;});
+  if (!t) return;
+  editId = id;
+  document.getElementById('task-modal-title').textContent = 'Редактировать задачу';
+  document.getElementById('t-title').value    = t.title||'';
+  document.getElementById('t-status').value   = t.status||'plan';
+  document.getElementById('t-priority').value = t.priority||'medium';
+  document.getElementById('t-due').value      = t.due_date ? t.due_date.slice(0,10) : '';
+  document.getElementById('t-desc').value     = t.description||'';
+  document.getElementById('t-client').value   = t.client_id||'';
+  document.getElementById('taskModal').style.display = 'flex';
+}
+
+function closeTask() { document.getElementById('taskModal').style.display='none'; }
+
+async function saveTask() {
+  var body = {
+    title:       document.getElementById('t-title').value.trim(),
+    status:      document.getElementById('t-status').value,
+    priority:    document.getElementById('t-priority').value,
+    due_date:    document.getElementById('t-due').value||null,
+    description: document.getElementById('t-desc').value,
+    client_id:   parseInt(document.getElementById('t-client').value)||null,
+    push_mr:     document.getElementById('t-push-mr').checked,
+  };
+  if (!body.title) return;
+  var url = editId ? '/api/tasks/'+editId : '/api/tasks';
+  var method = editId ? 'PUT' : 'POST';
+  var r = await fetch(url, {method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (r.ok) {
+    closeTask();
+    var d = await fetch('/api/tasks/all').then(function(r){return r.json();});
+    allTasks = d.tasks||[];
+    renderStats(allTasks); renderTasks(allTasks);
+    showToast(editId ? 'Задача обновлена' : 'Задача создана');
+  }
+}
+
+async function deleteTask(id) {
+  if (!confirm('Удалить задачу?')) return;
+  await fetch('/api/tasks/'+id, {method:'DELETE'});
+  allTasks = allTasks.filter(function(t){return t.id!==id;});
+  renderStats(allTasks); renderTasks(allTasks);
+}
+
+async function pushToMR(id, btn) {
+  btn.textContent = '⏳'; btn.disabled = true;
+  var r = await fetch('/api/tasks/'+id+'/push-roadmap', {method:'POST'});
+  var d = await r.json();
+  if (d.ok) { btn.textContent='✅'; showToast('Задача синхронизирована с Merchrules'); }
+  else { btn.textContent='❌'; btn.disabled=false; showToast('Ошибка: '+(d.error||'?')); }
+  // Обновляем статус синка в таблице
+  var t = allTasks.find(function(t){return t.id===id;});
+  if (t && d.ok) t.merchrules_task_id = d.mr_id || 'synced';
+  renderTasks(allTasks);
+}
+
+async function syncAll() {
+  var btn = document.getElementById('sync-btn');
+  var st  = document.getElementById('sync-status');
+  btn.disabled = true; btn.textContent = '⏳ Синхронизация...';
+  var r = await fetch('/api/sync/merchrules', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+  var d = await r.json().catch(function(){return {};});
+  btn.textContent = '🔄 Синх. все'; btn.disabled = false;
+  st.textContent = d.ok ? '✅ Синхронизировано' : '❌ '+(d.error||'Ошибка');
+  if (d.ok) {
+    var nd = await fetch('/api/tasks/all').then(function(r){return r.json();});
+    allTasks = nd.tasks||[]; renderStats(allTasks); renderTasks(allTasks);
+  }
+}
+
+function showToast(msg) {
+  var t=document.createElement('div'); t.className='toast success'; t.textContent=msg;
+  document.body.appendChild(t); setTimeout(function(){t.remove();},3000);
+}
 </script>
-</body>
-</html>
+{% endblock %}
