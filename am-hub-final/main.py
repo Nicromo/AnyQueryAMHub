@@ -10111,3 +10111,41 @@ async def api_meeting_comments(
          "user_name": c.user.name if c.user else "Система"}
         for c in comments
     ]}
+
+
+@app.post("/api/onboarding/skip")
+async def api_onboarding_skip(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Пропустить онбординг."""
+    from models import OnboardingProgress
+    from sqlalchemy.orm.attributes import flag_modified
+    prog = db.query(OnboardingProgress).filter(OnboardingProgress.user_id == user.id).first()
+    if not prog:
+        prog = OnboardingProgress(user_id=user.id, completed=[], skipped=True)
+        db.add(prog)
+    else:
+        prog.skipped = True
+        flag_modified(prog, "completed")
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/onboarding/skip")
+async def api_onboarding_skip(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Пропустить онбординг."""
+    from models import OnboardingProgress
+    from sqlalchemy.orm.attributes import flag_modified
+    prog = db.query(OnboardingProgress).filter(OnboardingProgress.user_id == user.id).first()
+    if not prog:
+        prog = OnboardingProgress(user_id=user.id, completed=[], skipped=True)
+        db.add(prog)
+    else:
+        prog.skipped = True
+        flag_modified(prog, "completed")
+    db.commit()
+    return {"ok": True}
