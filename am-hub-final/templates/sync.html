@@ -113,6 +113,7 @@
       <div class="help">Если не указать — попытается загрузить все аккаунты</div>
     </div>
     <button class="btn" id="mrBtn" onclick="doSyncMR()">🔄 Синхронизировать Merchrules</button>
+    <button class="btn" style="background:#374151;margin-left:8px" onclick="diagMR()">🔍 Диагностика авторизации</button>
     <div class="result" id="mrResult"></div>
   </div>
 
@@ -195,6 +196,32 @@ async function saveSheetsCreds(){
     const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:{spreadsheet_id:id}})});
     if(r.ok){const el=document.getElementById('gsResult');el.className='result ok';el.textContent='✅ Сохранено';}
   }catch(e){}
+}
+
+async function diagMR(){
+  const login=document.getElementById('mr-login').value;
+  const password=document.getElementById('mr-pass').value;
+  const el=document.getElementById('mrResult');
+  if(!login||!password){el.className='result err';el.textContent='❌ Введите логин и пароль';return;}
+  el.className='result ok';el.textContent='⏳ Диагностируем авторизацию...';
+  try{
+    const r=await fetch('/api/diagnostics/merchrules-auth',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({login,password})
+    });
+    const d=await r.json();
+    if(d.ok){
+      const w=d.working;
+      el.textContent='✅ Авторизация успешна!\nURL: '+w.url+'\nПоле: '+w.field+'\n\nТеперь нажмите «Синхронизировать»';
+    } else {
+      let lines=['❌ Авторизация не удалась. Детали:',''];
+      for(const a of (d.all||[])){
+        lines.push(a.url+' ['+a.field+'] → '+(a.error||'HTTP '+a.status));
+        if(a.response) lines.push('  Ответ: '+a.response.slice(0,120));
+      }
+      el.className='result err';el.textContent=lines.join('\n');
+    }
+  }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
 }
 
 async function getOutboundIP(){

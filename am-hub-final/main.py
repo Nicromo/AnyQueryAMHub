@@ -2837,7 +2837,75 @@ async def api_outbound_ip(auth_token: Optional[str] = Cookie(None)):
     return {"error": "Не удалось определить IP"}
 
 
-@app.post("/api/import/clients-csv")
+@app.post("/api/diagnostics/merchrules-auth")
+async def api_diag_merchrules_auth(
+    request: Request,
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Диагностика авторизации Merchrules.
+    Показывает точный HTTP-статус и ответ для каждой попытки.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    body = await request.json()
+    login = body.get("login", "")
+    password = body.get("password", "")
+    if not login or not password:
+        return {"error": "Нужны login и password"}
+
+    import httpx
+    results = []
+    urls = [
+        "https://merchrules.any-platform.ru",
+        "https://merchrules-qa.any-platform.ru",
+    ]
+    fields = ["email", "login", "username"]
+
+    async with httpx.AsyncClient(timeout=15) as hx:
+        for url in urls:
+            for field in fields:
+                try:
+                    resp = await hx.post(
+                        f"{url}/backend-v2/auth/login",
+                        json={field: login, "password": password},
+                        timeout=10,
+                    )
+                    body_text = resp.text[:300]
+                    has_token = False
+                    if resp.status_code == 200:
+                        try:
+                            j = resp.json()
+                            has_token = bool(j.get("token") or j.get("access_token") or j.get("accessToken"))
+                        except Exception:
+                            pass
+                    results.append({
+                        "url": url,
+                        "field": field,
+                        "status": resp.status_code,
+                        "has_token": has_token,
+                        "response": body_text,
+                    })
+                    # Нашли рабочий — дальше не пробуем
+                    if resp.status_code == 200 and has_token:
+                        return {"ok": True, "working": results[-1], "all": results}
+                except Exception as e:
+                    results.append({
+                        "url": url,
+                        "field": field,
+                        "status": "error",
+                        "error": str(e),
+                    })
+
+    return {"ok": False, "all": results}
+
+
+
 async def api_import_clients_csv(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
