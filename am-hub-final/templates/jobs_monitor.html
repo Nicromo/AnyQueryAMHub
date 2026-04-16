@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Jobs мониторинг — AM Hub{% endblock %}
+{% block page_title %}Background Jobs{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Статус фоновых задач и планировщика</div>{% endblock %}
+{% block page_actions %}
+<button class="btn btn-sm" onclick="loadJobs()">🔄 Обновить</button>
+{% endblock %}
+
+{% block content %}
+<style>
+.job-row{display:grid;grid-template-columns:200px 1fr 120px 140px 80px;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);transition:background var(--t)}
+.job-row:hover{background:var(--surface-2)}
+.job-header{background:var(--surface-2);font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)}
+.job-status{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;font-weight:600;padding:3px 9px;border-radius:4px}
+.st-ok     {background:var(--green-bg);color:var(--green)}
+.st-error  {background:var(--red-bg);color:var(--red)}
+.st-running{background:var(--yellow-bg);color:var(--yellow)}
+.st-pending{background:var(--surface-3);color:var(--text-muted)}
+.run-btn{padding:4px 10px;font-size:.72rem}
+.timeline{height:4px;background:var(--surface-3);border-radius:2px;overflow:hidden;margin-top:4px}
+.timeline-fill{height:100%;border-radius:2px;background:var(--accent);transition:width .3s}
+</style>
+
+<div class="card" style="margin-bottom:20px">
+  <div class="job-row job-header">
+    <div>Job</div><div>Описание</div><div>Статус</div><div>Последний запуск</div><div></div>
+  </div>
+  <div id="jobs-list">
+    <div class="empty" style="padding:24px"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><div class="card-title">📋 Лог последних запусков</div></div>
+  <div id="jobs-log" style="font-family:var(--font-mono);font-size:.74rem;color:var(--text-dim);padding:12px 16px;max-height:300px;overflow-y:auto;line-height:1.8"></div>
+</div>
+
+<script>
+async function loadJobs() {
+  var d = await fetch('/api/admin/jobs').then(r=>r.json()).catch(()=>({jobs:[],log:[]}));
+  var jobs = d.jobs || [];
+  var el = document.getElementById('jobs-list');
+
+  var STATUS = {ok:'st-ok',error:'st-error',running:'st-running',pending:'st-pending'};
+  var ICONS  = {ok:'✅',error:'❌',running:'⏳',pending:'🕐'};
+
+  el.innerHTML = jobs.map(function(j) {
+    var stCls = STATUS[j.status]||'st-pending';
+    var stIco = ICONS[j.status]||'🕐';
+    var next  = j.next_run ? new Date(j.next_run).toLocaleString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : '—';
+    var last  = j.last_run ? new Date(j.last_run).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'никогда';
+    var dur   = j.duration_ms ? (j.duration_ms/1000).toFixed(1)+'с' : '';
+    return '<div class="job-row">'
+      +'<div>'
+      +'  <div style="font-size:.82rem;font-weight:600">'+j.name+'</div>'
+      +'  <div style="font-size:.68rem;color:var(--text-muted)">'+next+'</div>'
+      +'</div>'
+      +'<div style="font-size:.78rem;color:var(--text-dim)">'+j.description+'</div>'
+      +'<div><span class="job-status '+stCls+'">'+stIco+' '+j.status+'</span>'+(dur?'<div style="font-size:.68rem;color:var(--text-muted);margin-top:2px">'+dur+'</div>':'')+'</div>'
+      +'<div style="font-size:.76rem;color:var(--text-muted)">'+last+(j.error?'<div style="color:var(--red);font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px" title="'+j.error+'">'+j.error.slice(0,30)+'...</div>':'')+'</div>'
+      +'<div><button class="btn btn-sm run-btn" onclick="runJob(\''+j.id+'\',this)">▶ Запустить</button></div>'
+      +'</div>';
+  }).join('');
+
+  var log = d.log || [];
+  document.getElementById('jobs-log').innerHTML = log.length
+    ? log.map(function(l) {
+        var t = new Date(l.ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        var col = l.level==='error'?'var(--red)':l.level==='warn'?'var(--yellow)':'var(--text-dim)';
+        return '<div style="color:'+col+'"><span style="color:var(--text-muted)">'+t+'</span> ['+l.job+'] '+l.message+'</div>';
+      }).join('')
+    : '<div>Лог пуст</div>';
+}
+
+async function runJob(jobId, btn) {
+  btn.disabled=true; btn.textContent='⏳';
+  var r = await fetch('/api/admin/jobs/'+jobId+'/run', {method:'POST'});
+  var d = await r.json();
+  btn.disabled=false; btn.textContent='▶ Запустить';
+  showToast(d.ok ? '✅ Job запущен' : '❌ '+(d.error||'Ошибка'));
+  setTimeout(loadJobs, 1500);
+}
+
+function showToast(m){var t=document.createElement('div');t.className='toast success';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),3000);}
+loadJobs();
+setInterval(loadJobs, 15000);
+</script>
+{% endblock %}

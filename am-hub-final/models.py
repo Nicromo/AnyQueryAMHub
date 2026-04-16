@@ -405,3 +405,66 @@ class TelegramSubscription(Base):
 
     user = relationship("User", backref="tg_subscription")
 
+class MeetingComment(Base):
+    """Комментарии к встречам."""
+    __tablename__ = "meeting_comments"
+    id         = Column(Integer, primary_key=True, index=True)
+    meeting_id = Column(Integer, ForeignKey("meetings.id"), index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    content    = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    meeting    = relationship("Meeting", backref="comments")
+    user       = relationship("User")
+
+
+class ClientAttachment(Base):
+    """Вложения к клиенту (файлы, документы)."""
+    __tablename__ = "client_attachments"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    filename   = Column(String, nullable=False)
+    file_key   = Column(String, nullable=False)   # S3/R2 key
+    file_size  = Column(Integer, default=0)       # bytes
+    mime_type  = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    client     = relationship("Client", backref="attachments")
+    user       = relationship("User")
+
+
+class ChurnScore(Base):
+    """Скоринг риска оттока — пересчитывается еженедельно."""
+    __tablename__ = "churn_scores"
+    id          = Column(Integer, primary_key=True, index=True)
+    client_id   = Column(Integer, ForeignKey("clients.id"), unique=True, index=True)
+    score       = Column(Float, default=0.0)      # 0-100, выше = больше риск
+    risk_level  = Column(String, default="low")   # low|medium|high|critical
+    factors     = Column(JSONB, default=dict)      # {days_no_contact, health_trend, ...}
+    explanation = Column(Text, nullable=True)      # AI объяснение
+    calculated_at = Column(DateTime, default=datetime.utcnow)
+    client      = relationship("Client", backref="churn_score", uselist=False)
+
+
+class OnboardingProgress(Base):
+    """Прогресс онбординга нового менеджера."""
+    __tablename__ = "onboarding_progress"
+    id        = Column(Integer, primary_key=True, index=True)
+    user_id   = Column(Integer, ForeignKey("users.id"), unique=True)
+    completed = Column(JSONB, default=list)  # список выполненных шагов
+    skipped   = Column(Boolean, default=False)
+    completed_at = Column(DateTime, nullable=True)
+    user      = relationship("User", backref="onboarding")
+
+
+# ── DB Indexes для горячих запросов ──────────────────────────────────────────
+from sqlalchemy import Index
+
+# Самые частые: clients by manager_email
+Index("ix_clients_manager_email", Client.manager_email)
+# Tasks by status for kanban
+Index("ix_tasks_client_status", Task.client_id, Task.status)
+# History queries
+Index("ix_client_history_client_date", ClientHistory.client_id, ClientHistory.created_at)
+# Notifications
+Index("ix_notifications_user_read", Notification.user_id)
+

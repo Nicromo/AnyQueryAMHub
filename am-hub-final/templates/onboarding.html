@@ -1,197 +1,99 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Добро пожаловать — AM Hub</title>
-  <style>
-    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; }
-    .container { max-width:700px; width:90%; }
-    .step { display:none; }
-    .step.active { display:block; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:40px; }
-    .logo { font-size:3rem; margin-bottom:16px; }
-    h1 { font-size:1.5rem; margin-bottom:8px; }
-    .sub { color:var(--muted); font-size:.9rem; margin-bottom:24px; line-height:1.5; }
-    .nav-dots { display:flex; gap:8px; margin-bottom:24px; }
-    .dot { width:10px; height:10px; border-radius:50%; background:var(--border); transition:background .2s; }
-    .dot.active { background:var(--accent); }
-    .feature { display:flex; gap:16px; margin-bottom:16px; padding:16px; background:var(--bg); border-radius:12px; }
-    .feature .icon { font-size:1.5rem; flex-shrink:0; }
-    .feature h3 { font-size:.9rem; margin-bottom:4px; }
-    .feature p { font-size:.8rem; color:var(--muted); line-height:1.4; }
-    .btn { padding:12px 24px; border-radius:10px; font-size:.9rem; font-weight:600; cursor:pointer; border:none; background:var(--accent); color:#fff; transition:filter .15s; }
-    .btn:hover { filter:brightness(1.15); }
-    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
-    .btn-row { display:flex; gap:10px; margin-top:24px; }
-    .shortcut { display:inline-block; padding:2px 8px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-size:.75rem; font-family:monospace; }
-  </style>
-</head>
-<body>
-<div class="container">
-  <div class="card">
-    <div class="nav-dots" id="dots"></div>
+{% extends "base.html" %}
+{% block title %}Добро пожаловать — AM Hub{% endblock %}
 
-    <!-- Step 0: Welcome -->
-    <div class="step active" data-step="0">
-      <div class="logo">🎛️</div>
-      <h1>Добро пожаловать в AM Hub</h1>
-      <p class="sub">Система управления аккаунтами для менеджеров. Пройдём быстрый тур по основным функциям.</p>
-      <div class="feature">
-        <span class="icon">📊</span>
-        <div><h3>Дашборд</h3><p>Обзор всех клиентов, метрики, карточки действий</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">✍️</span>
-        <div><h3>Фолоуапы</h3><p>AI-генерация итогов встреч, подтверждение отправки</p></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn" onclick="nextStep()">Начать тур →</button>
-        <button class="btn btn-outline" onclick="skipOnboarding()">Пропустить</button>
-      </div>
-    </div>
+{% block content %}
+<style>
+.onb-wrap{max-width:600px;margin:0 auto;padding:32px 20px}
+.onb-header{text-align:center;margin-bottom:32px}
+.onb-logo{width:56px;height:56px;background:linear-gradient(135deg,var(--accent),var(--purple));border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:1.6rem;margin:0 auto 16px}
+.onb-title{font-size:1.4rem;font-weight:700;margin-bottom:6px}
+.onb-sub{font-size:.86rem;color:var(--text-dim);line-height:1.6}
+.steps{display:flex;flex-direction:column;gap:10px}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;display:flex;align-items:flex-start;gap:14px;transition:border-color var(--t),box-shadow var(--t)}
+.step.done{border-color:rgba(35,209,139,.3);background:rgba(35,209,139,.03)}
+.step.active{border-color:var(--accent-ring);box-shadow:var(--shadow-s)}
+.step-num{width:32px;height:32px;border-radius:50%;background:var(--surface-3);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex-shrink:0;transition:all .2s}
+.step.done .step-num{background:rgba(35,209,139,.15);border-color:var(--green);color:var(--green)}
+.step.active .step-num{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.step-body{flex:1;min-width:0}
+.step-title{font-size:.88rem;font-weight:600;margin-bottom:3px}
+.step-desc{font-size:.76rem;color:var(--text-dim);line-height:1.5}
+.step-action{margin-top:10px}
+.progress-bar-onb{height:4px;background:var(--surface-3);border-radius:2px;margin:16px 0 24px;overflow:hidden}
+.progress-fill-onb{height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));border-radius:2px;transition:width .4s}
+</style>
 
-    <!-- Step 1: Dashboard -->
-    <div class="step" data-step="1">
-      <div class="logo">📊</div>
-      <h1>Дашборд</h1>
-      <p class="sub">Центральная страница — всё что нужно для работы.</p>
-      <div class="feature">
-        <span class="icon">⚡</span>
-        <div><h3>Карточки действий</h3><p>Фолоуапы, подготовки, чекапы, QBR — всё в одном месте</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">📈</span>
-        <div><h3>Графики</h3><p>Распределение по сегментам и статусам</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">🔍</span>
-        <div><h3>Поиск и фильтры</h3><p>Быстрый поиск по клиентам, фильтр по сегментам</p></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-outline" onclick="prevStep()">← Назад</button>
-        <button class="btn" onclick="nextStep()">Далее →</button>
-      </div>
-    </div>
+<div class="onb-wrap">
+  <div class="onb-header">
+    <div class="onb-logo">🎛️</div>
+    <div class="onb-title">Добро пожаловать в AM Hub!</div>
+    <div class="onb-sub">{{ user.name or user.email }}, давайте настроим всё за несколько минут</div>
+  </div>
 
-    <!-- Step 2: Client Page -->
-    <div class="step" data-step="2">
-      <div class="logo">👥</div>
-      <h1>Страница клиента</h1>
-      <p class="sub">Всё о клиенте в одном месте.</p>
-      <div class="feature">
-        <span class="icon">📋</span>
-        <div><h3>Задачи</h3><p>Список задач со статусами, подтверждение выполнения</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">📅</span>
-        <div><h3>Встречи</h3><p>История встреч, фолоуапы, транскрипции</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">📐</span>
-        <div><h3>План работы</h3><p>Цели на квартал, действия, стратегия</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">📊</span>
-        <div><h3>QBR</h3><p>Quarterly Business Review — итоги, презентация, будущие работы</p></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-outline" onclick="prevStep()">← Назад</button>
-        <button class="btn" onclick="nextStep()">Далее →</button>
-      </div>
-    </div>
+  <div class="progress-bar-onb">
+    <div class="progress-fill-onb" id="onb-progress" style="width:0%"></div>
+  </div>
 
-    <!-- Step 3: Workflow -->
-    <div class="step" data-step="3">
-      <div class="logo">🔄</div>
-      <h1>Рабочий процесс</h1>
-      <p class="sub">Как всё связано между собой.</p>
-      <div class="feature">
-        <span class="icon">1️⃣</span>
-        <div><h3>Встреча проведена</h3><p>Система предложит заполнить фолоуап</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">2️⃣</span>
-        <div><h3>AI-фолоуап</h3><p>Генерирует шаблон → редактируете → подтверждаете отправку</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">3️⃣</span>
-        <div><h3>Задача создана</h3><p>При подтверждении — задача со статусом «done»</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">4️⃣</span>
-        <div><h3>План и QBR</h3><p>Фиксируйте итоги, презентацию, будущие работы</p></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-outline" onclick="prevStep()">← Назад</button>
-        <button class="btn" onclick="nextStep()">Далее →</button>
-      </div>
-    </div>
+  <div class="steps" id="steps-list">
+    <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+  </div>
 
-    <!-- Step 4: Settings -->
-    <div class="step" data-step="4">
-      <div class="logo">⚙️</div>
-      <h1>Настройки</h1>
-      <p class="sub">Персональная конфигурация.</p>
-      <div class="feature">
-        <span class="icon">🔐</span>
-        <div><h3>Креды</h3><p>Merchrules, Telegram, Ktalk, Tbank Time — ваши личные</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">📐</span>
-        <div><h3>Правила</h3><p>Предупреждения о чекапах, расписание</p></div>
-      </div>
-      <div class="feature">
-        <span class="icon">🎨</span>
-        <div><h3>Оформление</h3><p>Тёмная/светлая тема, вид дашборда</p></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-outline" onclick="prevStep()">← Назад</button>
-        <button class="btn" onclick="finishOnboarding()">🚀 Начать работу</button>
-      </div>
-    </div>
+  <div style="margin-top:24px;text-align:center">
+    <button class="btn btn-ghost btn-sm" onclick="skipOnboarding()">Пропустить →</button>
   </div>
 </div>
 
 <script>
-const totalSteps = 5;
-let currentStep = 0;
+var STEPS = [
+  { id: 'merchrules', icon: '🔗', title: 'Подключите Merchrules', desc: 'Ваши клиенты и задачи подтянутся автоматически из CRM.', action: '<a href="/settings" class="btn btn-primary btn-sm">Перейти в настройки</a>' },
+  { id: 'add_clients', icon: '👥', title: 'Добавьте клиентов в кабинет', desc: 'Выберите клиентов из общего пула которые находятся в вашей ответственности.', action: '<a href="/cabinet" class="btn btn-primary btn-sm">Открыть кабинет</a>' },
+  { id: 'first_task', icon: '✅', title: 'Создайте первую задачу', desc: 'Добавьте задачу по любому клиенту — это займёт 10 секунд.', action: '<a href="/tasks" class="btn btn-primary btn-sm">Перейти к задачам</a>' },
+  { id: 'tg_connect', icon: '📱', title: 'Подключите Telegram', desc: 'Получайте умные уведомления о просрочках и важных событиях.', action: '<a href="/settings#telegram" class="btn btn-primary btn-sm">Подключить</a>' },
+  { id: 'first_checkup', icon: '🔍', title: 'Запустите первый чекап', desc: 'Установите AM Hub Extension и проверьте качество поиска одного клиента.', action: '<a href="/checkups" class="btn btn-primary btn-sm">К чекапам</a>' },
+];
 
-function renderDots(){
-  const dots = document.getElementById('dots');
-  dots.innerHTML = '';
-  for(let i=0;i<totalSteps;i++){
-    const d=document.createElement('div');
-    d.className='dot'+(i===currentStep?' active':'');
-    d.onclick=()=>goToStep(i);
-    dots.appendChild(d);
+async function loadSteps() {
+  var d = await fetch('/api/onboarding/status').then(r=>r.json()).catch(()=>({steps:[]}));
+  var completed = new Set((d.steps||[]).filter(s=>s.done).map(s=>s.id));
+  var done = completed.size;
+
+  document.getElementById('onb-progress').style.width = Math.round(done/STEPS.length*100)+'%';
+
+  document.getElementById('steps-list').innerHTML = STEPS.map(function(s, i) {
+    var isDone = completed.has(s.id);
+    var isActive = !isDone && i === done;
+    var cls = isDone ? 'done' : isActive ? 'active' : '';
+    var numContent = isDone ? '✓' : (i+1);
+    return '<div class="step '+cls+'" id="step-'+s.id+'">'
+      + '<div class="step-num">'+numContent+'</div>'
+      + '<div class="step-body">'
+      +   '<div class="step-title">'+s.icon+' '+s.title+'</div>'
+      +   '<div class="step-desc">'+s.desc+'</div>'
+      +   (isDone ? '' : '<div class="step-action">'+s.action+'</div>')
+      + '</div>'
+      + (isDone ? '' : '<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px;font-size:.7rem" onclick="markDone(\''+s.id+'\')">✓ Готово</button>')
+      + '</div>';
+  }).join('');
+
+  if (done === STEPS.length) {
+    setTimeout(function() { window.location.href = '/dashboard'; }, 1500);
   }
 }
 
-function showStep(n){
-  document.querySelectorAll('.step').forEach(s=>s.classList.remove('active'));
-  document.querySelector('.step[data-step="'+n+'"]').classList.add('active');
-  currentStep=n;
-  renderDots();
+async function markDone(stepId) {
+  await fetch('/api/onboarding/complete-step', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({step: stepId})
+  });
+  loadSteps();
 }
 
-function nextStep(){if(currentStep<totalSteps-1) showStep(currentStep+1);}
-function prevStep(){if(currentStep>0) showStep(currentStep-1);}
-function goToStep(n){showStep(n);}
-
-async function skipOnboarding(){
-  await fetch('/api/onboarding/complete',{method:'POST'});
-  window.location.href='/dashboard';
+async function skipOnboarding() {
+  await fetch('/api/onboarding/skip', {method: 'POST'});
+  window.location.href = '/dashboard';
 }
 
-async function finishOnboarding(){
-  await fetch('/api/onboarding/complete',{method:'POST'});
-  window.location.href='/dashboard';
-}
-
-renderDots();
+loadSteps();
 </script>
-</body>
-</html>
+{% endblock %}
