@@ -3180,6 +3180,19 @@ async def api_assign_checkup(request: Request, db: Session = Depends(get_db), au
         client.last_meeting_date = meeting_date
         client.needs_checkup = False
     db.commit()
+
+    # Автозапись в Google Sheets
+    if client:
+        try:
+            from sheets import write_checkup_status
+            await write_checkup_status(
+                client_name=client.name,
+                status="Запланирован",
+                last_date=meeting_date.strftime("%d.%m.%Y"),
+            )
+        except Exception as e:
+            logger.debug(f"Sheets write-back skipped: {e}")
+
     return {"ok": True, "meeting_id": meeting.id}
 
 
@@ -5736,3 +5749,134 @@ async def api_sheets_update_checkup(
         return {"ok": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+# ============================================================================
+# AIRTABLE WEBHOOK — push при изменении записи в Airtable
+# ============================================================================
+
+@app.post("/webhook/airtable")
+async def airtable_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Webhook от Airtable Automations.
+    Airtable → Automations → Webhook → этот endpoint.
+    При изменении записи обновляем клиента в локальной БД.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid json"}
+
+    # Airtable присылает {record_id, fields: {...}}
+    record_id = payload.get("record_id") or payload.get("id")
+    fields = payload.get("fields") or payload.get("data") or {}
+
+    if not record_id:
+        return {"ok": False, "error": "no record_id"}
+
+    client = db.query(Client).filter(Client.airtable_record_id == record_id).first()
+    if not client:
+        # Пробуем создать нового клиента
+        name = fields.get("Название") or fields.get("Name") or fields.get("Клиент") or fields.get("Company")
+        if name:
+            client = Client(
+                airtable_record_id=record_id,
+                name=str(name),
+                segment=str(fields.get("Сегмент") or fields.get("Segment") or ""),
+                manager_email=str(fields.get("Менеджер") or fields.get("Manager Email") or ""),
+            )
+            db.add(client)
+            db.commit()
+            logger.info(f"✅ Airtable webhook: created client {name}")
+            return {"ok": True, "action": "created", "client_id": client.id}
+        return {"ok": False, "error": "client not found and no name field"}
+
+    # Обновляем поля
+    field_map = {
+        "Название": "name", "Name": "name", "Клиент": "name", "Company": "name",
+        "Сегмент": "segment", "Segment": "segment",
+        "Домен": "domain", "Domain": "domain",
+        "Менеджер": "manager_email", "Manager Email": "manager_email",
+        "Health Score": "health_score",
+    }
+    updated = []
+    for at_field, model_field in field_map.items():
+        if at_field in fields and fields[at_field] is not None:
+            val = fields[at_field]
+            if model_field == "health_score":
+                try:
+                    val = float(val)
+                    if val > 1:
+                        val = val / 100
+                except Exception:
+                    continue
+            setattr(client, model_field, val)
+            updated.append(model_field)
+
+    if updated:
+        from sqlalchemy.orm.attributes import flag_modified
+        db.commit()
+        logger.info(f"✅ Airtable webhook: updated {client.name} fields={updated}")
+
+    return {"ok": True, "action": "updated", "fields": updated}
+
+
+# ============================================================================
+# GOOGLE SHEETS — запись обратно
+# ============================================================================
+
+@app.post("/api/sheets/update-checkup")
+async def api_sheets_update_checkup(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Записать статус чекапа обратно в Google Sheets (Top-50).
+    Обновляет строку клиента: дата последнего чекапа, статус.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    client_name = data.get("client_name", "")
+    checkup_date = data.get("checkup_date", datetime.now().strftime("%Y-%m-%d"))
+    status = data.get("status", "done")
+
+    if not client_name:
+        return {"error": "client_name required"}
+
+    try:
+        from sheets import write_checkup_status
+        result = await write_checkup_status(client_name, checkup_date, status)
+        return {"ok": result, "client": client_name}
+    except Exception as e:
+        return {"error": str(e), "note": "Sheets write-back requires service account credentials"}
+
+
+@app.post("/api/sheets/batch-update")
+async def api_sheets_batch_update(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Массовое обновление данных в Google Sheets."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    updates = data.get("updates", [])  # [{row, col, value}]
+
+    try:
+        from sheets import batch_update_cells
+        result = await batch_update_cells(updates)
+        return {"ok": result, "count": len(updates)}
+    except Exception as e:
+        return {"error": str(e)}

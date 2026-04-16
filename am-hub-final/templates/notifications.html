@@ -7,18 +7,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
-    .notif-full-item{background:var(--surface,var(--card));border:1px solid var(--border);border-left:3px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;text-decoration:none;color:var(--text);transition:border-color .15s;}
-    .notif-full-item:hover{border-color:var(--accent);}
-    .notif-full-item.unread{border-left-color:var(--accent);background:rgba(99,102,241,.04);}
-    .notif-full-item.alert{border-left-color:var(--red);}
-    .notif-full-item.warning{border-left-color:var(--yellow);}
-    .notif-full-item.success{border-left-color:var(--green);}
-    .ni-icon{font-size:1.2rem;flex-shrink:0;margin-top:1px;}
-    .ni-body{flex:1;}
-    .ni-title{font-size:.88rem;font-weight:500;margin-bottom:3px;}
-    .ni-msg{font-size:.78rem;color:var(--text-dim,var(--muted));}
-    .ni-date{font-size:.72rem;color:var(--text-dim,var(--muted));white-space:nowrap;}
-    .filter-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim,var(--muted));cursor:pointer;font-size:.8rem;}
+    .notif-row{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--border);text-decoration:none;color:var(--text);transition:background .1s;}
+    .notif-row:hover{background:var(--surface-2,rgba(255,255,255,.03));}
+    .notif-row.unread{background:rgba(99,102,241,.04);}
+    .notif-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px;}
+    .notif-body{flex:1;min-width:0;}
+    .notif-title{font-size:.86rem;font-weight:500;margin-bottom:2px;}
+    .notif-msg{font-size:.78rem;color:var(--text-dim,var(--muted));}
+    .notif-date{font-size:.72rem;color:var(--muted);white-space:nowrap;}
+    .filter-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;}
     .filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   </style>
 </head>
@@ -31,90 +28,104 @@
     <a class="nav-link active" href="/notifications">🔔 Уведомления</a>
     <a class="nav-link" href="/clients">👥 Клиенты</a>
     <a class="nav-link" href="/tasks">✅ Задачи</a>
+    <a class="nav-link" href="/kpi">📈 Мой KPI</a>
     <a class="nav-link" href="/settings">⚙️ Настройки</a>
-    <div class="sidebar-bottom"><a href="/logout" style="color:var(--text-dim,var(--muted));font-size:.78rem;">→ Выйти</a></div>
+    <div class="sidebar-bottom"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
   </nav>
   <main class="main">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
       <h1 style="font-size:1.4rem;font-weight:700;">🔔 Уведомления</h1>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div style="display:flex;gap:8px;">
         <button class="filter-btn active" onclick="filterNotifs('all',this)">Все</button>
-        <button class="filter-btn" onclick="filterNotifs('alert',this)">🔴 Срочные</button>
-        <button class="filter-btn" onclick="filterNotifs('warning',this)">🟡 Внимание</button>
         <button class="filter-btn" onclick="filterNotifs('unread',this)">Непрочитанные</button>
-        <button class="filter-btn" style="background:rgba(99,102,241,.12);color:var(--accent);border-color:rgba(99,102,241,.3);" onclick="markAllRead()">✓ Прочитать все</button>
+        <button class="filter-btn" onclick="markAllRead()" style="background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3);color:#22c55e;">✓ Всё прочитано</button>
       </div>
     </div>
 
-    <!-- Системные уведомления из /api/notifications -->
-    <div id="live-notifs" style="margin-bottom:16px;"></div>
-
-    <!-- Уведомления из БД -->
-    {% if notifications %}
-    <div id="db-notifs">
-      {% for n in notifications %}
-      <a href="{% if n.related_resource_id %}/client/{{ n.related_resource_id }}{% else %}#{% endif %}"
-         class="notif-full-item {{ 'unread' if not n.is_read else '' }} {{ n.type or '' }}"
-         data-type="{{ n.type or 'info' }}" data-read="{{ 'true' if n.is_read else 'false' }}">
-        <div class="ni-icon">
-          {% if n.type == 'alert' %}🔴{% elif n.type == 'warning' %}🟡{% elif n.type == 'success' %}✅{% else %}ℹ️{% endif %}
-        </div>
-        <div class="ni-body">
-          <div class="ni-title">{{ n.title }}</div>
-          {% if n.message %}<div class="ni-msg">{{ n.message }}</div>{% endif %}
-        </div>
-        <div class="ni-date">{{ n.created_at.strftime('%d.%m %H:%M') if n.created_at else '' }}</div>
-      </a>
-      {% endfor %}
+    <!-- Живые уведомления из API -->
+    <div style="background:var(--surface,var(--card));border:1px solid var(--border);border-radius:12px;margin-bottom:16px;overflow:hidden;">
+      <div style="padding:10px 16px;font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);">
+        Требуют внимания
+      </div>
+      <div id="live-notifs">
+        <div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">⏳ Загрузка...</div>
+      </div>
     </div>
-    {% else %}
-    <div id="db-notifs"></div>
-    {% endif %}
 
-    <div id="empty-state" style="display:none;text-align:center;padding:60px 20px;color:var(--muted);">
-      <div style="font-size:2.5rem;margin-bottom:12px;">✅</div>
-      <div>Уведомлений нет</div>
+    <!-- Сохранённые уведомления из БД -->
+    <div style="background:var(--surface,var(--card));border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+      <div style="padding:10px 16px;font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);">
+        История уведомлений
+      </div>
+      <div id="db-notifs">
+        {% if notifications %}
+          {% for n in notifications %}
+          <a href="{{ '/client/' + n.related_resource_id|string if n.related_resource_id else '#' }}"
+             class="notif-row {% if not n.is_read %}unread{% endif %}"
+             data-read="{{ n.is_read|lower }}">
+            <div class="notif-dot" style="background:{% if n.type=='alert' %}var(--red){% elif n.type=='warning' %}var(--yellow){% elif n.type=='success' %}var(--green){% else %}var(--accent){% endif %}"></div>
+            <div class="notif-body">
+              <div class="notif-title">{{ n.title }}</div>
+              <div class="notif-msg">{{ n.message }}</div>
+            </div>
+            <div class="notif-date">{{ n.created_at.strftime('%d.%m %H:%M') if n.created_at else '' }}</div>
+          </a>
+          {% endfor %}
+        {% else %}
+          <div style="text-align:center;padding:32px;color:var(--muted);font-size:.84rem;">📭 Уведомлений нет</div>
+        {% endif %}
+      </div>
     </div>
   </main>
 </div>
 
 <script>
-// Загружаем live уведомления (просрочки, блокировки)
-(async function() {
+const TYPE_COLOR = {alert:'var(--red)',warning:'var(--yellow)',success:'var(--green)',info:'var(--accent)',
+  overdue_checkup:'var(--red)',checkup_soon:'var(--yellow)',blocked_task:'var(--red)'};
+
+async function loadLiveNotifs() {
   try {
-    const r = await fetch('/api/notifications');
-    const d = await r.json();
+    const d = await fetch('/api/notifications').then(r => r.json());
     const notifs = d.notifications || [];
-    if (!notifs.length) return;
-    const TYPE_ICON = {overdue_checkup:'🔴',checkup_soon:'🟡',blocked_task:'🔴',info:'ℹ️'};
-    const TYPE_CLASS = {high:'alert',medium:'warning',low:''};
-    document.getElementById('live-notifs').innerHTML =
-      '<div style="font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Актуальные</div>' +
-      notifs.map(n => `
-        <a href="${n.client_id ? '/client/'+n.client_id : '#'}" class="notif-full-item ${TYPE_CLASS[n.priority]||''}" data-type="${n.priority||'info'}" data-read="false">
-          <div class="ni-icon">${TYPE_ICON[n.type]||'ℹ️'}</div>
-          <div class="ni-body"><div class="ni-title">${n.message||''}</div></div>
-        </a>`).join('');
+    const el = document.getElementById('live-notifs');
+    if (!notifs.length) {
+      el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--green);font-size:.84rem;">✅ Всё в порядке</div>';
+      return;
+    }
+    el.innerHTML = notifs.map(n => {
+      const color = TYPE_COLOR[n.type] || TYPE_COLOR[n.priority] || 'var(--accent)';
+      const link = n.client_id ? '/client/' + n.client_id : '#';
+      return `<a href="${link}" class="notif-row">
+        <div class="notif-dot" style="background:${color}"></div>
+        <div class="notif-body">
+          <div class="notif-title">${n.message || ''}</div>
+          ${n.client_name ? '<div class="notif-msg">👤 ' + n.client_name + '</div>' : ''}
+        </div>
+        <div class="notif-date" style="color:${color};font-size:.72rem;font-weight:600;">${n.priority || ''}</div>
+      </a>`;
+    }).join('');
   } catch(e) {}
-})();
+}
 
 function filterNotifs(type, btn) {
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  document.querySelectorAll('.notif-full-item').forEach(el => {
-    if (type === 'all') { el.style.display = ''; return; }
-    if (type === 'unread') { el.style.display = el.dataset.read === 'false' ? '' : 'none'; return; }
-    el.style.display = el.dataset.type === type ? '' : 'none';
+  btn.classList.add('active');
+  document.querySelectorAll('#db-notifs .notif-row').forEach(row => {
+    if (type === 'unread') {
+      row.style.display = row.dataset.read === 'false' ? 'flex' : 'none';
+    } else {
+      row.style.display = 'flex';
+    }
   });
-  const visible = document.querySelectorAll('.notif-full-item:not([style*="none"])').length;
-  document.getElementById('empty-state').style.display = visible === 0 ? 'block' : 'none';
 }
 
 async function markAllRead() {
   await fetch('/api/inbox/mark-read', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
-  document.querySelectorAll('.notif-full-item.unread').forEach(el => el.classList.remove('unread'));
-  alert('✅ Все прочитаны');
+  document.querySelectorAll('#db-notifs .notif-row').forEach(r => r.classList.remove('unread'));
+  document.querySelectorAll('#db-notifs .notif-row').forEach(r => r.dataset.read = 'true');
 }
+
+loadLiveNotifs();
 </script>
 </body>
 </html>

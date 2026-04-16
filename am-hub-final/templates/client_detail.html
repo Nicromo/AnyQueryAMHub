@@ -191,6 +191,9 @@
       <a href="/followup/{{ client.id }}" class="btn">✍️ Followup</a>
       <a href="/client/{{ client.id }}/plan" class="btn">📐 План</a>
       <a href="/client/{{ client.id }}/qbr" class="btn">📊 QBR</a>
+      {% if client.segment in ["SS","SMB"] or not client.last_meeting_date %}
+      <a href="/onboarding/{{ client.id }}" class="btn" style="background:rgba(249,115,22,.12);color:#fb923c;border:1px solid rgba(249,115,22,.3);">🚀 Онбординг</a>
+      {% endif %}
       {% if client.segment in ['ENT','SME+','SME'] or meetings|length == 0 %}
       <a href="/onboarding/{{ client.id }}" class="btn" style="background:rgba(249,115,22,.12);color:#fb923c;border:1px solid rgba(249,115,22,.3);">🚀 Онбординг</a>
       {% endif %}
