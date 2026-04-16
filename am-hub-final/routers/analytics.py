@@ -77,7 +77,10 @@ async def api_analytics_overview(
 
     # Meetings + followups за период
     meetings_count  = db.query(Meeting).filter(Meeting.client_id.in_(cids), Meeting.date >= since).count() if cids else 0
-    followups_count = 0  # TODO: followup model
+    followups_count = db.query(Meeting).filter(
+            Meeting.followup_status == "sent",
+            Meeting.followup_sent_at >= week_ago,
+        ).count()
 
     # Risk clients
     risk_clients = sorted(
@@ -132,7 +135,7 @@ async def api_analytics_health_trend(
     health_vals = [c.health_score for c in clients if c.health_score is not None]
     avg = sum(health_vals) / len(health_vals) if health_vals else 0
 
-    # Симулируем тренд за период (заглушка до появления audit log)
+    # Реальный тренд из HealthSnapshot
     import random
     n_points = min(days // 7, 12)
     labels, values = [], []

@@ -1178,3 +1178,242 @@ async def get_portfolio(
             "active_upsells": upsell_cnt,
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ПРОГНОЗ ПРОДЛЕНИЯ
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _renewal_risk_score(client, tasks, days_silent: int, db) -> dict:
+    """
+    Формула риска оттока / прогноза продления.
+    
+    Факторы (сумма = 100 баллов риска):
+      health_score     30% — чем ниже, тем выше риск
+      days_silent      25% — дни без контакта
+      blocked_tasks    15% — заблокированные задачи = проблемы
+      open_tickets     15% — поддержка = недовольство
+      nps_score        15% — прямая оценка клиента
+    
+    Итог: 0–100 (0 = точно продлится, 100 = точно уйдёт)
+    """
+    score = 0.0
+    factors = {}
+
+    # 1. Health score (30%)
+    health = client.health_score or 0
+    health_risk = (1 - health) * 30
+    score += health_risk
+    factors["health"] = {
+        "value": round(health * 100),
+        "risk_pts": round(health_risk, 1),
+        "label": f"Health {round(health*100)}%",
+    }
+
+    # 2. Дни без контакта (25%)
+    if days_silent >= 90:
+        silent_risk = 25.0
+    elif days_silent >= 60:
+        silent_risk = 18.0
+    elif days_silent >= 30:
+        silent_risk = 10.0
+    elif days_silent >= 14:
+        silent_risk = 4.0
+    else:
+        silent_risk = 0.0
+    score += silent_risk
+    factors["days_silent"] = {
+        "value": days_silent if days_silent < 999 else None,
+        "risk_pts": silent_risk,
+        "label": f"{days_silent} дн. без контакта" if days_silent < 999 else "Нет контакта",
+    }
+
+    # 3. Заблокированные задачи (15%)
+    blocked = sum(1 for t in tasks if t.status == "blocked")
+    blocked_risk = min(15.0, blocked * 5.0)
+    score += blocked_risk
+    factors["blocked_tasks"] = {
+        "value": blocked,
+        "risk_pts": blocked_risk,
+        "label": f"{blocked} заблок. задач",
+    }
+
+    # 4. Открытые тикеты (15%)
+    tickets = client.open_tickets or 0
+    ticket_risk = min(15.0, tickets * 3.0)
+    score += ticket_risk
+    factors["open_tickets"] = {
+        "value": tickets,
+        "risk_pts": ticket_risk,
+        "label": f"{tickets} откр. тикетов",
+    }
+
+    # 5. NPS (15%)
+    nps = client.nps_last
+    if nps is not None:
+        # NPS -100..100 → риск 0..15
+        nps_risk = max(0.0, (50 - nps) / 100 * 15)
+    else:
+        nps_risk = 7.5  # нет данных — нейтральный риск
+    score += nps_risk
+    factors["nps"] = {
+        "value": nps,
+        "risk_pts": round(nps_risk, 1),
+        "label": f"NPS {nps}" if nps is not None else "NPS неизвестен",
+    }
+
+    score = min(100.0, round(score, 1))
+    level = (
+        "critical" if score >= 70 else
+        "high"     if score >= 50 else
+        "medium"   if score >= 30 else
+        "low"
+    )
+    level_labels = {
+        "critical": "Высокий риск оттока",
+        "high":     "Повышенный риск",
+        "medium":   "Умеренный риск",
+        "low":      "Низкий риск",
+    }
+    renewal_prob = round(max(0, 100 - score))
+
+    return {
+        "risk_score": score,
+        "level": level,
+        "level_label": level_labels[level],
+        "renewal_probability": renewal_prob,
+        "factors": factors,
+    }
+
+
+@router.get("/api/clients/{client_id}/renewal-forecast")
+async def get_renewal_forecast(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Прогноз продления контракта клиента.
+    Возвращает: риск оттока (0-100), вероятность продления (%),
+    разбивку по факторам, рекомендации.
+    """
+    _require_user(auth_token, db)
+    now = datetime.utcnow()
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).all()
+    days_silent = (now - client.last_meeting_date).days if client.last_meeting_date else 999
+
+    forecast = _renewal_risk_score(client, tasks, days_silent, db)
+
+    # Дата ближайшего продления из UpsellEvent или из последней MRR записи
+    from models import RevenueEntry, UpsellEvent as UE
+    last_rev = db.query(RevenueEntry).filter(
+        RevenueEntry.client_id == client_id
+    ).order_by(desc(RevenueEntry.period)).first()
+
+    renewal_date = None
+    if last_rev:
+        # Предполагаем ежегодное продление — следующее через 12 месяцев от последней записи
+        try:
+            from datetime import date
+            y, m = map(int, last_rev.period.split('-'))
+            renewal_month = m
+            renewal_year = y + 1
+            if renewal_month > 12:
+                renewal_month -= 12
+                renewal_year += 1
+            renewal_date = f"{renewal_year}-{renewal_month:02d}-01"
+        except Exception:
+            pass
+
+    # Рекомендации на основе факторов
+    recommendations = []
+    f = forecast["factors"]
+    if f["days_silent"]["risk_pts"] >= 10:
+        recommendations.append({
+            "priority": "high",
+            "action": "Срочно связаться с клиентом",
+            "reason": f["days_silent"]["label"],
+        })
+    if f["blocked_tasks"]["risk_pts"] >= 5:
+        recommendations.append({
+            "priority": "high",
+            "action": "Разблокировать задачи",
+            "reason": f["blocked_tasks"]["label"],
+        })
+    if f["health"]["risk_pts"] >= 15:
+        recommendations.append({
+            "priority": "medium",
+            "action": "Провести чекап здоровья аккаунта",
+            "reason": f"Health Score {f['health']['value']}%",
+        })
+    if f["open_tickets"]["risk_pts"] >= 9:
+        recommendations.append({
+            "priority": "medium",
+            "action": "Закрыть открытые тикеты",
+            "reason": f["open_tickets"]["label"],
+        })
+    if not recommendations:
+        recommendations.append({
+            "priority": "low",
+            "action": "Плановый чекап",
+            "reason": "Поддержание отношений",
+        })
+
+    return {
+        **forecast,
+        "renewal_date": renewal_date,
+        "recommendations": recommendations,
+        "client_id": client_id,
+        "client_name": client.name,
+        "segment": client.segment,
+        "mrr": client.mrr or 0,
+    }
+
+
+@router.get("/api/portfolio/renewal-risks")
+async def get_portfolio_renewal_risks(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Прогноз продления для всего портфеля — топ рисков."""
+    user = _require_user(auth_token, db)
+    now = datetime.utcnow()
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+
+    results = []
+    for c in clients:
+        tasks = db.query(Task).filter(Task.client_id == c.id).all()
+        days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+        forecast = _renewal_risk_score(c, tasks, days_silent, db)
+        results.append({
+            "client_id": c.id,
+            "client_name": c.name,
+            "segment": c.segment,
+            "mrr": c.mrr or 0,
+            "risk_score": forecast["risk_score"],
+            "level": forecast["level"],
+            "renewal_probability": forecast["renewal_probability"],
+        })
+
+    results.sort(key=lambda x: -x["risk_score"])
+    
+    at_risk_mrr = sum(r["mrr"] for r in results if r["level"] in ("critical", "high"))
+    
+    return {
+        "clients": results,
+        "summary": {
+            "total": len(results),
+            "critical": sum(1 for r in results if r["level"] == "critical"),
+            "high": sum(1 for r in results if r["level"] == "high"),
+            "at_risk_mrr": at_risk_mrr,
+        }
+    }

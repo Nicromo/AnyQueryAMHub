@@ -1,71 +1,54 @@
 """
-Общие зависимости FastAPI — авторизация через cookie, получение текущего пользователя.
-Используется во всех роутерах вместо дублирования одинакового кода.
+Shared auth dependencies — единый источник вместо copy-paste в каждом роуте.
 """
 from typing import Optional
-from fastapi import Cookie, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import Cookie, HTTPException, Depends
 from sqlalchemy.orm import Session
-
 from database import get_db
-from auth import decode_access_token
 from models import User
+from auth import decode_access_token
 
 
-def get_current_user_from_cookie(
-    auth_token: Optional[str] = Cookie(None),
-    db: Session = Depends(get_db),
-) -> User:
-    """
-    Зависимость для API-эндпоинтов: возвращает текущего пользователя
-    или бросает 401 если токен невалидный.
-    """
+def _get_user_from_cookie(
+    auth_token: Optional[str],
+    db: Session,
+) -> Optional[User]:
+    """Получить пользователя из cookie-токена. None если не авторизован."""
     if not auth_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        return None
     payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-
-def get_current_user_or_redirect(
-    auth_token: Optional[str] = Cookie(None),
-    db: Session = Depends(get_db),
-) -> User:
-    """
-    Зависимость для HTML-страниц: возвращает пользователя
-    или бросает redirect на /login.
-    Использовать через require_user() внутри роутов.
-    """
-    if not auth_token:
-        raise _LoginRedirect()
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise _LoginRedirect()
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise _LoginRedirect()
-    return user
-
-
-class _LoginRedirect(Exception):
-    """Внутреннее исключение для редиректа на логин."""
-    pass
-
-
-def require_user(request: Request, db: Session = Depends(get_db)) -> User:
-    """
-    Удобная функция для использования в HTML-роутах.
-    Возвращает редирект на /login если не авторизован.
-    """
-    from typing import Optional as Opt
-    token = request.cookies.get("auth_token")
-    if not token:
-        return None  # роут сам решит что делать
-    payload = decode_access_token(token)
     if not payload:
         return None
-    return db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    return db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+
+
+def require_user(
+    auth_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+) -> User:
+    """FastAPI dependency — требует авторизации, бросает 401."""
+    user = _get_user_from_cookie(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def require_admin(
+    auth_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+) -> User:
+    """FastAPI dependency — требует роль admin."""
+    user = _get_user_from_cookie(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+    return user
+
+
+def optional_user(
+    auth_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """FastAPI dependency — возвращает пользователя или None."""
+    return _get_user_from_cookie(auth_token, db)

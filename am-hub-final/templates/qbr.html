@@ -219,6 +219,12 @@ async function saveStatus(){
   if(r.ok){closeStatusModal();location.reload();}
 }
 </script>
+<div id="qbr-empty" style="display:none;text-align:center;padding:60px 20px;color:var(--muted);">
+  <div style="font-size:3rem;margin-bottom:12px;">📊</div>
+  <div style="font-size:1.1rem;font-weight:600;color:var(--text);margin-bottom:8px;">QBR ещё не создан</div>
+  <div style="font-size:.84rem;margin-bottom:20px;">Quarterly Business Review позволяет проанализировать квартал и спланировать следующий</div>
+  <button onclick="createQBR()" class="btn btn-p">+ Создать QBR</button>
+</div>
 </body>
 </html>
 

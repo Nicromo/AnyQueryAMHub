@@ -207,6 +207,21 @@ app.include_router(sync.router, tags=["sync"])
 app.include_router(integrations.router, tags=["integrations"])
 app.include_router(analytics.router, tags=["analytics"])
 app.include_router(misc.router, tags=["misc"])
+from routers import (
+    auto_tasks, followup_mgmt, user_mgmt, misc_small,
+    onboarding_mgmt, checkups_mgmt, admin as admin_router,
+    inbox_notifications,
+)
+app.include_router(auto_tasks.router, tags=["auto-tasks"])
+app.include_router(followup_mgmt.router, tags=["followup"])
+app.include_router(user_mgmt.router, tags=["user"])
+app.include_router(misc_small.router, tags=["misc-small"])
+app.include_router(onboarding_mgmt.router, tags=["onboarding"])
+app.include_router(checkups_mgmt.router, tags=["checkups"])
+app.include_router(admin_router.router, tags=["admin"])
+app.include_router(inbox_notifications.router, tags=["inbox"])
+from routers import pdf_export
+app.include_router(pdf_export.router, tags=["pdf"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])
 
 

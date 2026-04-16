@@ -1864,6 +1864,28 @@ function setComboRange(months, btn) {
 // Загружаем при старте
 loadComboChart(6);
 
+// ── Lazy loading для вкладок ────────────────────────────────────────────────
+const _tabLoaded = {};
+const _tabLoaders = {
+  'finance':      () => typeof loadFinance === 'function' && loadFinance(),
+  'health-tab':   () => typeof loadHealthHistory === 'function' && loadHealthHistory(),
+  'ai-insights':  () => typeof loadAIInsights === 'function' && loadAIInsights(),
+  'exec-summary': () => typeof loadExecSummary === 'function' && loadExecSummary(),
+  'timeline':     () => typeof loadTimeline === 'function' && loadTimeline(),
+  'tickets':      () => typeof loadTickets === 'function' && loadTickets(),
+};
+
+// Переопределяем showTab чтобы добавить lazy loading
+const _origShowTab = window.showTab;
+window.showTab = function(tabId, btn) {
+  if (typeof _origShowTab === 'function') _origShowTab(tabId, btn);
+  // Запускаем loader только при первом открытии вкладки
+  if (!_tabLoaded[tabId] && _tabLoaders[tabId]) {
+    _tabLoaded[tabId] = true;
+    _tabLoaders[tabId]();
+  }
+};
+
 </script>
 </body>
 </html>

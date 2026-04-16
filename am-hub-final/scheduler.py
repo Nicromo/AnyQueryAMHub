@@ -771,6 +771,228 @@ async def job_sync_meetings_and_slots():
 
 # ── START ────────────────────────────────────────────────────────────────────
 
+
+
+async def job_health_recalc_all():
+    """Ночной пересчёт health score всех клиентов + TG алерт при падении."""
+    logger.info("🔄 Recalculating health scores for all clients...")
+    try:
+        from database import SessionLocal
+        from models import Client, User, HealthSnapshot, TelegramSubscription
+        from routers.account_dashboard import _calculate_health
+        db = SessionLocal()
+        try:
+            clients = db.query(Client).all()
+            updated = 0
+            dropped = []  # клиенты у которых упал health
+
+            for c in clients:
+                try:
+                    old_score = c.health_score or 0
+                    result = _calculate_health(c, db)
+                    new_score = result["score"]
+                    c.health_score = new_score
+                    snap = HealthSnapshot(
+                        client_id=c.id,
+                        score=new_score,
+                        components=result["components"],
+                    )
+                    db.add(snap)
+                    updated += 1
+                    # Фиксируем падение > 15%
+                    if (old_score - new_score) > 0.15 and new_score < 0.6:
+                        dropped.append((c, old_score, new_score))
+                except Exception as e:
+                    logger.warning(f"Health recalc failed for client {c.id}: {e}")
+
+            db.commit()
+            logger.info(f"✅ Health recalculated: {updated} clients, {len(dropped)} dropped")
+
+            # TG алерт при падении health
+            if dropped:
+                subs = db.query(TelegramSubscription).filter(
+                    TelegramSubscription.is_active == True,
+                    TelegramSubscription.notify_health_drop == True,
+                ).all()
+                for sub in subs:
+                    user = sub.user
+                    if not user or not user.is_active:
+                        continue
+                    user_dropped = [
+                        (c, old, new) for c, old, new in dropped
+                        if user.role == "admin" or c.manager_email == user.email
+                    ]
+                    if not user_dropped:
+                        continue
+                    lines = [f"📉 <b>Падение Health Score ({len(user_dropped)} клиентов)</b>\n"]
+                    for c, old, new in user_dropped[:8]:
+                        icon = "🔴" if new < 0.3 else "🟡"
+                        lines.append(
+                            f"{icon} <b>{c.name}</b>: "
+                            f"{round(old*100)}% → {round(new*100)}%"
+                        )
+                    await send_telegram(int(sub.chat_id), "\n".join(lines))
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Health recalc job error: {e}")
+
+
+async def job_ktalk_sync():
+    """Каждые 2 часа: синхронизация встреч из Контур.Толк."""
+    ktalk_token = os.environ.get("KTALK_API_TOKEN", "")
+    ktalk_space = os.environ.get("KTALK_SPACE", "")
+    if not ktalk_token or not ktalk_space:
+        return
+    logger.info("🔄 Syncing Ktalk meetings...")
+    try:
+        from database import SessionLocal
+        from models import Client, Meeting, SyncLog
+        import httpx
+        db = SessionLocal()
+        sync_log = SyncLog(
+            integration="ktalk", resource_type="meetings",
+            action="sync", status="in_progress"
+        )
+        db.add(sync_log)
+        db.commit()
+        synced = 0
+        try:
+            base_url = os.environ.get("KTALK_BASE_URL", "https://tbank.ktalk.ru")
+            headers = {
+                "Authorization": f"Bearer {ktalk_token}",
+                "Content-Type": "application/json",
+            }
+            from datetime import timezone
+            since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            async with httpx.AsyncClient(timeout=30) as hx:
+                resp = await hx.get(
+                    f"{base_url}/api/v1/events",
+                    headers=headers,
+                    params={"from": since, "limit": 100},
+                )
+                if resp.status_code != 200:
+                    raise Exception(f"Ktalk API {resp.status_code}: {resp.text[:200]}")
+                events = resp.json().get("events", resp.json().get("data", []))
+
+            clients = db.query(Client).all()
+            client_map = {c.name.lower(): c for c in clients}
+
+            for event in events:
+                ext_id = str(event.get("id", ""))
+                if not ext_id:
+                    continue
+                # Ищем уже существующую встречу
+                existing = db.query(Meeting).filter(Meeting.external_id == ext_id).first()
+                if existing:
+                    # Обновляем транскрипцию/запись если появились
+                    if event.get("recording_url") and not existing.recording_url:
+                        existing.recording_url = event["recording_url"]
+                    if event.get("transcript_url") and not existing.transcript_url:
+                        existing.transcript_url = event["transcript_url"]
+                    continue
+
+                # Новая встреча — ищем клиента по участникам
+                title = event.get("title", "")
+                attendees = event.get("attendees", event.get("participants", []))
+                client_obj = None
+                for att in attendees:
+                    email_or_name = att.get("email", att.get("name", "")).lower()
+                    for cname, c in client_map.items():
+                        if cname in email_or_name or email_or_name in cname:
+                            client_obj = c
+                            break
+                    if client_obj:
+                        break
+
+                if not client_obj:
+                    continue  # не нашли клиента — пропускаем
+
+                try:
+                    from datetime import datetime as dt
+                    meet_date = dt.fromisoformat(
+                        event.get("started_at", event.get("date", "")).replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                except Exception:
+                    continue
+
+                meet = Meeting(
+                    client_id=client_obj.id,
+                    external_id=ext_id,
+                    title=title,
+                    date=meet_date,
+                    type="sync",
+                    source="ktalk",
+                    recording_url=event.get("recording_url"),
+                    transcript_url=event.get("transcript_url"),
+                    attendees=[a.get("email", a.get("name", "")) for a in attendees],
+                    followup_status="pending",
+                )
+                db.add(meet)
+                client_obj.last_meeting_date = meet_date
+                synced += 1
+
+            db.commit()
+            sync_log.status = "success"
+            sync_log.records_processed = synced
+            logger.info(f"✅ Ktalk synced: {synced} new meetings")
+        except Exception as e:
+            db.rollback()
+            sync_log.status = "error"
+            sync_log.message = str(e)
+            logger.error(f"❌ Ktalk sync error: {e}")
+        finally:
+            db.add(sync_log)
+            db.commit()
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Ktalk job error: {e}")
+
+
+async def job_renewal_alerts():
+    """Еженедельно ПН 09:30: алерты о клиентах с высоким риском оттока."""
+    logger.info("📊 Checking renewal risks...")
+    try:
+        from database import SessionLocal
+        from models import Client, Task, User, TelegramSubscription
+        db = SessionLocal()
+        try:
+            subs = db.query(TelegramSubscription).filter(
+                TelegramSubscription.is_active == True,
+            ).all()
+            now = datetime.now()
+            for sub in subs:
+                user = sub.user
+                if not user or not user.is_active:
+                    continue
+                q = db.query(Client)
+                if user.role == "manager":
+                    q = q.filter(Client.manager_email == user.email)
+                clients = q.all()
+                at_risk = []
+                for c in clients:
+                    health = round((c.health_score or 0) * 100)
+                    days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+                    tasks = db.query(Task).filter(Task.client_id == c.id).all()
+                    blocked = sum(1 for t in tasks if t.status == "blocked")
+                    risk = (1-(c.health_score or 0))*30 + min(25, days_silent/90*25) + min(15, blocked*5)
+                    risk = min(100, round(risk))
+                    if risk >= 50:
+                        at_risk.append((risk, c.name, c.segment or "—", c.mrr or 0))
+                if not at_risk:
+                    continue
+                at_risk.sort(reverse=True)
+                lines = [f"📊 <b>Риски продления на неделю ({len(at_risk)} клиентов)</b>\n"]
+                for risk, name, seg, mrr in at_risk[:10]:
+                    mrr_s = f"{mrr/1e3:.0f}K" if mrr >= 1000 else str(int(mrr))
+                    icon = "🔴" if risk >= 70 else "🟡"
+                    lines.append(f"{icon} {name} [{seg}] — риск {risk}%, MRR {mrr_s}₽")
+                await send_telegram(int(sub.chat_id), "\n".join(lines))
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Renewal alerts error: {e}")
+
 def start_scheduler():
     sched = _get_scheduler()
 
@@ -795,7 +1017,13 @@ def start_scheduler():
 
     # Еженедельный
     sched.add_job(job_weekly_digest, "cron", hour=17, minute=0, day_of_week="fri",
-                  id="weekly_digest", name="Weekly Digest TG", replace_existing=True)
+                  id="weekly_digest", name="Weekly Digest", replace_existing=True)
+    sched.add_job(job_health_recalc_all, "cron", hour=3, minute=0,
+                  id="health_recalc", name="Nightly Health Recalc", replace_existing=True)
+    sched.add_job(job_ktalk_sync, "interval", hours=2,
+                  id="ktalk_sync", name="Ktalk Meeting Sync", replace_existing=True)
+    sched.add_job(job_renewal_alerts, "cron", hour=9, minute=30, day_of_week="mon",
+                  id="renewal_alerts", name="Weekly Renewal Alerts", replace_existing=True)
 
     sched.start()
     logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")

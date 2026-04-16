@@ -163,9 +163,11 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
             "Доступные команды:\n"
             "/today — мой день: встречи + слоты подготовки\n"
             "/status — общая статистика\n"
+            "/alert — клиенты с высоким риском\n"
+            "/client &lt;name&gt; — карточка клиента\n"
+            "/renewal — прогноз продления портфеля\n"
             "/checkups — просроченные чекапы\n"
-            "/checkup &lt;name&gt; — статус клиента\n"
-            "/tasks &lt;name&gt; — список задач клиента\n"
+            "/tasks &lt;name&gt; — задачи клиента\n"
             "/done &lt;task_id&gt; — закрыть задачу\n"
             "/prep &lt;name&gt; — подготовка к встрече\n"
             "/clients — мои клиенты\n"
@@ -394,6 +396,158 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
                 parts.append(current)
             for part in parts:
                 await send_message(chat_id, part)
+
+
+    elif cmd == "/alert":
+        """Алерты — клиенты с упавшим health или высоким риском оттока"""
+        try:
+            from database import SessionLocal
+            from models import User as UserModel, Client as ClientModel, Task as TaskModel
+            db = SessionLocal()
+            tg_user = db.query(UserModel).filter(UserModel.telegram_id == str(user_id)).first()
+            if not tg_user:
+                db.close()
+                await send_message(chat_id, "❌ Telegram не привязан к аккаунту AM Hub.")
+                return
+            q = db.query(ClientModel)
+            if tg_user.role == "manager":
+                q = q.filter(ClientModel.manager_email == tg_user.email)
+            clients = q.all()
+            now = datetime.now()
+            alerts = []
+            for c in clients:
+                health_pct = round((c.health_score or 0) * 100)
+                days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+                blocked = db.query(TaskModel).filter(
+                    TaskModel.client_id == c.id, TaskModel.status == "blocked"
+                ).count()
+                issues = []
+                if health_pct < 40:
+                    issues.append(f"Health {health_pct}%")
+                if days_silent > 30:
+                    issues.append(f"Нет контакта {days_silent}д")
+                if blocked > 0:
+                    issues.append(f"{blocked} заблок. задач")
+                if (c.open_tickets or 0) > 3:
+                    issues.append(f"{c.open_tickets} тикетов")
+                if issues:
+                    level = "🔴" if health_pct < 30 or days_silent > 60 else "🟡"
+                    alerts.append((level, c.name, c.segment or "—", issues))
+            db.close()
+            if not alerts:
+                await send_message(chat_id, "✅ <b>Алертов нет</b> — все клиенты в норме!")
+                return
+            lines = [f"🚨 <b>Алерты AM Hub ({len(alerts)} клиентов)</b>", ""]
+            for level, name, seg, issues in alerts[:15]:
+                lines.append(f"{level} <b>{name}</b> [{seg}]")
+                lines.append(f"   ⚠️ {' · '.join(issues)}")
+            if len(alerts) > 15:
+                lines.append(f"\n…и ещё {len(alerts)-15} клиентов")
+            await send_message(chat_id, "\n".join(lines))
+        except Exception as e:
+            logger.error(f"TG /alert error: {e}")
+            await send_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+
+    elif cmd == "/client" and arg_str:
+        """Карточка клиента — health, MRR, задачи, последний контакт"""
+        try:
+            from database import SessionLocal
+            from models import User as UserModel, Client as ClientModel, Task as TaskModel, RevenueEntry
+            from sqlalchemy import desc as sa_desc
+            db = SessionLocal()
+            tg_user = db.query(UserModel).filter(UserModel.telegram_id == str(user_id)).first()
+            if not tg_user:
+                db.close()
+                await send_message(chat_id, "❌ Telegram не привязан к аккаунту AM Hub.")
+                return
+            q = db.query(ClientModel).filter(ClientModel.name.ilike(f"%{arg_str}%"))
+            if tg_user.role == "manager":
+                q = q.filter(ClientModel.manager_email == tg_user.email)
+            matches = q.limit(5).all()
+            if not matches:
+                db.close()
+                await send_message(chat_id, f"❌ Клиент '{arg_str}' не найден")
+                return
+            if len(matches) > 1:
+                names = "\n".join(f"  • {m.name}" for m in matches)
+                db.close()
+                await send_message(chat_id, f"🔍 Найдено {len(matches)}:\n{names}\n\nУточните название.")
+                return
+            c = matches[0]
+            now = datetime.now()
+            health_pct = round((c.health_score or 0) * 100)
+            days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+            tasks = db.query(TaskModel).filter(TaskModel.client_id == c.id).all()
+            open_t = sum(1 for t in tasks if t.status in ("plan", "in_progress"))
+            blocked = sum(1 for t in tasks if t.status == "blocked")
+            rev = db.query(RevenueEntry).filter(RevenueEntry.client_id == c.id).order_by(sa_desc(RevenueEntry.period)).first()
+            mrr_str = f"{rev.mrr:,.0f} ₽" if rev else "—"
+            nps_str = str(c.nps_last) if c.nps_last is not None else "—"
+            health_icon = "🟢" if health_pct >= 70 else "🟡" if health_pct >= 40 else "🔴"
+            contact_str = f"{days_silent} дн. назад" if days_silent < 999 else "нет данных"
+            db.close()
+            lines = [
+                f"👤 <b>{c.name}</b> [{c.segment or '—'}]",
+                "",
+                f"{health_icon} Health: <b>{health_pct}%</b>",
+                f"💰 MRR: <b>{mrr_str}</b>",
+                f"⭐ NPS: <b>{nps_str}</b>",
+                f"📅 Последний контакт: <b>{contact_str}</b>",
+                f"🎫 Тикеты: <b>{c.open_tickets or 0}</b>",
+                "",
+                f"📋 Задачи: {open_t} открытых" + (f", 🔒 {blocked} заблок." if blocked else ""),
+            ]
+            await send_message(chat_id, "\n".join(lines))
+        except Exception as e:
+            logger.error(f"TG /client error: {e}")
+            await send_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+
+    elif cmd == "/renewal":
+        """Риски продления — топ клиентов по риску оттока"""
+        try:
+            from database import SessionLocal
+            from models import User as UserModel, Client as ClientModel, Task as TaskModel
+            db = SessionLocal()
+            tg_user = db.query(UserModel).filter(UserModel.telegram_id == str(user_id)).first()
+            if not tg_user:
+                db.close()
+                await send_message(chat_id, "❌ Telegram не привязан к аккаунту AM Hub.")
+                return
+            q = db.query(ClientModel)
+            if tg_user.role == "manager":
+                q = q.filter(ClientModel.manager_email == tg_user.email)
+            clients = q.all()
+            now = datetime.now()
+            risks = []
+            for c in clients:
+                tasks = db.query(TaskModel).filter(TaskModel.client_id == c.id).all()
+                health = round((c.health_score or 0) * 100)
+                days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+                blocked = sum(1 for t in tasks if t.status == "blocked")
+                tickets = c.open_tickets or 0
+                # Упрощённый скор
+                risk = (1 - (c.health_score or 0)) * 30
+                risk += min(25, days_silent / 90 * 25)
+                risk += min(15, blocked * 5)
+                risk += min(15, tickets * 3)
+                risk = min(100, round(risk))
+                renewal_prob = 100 - risk
+                risks.append((risk, renewal_prob, c.name, c.segment or "—", c.mrr or 0))
+            db.close()
+            risks.sort(reverse=True)
+            high_risk = [r for r in risks if r[0] >= 50]
+            lines = [f"📊 <b>Прогноз продления ({len(clients)} клиентов)</b>", ""]
+            if not high_risk:
+                lines.append("✅ Критичных рисков нет")
+            else:
+                lines.append(f"<b>🔴 Высокий риск ({len(high_risk)} клиентов):</b>")
+                for risk, prob, name, seg, mrr in high_risk[:8]:
+                    mrr_s = f"{mrr/1e3:.0f}K" if mrr >= 1000 else str(mrr)
+                    lines.append(f"  • {name} [{seg}] — риск {risk}%, продление {prob}%, MRR {mrr_s}₽")
+            await send_message(chat_id, "\n".join(lines))
+        except Exception as e:
+            logger.error(f"TG /renewal error: {e}")
+            await send_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
 
     else:
         await send_message(chat_id, f"❓ Неизвестная команда: {cmd}\nНапиши /help")
