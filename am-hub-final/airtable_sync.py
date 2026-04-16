@@ -264,3 +264,68 @@ async def sync_meeting_to_airtable(client_name: str, meeting_date: datetime, com
         except Exception as exc:
             logger.error("sync_meeting_to_airtable: %s", exc)
             return False
+
+
+async def push_client_fields_to_airtable(
+    record_id: str,
+    fields: dict,
+    token: str = "",
+) -> bool:
+    """
+    Обновить произвольные поля записи клиента в Airtable.
+    fields — словарь {field_name: value}.
+    Используется при изменении данных клиента в AM Hub.
+    """
+    use_token = token or AIRTABLE_TOKEN
+    if not use_token or not AIRTABLE_BASE_ID or not AIRTABLE_TABLE_ID:
+        logger.warning("push_client_fields_to_airtable: missing config")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            resp = await hx.patch(
+                f"{BASE_URL}/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}/{record_id}",
+                headers=_headers(use_token),
+                json={"fields": fields},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                logger.info(f"✅ Airtable client {record_id} updated")
+                return True
+            logger.warning(f"Airtable push error: {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"push_client_fields_to_airtable error: {e}")
+    return False
+
+
+async def push_qbr_to_airtable(
+    client_name: str,
+    quarter: str,
+    summary: str,
+    achievements: list,
+    token: str = "",
+) -> bool:
+    """
+    Создать/обновить QBR запись в Airtable QBR-таблице.
+    """
+    qbr_table = os.getenv("AIRTABLE_QBR_TABLE_ID", "")
+    use_token = token or AIRTABLE_TOKEN
+    if not use_token or not AIRTABLE_BASE_ID or not qbr_table:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            fields = {
+                "Клиент": client_name,
+                "Квартал": quarter,
+                "Итоги": summary,
+                "Достижения": "\n".join(achievements) if achievements else "",
+            }
+            resp = await hx.post(
+                f"{BASE_URL}/{AIRTABLE_BASE_ID}/{qbr_table}",
+                headers=_headers(use_token),
+                json={"fields": fields},
+                timeout=15,
+            )
+            return resp.status_code in (200, 201)
+    except Exception as e:
+        logger.error(f"push_qbr_to_airtable error: {e}")
+    return False
