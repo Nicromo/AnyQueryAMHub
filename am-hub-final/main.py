@@ -2823,6 +2823,186 @@ async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optio
         return {"error": str(e), "tickets": [], "total": 0}
 
 
+
+# ============================================================================
+# MANAGER CABINET — личный кабинет менеджера
+# ============================================================================
+
+@app.get("/cabinet", response_class=HTMLResponse)
+async def manager_cabinet(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Личный кабинет менеджера — его клиенты + выбор из общего пула."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("cabinet.html", {"request": request, "user": user})
+
+
+@app.get("/api/cabinet/my-clients")
+async def api_cabinet_my_clients(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Клиенты текущего менеджера (назначены через assignment или manager_email)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    # Объединяем: manager_email ИЛИ user_client_assignment
+    from sqlalchemy import or_
+    assigned_ids = [a.client_id for a in
+                    db.query(UserClientAssignment).filter(UserClientAssignment.user_id == user.id).all()]
+    clients = db.query(Client).filter(
+        or_(Client.manager_email == user.email, Client.id.in_(assigned_ids))
+    ).order_by(Client.name).all()
+
+    now = datetime.now()
+    result = []
+    for c in clients:
+        meta = c.integration_metadata or {}
+        digi = meta.get("diginetica", {})
+        products = [p for p in ("sort", "autocomplete", "recommendations") if digi.get(p, {}).get("api_key")]
+        if not products and meta.get("diginetica_api_key"):
+            products = ["sort"]
+        interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+        last = c.last_meeting_date or c.last_checkup
+        days_since = (now - last).days if last else 999
+        result.append({
+            "id": c.id, "name": c.name, "segment": c.segment,
+            "health_score": c.health_score,
+            "domain": c.domain or meta.get("site_url", ""),
+            "products": products,
+            "has_api_keys": len(products) > 0,
+            "days_since_checkup": days_since,
+            "checkup_overdue": days_since > interval,
+            "merchrules_id": c.merchrules_account_id,
+            "last_meeting": c.last_meeting_date.isoformat() if c.last_meeting_date else None,
+        })
+    return {"clients": result, "total": len(result)}
+
+
+@app.get("/api/cabinet/available-clients")
+async def api_cabinet_available_clients(
+    search: str = "",
+    segment: str = "",
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Клиенты без менеджера или со свободными слотами — для добавления в свой кабинет."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from sqlalchemy import or_
+    # Уже назначенные у этого менеджера
+    my_ids = {a.client_id for a in
+              db.query(UserClientAssignment).filter(UserClientAssignment.user_id == user.id).all()}
+    my_emails = {user.email}
+
+    q = db.query(Client)
+    # Исключаем уже своих
+    if my_ids:
+        q = q.filter(~Client.id.in_(my_ids))
+    q = q.filter(or_(Client.manager_email != user.email, Client.manager_email.is_(None)))
+
+    if search:
+        q = q.filter(Client.name.ilike(f"%{search}%"))
+    if segment:
+        q = q.filter(Client.segment == segment)
+
+    clients = q.order_by(Client.name).limit(100).all()
+    return {
+        "clients": [
+            {
+                "id": c.id, "name": c.name, "segment": c.segment,
+                "health_score": c.health_score,
+                "manager_email": c.manager_email or "—",
+            }
+            for c in clients
+        ]
+    }
+
+
+@app.post("/api/cabinet/assign/{client_id}")
+async def api_cabinet_assign(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Добавить клиента в свой кабинет."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    # Проверяем нет ли уже
+    existing = db.query(UserClientAssignment).filter(
+        UserClientAssignment.user_id == user.id,
+        UserClientAssignment.client_id == client_id,
+    ).first()
+    if not existing:
+        db.add(UserClientAssignment(user_id=user.id, client_id=client_id))
+        # Устанавливаем manager_email если он пустой
+        if not client.manager_email:
+            client.manager_email = user.email
+        db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/cabinet/assign/{client_id}")
+async def api_cabinet_unassign(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Убрать клиента из своего кабинета."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    db.query(UserClientAssignment).filter(
+        UserClientAssignment.user_id == user.id,
+        UserClientAssignment.client_id == client_id,
+    ).delete()
+    db.commit()
+    return {"ok": True}
+
 # ============================================================================
 # SEARCH QUALITY CHECKUP — API для расширения
 # ============================================================================
@@ -2875,14 +3055,34 @@ async def api_get_cabinet(
     if site_url and not site_url.startswith("http"):
         site_url = "https://" + site_url
 
+    digi = meta.get("diginetica", {})
+
+    products = {}
+    for product in ("sort", "autocomplete", "recommendations"):
+        p = digi.get(product, {})
+        if p.get("api_key"):
+            products[product] = {
+                "apiKey": p["api_key"],
+                "url":    p.get("url", ""),
+            }
+    # Legacy fallback — если нет структурированных, используем diginetica_api_key как sort
+    if not products and api_key:
+        products["sort"] = {"apiKey": api_key, "url": "https://sort.diginetica.net/search"}
+
     return {
         "ok": True,
         "cabinetId": str(client.id),
         "clientName": client.name,
-        "apiKey": api_key,
+        # Основной ключ (Sort или первый доступный) — для обратной совместимости с расширением
+        "apiKey": (products.get("sort") or next(iter(products.values()), {})).get("apiKey", ""),
         "siteUrl": site_url,
         "segment": client.segment,
         "healthScore": client.health_score,
+        # Все продукты — расширение использует для выбора типа чекапа
+        "products": products,
+        "hasSort": "sort" in products,
+        "hasAutocomplete": "autocomplete" in products,
+        "hasRecommendations": "recommendations" in products,
     }
 
 
@@ -3306,19 +3506,46 @@ async def api_admin_import_api_keys(
 
         meta = dict(client.integration_metadata or {})
 
-        api_key = str(row.get("diginetica_api_key", "") or "").strip()
-        if api_key and api_key != "nan":
-            meta["diginetica_api_key"] = api_key
+        # Diginetica продукты — Sort / Autocomplete / Recommendations
+        digi = meta.get("diginetica", {})
 
-        site_url = str(row.get("site_url", "") or "").strip()
-        if site_url and site_url != "nan":
+        def _val(key):
+            v = str(row.get(key, "") or "").strip()
+            return "" if v in ("", "nan", "None") else v
+
+        # Sort
+        if _val("sort_api_key"):
+            digi.setdefault("sort", {})["api_key"] = _val("sort_api_key")
+        if _val("sort_url"):
+            digi.setdefault("sort", {})["url"] = _val("sort_url")
+        # Autocomplete
+        if _val("auto_api_key"):
+            digi.setdefault("autocomplete", {})["api_key"] = _val("auto_api_key")
+        if _val("auto_url"):
+            digi.setdefault("autocomplete", {})["url"] = _val("auto_url")
+        # Recommendations
+        if _val("rec_api_key"):
+            digi.setdefault("recommendations", {})["api_key"] = _val("rec_api_key")
+        if _val("rec_url"):
+            digi.setdefault("recommendations", {})["url"] = _val("rec_url")
+        # Legacy single key
+        if _val("diginetica_api_key"):
+            meta["diginetica_api_key"] = _val("diginetica_api_key")
+            digi.setdefault("sort", {})["api_key"] = _val("diginetica_api_key")
+
+        if digi:
+            meta["diginetica"] = digi
+
+        # site_url
+        site_url = _val("site_url")
+        if site_url:
             if not site_url.startswith("http"):
                 site_url = "https://" + site_url
             meta["site_url"] = site_url
 
         # Запросы для чекапа (top)
-        queries_raw = str(row.get("checkup_queries_top", "") or "").strip()
-        if queries_raw and queries_raw != "nan":
+        queries_raw = _val("checkup_queries_top")
+        if queries_raw:
             queries = [q.strip() for q in queries_raw.split(",") if q.strip()]
             cq = meta.get("checkup_queries", {})
             cq["top"] = queries

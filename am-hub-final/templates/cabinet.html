@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Мой кабинет — AM Hub{% endblock %}
+{% block page_title %}Мой кабинет{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Ваши клиенты и настройки</div>{% endblock %}
+
+{% block page_actions %}
+<button class="btn btn-sm" onclick="openAddModal()">+ Добавить клиентов</button>
+{% endblock %}
+
+{% block content %}
+<style>
+.cab-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.cab-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;transition:border-color var(--t),box-shadow var(--t);}
+.cab-card:hover{border-color:var(--border-s);box-shadow:var(--shadow-s);}
+.cab-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;}
+.cab-name{font-size:.87rem;font-weight:600;}
+.cab-meta{font-size:.72rem;color:var(--text-dim);margin-top:2px;}
+.products{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;}
+.prod-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:.67rem;font-weight:600;}
+.prod-sort{background:var(--green-bg);color:var(--green);border:1px solid rgba(35,209,139,.2);}
+.prod-auto{background:var(--yellow-bg);color:var(--yellow);border:1px solid rgba(245,166,35,.2);}
+.prod-rec{background:var(--blue-bg);color:var(--blue);border:1px solid rgba(76,165,255,.2);}
+.prod-none{background:var(--surface-3);color:var(--text-muted);}
+.ck-bar{height:3px;border-radius:2px;margin-top:8px;overflow:hidden;background:var(--surface-3);}
+.ck-fill{height:100%;border-radius:2px;transition:width .5s;}
+
+.avail-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);transition:background var(--t);}
+.avail-row:hover{background:var(--surface-2);}
+.avail-row:last-child{border-bottom:none;}
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;}
+</style>
+
+<!-- Stats -->
+<div class="stats-row">
+  <div class="kpi-card c-accent">
+    <div class="kpi-label">Моих клиентов</div>
+    <div class="kpi-value" id="stat-total">—</div>
+  </div>
+  <div class="kpi-card c-green">
+    <div class="kpi-label">С Diginetica API</div>
+    <div class="kpi-value" id="stat-keys">—</div>
+  </div>
+  <div class="kpi-card c-red">
+    <div class="kpi-label">Нужен чекап</div>
+    <div class="kpi-value" id="stat-overdue">—</div>
+  </div>
+</div>
+
+<!-- Search / filter -->
+<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+  <input type="text" id="search-my" class="form-control" style="max-width:240px"
+         placeholder="Поиск по клиентам..." oninput="filterMy(this.value)">
+  <select id="filter-segment" class="form-control" style="width:130px" onchange="filterMy()">
+    <option value="">Все сегменты</option>
+    <option value="Enterprise">Enterprise</option>
+    <option value="SMB">SMB</option>
+    <option value="SME">SME</option>
+    <option value="SS">SS</option>
+    <option value="Partner">Partner</option>
+  </select>
+  <div style="display:flex;gap:4px;margin-left:auto">
+    <button class="btn btn-ghost btn-sm" onclick="setView('grid')" id="view-grid">▦</button>
+    <button class="btn btn-ghost btn-sm" onclick="setView('list')" id="view-list">☰</button>
+  </div>
+</div>
+
+<!-- My clients grid -->
+<div id="my-clients" class="cab-grid">
+  <div class="empty" style="grid-column:1/-1">
+    <div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div>
+  </div>
+</div>
+
+<!-- Add clients modal -->
+<div class="modal-overlay" id="addModal" style="display:none" onclick="if(event.target===this)closeAdd()">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title">+ Добавить клиентов</span>
+      <button class="modal-close" onclick="closeAdd()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input type="text" id="add-search" class="form-control"
+               placeholder="Поиск по названию..." oninput="searchAvailable(this.value)">
+        <select id="add-segment" class="form-control" style="width:130px" onchange="searchAvailable()">
+          <option value="">Все</option>
+          <option>Enterprise</option><option>SMB</option>
+          <option>SME</option><option>SS</option><option>Partner</option>
+        </select>
+      </div>
+      <div id="avail-list" style="max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)">
+        <div class="empty" style="padding:24px">
+          <div class="empty-icon">🔍</div>
+          <div class="empty-text">Начните вводить название клиента</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeAdd()">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var allMyClients = [];
+var currentView  = 'grid';
+
+(async function load() {
+  var d = await fetch('/api/cabinet/my-clients').then(function(r){return r.json();});
+  allMyClients = d.clients || [];
+
+  document.getElementById('stat-total').textContent   = allMyClients.length;
+  document.getElementById('stat-keys').textContent    = allMyClients.filter(function(c){return c.has_api_keys;}).length;
+  document.getElementById('stat-overdue').textContent = allMyClients.filter(function(c){return c.checkup_overdue;}).length;
+
+  renderMyClients(allMyClients);
+})();
+
+function setView(v) {
+  currentView = v;
+  document.getElementById('view-grid').classList.toggle('btn-primary', v==='grid');
+  document.getElementById('view-list').classList.toggle('btn-primary', v==='list');
+  renderMyClients(allMyClients);
+}
+
+function filterMy(val) {
+  var q   = (document.getElementById('search-my').value || '').toLowerCase();
+  var seg = document.getElementById('filter-segment').value;
+  var filtered = allMyClients.filter(function(c) {
+    return (!q || c.name.toLowerCase().includes(q))
+        && (!seg || c.segment === seg);
+  });
+  renderMyClients(filtered);
+}
+
+function renderMyClients(list) {
+  var el = document.getElementById('my-clients');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty" style="grid-column:1/-1">'
+      + '<div class="empty-icon">📭</div>'
+      + '<div class="empty-title">Нет клиентов</div>'
+      + '<div class="empty-text">Нажмите «+ Добавить клиентов» чтобы выбрать из общего пула</div>'
+      + '</div>';
+    return;
+  }
+
+  if (currentView === 'list') {
+    el.style.gridTemplateColumns = '1fr';
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr>'
+      + '<th>Клиент</th><th>Сегмент</th><th>Health</th><th>Продукты</th><th>Последняя встреча</th><th></th>'
+      + '</tr></thead><tbody>'
+      + list.map(function(c) {
+          var prods = renderProds(c.products);
+          var health = c.health_score != null ? c.health_score.toFixed(0)+'%' : '—';
+          var dt = c.last_meeting ? new Date(c.last_meeting).toLocaleDateString('ru-RU') : '—';
+          return '<tr onclick="window.location=\'/client/'+c.id+'\'" style="cursor:pointer">'
+            + '<td class="td-accent">'+c.name+'</td>'
+            + '<td><span class="badge badge-'+segBadge(c.segment)+'">'+c.segment+'</span></td>'
+            + '<td>'+health+'</td>'
+            + '<td>'+prods+'</td>'
+            + '<td style="color:var(--text-muted);font-size:.78rem">'+dt+'</td>'
+            + '<td><button class="btn btn-ghost btn-sm btn-icon" onclick="event.stopPropagation();removeClient('+c.id+')" title="Убрать">✕</button></td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>';
+  } else {
+    el.style.gridTemplateColumns = '';
+    el.innerHTML = list.map(function(c) {
+      var h = c.health_score || 0;
+      var hcls = h >= 70 ? 'good' : h >= 40 ? 'warn' : 'bad';
+      var prods = renderProds(c.products);
+      var overdue = c.checkup_overdue
+        ? '<span class="badge" style="background:var(--red-bg);color:var(--red);font-size:.63rem">⚠ чекап</span>' : '';
+      return '<div class="cab-card">'
+        + '<div class="cab-card-top">'
+        +   '<div>'
+        +     '<div style="display:flex;align-items:center;gap:6px">'
+        +       '<div class="cab-name">'+c.name+'</div>'
+        +       overdue
+        +     '</div>'
+        +     '<div class="cab-meta">'
+        +       '<span class="badge badge-'+segBadge(c.segment)+'">'+c.segment+'</span>'
+        +       (c.domain ? ' · <a href="'+c.domain+'" target="_blank" style="color:var(--text-muted);font-size:.7rem">'+c.domain.replace(/https?:\/\//,'')+'</a>' : '')
+        +     '</div>'
+        +   '</div>'
+        +   '<div style="display:flex;gap:4px">'
+        +     '<a href="/client/'+c.id+'" class="btn btn-ghost btn-sm btn-icon" title="Открыть">→</a>'
+        +     '<button class="btn btn-ghost btn-sm btn-icon" onclick="startCheckup('+c.id+')" title="Чекап ID">🔍</button>'
+        +     '<button class="btn btn-ghost btn-sm btn-icon" onclick="removeClient('+c.id+')" title="Убрать">✕</button>'
+        +   '</div>'
+        + '</div>'
+        + '<div class="products">'+prods+'</div>'
+        + '<div class="ck-bar"><div class="ck-fill health-fill '+hcls+'" style="width:'+h+'%"></div></div>'
+        + '<div style="font-size:.7rem;color:var(--text-muted);margin-top:4px">Health: '+h.toFixed(0)+'%</div>'
+        + '</div>';
+    }).join('');
+  }
+}
+
+function renderProds(products) {
+  if (!products || !products.length) {
+    return '<span class="prod-chip prod-none">нет ключей</span>';
+  }
+  return products.map(function(p) {
+    var cls = p === 'sort' ? 'prod-sort' : p === 'autocomplete' ? 'prod-auto' : 'prod-rec';
+    var lbl = p === 'sort' ? '🔍 Sort' : p === 'autocomplete' ? '⌨ Auto' : '⭐ Rec';
+    return '<span class="prod-chip '+cls+'">'+lbl+'</span>';
+  }).join('');
+}
+
+function segBadge(seg) {
+  var map = { Enterprise:'enterprise', 'Enterprise+':'enterprise', SMB:'smb', SME:'smb', Partner:'partner', SS:'neutral', Trial:'trial' };
+  return map[seg] || 'neutral';
+}
+
+function startCheckup(id) {
+  navigator.clipboard.writeText(String(id)).catch(function(){});
+  showToast('ID ' + id + ' скопирован — вставьте в расширение чекапера');
+}
+
+async function removeClient(id) {
+  if (!confirm('Убрать клиента из вашего кабинета?')) return;
+  await fetch('/api/cabinet/assign/'+id, { method: 'DELETE' });
+  allMyClients = allMyClients.filter(function(c){return c.id !== id;});
+  document.getElementById('stat-total').textContent = allMyClients.length;
+  renderMyClients(allMyClients);
+  showToast('Клиент убран из кабинета');
+}
+
+// Add modal
+function openAdd() { document.getElementById('addModal').style.display = 'flex'; searchAvailable(''); }
+function openAddModal() { openAdd(); }
+function closeAdd() { document.getElementById('addModal').style.display = 'none'; }
+
+var _searchTimer = null;
+function searchAvailable(val) {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(async function() {
+    var q   = document.getElementById('add-search').value;
+    var seg = document.getElementById('add-segment').value;
+    var params = new URLSearchParams();
+    if (q) params.set('search', q);
+    if (seg) params.set('segment', seg);
+    var d = await fetch('/api/cabinet/available-clients?' + params).then(function(r){return r.json();});
+    var list = d.clients || [];
+    var el = document.getElementById('avail-list');
+    if (!list.length) {
+      el.innerHTML = '<div class="empty" style="padding:20px"><div class="empty-text">Нет доступных клиентов</div></div>';
+      return;
+    }
+    el.innerHTML = list.map(function(c) {
+      return '<div class="avail-row">'
+        + '<div class="client-avatar" style="width:28px;height:28px;font-size:.7rem;flex-shrink:0">'+(c.name||'?')[0].toUpperCase()+'</div>'
+        + '<div style="flex:1;min-width:0">'
+        +   '<div style="font-size:.84rem;font-weight:500">'+c.name+'</div>'
+        +   '<div style="font-size:.71rem;color:var(--text-muted)">'
+        +     '<span class="badge badge-'+segBadge(c.segment)+'">'+c.segment+'</span>'
+        +     ' · '+c.manager_email
+        +   '</div>'
+        + '</div>'
+        + '<button class="btn btn-primary btn-sm" onclick="addClient('+c.id+',this)">+ Добавить</button>'
+        + '</div>';
+    }).join('');
+  }, 200);
+}
+
+async function addClient(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  var r = await fetch('/api/cabinet/assign/' + id, { method: 'POST' });
+  if (r.ok) {
+    btn.textContent = '✅';
+    btn.style.background = 'var(--green-bg)';
+    btn.style.color = 'var(--green)';
+    // Перезагружаем список
+    var d = await fetch('/api/cabinet/my-clients').then(function(r){return r.json();});
+    allMyClients = d.clients || [];
+    document.getElementById('stat-total').textContent   = allMyClients.length;
+    document.getElementById('stat-keys').textContent    = allMyClients.filter(function(c){return c.has_api_keys;}).length;
+    document.getElementById('stat-overdue').textContent = allMyClients.filter(function(c){return c.checkup_overdue;}).length;
+    renderMyClients(allMyClients);
+  } else {
+    btn.textContent = '❌';
+    btn.disabled = false;
+  }
+}
+
+function showToast(msg) {
+  var t = document.createElement('div');
+  t.className = 'toast success'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){t.remove();}, 3000);
+}
+</script>
+{% endblock %}
