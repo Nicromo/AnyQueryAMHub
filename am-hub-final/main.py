@@ -6559,3 +6559,97 @@ async def api_test_integration(
             return {"ok": False, "error": str(e)}
 
     return {"ok": False, "error": f"Неизвестный сервис: {service}"}
+
+# ============================================================================
+# CHROME EXTENSION — push токенов Time и Ktalk
+# ============================================================================
+
+@app.post("/api/auth/tokens/push")
+async def api_tokens_push(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Принимает токены от Chrome Extension.
+    Расширение автоматически перехватывает MMAUTHTOKEN из cookies браузера.
+    Auth через Bearer токен (hub_token из настроек расширения).
+    """
+    auth_header = request.headers.get("Authorization", "")
+    bearer = auth_header.replace("Bearer ", "").strip()
+
+    # Ищем пользователя по hub_token (сохранён в user.settings.hub_token)
+    user = None
+    if bearer:
+        from auth import decode_access_token
+        # Пробуем как JWT токен хаба
+        payload = decode_access_token(bearer)
+        if payload:
+            user = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+
+        # Fallback: ищем по статическому hub_token в settings
+        if not user:
+            all_users = db.query(User).filter(User.is_active == True).all()
+            for u in all_users:
+                s = u.settings or {}
+                if s.get("hub_token") == bearer:
+                    user = u
+                    break
+
+    if not user:
+        # Если нет авторизации — создаём анонимный push (для первичной настройки)
+        # Токены запишутся как pending, менеджер увидит их на странице настроек
+        data = await request.json()
+        logger.info(f"Anon token push: time={'time_token' in data}, ktalk={'ktalk_token' in data}")
+        return {"ok": True, "note": "Войдите в AM Hub и перейдите в Настройки для привязки токена"}
+
+    data = await request.json()
+    settings = dict(user.settings or {})
+    updated = []
+
+    # Tbank Time MMAUTHTOKEN
+    time_token = data.get("time_token", "")
+    if time_token:
+        tm = dict(settings.get("tbank_time", {}))
+        if tm.get("mmauthtoken") != time_token:
+            tm["mmauthtoken"] = time_token
+            tm["session_cookie"] = time_token
+            # Сразу проверяем и получаем channel_id
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=10) as hx:
+                    me = await hx.get(
+                        "https://time.tbank.ru/api/v4/users/me",
+                        headers={"Authorization": f"Bearer {time_token}"},
+                    )
+                    if me.status_code == 200:
+                        me_data = me.json()
+                        tm["username"] = me_data.get("username", "")
+                        tm["email"] = me_data.get("email", "")
+                    ch = await hx.get(
+                        "https://time.tbank.ru/api/v4/teams/name/tinkoff/channels/name/any-team-support",
+                        headers={"Authorization": f"Bearer {time_token}"},
+                    )
+                    if ch.status_code == 200:
+                        tm["support_channel_id"] = ch.json().get("id", "")
+            except Exception as e:
+                logger.debug(f"Token validation error: {e}")
+            settings["tbank_time"] = tm
+            updated.append("time")
+
+    # Ktalk access_token
+    ktalk_token = data.get("ktalk_token", "")
+    if ktalk_token:
+        kt = dict(settings.get("ktalk", {}))
+        if kt.get("access_token") != ktalk_token:
+            kt["access_token"] = ktalk_token
+            settings["ktalk"] = kt
+            updated.append("ktalk")
+
+    if updated:
+        from sqlalchemy.orm.attributes import flag_modified
+        user.settings = settings
+        flag_modified(user, "settings")
+        db.commit()
+        logger.info(f"✅ Extension pushed tokens for {user.email}: {updated}")
+
+    return {"ok": True, "updated": updated, "user": user.email}

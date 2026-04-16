@@ -6,14 +6,18 @@
   <title>{% block title %}AM Hub{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
 {% block body %}
 <div class="layout">
   <nav class="sidebar">
-    <div class="sidebar-logo">AM <span>Hub</span></div>
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">A</div>
+      <span>AM <span>Hub</span></span>
+      <span class="sidebar-logo-badge">Beta</span>
+    </div>
 
     <!-- Быстрый поиск -->
     <div class="search-wrap">

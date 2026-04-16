@@ -693,6 +693,9 @@ async function saveNotifs(){
   const r=await fetch('/api/settings/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   if(r.ok) showSaved('saved-notifs');
 }
+
+}
+}
 </script>
 </body>
 </html>
