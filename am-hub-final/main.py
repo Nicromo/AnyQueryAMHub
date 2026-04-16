@@ -1400,8 +1400,8 @@ async def api_sync_merchrules(
                             last_mtg = max(meetings_list, key=lambda m: m.get("date", ""))
                             try:
                                 c.last_meeting_date = datetime.fromisoformat(last_mtg.get("date", "")[:19])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Ignored error: {e}")
                 except Exception as e:
                     logger.warning(f"Failed to fetch meetings for {sid}: {e}")
 
@@ -3934,8 +3934,8 @@ async def _ai_chat(system: str, user: str, max_tokens: int = 1000) -> str:
                     headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"})
             if resp.status_code == 200:
                 return resp.json()["choices"][0]["message"]["content"].strip()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Ignored error: {e}")
 
     if qwen_key:
         import httpx
@@ -3946,8 +3946,8 @@ async def _ai_chat(system: str, user: str, max_tokens: int = 1000) -> str:
                     headers={"Authorization": f"Bearer {qwen_key}", "Content-Type": "application/json"})
             if resp.status_code == 200:
                 return resp.json()["choices"][0]["message"]["content"].strip()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Ignored error: {e}")
 
     return "AI недоступен. Настройте GROQ_API_KEY или QWEN_API_KEY."
 

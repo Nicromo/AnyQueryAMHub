@@ -129,6 +129,15 @@
         <button class="btn btn-sm" style="background:var(--red);" onclick="disconnectKTalk()">✕ Отключить</button>
         {% endif %}
       </div>
+      {% if kt.get('access_token') %}
+      <div class="field" style="margin-top:12px;">
+        <label>ID канала для фолоуапов <span style="color:var(--muted);font-size:.75rem;">(скопируйте из URL канала Ktalk)</span></label>
+        <input id="kt-channel-id" value="{{ kt.get('followup_channel_id', '') }}" placeholder="abc123def456...">
+        <div class="help">Фолоуап будет автоматически отправляться в этот канал после встречи</div>
+      </div>
+      <button class="btn btn-sm" onclick="saveKtalkChannel()">💾 Сохранить канал</button>
+      <span id="kt-channel-saved" style="font-size:.82rem;color:var(--green);display:none;">✅ Сохранено</span>
+      {% endif %}
     </div>
 
     <div class="section">
@@ -407,6 +416,13 @@ async function syncMR(){
     if(d.ok){el.textContent='✅ '+d.message;el.style.color='var(--green)';}
     else{el.textContent='❌ '+d.error+(d.endpoints_tried?'\n'+d.endpoints_tried.join('\n'):'');el.style.color='var(--red)';}
   }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
+}
+
+async function saveKtalkChannel(){
+  const id = document.getElementById('kt-channel-id')?.value || '';
+  const r = await fetch('/api/settings/creds', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ktalk: {followup_channel_id: id}})});
+  if(r.ok){ const el=document.getElementById('kt-channel-saved'); el.style.display='inline'; setTimeout(()=>el.style.display='none',2000); }
 }
 
 async function disconnectKTalk(){
