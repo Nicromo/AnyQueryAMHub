@@ -291,11 +291,6 @@ def _get_user_cred(user: User) -> tuple:
 # AUTH PAGES
 # ============================================================================
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
-
-
 @app.post("/login")
 async def login_submit(
     request: Request,
@@ -313,325 +308,25 @@ async def login_submit(
     return response
 
 
-@app.get("/logout")
-async def logout():
-    response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie(key="auth_token")
-    return response
-
-
 # ============================================================================
 # DASHBOARD
 # ============================================================================
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-
-    user_id = payload.get("sub")
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    # Проверка онбординга
-    settings = user.settings or {}
-    if not settings.get("onboarding_complete"):
-        return RedirectResponse(url="/onboarding", status_code=303)
-
-    # Для админа — все клиенты, для менеджера — только его
-    query = db.query(Client)
-    if user.role == "manager":
-        query = query.filter(Client.manager_email == user.email)
-    clients = query.all()
-
-    # Обогащаем данными из Merchrules если есть креды
-    mr_login, mr_password = _get_user_cred(user)
-    has_mr = bool(mr_login and mr_password)
-
-    # Статистика
-    now = datetime.now()
-    counts = {"ENT": 0, "SME+": 0, "SME-": 0, "SME": 0, "SMB": 0, "SS": 0}
-    healthy = warning = overdue = total_open = total_tasks = 0
-
-    for c in clients:
-        seg = c.segment or ""
-        if seg in counts:
-            counts[seg] += 1
-
-        open_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status.in_(["plan", "in_progress"])).count()
-        blocked_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status == "blocked").count()
-        total_client_tasks = db.query(Task).filter(Task.client_id == c.id).count()
-        total_open += open_tasks
-        total_tasks += total_client_tasks
-
-        is_overdue = c.needs_checkup and (not c.last_meeting_date or (now - c.last_meeting_date).days > 30)
-        is_warning = c.needs_checkup and c.last_meeting_date and 14 < (now - c.last_meeting_date).days <= 30
-
-        if is_overdue:
-            overdue += 1
-        elif is_warning:
-            warning += 1
-        else:
-            healthy += 1
-
-        c.open_tasks = open_tasks
-        c.blocked_tasks = blocked_tasks
-        c.total_tasks = total_client_tasks
-        c.status = {"color": "red" if is_overdue else ("yellow" if is_warning else "green")}
-
-    # Задачи на сегодня
-    today = now.date()
-    today_tasks = db.query(Task).filter(
-        Task.due_date >= datetime.combine(today, datetime.min.time()),
-        Task.due_date < datetime.combine(today + timedelta(days=1), datetime.min.time()),
-        Task.status.in_(["plan", "in_progress"]),
-    ).all()
-
-    if user.role == "manager":
-        today_tasks = [t for t in today_tasks if t.client and t.client.manager_email == user.email]
-
-    # Встречи на сегодня
-    today_meetings = db.query(Meeting).filter(
-        Meeting.date >= datetime.combine(today, datetime.min.time()),
-        Meeting.date < datetime.combine(today + timedelta(days=1), datetime.min.time()),
-    ).all()
-
-    return templates.TemplateResponse(
-        "dashboard.html", {
-            "request": request,
-            "user": user,
-            "clients": clients,
-            "counts": counts,
-            "healthy_count": healthy,
-            "warning_count": warning,
-            "overdue_count": overdue,
-            "total_open_tasks": total_open,
-            "total_tasks": total_tasks,
-            "today_tasks": today_tasks,
-            "today_meetings": today_meetings,
-            "now": now,
-            "has_mr": has_mr,
-        },
-    )
-
 
 # ============================================================================
 # MY DAY
 # ============================================================================
 
-@app.get("/today", response_class=HTMLResponse)
-async def my_day(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    today = datetime.now().date()
-    start = datetime.combine(today, datetime.min.time())
-    end = datetime.combine(today + timedelta(days=1), datetime.min.time())
-
-    # Задачи на сегодня
-    q = db.query(Task).filter(Task.due_date >= start, Task.due_date < end)
-    if user.role == "manager":
-        q = q.join(Client).filter(Client.manager_email == user.email)
-    today_tasks = q.all()
-
-    # Встречи на сегодня
-    q2 = db.query(Meeting).filter(Meeting.date >= start, Meeting.date < end)
-    if user.role == "manager":
-        q2 = q2.join(Client).filter(Client.manager_email == user.email)
-    today_meetings = q2.all()
-
-    # Просроченные задачи
-    q3 = db.query(Task).filter(Task.due_date < start, Task.status.in_(["plan", "in_progress"]))
-    if user.role == "manager":
-        q3 = q3.join(Client).filter(Client.manager_email == user.email)
-    overdue_tasks = q3.all()
-
-    # Общая статистика
-    total_open = db.query(Task).filter(Task.status.in_(["plan", "in_progress"])).count()
-    if user.role == "manager":
-        total_open = db.query(Task).join(Client).filter(
-            Task.status.in_(["plan", "in_progress"]),
-            Client.manager_email == user.email
-        ).count()
-
-    return templates.TemplateResponse("today.html", {
-        "request": request, "user": user,
-        "today_tasks": today_tasks,
-        "today_meetings": today_meetings,
-        "overdue_tasks": overdue_tasks,
-        "total_open": total_open,
-        "now": datetime.now(),
-    })
-
-
 # ============================================================================
 # CLIENTS LIST
 # ============================================================================
-
-@app.get("/clients", response_class=HTMLResponse)
-async def clients_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    segment = request.query_params.get("segment")
-    now = datetime.now()
-    q = db.query(Client)
-    if user.role == "manager":
-        q = q.filter(Client.manager_email == user.email)
-    if segment:
-        q = q.filter(Client.segment == segment)
-    clients = q.all()
-
-    counts = {"ENT": 0, "SME+": 0, "SME-": 0, "SME": 0, "SMB": 0, "SS": 0}
-    for c in clients:
-        seg = c.segment or ""
-        if seg in counts:
-            counts[seg] += 1
-
-    for c in clients:
-        open_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status.in_(["plan", "in_progress"])).count()
-        blocked_tasks = db.query(Task).filter(Task.client_id == c.id, Task.status == "blocked").count()
-        is_overdue = c.needs_checkup and (not c.last_meeting_date or (now - c.last_meeting_date).days > 30)
-        is_warning = c.needs_checkup and c.last_meeting_date and 14 < (now - c.last_meeting_date).days <= 30
-        c.open_tasks = open_tasks
-        c.blocked_tasks = blocked_tasks
-        c.status = {"color": "red" if is_overdue else ("yellow" if is_warning else "green")}
-
-    return templates.TemplateResponse("clients.html", {
-        "request": request, "user": user, "clients": clients,
-        "counts": counts, "segment": segment, "now": now,
-    })
-
 
 # ============================================================================
 # CLIENT DETAIL + PREP
 # ============================================================================
 
-@app.get("/client/{client_id}", response_class=HTMLResponse)
-async def client_detail(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.due_date.desc()).all()
-    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).all()
-
-    return templates.TemplateResponse("client_detail.html", {
-        "request": request, "user": user, "client": client,
-        "tasks": tasks, "meetings": meetings, "now": datetime.now(),
-    })
-
-
-@app.get("/prep/{client_id}", response_class=HTMLResponse)
-async def prep_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    tasks = db.query(Task).filter(Task.client_id == client_id, Task.status.in_(["plan", "in_progress"])).all()
-    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(5).all()
-
-    # AI-подготовка
-    try:
-        prep_text = generate_prep_brief(client, tasks, meetings)
-    except Exception as e:
-        prep_text = f"AI недоступен: {e}"
-
-    return templates.TemplateResponse("prep.html", {
-        "request": request, "user": user, "client": client,
-        "tasks": tasks, "meetings": meetings, "prep_text": prep_text,
-        "now": datetime.now(),
-    })
-
-
 # ============================================================================
 # FOLLOWUP
 # ============================================================================
-
-@app.get("/followup/{client_id}", response_class=HTMLResponse)
-async def followup_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    tasks = db.query(Task).filter(Task.client_id == client_id).all()
-    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(3).all()
-
-    # Последняя встреча с pending followup (или просто последняя)
-    meeting = db.query(Meeting).filter(
-        Meeting.client_id == client_id,
-        Meeting.followup_status == "pending"
-    ).order_by(Meeting.date.desc()).first()
-    if not meeting:
-        meeting = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).first()
-
-    try:
-        followup_text = generate_smart_followup(client, tasks, meetings)
-    except Exception as e:
-        followup_text = f"AI недоступен: {e}"
-
-    return templates.TemplateResponse("followup.html", {
-        "request": request, "user": user, "client": client,
-        "tasks": tasks, "meetings": meetings, "followup_text": followup_text,
-        "meeting": meeting, "now": datetime.now(),
-    })
-
 
 # ============================================================================
 # ONBOARDING PARTNER
@@ -665,163 +360,17 @@ async def onboarding_partner_page(request: Request, client_id: int, db: Session 
 # TASKS
 # ============================================================================
 
-@app.get("/tasks", response_class=HTMLResponse)
-async def tasks_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    status_filter = request.query_params.get("status")
-    q = db.query(Task)
-    if user.role == "manager":
-        q = q.join(Client).filter(Client.manager_email == user.email)
-    if status_filter and status_filter != "all":
-        q = q.filter(Task.status == status_filter)
-    tasks = q.order_by(Task.due_date.desc()).limit(100).all()
-
-    return templates.TemplateResponse("tasks.html", {
-        "request": request, "user": user, "tasks": tasks,
-        "status_filter": status_filter or "all", "now": datetime.now(),
-    })
-
-
-@app.get("/kanban", response_class=HTMLResponse)
-async def kanban_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Kanban-доска задач."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("kanban.html", {"request": request, "user": user})
-
-
 # ============================================================================
 # SYNC
 # ============================================================================
-
-@app.get("/sync", response_class=HTMLResponse)
-async def sync_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    mr_login_val, _ = _get_user_cred(user)
-    return templates.TemplateResponse("sync.html", {"request": request, "user": user, "mr_login": mr_login_val})
-
 
 # ============================================================================
 # PLAN & QBR PAGES
 # ============================================================================
 
-@app.get("/client/{client_id}/plan", response_class=HTMLResponse)
-async def plan_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404)
-
-    plan = db.query(AccountPlan).filter(AccountPlan.client_id == client_id).first()
-    if not plan:
-        plan = AccountPlan(client_id=client_id)
-
-    return templates.TemplateResponse("plan.html", {
-        "request": request, "user": user, "client": client, "plan": plan,
-    })
-
-
-@app.get("/client/{client_id}/qbr", response_class=HTMLResponse)
-async def qbr_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404)
-
-    qbr = db.query(QBR).filter(QBR.client_id == client_id).order_by(QBR.date.desc()).first()
-
-    return templates.TemplateResponse("qbr.html", {
-        "request": request, "user": user, "client": client, "qbr": qbr,
-    })
-
-
 # ============================================================================
 # INTEGRATIONS
 # ============================================================================
-
-@app.get("/integrations", response_class=HTMLResponse)
-async def integrations_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    mr_login_val, mr_password_val = _get_user_cred(user)
-    u_settings = user.settings or {}
-    ktalk_s = u_settings.get("ktalk", {})
-    airtable_s = u_settings.get("airtable", {})
-    sheets_s = u_settings.get("sheets", {})
-    groq_s = u_settings.get("groq", {})
-    tbank_s = u_settings.get("tbank_time", {})
-    tg_s = u_settings.get("telegram", {})
-    airtable_active = bool(airtable_s.get("pat") or env.AIRTABLE_PAT)
-    sheets_active = bool(sheets_s.get("spreadsheet_id") or env.SHEETS_ID)
-    ai_active = bool(groq_s.get("api_key") or env.AI_ACTIVE)
-    ai_type = "qwen" if env.QWEN_KEY else ("groq" if (groq_s.get("api_key") or env.GROQ_KEY) else "")
-    integrations_data = {
-        "mr_active": bool(mr_login_val and mr_password_val),
-        "mr_login": mr_login_val,
-        "airtable_active": airtable_active,
-        "sheets_active": sheets_active,
-        "sheets_id": env.SHEETS_ID,
-        "tg_active": bool(env.TG_TOKEN),
-        "ai_active": ai_active,
-        "ai_type": ai_type,
-        "ktalk_active": bool(env.KTALK_TOKEN and env.KTALK_SPACE),
-        "ktalk_space": _env("KTALK_SPACE"),
-        "time_active": bool(env.TIME_TOKEN),
-    }
-    return templates.TemplateResponse("integrations.html", {"request": request, "user": user, **integrations_data})
-
 
 # ============================================================================
 # API: INTEGRATION TESTS
@@ -838,46 +387,6 @@ async def integrations_page(request: Request, db: Session = Depends(get_db), aut
 # ============================================================================
 
 # ============================================================================
-
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    settings = user.settings or {}
-    rules = settings.get("rules", {
-        "min_health_score": 0.5, "checkup_interval_days": 30, "warning_days": 14,
-        "segments": ["ENT", "SME+", "SME-", "SMB", "SS"],
-        "auto_create_tasks": True, "morning_plan_time": "09:00", "weekly_digest_day": "friday",
-    })
-    prefs = settings.get("preferences", {
-        "theme": "dark", "dashboard_view": "cards",
-        "notifications_email": True, "notifications_tg": True, "notifications_ktalk": False,
-        "notif_overdue": True, "notif_new_tasks": True, "notif_blocked": True, "notif_morning": True,
-    })
-    return templates.TemplateResponse("settings.html", {
-        "request": request, "user": user,
-        "user_settings": settings,
-        "rules": rules, "prefs": prefs,
-    })
-
-
-@app.get("/", response_class=HTMLResponse)
-async def root(request: Request, auth_token: Optional[str] = Cookie(None)):
-    if auth_token:
-        from auth import decode_access_token
-        payload = decode_access_token(auth_token)
-        if payload:
-            return RedirectResponse(url="/dashboard", status_code=303)
-    return RedirectResponse(url="/login", status_code=303)
-
 
 # ============================================================================
 # WORKFLOW: MEETINGS CRUD
@@ -896,17 +405,6 @@ async def root(request: Request, auth_token: Optional[str] = Cookie(None)):
 # ============================================================================
 
 # ============================================================================
-
-@app.get("/followup-templates", response_class=HTMLResponse)
-async def followup_templates_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token: return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload: return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user: return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("followup_templates.html", {"request": request, "user": user})
-
 
 @app.get("/auto-tasks", response_class=HTMLResponse)
 async def auto_tasks_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
@@ -994,17 +492,6 @@ async def manager_cabinet(
 
 # ============================================================================
 
-@app.get("/onboarding", response_class=HTMLResponse)
-async def onboarding_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("onboarding.html", {"request": request})
-
-
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(
     request: Request,
@@ -1050,22 +537,6 @@ async def admin_page(
 
 # ============================================================================
 
-@app.get("/checkups", response_class=HTMLResponse)
-async def checkups_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Страница умных чекапов."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("checkups.html", {"request": request, "user": user})
-
-
-
 @app.get("/checkup/result/{result_id}", response_class=HTMLResponse)
 async def checkup_result_page(
     result_id: int,
@@ -1098,21 +569,6 @@ async def checkup_result_page(
 # ============================================================================
 
 # ============================================================================
-
-@app.get("/calendar", response_class=HTMLResponse)
-async def calendar_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Календарь встреч."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("calendar.html", {"request": request, "user": user})
-
 
 # ============================================================================
 
@@ -1192,21 +648,6 @@ async def notifications_page(request: Request, db: Session = Depends(get_db), au
 # ANALYTICS
 # ============================================================================
 
-@app.get("/analytics", response_class=HTMLResponse)
-async def analytics_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Страница аналитики."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("analytics.html", {"request": request, "user": user})
-
-
 # ============================================================================
 
 # ============================================================================
@@ -1216,33 +657,6 @@ async def analytics_page(request: Request, db: Session = Depends(get_db), auth_t
 # ============================================================================
 
 # ============================================================================
-
-@app.get("/client/{client_id}/focus", response_class=HTMLResponse)
-async def client_focus_view(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Режим фокуса: клиент без сайдбара."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404)
-
-    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.due_date.desc()).all()
-    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(5).all()
-    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.is_pinned.desc(), ClientNote.updated_at.desc()).all()
-
-    return templates.TemplateResponse("client_focus.html", {
-        "request": request, "user": user, "client": client,
-        "tasks": tasks, "meetings": meetings, "notes": notes,
-    })
-
 
 @app.get("/health")
 async def health():
@@ -1255,57 +669,9 @@ async def health():
 
 # ============================================================================
 
-@app.get("/inbox", response_class=HTMLResponse)
-async def inbox_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Персональный Inbox."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("inbox.html", {"request": request, "user": user})
-
-
 # ============================================================================
 
 # ============================================================================
-
-@app.get("/qbr/auto/{client_id}", response_class=HTMLResponse)
-async def qbr_auto_page(request: Request, client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Страница авто-QBR."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404)
-    return templates.TemplateResponse("qbr_auto.html", {"request": request, "user": user, "client": client})
-
-
-@app.get("/voice-notes", response_class=HTMLResponse)
-async def voice_notes_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Страница голосовых заметок."""
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("voice_notes.html", {"request": request, "user": user})
-
 
 # ============================================================================
 
@@ -1341,19 +707,6 @@ async def pwa_icon():
 # ============================================================================
 
 # ============================================================================
-
-@app.get("/kpi", response_class=HTMLResponse)
-async def kpi_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=303)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return RedirectResponse(url="/login", status_code=303)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("kpi.html", {"request": request, "user": user})
 
 # ============================================================================
 # AIRTABLE WEBHOOK (push при изменении записи)

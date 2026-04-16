@@ -408,57 +408,6 @@ async def calendar_events(start: str = "", end: str = "", db: Session = Depends(
 # ANALYTICS
 # ============================================================================
 
-@router.get("/analytics")
-async def analytics(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    if not auth_token:
-        return {}
-    payload = decode_access_token(auth_token)
-    if not payload:
-        return {}
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        return {}
-
-    q = db.query(Client)
-    if user.role == "manager":
-        q = q.filter(Client.manager_email == user.email)
-    clients = q.all()
-
-    seg_counts = {}
-    health_buckets = {"0-25": 0, "25-50": 0, "50-75": 0, "75-100": 0}
-    for c in clients:
-        seg_counts[c.segment or "other"] = seg_counts.get(c.segment or "other", 0) + 1
-        score = (c.health_score or 0) * 100
-        bucket = "0-25" if score < 25 else ("25-50" if score < 50 else ("50-75" if score < 75 else "75-100"))
-        health_buckets[bucket] += 1
-
-    task_q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
-    if user.role == "manager":
-        task_q = task_q.filter(Client.manager_email == user.email)
-    all_tasks = task_q.all()
-    task_status = {}
-    for t in all_tasks:
-        task_status[t.status or "plan"] = task_status.get(t.status or "plan", 0) + 1
-
-    meeting_q = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True)
-    if user.role == "manager":
-        meeting_q = meeting_q.filter(Client.manager_email == user.email)
-    meetings_per_month = {}
-    for m in meeting_q.filter(Meeting.date != None).all():
-        key = m.date.strftime("%Y-%m")
-        meetings_per_month[key] = meetings_per_month.get(key, 0) + 1
-
-    return {
-        "total_clients": len(clients),
-        "segments": seg_counts,
-        "health_distribution": health_buckets,
-        "task_status": task_status,
-        "total_tasks": len(all_tasks),
-        "meetings_per_month": dict(sorted(meetings_per_month.items(), reverse=True)[:6]),
-        "avg_health": round(sum((c.health_score or 0) for c in clients) / max(len(clients), 1) * 100, 1),
-    }
-
-
 # ============================================================================
 # DASHBOARD ACTIONS
 # ============================================================================

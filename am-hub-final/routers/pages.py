@@ -522,13 +522,3 @@ async def client_focus_page(request: Request, client_id: int, db: Session = Depe
 # AUTH: KTALK OAuth
 # ============================================================================
 
-@router.get("/auth/ktalk", response_class=HTMLResponse)
-async def auth_ktalk_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    user = _get_user(auth_token, db)
-    if not user:
-        return _login_redirect()
-    ktalk_space = os.environ.get("KTALK_SPACE", "")
-    auth_url = f"https://{ktalk_space}.ktalk.ru/oauth/authorize" if ktalk_space else ""
-    return templates.TemplateResponse("integrations.html", {
-        "request": request, "user": user, "ktalk_auth_url": auth_url,
-    })
