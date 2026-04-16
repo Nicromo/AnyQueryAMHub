@@ -1,4 +1,4 @@
-﻿"""
+"""
 AM Hub — Полные модели данных
 Workflow: встречи → фолоуап → задачи → roadmaps → QBR → план клиента
 """
@@ -38,6 +38,11 @@ class Client(Base):
     # QBR
     last_qbr_date = Column(DateTime, nullable=True)
     next_qbr_date = Column(DateTime, nullable=True)
+
+    # Финансы (быстрый доступ)
+    mrr = Column(Float, default=0.0)
+    nps_last = Column(Integer, nullable=True)
+    nps_date = Column(DateTime, nullable=True)
 
     # План работы (JSONB)
     # { "goals": [], "actions": [], "quarterly_targets": {}, "notes": "" }
@@ -468,3 +473,71 @@ Index("ix_client_history_client_date", ClientHistory.client_id, ClientHistory.cr
 # Notifications
 Index("ix_notifications_user_read", Notification.user_id)
 
+
+
+# ── Блок 1: Финансы ──────────────────────────────────────────────────────────
+
+class RevenueEntry(Base):
+    """MRR/ARR история — одна запись = один месяц."""
+    __tablename__ = "revenue_entries"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), index=True)
+    period     = Column(String, nullable=False)   # "2026-03" (YYYY-MM)
+    mrr        = Column(Float, default=0.0)       # месячная выручка
+    arr        = Column(Float, nullable=True)     # годовая (mrr * 12 если не задана)
+    currency   = Column(String, default="RUB")
+    note       = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_by = Column(String, nullable=True)
+    client     = relationship("Client", backref="revenue_history")
+
+
+class UpsellEvent(Base):
+    """Апсейл / Даунсейл событие."""
+    __tablename__ = "upsell_events"
+    id          = Column(Integer, primary_key=True, index=True)
+    client_id   = Column(Integer, ForeignKey("clients.id"), index=True)
+    event_type  = Column(String, nullable=False)  # upsell|downsell|expansion|churn_risk
+    status      = Column(String, default="identified")  # identified|in_progress|won|lost|postponed
+    amount_before = Column(Float, nullable=True)  # MRR до
+    amount_after  = Column(Float, nullable=True)  # MRR после (ожидаемый)
+    delta         = Column(Float, nullable=True)  # amount_after - amount_before
+    description = Column(Text, nullable=True)
+    owner_email = Column(String, nullable=True)
+    due_date    = Column(DateTime, nullable=True)
+    closed_at   = Column(DateTime, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    created_by  = Column(String, nullable=True)
+    client      = relationship("Client", backref="upsell_events")
+
+
+# ── Блок 2: Health Score история ─────────────────────────────────────────────
+
+class HealthSnapshot(Base):
+    """Снимок health score — пишется при каждом пересчёте."""
+    __tablename__ = "health_snapshots"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), index=True)
+    score      = Column(Float, nullable=False)       # 0.0–1.0
+    components = Column(JSONB, default=dict)         # {meetings:0.8, tasks:0.5, tickets:0.9, nps:0.7}
+    calculated_at = Column(DateTime, default=datetime.utcnow, index=True)
+    client     = relationship("Client", backref="health_history")
+
+
+class NPSEntry(Base):
+    """NPS / CSAT оценка от клиента."""
+    __tablename__ = "nps_entries"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), index=True)
+    score      = Column(Integer, nullable=False)     # NPS: -100..100 или CSAT: 1..10
+    type       = Column(String, default="nps")       # nps|csat
+    comment    = Column(Text, nullable=True)
+    source     = Column(String, default="manual")    # manual|survey|import
+    recorded_at = Column(DateTime, default=datetime.utcnow)
+    recorded_by = Column(String, nullable=True)
+    client     = relationship("Client", backref="nps_history")
+
+
+Index("ix_revenue_client_period", RevenueEntry.client_id, RevenueEntry.period)
+Index("ix_health_snapshots_client_date", HealthSnapshot.client_id, HealthSnapshot.calculated_at)
+Index("ix_nps_client_date", NPSEntry.client_id, NPSEntry.recorded_at)

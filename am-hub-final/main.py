@@ -195,6 +195,7 @@ app = FastAPI(title="AM Hub", version="2.0.0", lifespan=lifespan)
 # ROUTERS
 # ============================================================================
 from routers import ai, tasks, meetings, clients, sync, settings, auth, integrations, analytics, misc
+from routers import account_dashboard
 
 app.include_router(auth.router, tags=["auth"])
 app.include_router(settings.router, tags=["settings"])
@@ -206,6 +207,7 @@ app.include_router(sync.router, tags=["sync"])
 app.include_router(integrations.router, tags=["integrations"])
 app.include_router(analytics.router, tags=["analytics"])
 app.include_router(misc.router, tags=["misc"])
+app.include_router(account_dashboard.router, tags=["account-dashboard"])
 
 
 # ── Rate limiting ────────────────────────────────────────────────────────────

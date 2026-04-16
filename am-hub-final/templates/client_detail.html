@@ -256,10 +256,232 @@
     <button class="tab active" onclick="showTab('tasks',this)">✅ Задачи <span class="tab-badge">{{ tasks|length }}</span></button>
     <button class="tab" onclick="showTab('meetings',this)">📅 Встречи <span class="tab-badge">{{ meetings|length }}</span></button>
     <button class="tab" onclick="showTab('notes',this)">📝 Заметки <span class="tab-badge" id="badge-notes">0</span></button>
+    <button class="tab" onclick="showTab('finance',this);loadFinance()">💰 Финансы</button>
+    <button class="tab" onclick="showTab('health-tab',this);loadHealthHistory()">❤️ Health</button>
+    <button class="tab" onclick="showTab('ai-insights',this);loadAIInsights()">🤖 AI</button>
+    <button class="tab" onclick="showTab('exec-summary',this);loadExecSummary()">📋 Summary</button>
     <button class="tab" onclick="showTab('timeline',this)">📜 История</button>
     <button class="tab" onclick="showTab('tickets',this)">🎫 Тикеты</button>
     <button class="tab" onclick="showTab('checkup-config',this);loadCheckupConfig()">🔍 Чекап</button>
     <button class="tab" onclick="showTab('onboarding',this)">🚀 Онбординг</button>
+  </div>
+
+  <!-- ══ БЛОК 1: ФИНАНСЫ ══ -->
+  <div id="tab-finance" class="tab-content">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Текущий MRR</div>
+        <div id="fin-mrr" style="font-size:1.8rem;font-weight:700;">—</div>
+        <div id="fin-mrr-trend" style="font-size:.78rem;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">ARR</div>
+        <div id="fin-arr" style="font-size:1.8rem;font-weight:700;">—</div>
+        <div id="fin-pipeline" style="font-size:.78rem;color:var(--green);margin-top:2px;"></div>
+      </div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div style="font-size:.85rem;font-weight:600;">📈 История MRR</div>
+        <button onclick="showAddRevenue()" class="btn btn-sm">+ Добавить</button>
+      </div>
+      <div style="position:relative;height:180px;"><canvas id="mrr-chart"></canvas></div>
+    </div>
+    <div id="add-revenue-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:.84rem;font-weight:600;margin-bottom:10px;">Добавить MRR</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
+        <div>
+          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Период (YYYY-MM)</label>
+          <input id="rev-period" placeholder="2026-04" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+        </div>
+        <div>
+          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">MRR (руб.)</label>
+          <input id="rev-mrr" type="number" placeholder="150000" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+        </div>
+        <div>
+          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Заметка</label>
+          <input id="rev-note" placeholder="Продление, апсейл..." style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="saveRevenue()" class="btn btn-sm btn-p">Сохранить</button>
+        <button onclick="document.getElementById('add-revenue-form').style.display='none'" class="btn btn-sm">Отмена</button>
+      </div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div style="font-size:.85rem;font-weight:600;">🎯 Апсейл / Даунсейл</div>
+        <button onclick="showAddUpsell()" class="btn btn-sm">+ Событие</button>
+      </div>
+      <div id="upsell-list"><div style="color:var(--muted);font-size:.82rem;padding:8px 0;">Загрузка...</div></div>
+      <div id="add-upsell-form" style="display:none;border-top:1px solid var(--border);margin-top:12px;padding-top:12px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Тип</label>
+            <select id="upsell-type" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+              <option value="upsell">🔼 Апсейл</option>
+              <option value="downsell">🔽 Даунсейл</option>
+              <option value="expansion">📦 Расширение</option>
+              <option value="churn_risk">⚠️ Риск оттока</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Статус</label>
+            <select id="upsell-status" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+              <option value="identified">Выявлен</option>
+              <option value="in_progress">В работе</option>
+              <option value="won">✅ Выигран</option>
+              <option value="lost">❌ Проигран</option>
+              <option value="postponed">⏳ Отложен</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">MRR до (руб.)</label>
+            <input id="upsell-before" type="number" placeholder="100000" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+          </div>
+          <div>
+            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">MRR после (руб.)</label>
+            <input id="upsell-after" type="number" placeholder="150000" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+          </div>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Описание</label>
+          <input id="upsell-desc" placeholder="Что именно продаём/теряем..." style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="saveUpsell()" class="btn btn-sm btn-p">Сохранить</button>
+          <button onclick="document.getElementById('add-upsell-form').style.display='none'" class="btn btn-sm">Отмена</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ БЛОК 2: HEALTH ══ -->
+  <div id="tab-health-tab" class="tab-content">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px;">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center;">
+        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">Health Score</div>
+        <div id="hs-score" style="font-size:2.2rem;font-weight:700;">—%</div>
+        <div id="hs-level" style="font-size:.78rem;margin-top:4px;"></div>
+        <button onclick="recalcHealth()" class="btn btn-sm" style="margin-top:10px;">🔄 Пересчитать</button>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center;">
+        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">NPS</div>
+        <div id="hs-nps" style="font-size:2.2rem;font-weight:700;">—</div>
+        <div id="hs-nps-date" style="font-size:.78rem;color:var(--muted);margin-top:4px;"></div>
+        <button onclick="showAddNPS()" class="btn btn-sm" style="margin-top:10px;">+ Оценка</button>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Компоненты</div>
+        <div id="hs-components"></div>
+      </div>
+    </div>
+    <div id="add-nps-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:.84rem;font-weight:600;margin-bottom:10px;">Добавить NPS / CSAT</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Тип</label>
+          <select id="nps-type" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+            <option value="nps">NPS (-100 до 100)</option>
+            <option value="csat">CSAT (1–10)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Оценка</label>
+          <input id="nps-score" type="number" placeholder="75" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+        </div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Комментарий</label>
+        <input id="nps-comment" placeholder="Что клиент сказал..." style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="saveNPS()" class="btn btn-sm btn-p">Сохранить</button>
+        <button onclick="document.getElementById('add-nps-form').style.display='none'" class="btn btn-sm">Отмена</button>
+      </div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+      <div style="font-size:.85rem;font-weight:600;margin-bottom:12px;">📊 Динамика Health Score (6 мес.)</div>
+      <div style="position:relative;height:180px;"><canvas id="health-chart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ══ БЛОК 4: AI ИНСАЙТЫ ══ -->
+  <div id="tab-ai-insights" class="tab-content">
+    <div id="ai-loading" style="text-align:center;padding:32px;color:var(--muted);">
+      <div style="font-size:1.4rem;margin-bottom:8px;">🤖</div>
+      <div>Анализирую аккаунт...</div>
+    </div>
+    <div id="ai-content" style="display:none;">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:8px;">💡 Состояние аккаунта</div>
+        <div id="ai-summary" style="font-size:.84rem;line-height:1.6;"></div>
+        <div id="ai-verdict" style="display:inline-block;margin-top:8px;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+        <div style="background:var(--card);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:16px;">
+          <div style="font-size:.85rem;font-weight:600;color:#f87171;margin-bottom:10px;">⚠️ Риски</div>
+          <div id="ai-risks"></div>
+        </div>
+        <div style="background:var(--card);border:1px solid rgba(34,197,94,.3);border-radius:12px;padding:16px;">
+          <div style="font-size:.85rem;font-weight:600;color:#4ade80;margin-bottom:10px;">🚀 Возможности</div>
+          <div id="ai-opportunities"></div>
+        </div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">🎯 Рекомендуемые действия</div>
+        <div id="ai-actions"></div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">🎭 Тональность встреч</div>
+        <div id="ai-sentiment"></div>
+      </div>
+    </div>
+    <div id="ai-error" style="display:none;text-align:center;padding:24px;color:var(--muted);font-size:.84rem;"></div>
+  </div>
+
+  <!-- ══ БЛОК 5: EXECUTIVE SUMMARY ══ -->
+  <div id="tab-exec-summary" class="tab-content">
+    <div id="exec-loading" style="text-align:center;padding:32px;color:var(--muted);">
+      <div style="font-size:1.4rem;margin-bottom:8px;">📋</div>
+      <div>Формирую executive summary...</div>
+    </div>
+    <div id="exec-content" style="display:none;">
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <button onclick="generateAISummary()" class="btn btn-sm btn-p">🤖 AI-текст</button>
+        <button onclick="copyExecSummary()" class="btn btn-sm">📋 Скопировать</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">MRR</div>
+          <div id="ex-mrr" style="font-size:1.3rem;font-weight:700;">—</div>
+        </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">Health</div>
+          <div id="ex-health" style="font-size:1.3rem;font-weight:700;">—%</div>
+        </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">NPS</div>
+          <div id="ex-nps" style="font-size:1.3rem;font-weight:700;">—</div>
+        </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">Задач</div>
+          <div id="ex-tasks" style="font-size:1.3rem;font-weight:700;">—</div>
+        </div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">⚠️ Ключевые риски</div>
+        <div id="ex-risks"></div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">✅ Следующие шаги</div>
+        <div id="ex-steps"></div>
+      </div>
+      <div id="exec-ai-text-block" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">📝 AI Executive Summary</div>
+        <div id="exec-ai-text" style="font-size:.84rem;line-height:1.7;white-space:pre-wrap;"></div>
+      </div>
+    </div>
   </div>
 
   <!-- ЗАДАЧИ -->
@@ -998,6 +1220,390 @@ function generateFollowup() {
   window.location.href = '/followup/' + clientId;
 }
 
+
+// ═══════════════════════════════════════════════════════
+// БЛОК 1: ФИНАНСЫ
+// ═══════════════════════════════════════════════════════
+let mrrChart = null;
+
+async function loadFinance() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  try {
+    const r = await fetch(`/api/clients/${clientId}/revenue/history?months=12`);
+    const d = await r.json();
+
+    // KPI
+    const mrr = d.current_mrr || 0;
+    const arr = d.current_arr || 0;
+    document.getElementById('fin-mrr').textContent = mrr.toLocaleString('ru-RU') + ' ₽';
+    document.getElementById('fin-arr').textContent = arr.toLocaleString('ru-RU') + ' ₽';
+
+    const trendEl = document.getElementById('fin-mrr-trend');
+    const trendIcon = d.trend === 'up' ? '↑' : d.trend === 'down' ? '↓' : '→';
+    const trendColor = d.trend === 'up' ? 'var(--green)' : d.trend === 'down' ? 'var(--red)' : 'var(--muted)';
+    trendEl.innerHTML = `<span style="color:${trendColor}">${trendIcon} ${d.trend_pct > 0 ? '+' : ''}${d.trend_pct}% к пред. мес.</span>`;
+
+    // MRR chart
+    if (d.history && d.history.length > 0) {
+      const labels = d.history.map(h => h.period);
+      const values = d.history.map(h => h.mrr);
+      const ctx = document.getElementById('mrr-chart');
+      if (ctx) {
+        if (mrrChart) mrrChart.destroy();
+        mrrChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              label: 'MRR',
+              data: values,
+              backgroundColor: 'rgba(99,102,241,.6)',
+              borderColor: 'rgba(99,102,241,1)',
+              borderRadius: 5,
+              borderWidth: 1,
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, ticks: { color: '#64748b', callback: v => v.toLocaleString('ru-RU') + ' ₽' }, grid: { color: 'rgba(255,255,255,.05)' } },
+              x: { ticks: { color: '#64748b' }, grid: { display: false } }
+            }
+          }
+        });
+      }
+    }
+
+    // Upsell pipeline
+    const r2 = await fetch(`/api/clients/${clientId}/upsell`);
+    const d2 = await r2.json();
+    renderUpsellList(d2.events || []);
+
+    const pipeline = (d2.events || []).filter(e => e.delta > 0 && ['identified','in_progress'].includes(e.status)).reduce((s,e) => s + (e.delta||0), 0);
+    const downsell = (d2.events || []).filter(e => e.delta < 0 && ['identified','in_progress'].includes(e.status)).reduce((s,e) => s + Math.abs(e.delta||0), 0);
+    const pipeEl = document.getElementById('fin-pipeline');
+    let pipeHtml = '';
+    if (pipeline > 0) pipeHtml += `<span style="color:var(--green)">↑ Pipeline: +${pipeline.toLocaleString('ru-RU')} ₽</span> `;
+    if (downsell > 0) pipeHtml += `<span style="color:var(--red)">↓ Риск: -${downsell.toLocaleString('ru-RU')} ₽</span>`;
+    pipeEl.innerHTML = pipeHtml;
+
+  } catch(e) { console.error('Finance load error:', e); }
+}
+
+function renderUpsellList(events) {
+  const el = document.getElementById('upsell-list');
+  if (!events.length) { el.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:8px 0;">Нет активных событий</div>'; return; }
+  const typeLabels = { upsell: '🔼 Апсейл', downsell: '🔽 Даунсейл', expansion: '📦 Расширение', churn_risk: '⚠️ Риск оттока' };
+  const statusColors = { identified: '#60a5fa', in_progress: '#facc15', won: '#4ade80', lost: '#f87171', postponed: '#94a3b8' };
+  el.innerHTML = events.map(e => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;">
+      <div style="flex:1;">
+        <div style="font-size:.84rem;font-weight:500;">${typeLabels[e.type] || e.type}</div>
+        <div style="font-size:.76rem;color:var(--muted);">${e.description || ''}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:.84rem;font-weight:600;color:${(e.delta||0)>=0?'var(--green)':'var(--red)'};">${e.delta>=0?'+':''}${(e.delta||0).toLocaleString('ru-RU')} ₽</div>
+        <div style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:${statusColors[e.status]||'#94a3b8'}22;color:${statusColors[e.status]||'#94a3b8'};margin-top:2px;">${e.status}</div>
+      </div>
+    </div>`).join('');
+}
+
+function showAddRevenue() {
+  document.getElementById('add-revenue-form').style.display = 'block';
+  const now = new Date();
+  document.getElementById('rev-period').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+}
+
+async function saveRevenue() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  const period = document.getElementById('rev-period').value.trim();
+  const mrr = parseFloat(document.getElementById('rev-mrr').value);
+  const note = document.getElementById('rev-note').value.trim();
+  if (!period || !mrr) { toast('⚠️ Укажите период и MRR'); return; }
+  const r = await fetch('/api/revenue/entry', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ client_id: clientId, period, mrr, note })
+  });
+  const d = await r.json();
+  if (d.ok) { toast('✅ MRR сохранён'); document.getElementById('add-revenue-form').style.display='none'; loadFinance(); }
+  else toast('❌ ' + (d.detail || 'Ошибка'));
+}
+
+function showAddUpsell() {
+  document.getElementById('add-upsell-form').style.display = 'block';
+}
+
+async function saveUpsell() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  const r = await fetch('/api/upsell/event', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      client_id: clientId,
+      event_type: document.getElementById('upsell-type').value,
+      status: document.getElementById('upsell-status').value,
+      amount_before: parseFloat(document.getElementById('upsell-before').value)||0,
+      amount_after: parseFloat(document.getElementById('upsell-after').value)||0,
+      description: document.getElementById('upsell-desc').value.trim(),
+    })
+  });
+  const d = await r.json();
+  if (d.ok) { toast(`✅ Событие сохранено (delta: ${d.delta>=0?'+':''}${d.delta.toLocaleString('ru-RU')} ₽)`); document.getElementById('add-upsell-form').style.display='none'; loadFinance(); }
+  else toast('❌ ' + (d.detail || 'Ошибка'));
+}
+
+// ═══════════════════════════════════════════════════════
+// БЛОК 2: HEALTH
+// ═══════════════════════════════════════════════════════
+let healthChart = null;
+
+async function loadHealthHistory() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  try {
+    // Текущий health + компоненты (пересчитываем)
+    const r = await fetch(`/api/clients/${clientId}/health/recalc`, { method: 'POST' });
+    const d = await r.json();
+    const levelColors = { excellent: '#4ade80', good: '#60a5fa', warning: '#facc15', critical: '#f87171' };
+    const levelLabels = { excellent: 'Отличный', good: 'Хороший', warning: 'Внимание', critical: 'Критичный' };
+    document.getElementById('hs-score').textContent = d.score_pct + '%';
+    document.getElementById('hs-score').style.color = levelColors[d.level] || '#e2e8f0';
+    document.getElementById('hs-level').innerHTML = `<span style="color:${levelColors[d.level]}">${levelLabels[d.level]||d.level}</span>`;
+
+    // Компоненты
+    const compLabels = { meetings: '📅 Встречи', tasks: '✅ Задачи', tickets: '🎫 Тикеты', nps: '⭐ NPS', checkups: '🔍 Чекапы' };
+    const compEl = document.getElementById('hs-components');
+    compEl.innerHTML = Object.entries(d.components || {}).map(([k, v]) => `
+      <div style="margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;font-size:.76rem;margin-bottom:2px;">
+          <span style="color:var(--muted)">${compLabels[k]||k}</span>
+          <span style="font-weight:600">${Math.round(v*100)}%</span>
+        </div>
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+          <div style="height:100%;width:${Math.round(v*100)}%;background:${v>0.7?'var(--green)':v>0.4?'var(--yellow)':'var(--red)'};border-radius:2px;transition:width .5s"></div>
+        </div>
+      </div>`).join('');
+
+    // NPS
+    const r2 = await fetch(`/api/clients/${clientId}/nps`);
+    const d2 = await r2.json();
+    if (d2.latest) {
+      document.getElementById('hs-nps').textContent = d2.latest.score;
+      document.getElementById('hs-nps-date').textContent = d2.latest.date.slice(0,10) + ' (' + d2.latest.type.toUpperCase() + ')';
+    } else {
+      document.getElementById('hs-nps').textContent = '—';
+    }
+
+    // Health history chart
+    const r3 = await fetch(`/api/clients/${clientId}/health/history?months=6`);
+    const d3 = await r3.json();
+    if (d3.history && d3.history.length > 0) {
+      const ctx = document.getElementById('health-chart');
+      if (ctx) {
+        if (healthChart) healthChart.destroy();
+        healthChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: d3.history.map(h => h.period),
+            datasets: [{
+              label: 'Health Score',
+              data: d3.history.map(h => h.score),
+              borderColor: '#6366f1',
+              backgroundColor: 'rgba(99,102,241,.1)',
+              fill: true,
+              tension: 0.4,
+              pointRadius: 4,
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { min: 0, max: 100, ticks: { color: '#64748b', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,.05)' } },
+              x: { ticks: { color: '#64748b' }, grid: { display: false } }
+            }
+          }
+        });
+      }
+    }
+  } catch(e) { console.error('Health load error:', e); }
+}
+
+async function recalcHealth() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  toast('🔄 Пересчитываю...');
+  await loadHealthHistory();
+  toast('✅ Health Score обновлён');
+}
+
+function showAddNPS() {
+  document.getElementById('add-nps-form').style.display = 'block';
+}
+
+async function saveNPS() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  const score = parseInt(document.getElementById('nps-score').value);
+  if (isNaN(score)) { toast('⚠️ Укажите оценку'); return; }
+  const r = await fetch('/api/nps/entry', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      client_id: clientId,
+      score,
+      type: document.getElementById('nps-type').value,
+      comment: document.getElementById('nps-comment').value.trim(),
+    })
+  });
+  const d = await r.json();
+  if (d.ok) { toast('✅ NPS сохранён'); document.getElementById('add-nps-form').style.display='none'; loadHealthHistory(); }
+  else toast('❌ ' + (d.detail || 'Ошибка'));
+}
+
+// ═══════════════════════════════════════════════════════
+// БЛОК 4: AI ИНСАЙТЫ
+// ═══════════════════════════════════════════════════════
+async function loadAIInsights() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  document.getElementById('ai-loading').style.display = 'block';
+  document.getElementById('ai-content').style.display = 'none';
+  document.getElementById('ai-error').style.display = 'none';
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch(`/api/clients/${clientId}/ai/summary`),
+      fetch(`/api/clients/${clientId}/ai/sentiment`)
+    ]);
+    const ai = await r1.json();
+    const sent = await r2.json();
+
+    document.getElementById('ai-summary').textContent = ai.summary || '';
+
+    const verdictColors = { 'отличный':'#4ade80','хороший':'#60a5fa','требует внимания':'#facc15','критичный':'#f87171' };
+    const v = ai.health_verdict || '';
+    document.getElementById('ai-verdict').textContent = v;
+    document.getElementById('ai-verdict').style.background = (verdictColors[v] || '#94a3b8') + '22';
+    document.getElementById('ai-verdict').style.color = verdictColors[v] || '#94a3b8';
+
+    document.getElementById('ai-risks').innerHTML = (ai.risks||[]).map(r =>
+      `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;font-size:.82rem;"><span>⚠️</span><span>${r}</span></div>`).join('') || '<div style="color:var(--muted);font-size:.82rem;">Рисков не обнаружено</div>';
+
+    document.getElementById('ai-opportunities').innerHTML = (ai.opportunities||[]).map(o =>
+      `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;font-size:.82rem;"><span>💡</span><span>${o}</span></div>`).join('') || '<div style="color:var(--muted);font-size:.82rem;">Нет данных</div>';
+
+    const prioColors = { high: '#f87171', medium: '#facc15', low: '#60a5fa' };
+    document.getElementById('ai-actions').innerHTML = (ai.next_best_actions||[]).map(a =>
+      `<div style="display:flex;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${prioColors[a.priority]||'#94a3b8'};margin-top:5px;flex-shrink:0;"></div>
+        <div>
+          <div style="font-size:.84rem;font-weight:500;">${a.action}</div>
+          <div style="font-size:.76rem;color:var(--muted);">${a.reason} · ${a.deadline}</div>
+        </div>
+      </div>`).join('');
+
+    // Тональность
+    const sentColors = { positive: '#4ade80', neutral: '#94a3b8', negative: '#f87171' };
+    const sentLabels = { positive: 'Позитивная', neutral: 'Нейтральная', negative: 'Негативная' };
+    document.getElementById('ai-sentiment').innerHTML =
+      `<div style="margin-bottom:10px;font-size:.82rem;">Общая тональность: <span style="color:${sentColors[sent.overall_sentiment]};font-weight:600;">${sentLabels[sent.overall_sentiment]||sent.overall_sentiment}</span></div>` +
+      (sent.meetings||[]).map(m =>
+        `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border-radius:7px;margin-bottom:5px;font-size:.8rem;">
+          <div style="width:8px;height:8px;border-radius:50%;background:${sentColors[m.sentiment]||'#94a3b8'};flex-shrink:0;"></div>
+          <div style="flex:1;">${m.title} · ${(m.date||'').slice(0,10)}</div>
+          <div style="color:${sentColors[m.sentiment]||'#94a3b8'}">${sentLabels[m.sentiment]||m.sentiment}</div>
+        </div>`).join('');
+
+    document.getElementById('ai-loading').style.display = 'none';
+    document.getElementById('ai-content').style.display = 'block';
+  } catch(e) {
+    document.getElementById('ai-loading').style.display = 'none';
+    document.getElementById('ai-error').style.display = 'block';
+    document.getElementById('ai-error').textContent = '❌ Ошибка загрузки: ' + e.message;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// БЛОК 5: EXECUTIVE SUMMARY
+// ═══════════════════════════════════════════════════════
+let _execData = null;
+
+async function loadExecSummary() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  document.getElementById('exec-loading').style.display = 'block';
+  document.getElementById('exec-content').style.display = 'none';
+  try {
+    const r = await fetch(`/api/clients/${clientId}/executive-summary`);
+    const d = await r.json();
+    _execData = d;
+
+    document.getElementById('ex-mrr').textContent = (d.finance?.current_mrr||0).toLocaleString('ru-RU') + ' ₽';
+    document.getElementById('ex-health').textContent = (d.health?.score||0) + '%';
+    document.getElementById('ex-nps').textContent = d.health?.nps?.score ?? '—';
+    document.getElementById('ex-tasks').textContent = d.activity?.tasks?.total || 0;
+
+    const riskColors = { critical: '#f87171', high: '#fb923c', medium: '#facc15', low: '#60a5fa' };
+    document.getElementById('ex-risks').innerHTML = (d.risks||[]).map(r =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border-radius:7px;margin-bottom:5px;font-size:.82rem;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${riskColors[r.level]||'#94a3b8'};flex-shrink:0;"></div>
+        <span>${r.text}</span>
+      </div>`).join('') || '<div style="color:var(--muted);font-size:.82rem;">Критичных рисков нет</div>';
+
+    const stepIcons = { meeting: '📅', upsell: '💰', tasks: '✅', checkup: '🔍' };
+    const stepColors = { high: '#f87171', medium: '#facc15', low: '#60a5fa' };
+    document.getElementById('ex-steps').innerHTML = (d.next_steps||[]).map(s =>
+      `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;">
+        <span style="font-size:1rem;">${stepIcons[s.type]||'▸'}</span>
+        <div style="flex:1;font-size:.84rem;">${s.action}</div>
+        <div style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${stepColors[s.priority]||'#94a3b8'}22;color:${stepColors[s.priority]||'#94a3b8'};">${s.priority}</div>
+      </div>`).join('');
+
+    document.getElementById('exec-loading').style.display = 'none';
+    document.getElementById('exec-content').style.display = 'block';
+  } catch(e) {
+    document.getElementById('exec-loading').style.display = 'none';
+    document.getElementById('exec-content').innerHTML = '<div style="color:var(--muted);text-align:center;padding:24px;">❌ Ошибка: ' + e.message + '</div>';
+    document.getElementById('exec-content').style.display = 'block';
+  }
+}
+
+async function generateAISummary() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ Генерирую...';
+  try {
+    const r = await fetch(`/api/clients/${clientId}/executive-summary/ai`, { method: 'POST' });
+    const d = await r.json();
+    document.getElementById('exec-ai-text').textContent = d.text;
+    document.getElementById('exec-ai-text-block').style.display = 'block';
+    toast('✅ AI summary готов');
+  } catch(e) { toast('❌ Ошибка AI'); }
+  finally { btn.disabled = false; btn.textContent = '🤖 AI-текст'; }
+}
+
+function copyExecSummary() {
+  if (!_execData) return;
+  const d = _execData;
+  const text = [
+    `EXECUTIVE SUMMARY: ${d.client?.name}`,
+    `Дата: ${new Date().toLocaleDateString('ru-RU')}`,
+    `Менеджер: ${d.client?.manager || '—'}`,
+    '',
+    `ФИНАНСЫ`,
+    `MRR: ${(d.finance?.current_mrr||0).toLocaleString('ru-RU')} ₽`,
+    `ARR: ${(d.finance?.current_arr||0).toLocaleString('ru-RU')} ₽`,
+    `Тренд: ${d.finance?.mrr_trend} (${d.finance?.mrr_trend_pct > 0 ? '+' : ''}${d.finance?.mrr_trend_pct}%)`,
+    '',
+    `ЗДОРОВЬЕ`,
+    `Health Score: ${d.health?.score}% (${d.health?.level})`,
+    `NPS: ${d.health?.nps?.score ?? '—'}`,
+    `Последний контакт: ${d.health?.days_no_contact} дн. назад`,
+    '',
+    `РИСКИ`,
+    ...(d.risks||[]).map(r => `• [${r.level.toUpperCase()}] ${r.text}`),
+    '',
+    `СЛЕДУЮЩИЕ ШАГИ`,
+    ...(d.next_steps||[]).map(s => `• [${s.priority.toUpperCase()}] ${s.action}`),
+    '',
+    (document.getElementById('exec-ai-text')?.textContent || ''),
+  ].join('\n');
+  navigator.clipboard.writeText(text).then(() => toast('📋 Скопировано'));
+}
 
 </script>
 </body>
