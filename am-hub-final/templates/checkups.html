@@ -268,186 +268,206 @@
 </div>
 
 <script>
-// ── State ──────────────────────────────────────────────────────────────────
-let activeTab = 'overdue';
-let checkupData = { overdue: [], due_soon: [], upcoming: [] };
-let assignClientId = null;
-let myToken = null;
+var activeTab = 'overdue';
+var checkupData = { overdue: [], due_soon: [], upcoming: [] };
+var assignClientId = null;
+var myToken = null;
 
-// ── Init ───────────────────────────────────────────────────────────────────
 (async function init() {
   await Promise.all([loadCheckups(), loadResults()]);
   loadMyToken();
 })();
 
-// ── Tabs ───────────────────────────────────────────────────────────────────
 function switchTab(tab, btn) {
-  ['overdue','soon','upcoming','results'].forEach(t => {
+  ['overdue','soon','upcoming','results'].forEach(function(t) {
     document.getElementById('tab-'+t).style.display = t===tab ? 'block' : 'none';
   });
-  document.querySelectorAll('.tab-bar .fbtn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-bar .fbtn').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
   activeTab = tab;
   if (tab === 'results') loadResults();
 }
 
-// ── Load checkups list ─────────────────────────────────────────────────────
 async function loadCheckups() {
   try {
-    const d = await fetch('/api/checkups').then(r => r.json());
+    var d = await fetch('/api/checkups').then(function(r) { return r.json(); });
     checkupData = d;
-
-    document.getElementById('cnt-overdue').textContent  = d.overdue.length || '';
-    document.getElementById('cnt-soon').textContent     = d.due_soon.length || '';
-    document.getElementById('cnt-upcoming').textContent = d.upcoming.length || '';
-
+    document.getElementById('cnt-overdue').textContent  = d.overdue.length  || '';
+    document.getElementById('cnt-soon').textContent     = d.due_soon.length  || '';
+    document.getElementById('cnt-upcoming').textContent = d.upcoming.length  || '';
     renderList('list-overdue',  d.overdue,  'red');
     renderList('list-soon',     d.due_soon, 'yellow');
     renderList('list-upcoming', d.upcoming, 'dim');
   } catch(e) {
-    console.error('loadCheckups error:', e);
+    console.error('loadCheckups:', e);
   }
 }
 
-function renderList(elId, items, colorClass) {
-  const el = document.getElementById(elId);
-  if (!items.length) {
-    el.innerHTML = `<div class="empty" style="padding:24px">
-      <div class="empty-icon">${colorClass==='red'?'✅':'📅'}</div>
-      <div class="empty-text">${colorClass==='red'?'Нет просроченных — отлично!':'Нет клиентов в этой категории'}</div>
-    </div>`;
-    return;
-  }
-  el.innerHTML = items.map(c => `
-    <div class="ck-row">
-      <div class="ck-row-left">
-        <div class="client-avatar" style="width:28px;height:28px;font-size:.7rem">${(c.name||'?')[0].toUpperCase()}</div>
-        <div>
-          <div class="ck-name">${c.name}</div>
-          <div style="font-size:.7rem;color:var(--text-muted)">${c.segment||'—'} · интервал ${c.interval} дн.</div>
-        </div>
-      </div>
-      <div class="ck-row-right">
-        <span class="ck-days ${colorClass}">
-          ${c.days_until < 0 ? `просрочен ${Math.abs(c.days_until)} дн.` : `через ${c.days_until} дн.`}
-        </span>
-        <span class="badge badge-neutral" style="cursor:pointer;font-size:.65rem" onclick="startExtCheckup(${c.id},'${c.name.replace(/'/,'\\'')}')">🔍 Чекап</span>
-        <button class="btn btn-sm" style="padding:4px 10px;font-size:.73rem" onclick="openAssign(${c.id},'${c.name.replace(/'/,'\\'')}')">📅</button>
-      </div>
-    </div>
-  `).join('');
-}
-
-// ── Load checkup results ───────────────────────────────────────────────────
 async function loadResults() {
   try {
-    const qtype = document.getElementById('filter-qtype')?.value || '';
-    const params = qtype ? `?query_type=${qtype}` : '';
-    const d = await fetch('/api/checkup/results/all' + params).then(r => r.json()).catch(() => ({results:[]}));
-    const results = d.results || [];
+    var el = document.getElementById('results-grid');
+    var qtEl = document.getElementById('filter-qtype');
+    var qtype = qtEl ? qtEl.value : '';
+    var params = qtype ? ('?query_type=' + qtype) : '';
+    var d = await fetch('/api/checkup/results/all' + params)
+      .then(function(r) { return r.json(); })
+      .catch(function() { return { results: [] }; });
+    var results = d.results || [];
 
-    document.getElementById('cnt-results').textContent = results.length || '';
+    var cntEl = document.getElementById('cnt-results');
+    if (cntEl) cntEl.textContent = results.length || '';
+    if (!el) return;
 
-    const el = document.getElementById('results-grid');
     if (!results.length) {
-      el.innerHTML = `<div class="empty" style="grid-column:1/-1">
-        <div class="empty-icon">📭</div>
-        <div class="empty-title">Нет результатов</div>
-        <div class="empty-text">Запустите чекап в расширении — результаты появятся здесь автоматически</div>
-      </div>`;
+      el.innerHTML = '<div class="empty" style="grid-column:1/-1">'
+        + '<div class="empty-icon">📭</div>'
+        + '<div class="empty-title">Нет результатов</div>'
+        + '<div class="empty-text">Запустите чекап в расширении — результаты появятся здесь</div>'
+        + '</div>';
       return;
     }
 
-    el.innerHTML = results.map(r => {
-      const sd = r.score_dist || {};
-      const avg = r.avg_score != null ? r.avg_score.toFixed(2) : '—';
-      const color = r.avg_score == null ? 'var(--text-muted)'
-                  : r.avg_score >= 2.5 ? 'var(--green)'
-                  : r.avg_score >= 1.5 ? 'var(--yellow)'
-                  : 'var(--red)';
-      const dateStr = r.created_at
-        ? new Date(r.created_at).toLocaleString('ru-RU', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})
+    var qLabels = { top:'Топ', random:'Случайн.', zero:'Нулевые', zeroquery:'ZeroQ' };
+    var html = '';
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      var sd  = r.score_dist || {};
+      var avg = r.avg_score != null ? parseFloat(r.avg_score).toFixed(2) : '—';
+      var clr = r.avg_score == null ? 'var(--text-muted)'
+              : r.avg_score >= 2.5  ? 'var(--green)'
+              : r.avg_score >= 1.5  ? 'var(--yellow)' : 'var(--red)';
+      var dt  = r.created_at
+        ? new Date(r.created_at).toLocaleString('ru-RU',
+            { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
         : '';
-      const qLabels = {top:'Топ',random:'Случайн.',zero:'Нулевые',zeroquery:'ZeroQ'};
-      return `<div class="result-card" onclick="openResultDetail(${r.id})">
-        <div class="result-card-top">
-          <div>
-            <div class="result-client">${r.client_name || 'Клиент #'+r.client_id}</div>
-            <div class="result-date">${dateStr} · ${r.manager_name||''}${r.mode?' · '+r.mode:''}</div>
-          </div>
-          <div style="text-align:right">
-            <div class="avg-score" style="color:${color}">${avg}</div>
-            <div style="font-size:.67rem;color:var(--text-muted)">ср. балл</div>
-          </div>
-        </div>
-        <div class="score-dist">
-          ${[0,1,2,3].map(s=>`<div class="sc-bar sc-${s}">
-            <div class="n">${sd[s]||sd[String(s)]||0}</div>
-            <div class="l">Оц.${s}</div>
-          </div>`).join('')}
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
-          <span style="font-size:.72rem;color:var(--text-muted)">${r.total_queries} запросов · ${qLabels[r.query_type]||r.query_type}</span>
-          <span class="badge badge-neutral" style="font-size:.65rem">подробнее →</span>
-        </div>
-      </div>`;
-    }).join('');
+      var bars = '';
+      for (var s = 0; s < 4; s++) {
+        bars += '<div class="sc-bar sc-' + s + '">'
+          + '<div class="n">' + (sd[s] || sd[String(s)] || 0) + '</div>'
+          + '<div class="l">Оц.' + s + '</div>'
+          + '</div>';
+      }
+      html += '<div class="result-card" onclick="openResultDetail(' + r.id + ')">'
+        + '<div class="result-card-top">'
+        +   '<div>'
+        +     '<div class="result-client">' + (r.client_name || 'Клиент #' + r.client_id) + '</div>'
+        +     '<div class="result-date">' + dt
+        +       (r.manager_name ? ' · ' + r.manager_name : '')
+        +       (r.mode ? ' · ' + r.mode : '')
+        +     '</div>'
+        +   '</div>'
+        +   '<div style="text-align:right">'
+        +     '<div class="avg-score" style="color:' + clr + '">' + avg + '</div>'
+        +     '<div style="font-size:.67rem;color:var(--text-muted)">ср. балл</div>'
+        +   '</div>'
+        + '</div>'
+        + '<div class="score-dist">' + bars + '</div>'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">'
+        +   '<span style="font-size:.72rem;color:var(--text-muted)">'
+        +     r.total_queries + ' запросов · ' + (qLabels[r.query_type] || r.query_type)
+        +   '</span>'
+        +   '<span class="badge badge-neutral" style="font-size:.65rem">подробнее →</span>'
+        + '</div>'
+        + '</div>';
+    }
+    el.innerHTML = html;
   } catch(e) {
     console.error('loadResults:', e);
   }
 }
 
-// ── Assign checkup ─────────────────────────────────────────────────────────
-function openAssign(id, name) {
+function renderList(elId, items, colorClass) {
+  var el = document.getElementById(elId);
+  if (!items.length) {
+    el.innerHTML = '<div class="empty" style="padding:24px">'
+      + '<div class="empty-icon">' + (colorClass === 'red' ? '✅' : '📅') + '</div>'
+      + '<div class="empty-text">' + (colorClass === 'red' ? 'Нет просроченных — отлично!' : 'Нет клиентов') + '</div>'
+      + '</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < items.length; i++) {
+    var c = items[i];
+    var daysText = c.days_until < 0
+      ? 'просрочен ' + Math.abs(c.days_until) + ' дн.'
+      : 'через ' + c.days_until + ' дн.';
+    html += '<div class="ck-row" data-id="' + c.id + '">'
+      + '<div class="ck-row-left">'
+      +   '<div class="client-avatar" style="width:28px;height:28px;font-size:.7rem">'
+      +     (c.name || '?')[0].toUpperCase()
+      +   '</div>'
+      +   '<div>'
+      +     '<div class="ck-name">' + c.name + '</div>'
+      +     '<div style="font-size:.7rem;color:var(--text-muted)">'
+      +       (c.segment || '—') + ' · ' + c.interval + ' дн.'
+      +     '</div>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="ck-row-right">'
+      +   '<span class="ck-days ' + colorClass + '">' + daysText + '</span>'
+      +   '<span class="badge badge-neutral" style="cursor:pointer;font-size:.65rem"'
+      +     ' onclick="startExtCheckup(' + c.id + ',this)">🔍 Чекап</span>'
+      +   '<button class="btn btn-sm" style="padding:4px 10px;font-size:.73rem"'
+      +     ' onclick="openAssign(' + c.id + ',this)">📅</button>'
+      + '</div>'
+      + '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function openAssign(id, btn) {
   assignClientId = id;
+  var name = btn.closest('.ck-row').querySelector('.ck-name').textContent;
   document.getElementById('assign-name').textContent = name;
-  const d = new Date(Date.now() + 7*86400000);
-  document.getElementById('checkup-date').value = d.toISOString().slice(0,10);
+  var d = new Date(Date.now() + 7 * 86400000);
+  document.getElementById('checkup-date').value = d.toISOString().slice(0, 10);
   document.getElementById('assignModal').style.display = 'flex';
 }
-function closeAssign() { document.getElementById('assignModal').style.display = 'none'; }
-
+function closeAssign() {
+  document.getElementById('assignModal').style.display = 'none';
+}
 async function doAssign() {
-  const r = await fetch('/api/checkups/assign', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ client_id: assignClientId, date: document.getElementById('checkup-date').value })
+  var r = await fetch('/api/checkups/assign', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: assignClientId,
+      date: document.getElementById('checkup-date').value
+    })
   });
   if (r.ok) { closeAssign(); loadCheckups(); }
 }
-
 async function assignBulk(group) {
-  const items = checkupData[group === 'overdue' ? 'overdue' : 'due_soon'] || [];
+  var items = (group === 'overdue' ? checkupData.overdue : checkupData.due_soon) || [];
   if (!items.length) return;
-  const date = new Date(Date.now() + 7*86400000).toISOString().slice(0,10);
-  await Promise.all(items.map(c =>
-    fetch('/api/checkups/assign', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({client_id: c.id, date})
-    })
-  ));
+  var date = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  await Promise.all(items.map(function(c) {
+    return fetch('/api/checkups/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: c.id, date: date })
+    });
+  }));
   loadCheckups();
 }
 
-// ── Extension helpers ──────────────────────────────────────────────────────
-function startExtCheckup(clientId, name) {
-  // Открываем попап расширения если установлено (нельзя программно)
-  // Копируем ID кабинета в буфер — менеджер вставит в расширение
-  navigator.clipboard.writeText(String(clientId)).catch(()=>{});
-  showToast(`ID кабинета ${clientId} (${name}) скопирован — вставьте в расширение`);
+function startExtCheckup(clientId, btn) {
+  var name = btn.closest('.ck-row').querySelector('.ck-name').textContent;
+  navigator.clipboard.writeText(String(clientId)).catch(function() {});
+  showToast('ID кабинета ' + clientId + ' (' + name + ') скопирован — вставьте в расширение');
 }
 
 async function loadMyToken() {
   try {
-    const d = await fetch('/api/auth/me/token').then(r=>r.json()).catch(()=>({}));
+    var d = await fetch('/api/auth/me/token').then(function(r) { return r.json(); }).catch(function() { return {}; });
     myToken = d.token || '';
     document.getElementById('cfg-url').textContent = window.location.origin;
   } catch(e) {}
 }
-
 function openExtModal() {
   document.getElementById('cfg-url').textContent = window.location.origin;
   if (myToken) {
-    const el = document.getElementById('cfg-token');
+    var el = document.getElementById('cfg-token');
     el.dataset.token = myToken;
     el.textContent = 'Нажмите чтобы показать';
     el.style.filter = 'blur(4px)';
@@ -455,55 +475,50 @@ function openExtModal() {
   document.getElementById('extModal').style.display = 'flex';
 }
 function closeExtModal() { document.getElementById('extModal').style.display = 'none'; }
-
-function revealToken(el) {
-  el.textContent = el.dataset.token || '—';
-  el.style.filter = 'none';
-}
+function revealToken(el) { el.textContent = el.dataset.token || '—'; el.style.filter = 'none'; }
 function copy(elId) {
-  const text = document.getElementById(elId).textContent;
-  navigator.clipboard.writeText(text).then(()=>showToast('Скопировано'));
+  navigator.clipboard.writeText(document.getElementById(elId).textContent)
+    .then(function() { showToast('Скопировано'); });
 }
 function copyToken() {
-  const el = document.getElementById('cfg-token');
-  navigator.clipboard.writeText(el.dataset.token || '').then(()=>showToast('Токен скопирован'));
+  navigator.clipboard.writeText(document.getElementById('cfg-token').dataset.token || '')
+    .then(function() { showToast('Токен скопирован'); });
 }
 async function saveGroqKey() {
-  const key = document.getElementById('cfg-groq').value.trim();
+  var key = document.getElementById('cfg-groq').value.trim();
   if (!key) return;
-  await fetch('/api/settings/creds', {method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({groq: {api_key: key}})});
+  await fetch('/api/settings/creds', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ groq: { api_key: key } })
+  });
   showToast('Groq Key сохранён');
   closeExtModal();
 }
-
-// ── Result detail ──────────────────────────────────────────────────────────
 async function openResultDetail(id) {
-  window.location.href = `/checkup/result/${id}`;
+  window.location.href = '/checkup/result/' + id;
 }
-
-// ── Toast ──────────────────────────────────────────────────────────────────
 function showToast(msg) {
-  const t = document.createElement('div');
+  var t = document.createElement('div');
   t.className = 'toast success';
   t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(()=>t.remove(), 3500);
+  setTimeout(function() { t.remove(); }, 3500);
 }
 
-// ── Extension status check ─────────────────────────────────────────────────
 (async function checkExtensionStatus() {
-  // Проверяем были ли результаты в последние 24ч
   try {
-    const d = await fetch('/api/checkup/results/all?limit=1').then(r=>r.json()).catch(()=>({results:[]}));
-    const dot  = document.getElementById('ext-status-dot');
-    const text = document.getElementById('ext-status-text');
-    if ((d.results||[]).length) {
-      const last = new Date(d.results[0].created_at);
-      const hoursAgo = Math.round((Date.now()-last)/3600000);
+    var d = await fetch('/api/checkup/results/all?limit=1')
+      .then(function(r) { return r.json(); })
+      .catch(function() { return { results: [] }; });
+    var dot  = document.getElementById('ext-status-dot');
+    var text = document.getElementById('ext-status-text');
+    if ((d.results || []).length) {
+      var last = new Date(d.results[0].created_at);
+      var h = Math.round((Date.now() - last) / 3600000);
       dot.style.background = 'var(--green)';
       dot.style.boxShadow  = '0 0 5px rgba(35,209,139,.5)';
-      text.textContent = `Последний чекап: ${hoursAgo < 1 ? 'менее часа назад' : hoursAgo + ' ч. назад'} · расширение подключено`;
+      text.textContent = 'Последний чекап: ' + (h < 1 ? 'менее часа' : h + ' ч.') + ' назад · расширение подключено';
     } else {
       dot.style.background = 'var(--yellow)';
       text.textContent = 'Результатов пока нет — установите расширение и запустите первый чекап';

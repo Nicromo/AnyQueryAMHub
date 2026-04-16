@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block title %}Администратор — AM Hub{% endblock %}
+{% block page_title %}Администратор{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Управление данными и настройками</div>{% endblock %}
+
+{% block content %}
+<style>
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.drop-zone {
+  border: 2px dashed var(--border-s); border-radius: var(--radius-lg);
+  padding: 32px 20px; text-align: center; cursor: pointer;
+  transition: border-color var(--t), background var(--t);
+  background: var(--surface-2);
+}
+.drop-zone:hover, .drop-zone.drag { border-color: var(--accent); background: var(--accent-dim); }
+.drop-zone-icon { font-size: 2rem; margin-bottom: 8px; }
+.drop-zone-text { font-size: .84rem; color: var(--text-dim); }
+.drop-zone-hint { font-size: .72rem; color: var(--text-muted); margin-top: 4px; }
+.key-row {
+  display: grid; grid-template-columns: 40px 1fr 180px 120px 80px;
+  align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); font-size: .8rem;
+}
+.key-row:hover { background: var(--surface-2); }
+.key-val {
+  font-family: var(--font-mono); font-size: .75rem; color: var(--accent);
+  background: var(--surface-3); padding: 3px 8px; border-radius: 4px;
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+.key-val span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.import-result { margin-top: 16px; padding: 14px 16px; border-radius: var(--radius); font-size: .82rem; }
+.import-ok  { background: var(--green-bg); border: 1px solid rgba(35,209,139,.2); color: var(--green); }
+.import-err { background: var(--red-bg);   border: 1px solid rgba(240,85,106,.2); color: var(--red); }
+</style>
+
+<!-- Stats -->
+<div class="kpi-row" style="margin-bottom:24px">
+  <div class="kpi-card c-accent">
+    <div class="kpi-label">Всего клиентов</div>
+    <div class="kpi-value">{{ stats.total_clients }}</div>
+  </div>
+  <div class="kpi-card c-green">
+    <div class="kpi-label">С API Key</div>
+    <div class="kpi-value">{{ stats.clients_with_key }}</div>
+    <div class="kpi-sub">Diginetica настроен</div>
+  </div>
+  <div class="kpi-card c-blue">
+    <div class="kpi-label">Пользователей</div>
+    <div class="kpi-value">{{ stats.total_users }}</div>
+  </div>
+  <div class="kpi-card c-purple">
+    <div class="kpi-label">Чекапов проведено</div>
+    <div class="kpi-value">{{ stats.total_checkups }}</div>
+  </div>
+</div>
+
+<div class="admin-grid">
+
+  <!-- Import Excel -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📥 Импорт Diginetica API Keys</div>
+      <a href="/static/diginetica-api-keys-template.xlsx" class="btn btn-sm" download>⬇ Шаблон</a>
+    </div>
+    <div class="card-body">
+      <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:14px;line-height:1.6">
+        Загрузите Excel с колонками: <code>client_id</code>, <code>diginetica_api_key</code>,
+        <code>site_url</code> (необязательно), <code>checkup_queries_top</code> (необязательно).
+      </p>
+
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()"
+           ondragover="e=event;e.preventDefault();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="handleDrop(event)">
+        <div class="drop-zone-icon">📊</div>
+        <div class="drop-zone-text">Перетащите файл или нажмите для выбора</div>
+        <div class="drop-zone-hint">.xlsx · .xls · .csv</div>
+      </div>
+      <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="uploadFile(this.files[0])">
+
+      <div id="import-progress" style="display:none;margin-top:12px">
+        <div class="progress-bar"><div class="progress-fill" id="import-bar" style="width:0%"></div></div>
+        <div style="font-size:.76rem;color:var(--text-muted);margin-top:4px" id="import-status">Загружаем...</div>
+      </div>
+
+      <div id="import-result" style="display:none" class="import-result"></div>
+    </div>
+  </div>
+
+  <!-- Quick stats / actions -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">⚡ Быстрые действия</div>
+    </div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn" onclick="loadKeysList()">🔍 Просмотреть все API Keys</button>
+      <a href="/static/diginetica-api-keys-template.xlsx" class="btn" download>📋 Скачать шаблон Excel</a>
+      <a href="/static/checkup-ext.zip" class="btn" download>🔌 Скачать расширение чекапер</a>
+      <button class="btn btn-danger btn-sm" style="margin-top:auto" onclick="if(confirm('Сбросить все данные? Это необратимо!')) resetData()">⚠️ Сбросить данные</button>
+    </div>
+  </div>
+</div>
+
+<!-- Keys table -->
+<div class="card" id="keys-card" style="display:none">
+  <div class="card-header">
+    <div class="card-title">🗝 Diginetica API Keys — все клиенты</div>
+    <div style="display:flex;gap:8px">
+      <input type="text" id="keys-search" class="form-control" style="width:220px;font-size:.78rem"
+             placeholder="Поиск по клиенту..." oninput="filterKeys(this.value)">
+      <select id="keys-filter" class="form-control" style="width:140px;font-size:.78rem" onchange="filterKeys()">
+        <option value="">Все</option>
+        <option value="yes">С ключом</option>
+        <option value="no">Без ключа</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Table header -->
+  <div class="key-row" style="background:var(--surface-2);font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">
+    <div>ID</div><div>Клиент</div><div>API Key</div><div>Сегмент</div><div></div>
+  </div>
+
+  <div id="keys-list">
+    <div class="empty" style="padding:32px"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+  </div>
+</div>
+
+<!-- Edit key modal -->
+<div class="modal-overlay" id="editModal" style="display:none" onclick="if(event.target===this)closeEdit()">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-title">Редактировать API Key</span>
+      <button class="modal-close" onclick="closeEdit()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Diginetica API Key</label>
+        <input type="text" id="edit-key" class="form-control" style="font-family:var(--font-mono);font-size:.82rem" placeholder="Вставьте API Key...">
+      </div>
+      <div class="field">
+        <label>URL сайта</label>
+        <input type="text" id="edit-url" class="form-control" placeholder="https://client-site.ru">
+      </div>
+      <div class="field">
+        <label>Запросы TOP (через запятую)</label>
+        <textarea id="edit-queries" class="form-control" rows="3" placeholder="пуховик, куртка, джинсы, кроссовки"></textarea>
+        <div class="help">Будут использоваться как запросы по умолчанию в расширении</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeEdit()">Отмена</button>
+      <button class="btn btn-primary" onclick="saveEdit()">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let allKeys = [];
+let editClientId = null;
+
+// ── Upload ──────────────────────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+}
+
+async function uploadFile(file) {
+  if (!file) return;
+  const prog = document.getElementById('import-progress');
+  const bar  = document.getElementById('import-bar');
+  const st   = document.getElementById('import-status');
+  const res  = document.getElementById('import-result');
+
+  prog.style.display = 'block'; res.style.display = 'none';
+  bar.style.width = '30%'; st.textContent = `Загружаем ${file.name}…`;
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    bar.style.width = '60%'; st.textContent = 'Обрабатываем…';
+    const r = await fetch('/api/admin/import/api-keys', { method: 'POST', body: fd });
+    const d = await r.json();
+
+    bar.style.width = '100%';
+    prog.style.display = 'none';
+    res.style.display = 'block';
+
+    if (d.ok) {
+      res.className = 'import-result import-ok';
+      res.innerHTML = `✅ Импорт завершён<br>
+        <strong>${d.updated}</strong> клиентов обновлено · 
+        <strong>${d.skipped}</strong> строк пропущено
+        ${d.errors.length ? `<br><span style="color:var(--yellow)">⚠ ${d.errors.length} ошибок: ${d.errors.slice(0,3).join('; ')}${d.errors.length>3?'…':''}</span>` : ''}`;
+      loadKeysList();
+    } else {
+      res.className = 'import-result import-err';
+      res.textContent = '❌ ' + (d.detail || d.error || 'Ошибка импорта');
+    }
+  } catch(e) {
+    prog.style.display = 'none';
+    res.style.display = 'block';
+    res.className = 'import-result import-err';
+    res.textContent = '❌ ' + e.message;
+  }
+}
+
+// ── Keys list ───────────────────────────────────────────────────────────────
+async function loadKeysList() {
+  document.getElementById('keys-card').style.display = 'block';
+  document.getElementById('keys-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const d = await fetch('/api/admin/clients/api-keys').then(r => r.json());
+  allKeys = d.clients || [];
+  renderKeys(allKeys);
+}
+
+function renderKeys(list) {
+  const el = document.getElementById('keys-list');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-text">Нет клиентов</div></div>';
+    return;
+  }
+  el.innerHTML = list.map(c => `
+    <div class="key-row" data-name="${c.name.toLowerCase()}" data-has="${c.has_api_key?'yes':'no'}">
+      <div style="font-family:var(--font-mono);font-size:.75rem;color:var(--text-muted)">${c.id}</div>
+      <div>
+        <div style="font-size:.83rem;font-weight:500">${c.name}</div>
+        <div style="font-size:.7rem;color:var(--text-muted)">${c.site_url||''}</div>
+      </div>
+      <div class="key-val">
+        <span id="kv-${c.id}">${c.has_api_key ? maskKey(c.api_key) : '<span style="color:var(--text-muted)">—</span>'}</span>
+        ${c.has_api_key ? `<button onclick="copyKey('${c.api_key}')" class="btn btn-ghost" style="padding:1px 4px;min-width:unset;font-size:.7rem" title="Копировать">⎘</button>` : ''}
+      </div>
+      <div><span class="badge badge-neutral" style="font-size:.65rem">${c.segment||'—'}</span></div>
+      <div><button class="btn btn-sm" style="padding:4px 10px;font-size:.72rem" onclick="openEdit(${c.id},'${c.name.replace(/'/g,"\\'")}','${c.api_key||''}','${c.site_url||''}')">✏️</button></div>
+    </div>
+  `).join('');
+}
+
+function maskKey(k) {
+  if (!k) return '—';
+  return k.slice(0,6) + '••••••••••••' + k.slice(-4);
+}
+
+function filterKeys(val) {
+  const search = document.getElementById('keys-search').value.toLowerCase();
+  const filter = document.getElementById('keys-filter').value;
+  const filtered = allKeys.filter(c => {
+    const nameMatch = c.name.toLowerCase().includes(search);
+    const hasMatch  = !filter || (filter === 'yes' ? c.has_api_key : !c.has_api_key);
+    return nameMatch && hasMatch;
+  });
+  renderKeys(filtered);
+}
+
+function copyKey(key) {
+  navigator.clipboard.writeText(key).then(() => showToast('API Key скопирован'));
+}
+
+// ── Edit ────────────────────────────────────────────────────────────────────
+function openEdit(id, name, key, url) {
+  editClientId = id;
+  document.getElementById('edit-title').textContent = `Редактировать: ${name}`;
+  document.getElementById('edit-key').value = key || '';
+  document.getElementById('edit-url').value = url || '';
+  document.getElementById('edit-queries').value = '';
+  document.getElementById('editModal').style.display = 'flex';
+}
+function closeEdit() { document.getElementById('editModal').style.display = 'none'; }
+
+async function saveEdit() {
+  const key     = document.getElementById('edit-key').value.trim();
+  const url     = document.getElementById('edit-url').value.trim();
+  const queries = document.getElementById('edit-queries').value.trim();
+
+  const body = {};
+  if (key) body.diginetica_api_key = key;
+  if (url) body.site_url = url;
+  if (queries) body.checkup_queries = { top: queries.split(',').map(q => q.trim()).filter(Boolean) };
+
+  const r = await fetch(`/api/admin/clients/${editClientId}/api-key`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (r.ok) { closeEdit(); loadKeysList(); showToast('Сохранено'); }
+  else { showToast('Ошибка сохранения'); }
+}
+
+// ── Reset ───────────────────────────────────────────────────────────────────
+async function resetData() {
+  const r = await fetch('/api/admin/reset-data', { method: 'POST' });
+  if (r.ok) location.reload();
+}
+
+// ── Toast ───────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast success'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+</script>
+{% endblock %}

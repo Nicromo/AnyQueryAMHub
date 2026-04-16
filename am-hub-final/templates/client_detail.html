@@ -258,6 +258,7 @@
     <button class="tab" onclick="showTab('notes',this)">📝 Заметки <span class="tab-badge" id="badge-notes">0</span></button>
     <button class="tab" onclick="showTab('timeline',this)">📜 История</button>
     <button class="tab" onclick="showTab('tickets',this)">🎫 Тикеты</button>
+    <button class="tab" onclick="showTab('checkup-config',this);loadCheckupConfig()">🔍 Чекап</button>
     <button class="tab" onclick="showTab('onboarding',this)">🚀 Онбординг</button>
   </div>
 
@@ -390,6 +391,13 @@
 
   <!-- ТИКЕТЫ Tbank Time -->
   <div id="tab-tickets" class="tab-content">
+
+  <div id="tab-checkup-config" class="tab-content">
+    <div id="checkup-config-wrap">
+      <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+    </div>
+  </div>
+
     <div id="tickets-list">
       <div style="text-align:center;padding:30px;color:var(--muted);font-size:.85rem;">
         ⏳ Загрузка тикетов...
@@ -803,6 +811,143 @@ async function updateNotesBadge() {
   } catch(e) {}
 }
 updateNotesBadge();
+
+async function loadCheckupConfig() {
+  const el = document.getElementById('checkup-config-wrap');
+  if (!el || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+
+  const clientId = {{ client.id }};
+  try {
+    const d = await fetch(`/api/clients/${clientId}/checkup-info`).then(r => r.json());
+    const isAdmin = d.is_admin;
+    const hasKey  = d.has_api_key;
+    const qs = d.checkup_queries || {};
+
+    el.innerHTML = `
+      <div class="section" style="margin-bottom:12px">
+        <h3>🔍 Diginetica Search API</h3>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+          <div style="font-size:.8rem;color:var(--text-dim)">API Key:</div>
+          ${hasKey ? `
+            <div style="display:flex;align-items:center;gap:6px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-family:var(--font-mono);font-size:.78rem;color:var(--accent);max-width:340px;overflow:hidden">
+              <span id="api-key-display" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.api_key_display}</span>
+              <button onclick="copyApiKey()" class="btn btn-ghost" style="padding:1px 5px;font-size:.7rem;min-width:unset" title="Копировать">⎘</button>
+            </div>
+            <span class="badge badge-accent">✅ Настроен</span>
+          ` : `
+            <span class="badge" style="background:var(--red-bg);color:var(--red);border:1px solid rgba(240,85,106,.2)">⚠ Не настроен</span>
+            ${isAdmin ? '' : '<span style="font-size:.76rem;color:var(--text-muted)">Обратитесь к администратору</span>'}
+          `}
+        </div>
+        ${isAdmin ? `
+          <div class="field-row">
+            <div class="field">
+              <label>API Key (только admin)</label>
+              <input type="text" id="admin-key-input" class="form-control"
+                     style="font-family:var(--font-mono);font-size:.8rem"
+                     value="${d.api_key_full || ''}"
+                     placeholder="Diginetica apiKey клиента">
+            </div>
+            <div class="field">
+              <label>URL сайта</label>
+              <input type="text" id="admin-url-input" class="form-control"
+                     value="${d.site_url || ''}" placeholder="https://client.ru">
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="saveApiKey(${clientId})">💾 Сохранить</button>
+          <span id="save-key-result" style="font-size:.78rem;margin-left:8px"></span>
+        ` : ''}
+      </div>
+
+      <div class="section" style="margin-bottom:12px">
+        <h3>📋 Запросы для чекапа</h3>
+        ${Object.keys(qs).length ? `
+          ${Object.entries(qs).map(([type, queries]) => `
+            <div style="margin-bottom:10px">
+              <div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:5px">${type}</div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                ${Array.isArray(queries) ? queries.map(q => `<span class="badge badge-neutral" style="font-size:.7rem">${q}</span>`).join('') : ''}
+              </div>
+            </div>
+          `).join('')}
+        ` : `<div class="empty" style="padding:20px 0"><div class="empty-text">Запросы не настроены — добавьте в <a href="/admin" style="color:var(--accent)">Администраторе</a> или загрузите Excel</div></div>`}
+      </div>
+
+      <div class="section">
+        <h3>📊 История чекапов</h3>
+        <div id="checkup-history-list">
+          <div style="font-size:.78rem;color:var(--text-muted)">Загрузка...</div>
+        </div>
+      </div>
+    `;
+
+    // Сохраняем api_key_full для копирования
+    window._checkup_api_key = d.api_key_full || d.api_key_display || '';
+
+    // Загружаем историю чекапов
+    loadCheckupHistory(clientId);
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">❌</div><div class="empty-text">${e.message}</div></div>`;
+  }
+}
+
+function copyApiKey() {
+  const key = window._checkup_api_key || document.getElementById('api-key-display')?.textContent || '';
+  navigator.clipboard.writeText(key).then(() => {
+    const t = document.createElement('div');
+    t.className = 'toast success'; t.textContent = 'API Key скопирован';
+    document.body.appendChild(t); setTimeout(() => t.remove(), 2500);
+  });
+}
+
+async function saveApiKey(clientId) {
+  const key = document.getElementById('admin-key-input')?.value.trim();
+  const url = document.getElementById('admin-url-input')?.value.trim();
+  const el  = document.getElementById('save-key-result');
+  el.style.color = 'var(--text-muted)'; el.textContent = '⏳';
+  const r = await fetch(`/api/admin/clients/${clientId}/api-key`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({diginetica_api_key: key, site_url: url})
+  });
+  if (r.ok) {
+    el.style.color = 'var(--green)'; el.textContent = '✅ Сохранено';
+    window._checkup_api_key = key;
+  } else {
+    el.style.color = 'var(--red)'; el.textContent = '❌ Ошибка';
+  }
+}
+
+async function loadCheckupHistory(clientId) {
+  const el = document.getElementById('checkup-history-list');
+  if (!el) return;
+  try {
+    const d = await fetch(`/api/checkup/${clientId}/history?limit=5`).then(r => r.json());
+    const items = d.results || [];
+    if (!items.length) {
+      el.innerHTML = '<div class="empty" style="padding:16px 0"><div class="empty-text">Чекапов ещё не было. Запустите расширение!</div></div>';
+      return;
+    }
+    const qLabels = {top:'Топ',random:'Случайн.',zero:'Нулевые',zeroquery:'ZeroQ'};
+    el.innerHTML = items.map(r => {
+      const avg = r.avg_score != null ? r.avg_score.toFixed(2) : '—';
+      const col = r.avg_score == null ? 'var(--text-muted)'
+                : r.avg_score >= 2.5 ? 'var(--green)'
+                : r.avg_score >= 1.5 ? 'var(--yellow)' : 'var(--red)';
+      const dt = r.created_at ? new Date(r.created_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
+      return `<div class="task-row" onclick="window.location='/checkup/result/${r.id}'" style="cursor:pointer">
+        <div style="font-size:.82rem;color:var(--accent);font-weight:700;font-family:var(--font-mono)">${avg}</div>
+        <div style="flex:1;font-size:.81rem">${r.total_queries} запросов · ${qLabels[r.query_type]||r.query_type}${r.mode?' · '+r.mode:''}</div>
+        <div style="font-size:.71rem;color:var(--text-muted)">${dt}</div>
+        <span class="badge badge-neutral" style="font-size:.65rem">→</span>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="font-size:.76rem;color:var(--text-muted)">${e.message}</div>`;
+  }
+}
+
 </script>
 </body>
 </html>

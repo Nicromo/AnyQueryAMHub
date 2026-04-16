@@ -3198,6 +3198,242 @@ async def api_complete_onboarding(db: Session = Depends(get_db), auth_token: Opt
     return {"ok": True}
 
 
+
+# ============================================================================
+# ADMIN PANEL
+# ============================================================================
+
+def _require_admin(auth_token, db):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403, detail="Только для администраторов")
+    return user
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Панель администратора."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403, detail="Только для администраторов")
+
+    # Статистика
+    total_clients  = db.query(Client).count()
+    clients_with_key = db.query(Client).filter(
+        Client.integration_metadata.op("->>")('diginetica_api_key').isnot(None)
+    ).count()
+    total_users = db.query(User).count()
+    from models import CheckupResult
+    total_checkups = db.query(CheckupResult).count()
+
+    return templates.TemplateResponse("admin.html", {
+        "request": request, "user": user,
+        "stats": {
+            "total_clients": total_clients,
+            "clients_with_key": clients_with_key,
+            "total_users": total_users,
+            "total_checkups": total_checkups,
+        },
+    })
+
+
+@app.post("/api/admin/import/api-keys")
+async def api_admin_import_api_keys(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Импорт Diginetica API keys из Excel файла.
+    Формат: client_id | client_name | diginetica_api_key | site_url | checkup_queries_top
+    Доступно только администраторам.
+    """
+    _require_admin(auth_token, db)
+
+    if not file.filename.endswith((".xlsx", ".xls", ".csv")):
+        raise HTTPException(status_code=400, detail="Поддерживаются только .xlsx / .csv")
+
+    content = await file.read()
+
+    import io, pandas as pd
+    try:
+        if file.filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(content), dtype=str)
+        else:
+            df = pd.read_excel(io.BytesIO(content), dtype=str, skiprows=1)  # skiprows=1 пропускает описания
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка чтения файла: {e}")
+
+    df.columns = [c.strip().lower() for c in df.columns]
+    if "client_id" not in df.columns:
+        raise HTTPException(status_code=400, detail="Нет колонки client_id")
+
+    updated, skipped, errors = 0, 0, []
+    from sqlalchemy.orm.attributes import flag_modified
+
+    for _, row in df.iterrows():
+        raw_id = row.get("client_id", "")
+        if not raw_id or str(raw_id).strip() in ("", "nan", "None"):
+            skipped += 1
+            continue
+
+        try:
+            client_id = int(float(str(raw_id).strip()))
+        except ValueError:
+            errors.append(f"Неверный client_id: {raw_id!r}")
+            continue
+
+        client = db.query(Client).filter(Client.id == client_id).first()
+        if not client:
+            errors.append(f"Клиент #{client_id} не найден")
+            continue
+
+        meta = dict(client.integration_metadata or {})
+
+        api_key = str(row.get("diginetica_api_key", "") or "").strip()
+        if api_key and api_key != "nan":
+            meta["diginetica_api_key"] = api_key
+
+        site_url = str(row.get("site_url", "") or "").strip()
+        if site_url and site_url != "nan":
+            if not site_url.startswith("http"):
+                site_url = "https://" + site_url
+            meta["site_url"] = site_url
+
+        # Запросы для чекапа (top)
+        queries_raw = str(row.get("checkup_queries_top", "") or "").strip()
+        if queries_raw and queries_raw != "nan":
+            queries = [q.strip() for q in queries_raw.split(",") if q.strip()]
+            cq = meta.get("checkup_queries", {})
+            cq["top"] = queries
+            meta["checkup_queries"] = cq
+
+        client.integration_metadata = meta
+        flag_modified(client, "integration_metadata")
+        updated += 1
+
+    db.commit()
+    logger.info(f"Admin import API keys: updated={updated}, skipped={skipped}, errors={len(errors)}")
+    return {"ok": True, "updated": updated, "skipped": skipped, "errors": errors}
+
+
+@app.get("/api/admin/clients/api-keys")
+async def api_admin_list_api_keys(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Список всех клиентов с их API keys (только admin)."""
+    _require_admin(auth_token, db)
+    clients = db.query(Client).order_by(Client.name).all()
+    return {
+        "clients": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "segment": c.segment,
+                "has_api_key": bool((c.integration_metadata or {}).get("diginetica_api_key")),
+                "api_key": (c.integration_metadata or {}).get("diginetica_api_key", ""),
+                "site_url": c.domain or (c.integration_metadata or {}).get("site_url", ""),
+                "has_queries": bool((c.integration_metadata or {}).get("checkup_queries", {}).get("top")),
+            }
+            for c in clients
+        ]
+    }
+
+
+@app.patch("/api/admin/clients/{client_id}/api-key")
+async def api_admin_set_api_key(
+    client_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Установить/обновить API key конкретного клиента (только admin)."""
+    _require_admin(auth_token, db)
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    body = await request.json()
+    from sqlalchemy.orm.attributes import flag_modified
+    meta = dict(client.integration_metadata or {})
+
+    if "diginetica_api_key" in body:
+        meta["diginetica_api_key"] = body["diginetica_api_key"]
+    if "site_url" in body:
+        meta["site_url"] = body["site_url"]
+    if "checkup_queries" in body:
+        meta["checkup_queries"] = body["checkup_queries"]
+
+    client.integration_metadata = meta
+    flag_modified(client, "integration_metadata")
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/clients/{client_id}/checkup-info")
+async def api_client_checkup_info(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Публичная информация о checkup-конфиге клиента.
+    API key — только маска для менеджеров, полный — для admin.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    meta = client.integration_metadata or {}
+    api_key = meta.get("diginetica_api_key", "")
+
+    # Менеджер видит только маску: первые 4 и последние 4 символа
+    if user.role != "admin" and api_key:
+        masked = api_key[:4] + "••••••••••••••••••••" + api_key[-4:] if len(api_key) > 8 else "••••••••"
+        api_key_display = masked
+    else:
+        api_key_display = api_key
+
+    cq = meta.get("checkup_queries", {})
+    return {
+        "client_id": client_id,
+        "client_name": client.name,
+        "has_api_key": bool(meta.get("diginetica_api_key")),
+        "api_key_display": api_key_display,
+        "api_key_full": api_key if user.role == "admin" else None,
+        "site_url": client.domain or meta.get("site_url", ""),
+        "is_admin": user.role == "admin",
+        "checkup_queries": cq,
+        "queries_count": {k: len(v) for k, v in cq.items() if isinstance(v, list)},
+    }
+
 @app.post("/api/admin/reset-data")
 async def api_reset_data(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Удалить все тестовые данные (только для админа)."""
@@ -3679,6 +3915,24 @@ async def api_checkup_results_all(
         ]
     }
 
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Данные текущего пользователя (роль, имя)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
 
 @app.get("/api/auth/me/token")
 async def api_me_token(
