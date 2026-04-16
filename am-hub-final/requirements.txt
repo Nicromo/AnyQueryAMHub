@@ -19,6 +19,7 @@ bcrypt==4.1.1
 email-validator==2.1.0
 pandas==2.3.3
 reportlab==4.0.9
+weasyprint>=60.0
 sendgrid==6.11.0
 python-telegram-bot==20.6
 typer==0.12.3

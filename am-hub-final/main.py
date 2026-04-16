@@ -4965,3 +4965,171 @@ async def api_export_client_pdf(
     except Exception as e:
         logger.error(f"PDF export error: {e}")
         raise HTTPException(status_code=500, detail=f"PDF генерация не удалась: {e}")
+
+# ============================================================================
+# EXPORT: PDF отчёт по клиенту
+# ============================================================================
+
+@app.get("/api/clients/{client_id}/export/pdf")
+async def api_export_client_pdf(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Экспорт карточки клиента в PDF."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.created_at.desc()).limit(50).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(20).all()
+    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.updated_at.desc()).limit(10).all()
+    plan = db.query(AccountPlan).filter(AccountPlan.client_id == client_id).first()
+    qbr = db.query(QBR).filter(QBR.client_id == client_id).order_by(QBR.date.desc()).first()
+
+    now_str = datetime.now().strftime("%d.%m.%Y")
+    health_pct = int((client.health_score or 0) * 100)
+    health_color = "#22c55e" if health_pct >= 70 else ("#eab308" if health_pct >= 40 else "#ef4444")
+
+    # Задачи по статусам
+    task_rows = ""
+    for t in tasks:
+        status_colors = {"plan": "#64748b", "in_progress": "#6366f1", "review": "#eab308", "done": "#22c55e", "blocked": "#ef4444"}
+        color = status_colors.get(t.status or "plan", "#64748b")
+        due = t.due_date.strftime("%d.%m.%Y") if t.due_date else "—"
+        task_rows += f"""<tr>
+            <td>{t.title or ''}</td>
+            <td><span style="color:{color};font-weight:600;">{t.status or ''}</span></td>
+            <td>{t.priority or ''}</td>
+            <td>{t.team or '—'}</td>
+            <td>{due}</td>
+        </tr>"""
+
+    # Встречи
+    meeting_rows = ""
+    for m in meetings:
+        date_str = m.date.strftime("%d.%m.%Y %H:%M") if m.date else "—"
+        followup = "✅" if m.followup_status == "sent" else ("⏳" if m.followup_status == "pending" else "—")
+        meeting_rows += f"""<tr>
+            <td>{date_str}</td>
+            <td>{m.type or ''}</td>
+            <td>{m.title or ''}</td>
+            <td>{followup}</td>
+        </tr>"""
+
+    # Заметки
+    notes_html = ""
+    for n in notes:
+        pin = "📌 " if n.is_pinned else ""
+        date_str = n.updated_at.strftime("%d.%m.%Y") if n.updated_at else ""
+        notes_html += f'<div style="margin-bottom:8px;padding:8px 12px;background:#f8fafc;border-left:3px solid #e2e8f0;border-radius:4px;"><div style="font-size:12px;white-space:pre-wrap;">{pin}{n.content}</div><div style="font-size:10px;color:#94a3b8;margin-top:4px;">{date_str}</div></div>'
+
+    # Цели из плана
+    goals_html = ""
+    if plan and plan.quarterly_goals:
+        for g in (plan.quarterly_goals or [])[:5]:
+            if isinstance(g, dict):
+                goals_html += f'<li>{g.get("goal", str(g))}</li>'
+            else:
+                goals_html += f'<li>{g}</li>'
+
+    html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {{ margin: 20mm 15mm; }}
+  body {{ font-family: 'Arial', sans-serif; font-size: 12px; color: #1e293b; line-height: 1.5; }}
+  h1 {{ font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }}
+  h2 {{ font-size: 14px; font-weight: 600; color: #1e293b; margin: 20px 0 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }}
+  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #6366f1; }}
+  .meta {{ font-size: 11px; color: #64748b; margin-top: 4px; }}
+  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; background: #ede9fe; color: #6366f1; margin-right: 4px; }}
+  .health {{ font-size: 28px; font-weight: 800; color: {health_color}; }}
+  .health-label {{ font-size: 10px; color: #64748b; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }}
+  th {{ background: #f1f5f9; padding: 6px 8px; text-align: left; font-weight: 600; color: #475569; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }}
+  td {{ padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }}
+  tr:last-child td {{ border-bottom: none; }}
+  .footer {{ margin-top: 24px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #94a3b8; display: flex; justify-content: space-between; }}
+  .kpi-row {{ display: flex; gap: 16px; margin-bottom: 16px; }}
+  .kpi {{ flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; }}
+  .kpi-val {{ font-size: 20px; font-weight: 700; color: #0f172a; }}
+  .kpi-label {{ font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px; }}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>{client.name}</h1>
+    <div class="meta">
+      <span class="badge">{client.segment or '—'}</span>
+      Менеджер: {client.manager_email or '—'}
+      {'· Домен: ' + client.domain if client.domain else ''}
+    </div>
+  </div>
+  <div style="text-align:right;">
+    <div class="health">{health_pct}%</div>
+    <div class="health-label">Health Score</div>
+    <div style="font-size:10px;color:#94a3b8;margin-top:4px;">Отчёт от {now_str}</div>
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi-val">{sum(1 for t in tasks if t.status in ('plan','in_progress','blocked'))}</div>
+    <div class="kpi-label">Открытых задач</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val">{sum(1 for t in tasks if t.status == 'done')}</div>
+    <div class="kpi-label">Выполнено</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val">{len(meetings)}</div>
+    <div class="kpi-label">Встреч</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val">{client.last_meeting_date.strftime('%d.%m') if client.last_meeting_date else '—'}</div>
+    <div class="kpi-label">Последний контакт</div>
+  </div>
+</div>
+
+{'<h2>Цели на квартал</h2><ul>' + goals_html + '</ul>' if goals_html else ''}
+
+<h2>Задачи</h2>
+{'<table><thead><tr><th>Задача</th><th>Статус</th><th>Приоритет</th><th>Команда</th><th>Дедлайн</th></tr></thead><tbody>' + task_rows + '</tbody></table>' if task_rows else '<p style="color:#94a3b8;font-size:11px;">Задач нет</p>'}
+
+<h2>Встречи</h2>
+{'<table><thead><tr><th>Дата</th><th>Тип</th><th>Тема</th><th>Фолоуап</th></tr></thead><tbody>' + meeting_rows + '</tbody></table>' if meeting_rows else '<p style="color:#94a3b8;font-size:11px;">Встреч нет</p>'}
+
+{'<h2>Заметки</h2>' + notes_html if notes_html else ''}
+
+{'<h2>QBR · ' + (qbr.quarter or '') + '</h2><p>' + (qbr.summary or '') + '</p>' if qbr and qbr.summary else ''}
+
+<div class="footer">
+  <span>AM Hub · {client.name}</span>
+  <span>{now_str}</span>
+</div>
+</body>
+</html>"""
+
+    try:
+        import weasyprint
+        pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+        from fastapi.responses import Response
+        fname = f"{client.name.replace(' ', '_')}_{now_str.replace('.', '-')}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+    except Exception as e:
+        logger.error(f"PDF export error: {e}")
+        return {"error": str(e)}
