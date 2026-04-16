@@ -59,6 +59,44 @@
   <h1>🔄 Синхронизация</h1>
   <p class="sub">Подключите сервисы и загрузите данные</p>
 
+  <div class="section" style="border-color:rgba(234,179,8,.35);background:rgba(234,179,8,.04)">
+    <h3>⚠️ Прямое подключение к Merchrules недоступно</h3>
+    <p style="font-size:.83rem;color:var(--muted);margin-bottom:12px;line-height:1.6;">
+      Merchrules ограничивает доступ по IP-адресу. Railway-сервер AM Hub не в whitelist — запросы блокируются.<br>
+      <strong style="color:var(--text)">Решение:</strong> узнайте IP этого сервера ниже и попросите добавить его в разрешённые адреса Merchrules.
+    </p>
+    <button class="btn" style="background:#b45309" onclick="getOutboundIP()">🔍 Узнать IP сервера</button>
+    <div class="result" id="ipResult"></div>
+  </div>
+
+  <div class="section">
+    <h3>📂 Импорт из файла — клиенты и задачи</h3>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;line-height:1.6;">
+      Экспортируйте данные из Merchrules или Airtable в CSV/Excel и загрузите сюда.<br>
+      Колонки определяются автоматически по названию.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div>
+        <div class="field">
+          <label>📋 Клиенты (CSV / XLSX)</label>
+          <input type="file" id="clientsFile" accept=".csv,.xlsx,.xls" style="font-size:.8rem;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%">
+          <div class="help">Ожидаемые колонки: название, сегмент, менеджер, site_id</div>
+        </div>
+        <button class="btn" onclick="importClients()">⬆️ Загрузить клиентов</button>
+        <div class="result" id="clientsResult"></div>
+      </div>
+      <div>
+        <div class="field">
+          <label>✅ Задачи (CSV / XLSX)</label>
+          <input type="file" id="tasksFile" accept=".csv,.xlsx,.xls" style="font-size:.8rem;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%">
+          <div class="help">Ожидаемые колонки: название, клиент, статус, дедлайн, команда</div>
+        </div>
+        <button class="btn" onclick="importTasks()">⬆️ Загрузить задачи</button>
+        <div class="result" id="tasksResult"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="section">
     <h3>🗺️ Merchrules (Roadmap)</h3>
     <div class="field">
@@ -159,7 +197,54 @@ async function saveSheetsCreds(){
   }catch(e){}
 }
 
-async function saveTgCreds(){
+async function getOutboundIP(){
+  const el=document.getElementById('ipResult');
+  el.className='result ok';el.textContent='⏳ Определяем IP...';
+  try{
+    const r=await fetch('/api/diagnostics/outbound-ip');
+    const d=await r.json();
+    if(d.ip){
+      el.textContent='🌐 IP сервера: '+d.ip+'\n\nЭтот адрес нужно добавить в whitelist Merchrules.\nСкопируйте и передайте администратору Merchrules.';
+    } else {
+      el.className='result err';el.textContent='❌ '+(d.error||'Не удалось определить');
+    }
+  }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
+}
+
+async function importClients(){
+  const file=document.getElementById('clientsFile').files[0];
+  const el=document.getElementById('clientsResult');
+  if(!file){el.className='result err';el.textContent='❌ Выберите файл';el.style.display='block';return;}
+  el.className='result ok';el.textContent='⏳ Загружаем...';
+  const fd=new FormData();fd.append('file',file);
+  try{
+    const r=await fetch('/api/import/clients-csv',{method:'POST',body:fd});
+    const d=await r.json();
+    if(d.ok){
+      el.textContent='✅ Готово!\nСоздано: '+d.created+' | Обновлено: '+d.updated+' | Пропущено: '+d.skipped+'\nВсего строк: '+d.total_rows;
+    } else {
+      el.className='result err';el.textContent='❌ '+d.error;
+    }
+  }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
+}
+
+async function importTasks(){
+  const file=document.getElementById('tasksFile').files[0];
+  const el=document.getElementById('tasksResult');
+  if(!file){el.className='result err';el.textContent='❌ Выберите файл';el.style.display='block';return;}
+  el.className='result ok';el.textContent='⏳ Загружаем...';
+  const fd=new FormData();fd.append('file',file);
+  try{
+    const r=await fetch('/api/import/tasks-csv',{method:'POST',body:fd});
+    const d=await r.json();
+    if(d.ok){
+      el.textContent='✅ Готово!\nСоздано задач: '+d.created+' | Пропущено: '+d.skipped+'\nВсего строк: '+d.total_rows;
+    } else {
+      el.className='result err';el.textContent='❌ '+d.error;
+    }
+  }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
+}
+
   const token=document.getElementById('tg-token').value;
   const chat=document.getElementById('tg-chat').value;
   try{

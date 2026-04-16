@@ -2808,6 +2808,320 @@ async def api_calendar_events(start: str = "", end: str = "", db: Session = Depe
 
 
 # ============================================================================
+# DIAGNOSTICS & IMPORT
+# ============================================================================
+
+@app.get("/api/diagnostics/outbound-ip")
+async def api_outbound_ip(auth_token: Optional[str] = Cookie(None)):
+    """
+    Возвращает внешний IP Railway-сервера.
+    Этот IP нужно добавить в whitelist Merchrules.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Используем несколько сервисов для надёжности
+            for url in ["https://api.ipify.org?format=json", "https://ifconfig.me/ip"]:
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        text = resp.text.strip()
+                        ip = resp.json().get("ip", text) if "json" in url else text
+                        return {"ip": ip, "note": "Добавьте этот IP в whitelist Merchrules"}
+                except Exception:
+                    continue
+    except Exception as e:
+        return {"error": str(e)}
+    return {"error": "Не удалось определить IP"}
+
+
+@app.post("/api/import/clients-csv")
+async def api_import_clients_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Импорт клиентов из CSV/Excel файла.
+
+    Ожидаемые колонки (гибко — ищет по ключевым словам):
+      name / название / клиент
+      segment / сегмент
+      manager_email / менеджер
+      site_id / site_ids / merchrules_id
+      health_score
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    content = await file.read()
+    filename = file.filename or ""
+
+    # Парсим файл
+    try:
+        import pandas as pd, io
+        if filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            # Пробуем разные кодировки и разделители
+            for enc in ("utf-8", "cp1251", "latin-1"):
+                try:
+                    df = pd.read_csv(io.BytesIO(content), encoding=enc, sep=None, engine="python")
+                    break
+                except Exception:
+                    continue
+            else:
+                return {"error": "Не удалось прочитать файл. Поддерживаются CSV и XLSX."}
+    except Exception as e:
+        return {"error": f"Ошибка чтения файла: {e}"}
+
+    # Нормализуем названия колонок
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    def find_col(df, variants):
+        for v in variants:
+            for c in df.columns:
+                if v in c:
+                    return c
+        return None
+
+    col_name    = find_col(df, ["name", "название", "клиент", "company", "account"])
+    col_segment = find_col(df, ["segment", "сегмент", "тип"])
+    col_manager = find_col(df, ["manager", "менеджер", "email"])
+    col_site    = find_col(df, ["site_id", "site", "merchrules", "account_id"])
+    col_health  = find_col(df, ["health", "score", "хелс"])
+
+    if not col_name:
+        return {"error": f"Не найдена колонка с именем клиента. Колонки в файле: {list(df.columns)}"}
+
+    created = updated = skipped = 0
+    errors = []
+
+    for idx, row in df.iterrows():
+        name = str(row.get(col_name, "")).strip()
+        if not name or name.lower() in ("nan", "none", ""):
+            skipped += 1
+            continue
+
+        segment   = str(row.get(col_segment, "")).strip() if col_segment else ""
+        manager   = str(row.get(col_manager, "")).strip() if col_manager else user.email
+        site_id   = str(row.get(col_site, "")).strip() if col_site else ""
+        health    = None
+        if col_health:
+            try:
+                health = float(str(row.get(col_health, "")).replace(",", ".").replace("%", ""))
+                if health > 1:
+                    health = health / 100
+            except Exception:
+                pass
+
+        # Ищем существующего клиента
+        existing = None
+        if site_id and site_id not in ("nan", ""):
+            existing = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
+        if not existing:
+            existing = db.query(Client).filter(Client.name == name).first()
+
+        if existing:
+            # Обновляем только непустые поля
+            if segment and segment not in ("nan", ""):
+                existing.segment = segment
+            if manager and manager not in ("nan", "") and "@" in manager:
+                existing.manager_email = manager
+            if site_id and site_id not in ("nan", ""):
+                existing.merchrules_account_id = site_id
+            if health is not None:
+                existing.health_score = health
+            updated += 1
+        else:
+            c = Client(
+                name=name,
+                segment=segment if segment not in ("nan", "") else None,
+                manager_email=manager if "@" in manager else user.email,
+                merchrules_account_id=site_id if site_id not in ("nan", "") else None,
+                health_score=health,
+            )
+            db.add(c)
+            created += 1
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return {"error": f"Ошибка сохранения: {e}"}
+
+    return {
+        "ok": True,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "total_rows": len(df),
+        "columns_detected": {
+            "name": col_name, "segment": col_segment,
+            "manager": col_manager, "site_id": col_site,
+        }
+    }
+
+
+@app.post("/api/import/tasks-csv")
+async def api_import_tasks_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Импорт задач из CSV/Excel файла.
+
+    Ожидаемые колонки:
+      title / название / задача
+      client / клиент / account
+      status / статус
+      priority / приоритет
+      due_date / дедлайн / срок
+      team / команда
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    content = await file.read()
+    filename = file.filename or ""
+
+    try:
+        import pandas as pd, io
+        if filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            for enc in ("utf-8", "cp1251", "latin-1"):
+                try:
+                    df = pd.read_csv(io.BytesIO(content), encoding=enc, sep=None, engine="python")
+                    break
+                except Exception:
+                    continue
+            else:
+                return {"error": "Не удалось прочитать файл"}
+    except Exception as e:
+        return {"error": f"Ошибка чтения файла: {e}"}
+
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    def find_col(df, variants):
+        for v in variants:
+            for c in df.columns:
+                if v in c:
+                    return c
+        return None
+
+    col_title    = find_col(df, ["title", "название", "задача", "task", "name"])
+    col_client   = find_col(df, ["client", "клиент", "account", "аккаунт", "site"])
+    col_status   = find_col(df, ["status", "статус"])
+    col_priority = find_col(df, ["priority", "приоритет"])
+    col_due      = find_col(df, ["due", "дедлайн", "срок", "date"])
+    col_team     = find_col(df, ["team", "команда"])
+    col_mr_id    = find_col(df, ["merchrules_task", "task_id", "mr_id", "id"])
+
+    if not col_title:
+        return {"error": f"Не найдена колонка с названием задачи. Колонки: {list(df.columns)}"}
+
+    STATUS_MAP = {
+        "plan": "plan", "в работе": "in_progress", "in_progress": "in_progress",
+        "review": "review", "done": "done", "готово": "done",
+        "blocked": "blocked", "заблок": "blocked",
+    }
+
+    created = skipped = 0
+    # Кешируем клиентов для поиска
+    all_clients = {c.name.lower(): c for c in db.query(Client).all()}
+
+    for idx, row in df.iterrows():
+        title = str(row.get(col_title, "")).strip()
+        if not title or title.lower() in ("nan", "none", ""):
+            skipped += 1
+            continue
+
+        # Ищем клиента
+        client_id = None
+        if col_client:
+            client_name = str(row.get(col_client, "")).strip().lower()
+            if client_name and client_name not in ("nan", ""):
+                # Точное совпадение
+                c = all_clients.get(client_name)
+                if not c:
+                    # Частичное совпадение
+                    for cname, cobj in all_clients.items():
+                        if client_name in cname or cname in client_name:
+                            c = cobj
+                            break
+                if c:
+                    client_id = c.id
+
+        # Статус
+        raw_status = str(row.get(col_status, "plan")).strip().lower() if col_status else "plan"
+        status_val = STATUS_MAP.get(raw_status, "plan")
+
+        # Дедлайн
+        due_date = None
+        if col_due:
+            raw_due = str(row.get(col_due, "")).strip()
+            if raw_due and raw_due not in ("nan", ""):
+                for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y"):
+                    try:
+                        due_date = datetime.strptime(raw_due[:10], fmt)
+                        break
+                    except Exception:
+                        continue
+
+        # Проверяем дубль по merchrules_task_id
+        mr_id = str(row.get(col_mr_id, "")).strip() if col_mr_id else ""
+        if mr_id and mr_id not in ("nan", ""):
+            existing = db.query(Task).filter(Task.merchrules_task_id == mr_id).first()
+            if existing:
+                skipped += 1
+                continue
+
+        task = Task(
+            client_id=client_id,
+            title=title,
+            status=status_val,
+            priority=str(row.get(col_priority, "medium")).strip().lower() if col_priority else "medium",
+            due_date=due_date,
+            team=str(row.get(col_team, "")).strip() if col_team else None,
+            source="import",
+            merchrules_task_id=mr_id if mr_id not in ("nan", "") else None,
+        )
+        db.add(task)
+        created += 1
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return {"error": f"Ошибка сохранения: {e}"}
+
+    return {
+        "ok": True,
+        "created": created,
+        "skipped": skipped,
+        "total_rows": len(df),
+    }
+
+
+# ============================================================================
 # MEETING SLOTS
 # ============================================================================
 
