@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { width:320px; font-family:'Inter',-apple-system,sans-serif; background:#0f172a; color:#e2e8f0; padding:0; }
+    .header { background:#1e293b; padding:14px 16px; border-bottom:1px solid #1e2a3a; display:flex; align-items:center; gap:10px; }
+    .header h1 { font-size:.95rem; font-weight:700; }
+    .header .sub { font-size:.72rem; color:#64748b; margin-top:2px; }
+    .logo { width:28px; height:28px; background:#6366f1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+    .body { padding:14px 16px; }
+    .status-row { display:flex; align-items:center; gap:8px; margin-bottom:14px; padding:10px 12px; background:#1e293b; border-radius:10px; }
+    .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .dot.ok { background:#22c55e; }
+    .dot.error { background:#ef4444; }
+    .dot.running { background:#eab308; animation:pulse .8s infinite; }
+    .dot.idle { background:#64748b; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .status-text { font-size:.8rem; flex:1; }
+    .status-time { font-size:.7rem; color:#64748b; }
+    .section { margin-bottom:14px; }
+    .section label { font-size:.75rem; color:#64748b; display:block; margin-bottom:5px; font-weight:500; text-transform:uppercase; letter-spacing:.04em; }
+    input { width:100%; background:#1e293b; border:1px solid #1e2a3a; border-radius:8px; padding:8px 10px; color:#e2e8f0; font-size:.83rem; outline:none; }
+    input:focus { border-color:#6366f1; }
+    input::placeholder { color:#475569; }
+    .btn { width:100%; padding:9px; border-radius:8px; border:none; cursor:pointer; font-size:.85rem; font-weight:600; margin-top:4px; }
+    .btn-primary { background:#6366f1; color:#fff; }
+    .btn-primary:hover { background:#4f46e5; }
+    .btn-primary:disabled { opacity:.5; cursor:default; }
+    .btn-secondary { background:#1e293b; color:#e2e8f0; border:1px solid #1e2a3a; margin-top:6px; }
+    .btn-secondary:hover { border-color:#6366f1; color:#818cf8; }
+    .divider { height:1px; background:#1e2a3a; margin:12px 0; }
+    .error-box { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); border-radius:8px; padding:8px 10px; font-size:.75rem; color:#fca5a5; margin-top:8px; word-break:break-word; }
+    .result-box { background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.2); border-radius:8px; padding:8px 10px; font-size:.75rem; color:#86efac; margin-top:8px; }
+    .hint { font-size:.72rem; color:#475569; margin-top:5px; line-height:1.4; }
+  </style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">🎛</div>
+  <div>
+    <h1>AM Hub Sync</h1>
+    <div class="sub">Merchrules → AM Hub</div>
+  </div>
+</div>
+
+<div class="body">
+  <!-- Статус -->
+  <div class="status-row" id="statusRow">
+    <div class="dot idle" id="statusDot"></div>
+    <div class="status-text" id="statusText">Ожидание</div>
+    <div class="status-time" id="statusTime"></div>
+  </div>
+
+  <!-- Merchrules -->
+  <div class="section">
+    <label>Merchrules логин</label>
+    <input type="email" id="mrLogin" placeholder="manager@company.ru">
+  </div>
+  <div class="section">
+    <label>Merchrules пароль</label>
+    <input type="password" id="mrPass" placeholder="••••••••">
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- AM Hub -->
+  <div class="section">
+    <label>AM Hub URL</label>
+    <input type="url" id="hubUrl" placeholder="https://your-hub.railway.app">
+  </div>
+  <div class="section">
+    <label>AM Hub токен</label>
+    <input type="password" id="hubToken" placeholder="Токен из настроек AM Hub">
+    <div class="hint">Настройки → Персональный токен</div>
+  </div>
+
+  <button class="btn btn-primary" id="saveBtn" onclick="save()">💾 Сохранить настройки</button>
+  <button class="btn btn-secondary" id="syncBtn" onclick="syncNow()">🔄 Синхронизировать сейчас</button>
+
+  <div id="errorBox" class="error-box" style="display:none"></div>
+  <div id="resultBox" class="result-box" style="display:none"></div>
+</div>
+
+<script>
+async function loadSettings() {
+  const s = await chrome.storage.local.get(["mr_login", "mr_password", "hub_url", "hub_token"]);
+  if (s.mr_login) document.getElementById("mrLogin").value = s.mr_login;
+  if (s.mr_password) document.getElementById("mrPass").value = s.mr_password;
+  if (s.hub_url) document.getElementById("hubUrl").value = s.hub_url;
+  if (s.hub_token) document.getElementById("hubToken").value = s.hub_token;
+}
+
+async function loadStatus() {
+  chrome.runtime.sendMessage({ action: "getStatus" }, res => {
+    if (!res) return;
+    const dot = document.getElementById("statusDot");
+    const text = document.getElementById("statusText");
+    const time = document.getElementById("statusTime");
+    const err = document.getElementById("errorBox");
+    const result = document.getElementById("resultBox");
+
+    dot.className = `dot ${res.status}`;
+    time.textContent = res.last_sync ? `последний: ${res.last_sync}` : "";
+
+    if (res.status === "ok") {
+      text.textContent = "Синхронизировано";
+      err.style.display = "none";
+      if (res.last_result) {
+        result.style.display = "block";
+        result.textContent = `✅ ${res.last_result.clients_synced || 0} клиентов, ${res.last_result.tasks_synced || 0} задач`;
+      }
+    } else if (res.status === "error") {
+      text.textContent = "Ошибка синхронизации";
+      err.style.display = "block";
+      err.textContent = res.error || "Неизвестная ошибка";
+      result.style.display = "none";
+    } else if (res.status === "running") {
+      text.textContent = "Синхронизация...";
+    } else {
+      text.textContent = "Ожидание (авто каждые 30 мин)";
+    }
+  });
+}
+
+async function save() {
+  const login = document.getElementById("mrLogin").value.trim();
+  const pass = document.getElementById("mrPass").value;
+  const url = document.getElementById("hubUrl").value.trim().replace(/\/$/, "");
+  const token = document.getElementById("hubToken").value.trim();
+
+  if (!login || !pass || !url || !token) {
+    showError("Заполните все поля");
+    return;
+  }
+
+  await chrome.storage.local.set({
+    mr_login: login,
+    mr_password: pass,
+    hub_url: url,
+    hub_token: token,
+  });
+
+  document.getElementById("errorBox").style.display = "none";
+  document.getElementById("resultBox").style.display = "block";
+  document.getElementById("resultBox").textContent = "✅ Настройки сохранены";
+  setTimeout(() => document.getElementById("resultBox").style.display = "none", 2000);
+}
+
+async function syncNow() {
+  const btn = document.getElementById("syncBtn");
+  btn.disabled = true;
+  btn.textContent = "⏳ Синхронизация...";
+  document.getElementById("errorBox").style.display = "none";
+  document.getElementById("resultBox").style.display = "none";
+
+  chrome.runtime.sendMessage({ action: "sync" }, res => {
+    btn.disabled = false;
+    btn.textContent = "🔄 Синхронизировать сейчас";
+    loadStatus();
+  });
+}
+
+function showError(msg) {
+  const box = document.getElementById("errorBox");
+  box.textContent = msg;
+  box.style.display = "block";
+}
+
+loadSettings();
+loadStatus();
+setInterval(loadStatus, 3000);
+</script>
+</body>
+</html>

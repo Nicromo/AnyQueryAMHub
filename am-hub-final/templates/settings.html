@@ -252,9 +252,70 @@
       <span class="saved-msg" id="saved-notifs">✅ Сохранено</span>
     </div>
   </div>
+
+  <!-- Chrome Extension -->
+  <div class="section">
+    <h3>🔌 Chrome-расширение AM Hub Sync</h3>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;line-height:1.5;">
+      Расширение синхронизирует данные из Merchrules в AM Hub прямо из браузера — каждые 30 минут автоматически.
+      Установите его на каждом компьютере менеджера.
+    </p>
+    <div class="field">
+      <label>Ваш токен для расширения</label>
+      <div style="display:flex;gap:8px;">
+        <input type="password" id="ext-token" placeholder="Нажмите кнопку чтобы получить токен" readonly style="flex:1;font-family:monospace;font-size:.8rem;">
+        <button class="btn" onclick="getToken()" style="white-space:nowrap;">👁 Показать</button>
+        <button class="btn" onclick="copyToken()" style="white-space:nowrap;">📋 Копировать</button>
+      </div>
+      <div class="help">Вставьте этот токен в настройки расширения вместе с URL хаба</div>
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label>URL этого AM Hub</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="hub-url-display" value="{{ request.base_url }}" readonly style="flex:1;font-family:monospace;font-size:.8rem;">
+        <button class="btn" onclick="copyHubUrl()" style="white-space:nowrap;">📋 Копировать</button>
+      </div>
+    </div>
+    <div style="margin-top:14px;padding:12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:10px;font-size:.8rem;line-height:1.7;">
+      <b>Инструкция установки:</b><br>
+      1. Скачайте расширение: <a href="/static/extension/amhub-sync.zip" download>amhub-sync.zip</a><br>
+      2. Откройте Chrome → <code>chrome://extensions</code><br>
+      3. Включите «Режим разработчика» (правый верхний угол)<br>
+      4. Нажмите «Загрузить распакованное» → выберите папку расширения<br>
+      5. Кликните иконку расширения → вставьте URL хаба и токен → сохраните
+    </div>
+    <span class="saved-msg" id="saved-ext" style="display:none;">✅ Скопировано</span>
+  </div>
 </div>
 
 <script>
+async function getToken() {
+  try {
+    const r = await fetch('/api/auth/token');
+    const d = await r.json();
+    const inp = document.getElementById('ext-token');
+    inp.value = d.token;
+    inp.type = 'text';
+  } catch(e) { alert('Ошибка: ' + e.message); }
+}
+
+async function copyToken() {
+  const inp = document.getElementById('ext-token');
+  if (!inp.value) await getToken();
+  await navigator.clipboard.writeText(inp.value);
+  const msg = document.getElementById('saved-ext');
+  msg.style.display = 'inline';
+  setTimeout(() => msg.style.display = 'none', 2000);
+}
+
+function copyHubUrl() {
+  const val = document.getElementById('hub-url-display').value.replace(/\/$/, '');
+  navigator.clipboard.writeText(val);
+  const msg = document.getElementById('saved-ext');
+  msg.style.display = 'inline';
+  setTimeout(() => msg.style.display = 'none', 2000);
+}
+
 function toggleTheme(){
   const h=document.documentElement;
   const t=h.getAttribute('data-theme')==='light'?'dark':'light';

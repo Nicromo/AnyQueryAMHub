@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from fastapi import (
     FastAPI, Request, Depends, HTTPException, Query, Cookie,
-    Form, status
+    Form, status, UploadFile, File
 )
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1036,6 +1036,173 @@ async def api_ktalk_followup(
 # ============================================================================
 # API: MERCHRULES SYNC
 # ============================================================================
+
+@app.post("/api/sync/extension")
+async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
+    """
+    Приём данных синхронизации от Chrome-расширения AM Hub Sync.
+    Авторизация через Bearer токен (JWT) в заголовке Authorization.
+    """
+    # Авторизация через Bearer header (расширение не использует cookie)
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Bearer token required")
+
+    from auth import decode_access_token
+    payload_jwt = decode_access_token(token)
+    if not payload_jwt:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = db.query(User).filter(User.id == int(payload_jwt.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    data = await request.json()
+    accounts = data.get("accounts", [])
+
+    if not accounts:
+        return {"ok": False, "error": "No accounts in payload"}
+
+    clients_synced = 0
+    tasks_synced = 0
+    meetings_synced = 0
+
+    for acc in accounts:
+        site_id = str(acc.get("id", "")).strip()
+        if not site_id:
+            continue
+
+        # Найти или создать клиента
+        client = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
+        if not client:
+            client = Client(
+                merchrules_account_id=site_id,
+                name=acc.get("name") or f"Site {site_id}",
+                manager_email=user.email,
+                segment=acc.get("segment") or "SMB",
+                domain=acc.get("domain"),
+            )
+            db.add(client)
+            db.flush()
+        else:
+            # Обновляем имя и сегмент если пришли
+            if acc.get("name"):
+                client.name = acc["name"]
+            if acc.get("segment"):
+                client.segment = acc["segment"]
+            if acc.get("domain"):
+                client.domain = acc["domain"]
+            if acc.get("health_score") is not None:
+                client.health_score = float(acc["health_score"])
+
+        # Гарантируем привязку к менеджеру
+        if not client.manager_email:
+            client.manager_email = user.email
+
+        clients_synced += 1
+
+        # Задачи
+        for t in acc.get("tasks", []):
+            mr_task_id = str(t.get("id", "")).strip()
+            if not mr_task_id:
+                continue
+            existing = db.query(Task).filter(Task.merchrules_task_id == mr_task_id).first()
+            if existing:
+                # Обновляем статус
+                existing.status = t.get("status", existing.status)
+                existing.priority = t.get("priority", existing.priority)
+            else:
+                due = None
+                if t.get("due_date"):
+                    try:
+                        due = datetime.fromisoformat(str(t["due_date"])[:19])
+                    except Exception:
+                        pass
+                db.add(Task(
+                    client_id=client.id,
+                    merchrules_task_id=mr_task_id,
+                    title=t.get("title") or "",
+                    status=t.get("status") or "plan",
+                    priority=t.get("priority") or "medium",
+                    source="roadmap",
+                    due_date=due,
+                    team=t.get("team"),
+                    task_type=t.get("task_type"),
+                ))
+                tasks_synced += 1
+
+        # Встречи
+        for m in acc.get("meetings", []):
+            mr_meeting_id = str(m.get("id", "")).strip()
+            if not mr_meeting_id:
+                continue
+            ext_id = f"mr_{mr_meeting_id}"
+            existing = db.query(Meeting).filter(Meeting.external_id == ext_id).first()
+            if not existing:
+                meeting_date = None
+                raw_date = m.get("date")
+                if raw_date:
+                    try:
+                        meeting_date = datetime.fromisoformat(str(raw_date)[:19])
+                    except Exception:
+                        pass
+                if meeting_date:
+                    db.add(Meeting(
+                        client_id=client.id,
+                        date=meeting_date,
+                        type=m.get("type") or "meeting",
+                        title=m.get("title"),
+                        summary=m.get("summary"),
+                        source="merchrules",
+                        external_id=ext_id,
+                        followup_status="pending",
+                    ))
+                    meetings_synced += 1
+                    # Обновляем last_meeting_date на клиенте
+                    if not client.last_meeting_date or meeting_date > client.last_meeting_date:
+                        client.last_meeting_date = meeting_date
+
+        # Метрики
+        metrics = acc.get("metrics")
+        if metrics and isinstance(metrics, dict):
+            hs = metrics.get("health_score") or metrics.get("healthScore")
+            if hs is not None:
+                client.health_score = float(hs)
+
+    db.commit()
+
+    # Логируем
+    db.add(SyncLog(
+        integration="extension",
+        resource_type="accounts",
+        action="push",
+        status="success",
+        records_processed=clients_synced,
+        sync_data={"tasks": tasks_synced, "meetings": meetings_synced},
+    ))
+    db.commit()
+
+    logger.info(f"Extension sync: {clients_synced} clients, {tasks_synced} tasks, {meetings_synced} meetings (user={user.email})")
+    return {
+        "ok": True,
+        "clients_synced": clients_synced,
+        "tasks_synced": tasks_synced,
+        "meetings_synced": meetings_synced,
+    }
+
+
+@app.get("/api/auth/token")
+async def api_get_token(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Вернуть JWT токен текущего пользователя — для настройки расширения."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload_jwt = decode_access_token(auth_token)
+    if not payload_jwt:
+        raise HTTPException(status_code=401)
+    return {"token": auth_token}
+
 
 @app.post("/api/sync/merchrules")
 async def api_sync_merchrules(
