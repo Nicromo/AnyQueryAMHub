@@ -54,7 +54,7 @@ async def send_telegram(chat_id: int, text: str) -> bool:
 
 async def job_sync_airtable_clients():
     """Каждый час: синхронизировать клиентов из Airtable."""
-    token = os.environ.get("AIRTABLE_PAT", "")
+    token = os.environ.get("AIRTABLE_TOKEN") or os.environ.get("AIRTABLE_TOKEN") or os.environ.get("AIRTABLE_PAT", "")
     if not token:
         return  # Skip if no credentials
     logger.info("🔄 Syncing Airtable clients...")
@@ -465,7 +465,7 @@ def start_scheduler():
     sched = _get_scheduler()
 
     # Hourly sync — only if credentials are set
-    if os.environ.get("AIRTABLE_PAT"):
+    if (os.environ.get("AIRTABLE_TOKEN") or os.environ.get("AIRTABLE_PAT")):
         sched.add_job(job_sync_airtable_clients, "interval", hours=1,
                       id="sync_airtable", name="Sync Airtable Clients", replace_existing=True)
 

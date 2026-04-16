@@ -13,11 +13,19 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+import re as _re
+
+def _extract_sheets_id(val: str) -> str:
+    if not val:
+        return ""
+    m = _re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", val)
+    return m.group(1) if m else val
+
 # Настройки по умолчанию
-SHEETS_SPREADSHEET_ID = os.getenv(
+SHEETS_SPREADSHEET_ID = _extract_sheets_id(os.getenv(
     "SHEETS_SPREADSHEET_ID",
     "1baqs2xGFZNxCuAwTfuDiE52KXIaLaKtuZzcSN4lce3M",
-)
+))
 SHEETS_TOP50_GID = os.getenv("SHEETS_TOP50_GID", "374545260")
 
 # Список клиентов из БД — для фильтрации строк таблицы.

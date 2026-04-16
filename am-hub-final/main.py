@@ -59,11 +59,24 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
+def _extract_sheets_id(val: str) -> str:
+    """Вырезает spreadsheet ID из полного URL или возвращает как есть."""
+    if not val:
+        return ""
+    # https://docs.google.com/spreadsheets/d/ID/edit...
+    import re
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", val)
+    if m:
+        return m.group(1)
+    return val
+
+
 class Env:
     """Централизованный доступ к переменным окружения."""
     # Merchrules
     MR_LOGIN      = property(lambda self: _env("MERCHRULES_LOGIN"))
     MR_PASSWORD   = property(lambda self: _env("MERCHRULES_PASSWORD"))
+    MR_URL        = property(lambda self: _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"))
     MR_ACTIVE     = property(lambda self: bool(_env("MERCHRULES_LOGIN") and _env("MERCHRULES_PASSWORD")))
     # AI
     GROQ_KEY      = property(lambda self: _env("GROQ_API_KEY") or _env("API_GROQ"))
@@ -72,7 +85,25 @@ class Env:
     AI_TYPE       = property(lambda self: "qwen" if _env("QWEN_API_KEY") else ("groq" if (_env("GROQ_API_KEY") or _env("API_GROQ")) else ""))
     # Telegram
     TG_TOKEN      = property(lambda self: _env("TG_BOT_TOKEN") or _env("TELEGRAM_BOT_TOKEN"))
-    TG_ACTIVE     = property(lambda self: bool(_env("TG_BOT_TOKEN")))
+    TG_CHAT_ID    = property(lambda self: _env("TG_NOTIFY_CHAT_ID") or _env("TELEGRAM_CHAT_ID"))
+    TG_ACTIVE     = property(lambda self: bool(_env("TG_BOT_TOKEN") or _env("TELEGRAM_BOT_TOKEN")))
+    # Airtable — поддерживаем оба имени: AIRTABLE_TOKEN и AIRTABLE_PAT
+    AIRTABLE_PAT  = property(lambda self: _env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT"))
+    AIRTABLE_BASE = property(lambda self: _env("AIRTABLE_BASE_ID"))
+    AIRTABLE_TABLE = property(lambda self: _env("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn"))
+    AIRTABLE_QBR_TABLE = property(lambda self: _env("AIRTABLE_QBR_TABLE_ID", "tblqQbChhRYoZoxWu"))
+    AIRTABLE_ACTIVE = property(lambda self: bool(_env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT")))
+    # Google Sheets — вырезаем ID из полного URL если передан
+    SHEETS_ID     = property(lambda self: _extract_sheets_id(_env("SHEETS_SPREADSHEET_ID")))
+    SHEETS_ACTIVE = property(lambda self: bool(_env("SHEETS_SPREADSHEET_ID")))
+    # Ktalk
+    KTALK_SPACE   = property(lambda self: _env("KTALK_SPACE"))
+    KTALK_TOKEN   = property(lambda self: _env("KTALK_API_TOKEN"))
+    KTALK_WEBHOOK = property(lambda self: _env("KTALK_WEBHOOK_URL"))
+    KTALK_ACTIVE  = property(lambda self: bool(_env("KTALK_SPACE") and _env("KTALK_API_TOKEN")))
+    # Tbank Time
+    TIME_TOKEN    = property(lambda self: _env("TIME_API_TOKEN") or _env("TIME_SESSION_COOKIE"))
+    TIME_ACTIVE   = property(lambda self: bool(_env("TIME_API_TOKEN") or _env("TIME_SESSION_COOKIE")))
     # Ktalk
     KTALK_SPACE   = property(lambda self: _env("KTALK_SPACE"))
     KTALK_TOKEN   = property(lambda self: _env("KTALK_API_TOKEN"))
@@ -1241,10 +1272,11 @@ async def api_sync_merchrules(
 
     # Пробуем авторизацию — все URL + все варианты поля логина
     import httpx
-    urls_to_try = [
-        "https://merchrules-qa.any-platform.ru",
+    urls_to_try = list(dict.fromkeys([
+        _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
         "https://merchrules.any-platform.ru",
-    ]
+        "https://merchrules-qa.any-platform.ru",
+    ]))
     login_fields = ["email", "login", "username"]
     base_url = None
     token = None
@@ -2941,10 +2973,11 @@ async def api_diag_merchrules_auth(
 
     import httpx
     results = []
-    urls = [
+    urls = list(dict.fromkeys([
+        os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
         "https://merchrules.any-platform.ru",
         "https://merchrules-qa.any-platform.ru",
-    ]
+    ]))
     fields = ["email", "login", "username"]
 
     async with httpx.AsyncClient(timeout=15) as hx:
