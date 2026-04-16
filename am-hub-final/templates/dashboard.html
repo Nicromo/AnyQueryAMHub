@@ -158,6 +158,7 @@
   </style>
 
   <!-- Action Cards -->
+  <div id="sync-status-bar" style="display:none;align-items:center;flex-wrap:wrap;padding:6px 0;margin-bottom:12px;"></div>
   <div id="action-cards" style="margin-bottom:24px;">
     <div class="section-title" style="margin-bottom:10px;">⚡ Действия</div>
     <div id="actions-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;"></div>
@@ -257,6 +258,31 @@ new Chart(document.getElementById('stChart'),{type:'doughnut',data:{labels:['З�
 {% endif %}
 function filterSeg(seg){document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=(!seg||tr.dataset.seg===seg)?'':'none';});}
 function filterTbl(q){q=q.toLowerCase();document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+
+// Статус синка
+async function loadSyncStatus() {
+  try {
+    const r = await fetch('/api/sync/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    const bar = document.getElementById('sync-status-bar');
+    if (!bar) return;
+    const parts = [];
+    const icons = {merchrules: '🗺️', airtable: '📊', meetings_slots: '📅', system: '⚙️'};
+    const labels = {merchrules: 'Merchrules', airtable: 'Airtable', meetings_slots: 'Слоты', system: 'Система'};
+    for (const [key, val] of Object.entries(d)) {
+      if (!val) continue;
+      const ok = val.status === 'success';
+      parts.push('<span style="font-size:.72rem;color:' + (ok ? 'var(--green)' : 'var(--red)') + ';margin-right:12px;">' +
+        (icons[key]||'🔄') + ' ' + (labels[key]||key) + ': ' + (val.ago || '—') + '</span>');
+    }
+    if (parts.length) {
+      bar.innerHTML = '<span style="font-size:.72rem;color:var(--muted);margin-right:8px;">Синк:</span>' + parts.join('');
+      bar.style.display = 'flex';
+    }
+  } catch(e) {}
+}
+loadSyncStatus();
 
 // Load action cards
 async function loadActions(){

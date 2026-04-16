@@ -1821,6 +1821,44 @@ async def api_generate_followup(request: Request, db: Session = Depends(get_db),
         return {"error": str(e)}
 
 
+@app.post("/api/ai/generate-prep")
+async def api_generate_prep(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Перегенерация AI-подготовки к встрече (вызывается по кнопке на prep-странице)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    client_id = data.get("client_id")
+    meeting_type = data.get("meeting_type", "meeting")
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        return {"error": "Клиент не найден"}
+    tasks = db.query(Task).filter(
+        Task.client_id == client_id,
+        Task.status.in_(["plan", "in_progress", "blocked"]),
+    ).all()
+    meetings = db.query(Meeting).filter(
+        Meeting.client_id == client_id,
+    ).order_by(Meeting.date.desc()).limit(5).all()
+    try:
+        text = generate_prep_brief(client, tasks, meetings)
+        # Добавляем контекст типа встречи
+        type_hints = {
+            "checkup": "\n\n📋 Тип встречи: ЧЕКАП — фокус на прогрессе по задачам и здоровье аккаунта.",
+            "qbr": "\n\n📊 Тип встречи: QBR — квартальный обзор, нужна аналитика и достижения.",
+            "onboarding": "\n\n🚀 Тип встречи: ОНБОРДИНГ — первые шаги, знакомство с продуктом.",
+            "upsell": "\n\n📈 Тип встречи: АПСЕЙЛ — выявление возможностей для расширения.",
+            "sync": "\n\n🔄 Тип встречи: СИНК — текущий статус и оперативные вопросы.",
+        }
+        text += type_hints.get(meeting_type, "")
+        return {"text": text}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ============================================================================
 # SETTINGS
 # ============================================================================
@@ -1939,6 +1977,95 @@ async def root(request: Request, auth_token: Optional[str] = Cookie(None)):
         if payload:
             return RedirectResponse(url="/dashboard", status_code=303)
     return RedirectResponse(url="/login", status_code=303)
+
+
+# ============================================================================
+# WORKFLOW: MEETINGS CRUD
+# ============================================================================
+
+@app.post("/api/meetings")
+async def api_create_meeting(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Создать встречу вручную."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    client_id = data.get("client_id")
+    title = data.get("title", "").strip()
+    meeting_type = data.get("type", "meeting")
+    date_str = data.get("date")
+    notes = data.get("notes", "")
+
+    if not client_id:
+        return {"error": "client_id обязателен"}
+
+    meeting_date = None
+    if date_str:
+        try:
+            meeting_date = datetime.fromisoformat(date_str.replace("Z", ""))
+        except Exception:
+            return {"error": f"Неверный формат даты: {date_str}"}
+
+    meeting = Meeting(
+        client_id=int(client_id),
+        title=title or meeting_type,
+        type=meeting_type,
+        date=meeting_date or datetime.now(),
+        source="manual",
+        followup_status="pending",
+        summary=notes or None,
+    )
+    db.add(meeting)
+    db.flush()
+
+    # Обновляем last_meeting_date у клиента
+    client = db.query(Client).filter(Client.id == int(client_id)).first()
+    if client and meeting_date:
+        if not client.last_meeting_date or meeting_date > client.last_meeting_date:
+            client.last_meeting_date = meeting_date
+
+    # Создаём слоты prep/followup
+    try:
+        from meeting_slots import create_slots_for_meeting
+        create_slots_for_meeting(db, meeting)
+    except Exception as e:
+        logger.warning(f"Slots creation failed: {e}")
+
+    db.commit()
+    return {"ok": True, "meeting_id": meeting.id, "message": f"Встреча «{meeting.title}» создана"}
+
+
+@app.delete("/api/meetings/{meeting_id}")
+async def api_delete_meeting(
+    meeting_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Удалить встречу."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404)
+    db.delete(meeting)
+    db.commit()
+    return {"ok": True}
 
 
 # ============================================================================
@@ -3253,6 +3380,69 @@ async def api_change_password(request: Request, db: Session = Depends(get_db), a
     user.hashed_password = hash_password(new_pw)
     db.commit()
     return {"ok": True}
+
+
+
+# ============================================================================
+# SYNC STATUS
+# ============================================================================
+
+@app.get("/api/sync/status")
+async def api_sync_status(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Статус последней синхронизации по каждой интеграции."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    integrations = ["merchrules", "airtable", "meetings_slots", "system"]
+    result = {}
+    now = datetime.now()
+
+    for integration in integrations:
+        last = db.query(SyncLog).filter(
+            SyncLog.integration == integration,
+        ).order_by(SyncLog.started_at.desc()).first()
+
+        if last:
+            ago_sec = int((now - last.started_at).total_seconds()) if last.started_at else None
+            if ago_sec is not None:
+                if ago_sec < 60:
+                    ago_str = "только что"
+                elif ago_sec < 3600:
+                    ago_str = f"{ago_sec // 60} мин назад"
+                elif ago_sec < 86400:
+                    ago_str = f"{ago_sec // 3600} ч назад"
+                else:
+                    ago_str = f"{ago_sec // 86400} дн назад"
+            else:
+                ago_str = "—"
+
+            result[integration] = {
+                "status": last.status,
+                "records": last.records_processed,
+                "ago": ago_str,
+                "at": last.started_at.strftime("%d.%m %H:%M") if last.started_at else "—",
+                "error": last.message if last.status == "error" else None,
+            }
+        else:
+            result[integration] = {"status": "never", "ago": "никогда", "records": 0}
+
+    # Кол-во клиентов текущего менеджера
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients_count = q.count()
+
+    return {"integrations": result, "clients_total": clients_count}
 
 
 # ============================================================================
@@ -4620,3 +4810,158 @@ async def api_clients_list(
         "merchrules_account_id": c.merchrules_account_id,
         "last_meeting_date": c.last_meeting_date.isoformat() if c.last_meeting_date else None,
     } for c in clients]}
+
+
+# ============================================================================
+# EXPORT: PDF REPORT
+# ============================================================================
+
+@app.get("/api/clients/{client_id}/export/pdf")
+async def api_export_client_pdf(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Экспорт отчёта по клиенту в PDF."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    tasks = db.query(Task).filter(Task.client_id == client_id).order_by(Task.created_at.desc()).limit(30).all()
+    meetings = db.query(Meeting).filter(Meeting.client_id == client_id).order_by(Meeting.date.desc()).limit(10).all()
+    notes = db.query(ClientNote).filter(ClientNote.client_id == client_id).order_by(ClientNote.created_at.desc()).limit(10).all()
+    qbr = db.query(QBR).filter(QBR.client_id == client_id).order_by(QBR.date.desc()).first()
+
+    try:
+        import io
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from fastapi.responses import StreamingResponse
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buf, pagesize=A4,
+            leftMargin=20*mm, rightMargin=20*mm,
+            topMargin=20*mm, bottomMargin=20*mm,
+        )
+        styles = getSampleStyleSheet()
+
+        # Стили
+        h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontSize=18, spaceAfter=6, textColor=colors.HexColor('#1e293b'))
+        h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontSize=13, spaceAfter=4, spaceBefore=12, textColor=colors.HexColor('#334155'))
+        body = ParagraphStyle('body', parent=styles['Normal'], fontSize=9, spaceAfter=3, leading=14)
+        muted = ParagraphStyle('muted', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#64748b'), spaceAfter=2)
+        label = ParagraphStyle('label', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#6366f1'), fontName='Helvetica-Bold', spaceAfter=2)
+
+        story = []
+
+        # Заголовок
+        story.append(Paragraph(f"Отчёт по клиенту: {client.name}", h1))
+        story.append(Paragraph(
+            f"Сегмент: {client.segment or '—'}  |  "
+            f"Менеджер: {client.manager_email or '—'}  |  "
+            f"Health Score: {int((client.health_score or 0)*100)}%  |  "
+            f"Дата: {datetime.now().strftime('%d.%m.%Y')}",
+            muted
+        ))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=8))
+
+        # Задачи
+        story.append(Paragraph("Задачи", h2))
+        if tasks:
+            STATUS_RU = {'plan': 'В плане', 'in_progress': 'В работе', 'review': 'Ревью', 'done': 'Готово', 'blocked': 'Заблок.'}
+            STATUS_COLORS = {'plan': '#64748b', 'in_progress': '#6366f1', 'done': '#22c55e', 'blocked': '#ef4444', 'review': '#eab308'}
+            tdata = [['Задача', 'Статус', 'Приоритет', 'Дедлайн', 'Команда']]
+            for t in tasks:
+                tdata.append([
+                    t.title[:60] + ('…' if len(t.title) > 60 else ''),
+                    STATUS_RU.get(t.status, t.status),
+                    t.priority or '—',
+                    t.due_date.strftime('%d.%m.%y') if t.due_date else '—',
+                    t.team or '—',
+                ])
+            tbl = Table(tdata, colWidths=[85*mm, 22*mm, 20*mm, 22*mm, 20*mm])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f8fafc')),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#475569')),
+                ('FONTSIZE', (0,0), (-1,-1), 8),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('LEFTPADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(tbl)
+        else:
+            story.append(Paragraph("Нет задач", muted))
+
+        # Встречи
+        story.append(Paragraph("История встреч", h2))
+        if meetings:
+            for m in meetings:
+                date_str = m.date.strftime('%d.%m.%Y %H:%M') if m.date else '—'
+                story.append(Paragraph(f"<b>{date_str}</b> — {m.title or m.type}", body))
+                if m.summary:
+                    story.append(Paragraph(m.summary[:200], muted))
+                followup_status = {'sent': '✓ Фолоуап отправлен', 'pending': '⏳ Ожидает фолоуапа', 'skipped': '— Пропущен'}.get(m.followup_status, '')
+                if followup_status:
+                    story.append(Paragraph(followup_status, muted))
+                story.append(Spacer(1, 3))
+        else:
+            story.append(Paragraph("Встреч нет", muted))
+
+        # QBR если есть
+        if qbr:
+            story.append(Paragraph(f"Последний QBR ({qbr.quarter})", h2))
+            if qbr.summary:
+                story.append(Paragraph(qbr.summary[:500], body))
+            if qbr.achievements:
+                story.append(Paragraph("Достижения:", label))
+                for a in (qbr.achievements or [])[:5]:
+                    story.append(Paragraph(f"• {str(a)[:100]}", body))
+            if qbr.issues:
+                story.append(Paragraph("Проблемы:", label))
+                for i in (qbr.issues or [])[:5]:
+                    story.append(Paragraph(f"• {str(i)[:100]}", body))
+
+        # Заметки
+        if notes:
+            story.append(Paragraph("Заметки", h2))
+            for n in notes:
+                date_str = n.created_at.strftime('%d.%m.%Y') if n.created_at else ''
+                story.append(Paragraph(f"{'📌 ' if n.is_pinned else ''}{n.content[:300]}", body))
+                if date_str:
+                    story.append(Paragraph(date_str, muted))
+                story.append(Spacer(1, 3))
+
+        # Footer
+        story.append(Spacer(1, 12))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e2e8f0')))
+        story.append(Paragraph(f"Сгенерировано AM Hub · {datetime.now().strftime('%d.%m.%Y %H:%M')}", muted))
+
+        doc.build(story)
+        buf.seek(0)
+
+        filename = f"client_{client.name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        logger.error(f"PDF export error: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF генерация не удалась: {e}")

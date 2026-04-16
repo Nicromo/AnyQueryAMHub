@@ -91,14 +91,42 @@
     <div class="kpi"><div class="v">{{ today_meetings|length }}</div><div class="l">Встреч</div></div>
     <div class="kpi"><div class="v" style="color:var(--red)">{{ overdue_tasks|length }}</div><div class="l">Просрочено</div></div>
     <div class="kpi"><div class="v">{{ total_open }}</div><div class="l">Открытых всего</div></div>
+    <div class="kpi" id="kpi-sync" style="min-width:160px;">
+      <div class="v" style="font-size:.9rem;color:var(--muted)" id="kpi-sync-clients">—</div>
+      <div class="l">Клиентов / Синк</div>
+    </div>
+  </div>
+
+  <!-- Быстрое создание задачи -->
+  <div class="section">
+    <h2>⚡ Быстрая задача</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input id="quick-task-title" placeholder="Название задачи..." style="flex:1;min-width:200px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;">
+      <select id="quick-task-client" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;min-width:160px;">
+        <option value="">— Клиент —</option>
+      </select>
+      <select id="quick-task-priority" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
+        <option value="medium">Средний</option>
+        <option value="high">Высокий</option>
+        <option value="low">Низкий</option>
+      </select>
+      <button class="btn btn-sm" onclick="quickCreateTask()">➕ Создать</button>
+    </div>
+    <div id="quick-task-result" style="margin-top:6px;font-size:.8rem;display:none;"></div>
+  </div>
+
+  <!-- Слоты дня (prep/followup) -->
+  <div class="section" id="slots-section" style="display:none;">
+    <h2>⏰ Слоты дня</h2>
+    <div id="slots-list"></div>
   </div>
 
   <!-- Schedule -->
   <div class="section">
-    <h2>⏰ Расписание на день</h2>
+    <h2>📋 Расписание на день</h2>
     <div id="schedule-list" style="min-height:40px;"></div>
     <div style="margin-top:8px;display:flex;gap:8px;">
-      <button class="btn btn-sm" onclick="loadMyDaySchedule()">📋 Загрузить</button>
+      <button class="btn btn-sm" onclick="loadMyDaySchedule()">🔄 Загрузить</button>
       <button class="btn btn-sm btn-outline" onclick="saveMyDaySchedule()">💾 Сохранить</button>
     </div>
   </div>
@@ -167,6 +195,118 @@ function dropTask(e,idx){const from=parseInt(e.dataTransfer.getData('text/plain'
 function removeMyDayTask(i){myDayTasks.splice(i,1);renderSchedule();}
 async function saveMyDaySchedule(){const r=await fetch('/api/my-day/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule:myDayTasks,date:new Date().toISOString().slice(0,10)})});if(r.ok)alert('✅ Сохранено!');}
 loadMyDaySchedule();
+
+// ── Быстрая задача ──────────────────────────────────────────────────────
+async function loadClientsForQuick() {
+  try {
+    const r = await fetch('/api/clients');
+    const d = await r.json();
+    const sel = document.getElementById('quick-task-client');
+    (d.clients || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name + (c.segment ? ' [' + c.segment + ']' : '');
+      sel.appendChild(opt);
+    });
+  } catch(e) {}
+}
+loadClientsForQuick();
+
+// Ctrl+Enter в поле задачи
+document.getElementById('quick-task-title').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); quickCreateTask(); }
+});
+
+async function quickCreateTask() {
+  const title = document.getElementById('quick-task-title').value.trim();
+  const clientId = document.getElementById('quick-task-client').value;
+  const priority = document.getElementById('quick-task-priority').value;
+  const res = document.getElementById('quick-task-result');
+  if (!title) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ Введите название задачи';
+    return;
+  }
+  try {
+    const r = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title, priority,
+        client_id: clientId ? parseInt(clientId) : null,
+        due_date: new Date().toISOString().slice(0, 10),
+        status: 'plan', source: 'manual'
+      })
+    });
+    const d = await r.json();
+    if (d.id || d.ok) {
+      res.style.display = 'block';
+      res.style.color = 'var(--green)';
+      res.textContent = '✅ Задача создана';
+      document.getElementById('quick-task-title').value = '';
+      setTimeout(() => { res.style.display = 'none'; location.reload(); }, 1200);
+    } else {
+      res.style.display = 'block';
+      res.style.color = 'var(--red)';
+      res.textContent = '❌ ' + (d.error || 'Ошибка');
+    }
+  } catch(e) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ ' + e.message;
+  }
+}
+
+// ── Слоты дня ──────────────────────────────────────────────────────────
+async function loadDaySlots() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await fetch('/api/meetings/slots?date=' + today);
+    const d = await r.json();
+    const slots = d.slots || [];
+    if (!slots.length) return;
+    const section = document.getElementById('slots-section');
+    section.style.display = 'block';
+    const SLOT_COLORS = {meeting: '#6366f1', prep: '#eab308', followup: '#8b5cf6', extra: '#06b6d4'};
+    const SLOT_ICONS  = {meeting: '📅', prep: '📋', followup: '✍️', extra: '📌'};
+    document.getElementById('slots-list').innerHTML = slots.map(s => {
+      const type = s.type === 'meeting' ? 'meeting' : (s.slot_type || 'prep');
+      const color = SLOT_COLORS[type] || '#64748b';
+      const icon  = SLOT_ICONS[type] || '📌';
+      const done  = s.status === 'done' || s.followup_status === 'sent';
+      return '<a href="' + (s.url || '#') + '" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;border:1px solid var(--border);margin-bottom:6px;text-decoration:none;color:inherit;border-left:3px solid ' + color + ';opacity:' + (done ? '.5' : '1') + ';">' +
+        '<span style="font-size:.9rem;">' + icon + '</span>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:.83rem;font-weight:500;">' + (done ? '<s>' : '') + s.title + (done ? '</s>' : '') + '</div>' +
+          '<div style="font-size:.72rem;color:var(--muted);">до ' + s.time + (s.client_name ? ' · ' + s.client_name : '') + '</div>' +
+        '</div>' +
+        (done ? '<span style="font-size:.75rem;color:var(--green);">✅</span>' : '') +
+      '</a>';
+    }).join('');
+  } catch(e) {}
+}
+loadDaySlots();
+
+// ── KPI синка ──────────────────────────────────────────────────────────
+async function loadSyncKpi() {
+  try {
+    const [cs, ss] = await Promise.all([
+      fetch('/api/clients').then(r => r.json()),
+      fetch('/api/sync/status').then(r => r.json())
+    ]);
+    const count = (cs.clients || []).length;
+    const mr = ss.merchrules;
+    const ago = mr ? mr.ago : '—';
+    const ok = mr && mr.status === 'success';
+    const el = document.getElementById('kpi-sync-clients');
+    if (el) {
+      el.innerHTML = count + ' <span style="font-size:.65rem;color:' + (ok?'var(--green)':'var(--muted)') + ';">(' + ago + ')</span>';
+    }
+  } catch(e) {}
+}
+loadSyncKpi();
+
 </script>
 </body>
 </html>

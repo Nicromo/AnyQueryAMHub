@@ -94,6 +94,52 @@
     .toast { position:fixed; bottom:24px; right:24px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 18px; font-size:.84rem; z-index:9999; box-shadow:0 8px 24px rgba(0,0,0,.3); transition:opacity .3s; }
     .toast.ok { border-color:var(--green); color:var(--green); }
     .toast.err { border-color:var(--red); color:var(--red); }
+
+    /* ── Mobile ── */
+    @media (max-width: 768px) {
+      .layout { flex-direction: column; }
+      .sidebar { display: none; }
+      .main { padding: 12px; margin-left: 0 !important; }
+      .cc-header { flex-direction: column; gap: 10px; }
+      .cc-actions { flex-wrap: wrap; }
+      .cc-actions .btn { flex: 1; min-width: 120px; text-align: center; }
+      .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+      .tab { font-size: .75rem; padding: 6px 12px; }
+      .task-row { flex-wrap: wrap; gap: 6px; }
+      .task-row select { width: 100%; }
+      #new-task-title, #new-meeting-title { width: 100%; min-width: unset; }
+      .kpi-row { gap: 8px; }
+      .kpi { min-width: calc(50% - 4px); flex: 1; padding: 10px 12px; }
+      .cc-grid { grid-template-columns: 1fr !important; }
+      .note-chip-actions { opacity: 1; }
+      .tl-item { font-size: .82rem; }
+    }
+    @media (max-width: 480px) {
+      .main { padding: 8px; }
+      .kpi .v { font-size: 1.2rem; }
+      .tab-badge { display: none; }
+    }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      .main { padding:12px; }
+      .header { flex-direction:column; gap:8px; }
+      .header h1 { font-size:1.2rem; }
+      .kpi-row { grid-template-columns: repeat(2, 1fr); gap:8px; }
+      .action-buttons { flex-wrap:wrap; }
+      .action-buttons a, .action-buttons button { flex:1; min-width:120px; text-align:center; font-size:.78rem; padding:8px 10px; }
+      .tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; padding-bottom:4px; }
+      .tab { padding:7px 12px; font-size:.78rem; }
+      .task-row { flex-wrap:wrap; gap:6px; }
+      .task-row select { font-size:.75rem; padding:4px 6px; }
+      #new-task-title, #new-meeting-title { min-width:100%; }
+      .note-chip { padding:10px; }
+      .tl-item { gap:8px; }
+    }
+    @media (max-width: 480px) {
+      .kpi-row { grid-template-columns: 1fr 1fr; }
+      .seg-badge, .health-wrap { display:none; }
+    }
   </style>
 </head>
 <body>
@@ -137,6 +183,11 @@
       </label>
       <span id="quick-note-saved" style="font-size:.76rem;color:var(--green);display:none;">✅ Сохранено</span>
     </div>
+    <a href="/api/clients/{{ client.id }}/export/pdf" download
+       style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid var(--border);color:var(--muted);font-size:.8rem;text-decoration:none;background:var(--surface-2,rgba(255,255,255,.03));"
+       title="Скачать PDF-отчёт">
+      📄 PDF
+    </a>
   </div>
 
   <div class="tabs">
@@ -148,6 +199,38 @@
 
   <!-- ЗАДАЧИ -->
   <div id="tab-tasks" class="tab-content active">
+    <!-- Форма создания задачи -->
+    <div style="background:var(--surface-2,var(--card));border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="new-task-title" placeholder="Новая задача... (Ctrl+Enter)" style="flex:1;min-width:180px;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+        <select id="new-task-priority" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
+          <option value="medium">Средний</option>
+          <option value="high">Высокий</option>
+          <option value="low">Низкий</option>
+        </select>
+        <input type="date" id="new-task-due" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
+        <button class="btn btn-sm" onclick="addTask()">➕ Задача</button>
+        <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:var(--accent,#6366f1);border:1px solid rgba(99,102,241,.3);" onclick="showMeetingForm()">📅 Встреча</button>
+      </div>
+      <!-- Форма встречи (скрыта по умолчанию) -->
+      <div id="meeting-form" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input id="new-meeting-title" placeholder="Тема встречи..." style="flex:1;min-width:180px;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+          <select id="new-meeting-type" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
+            <option value="meeting">Встреча</option>
+            <option value="checkup">Чекап</option>
+            <option value="qbr">QBR</option>
+            <option value="onboarding">Онбординг</option>
+            <option value="upsell">Апсейл</option>
+            <option value="sync">Синк</option>
+          </select>
+          <input type="datetime-local" id="new-meeting-date" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
+          <button class="btn btn-sm" onclick="addMeeting()">💾 Сохранить</button>
+          <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text);" onclick="document.getElementById('meeting-form').style.display='none'">✕</button>
+        </div>
+      </div>
+      <div id="add-result" style="margin-top:6px;font-size:.78rem;display:none;"></div>
+    </div>
     {% if tasks %}
     {% for t in tasks %}
     <div class="task-row" id="task-{{ t.id }}" data-status="{{ t.status }}">
@@ -188,16 +271,40 @@
           <div style="font-size:.88rem;font-weight:600;">{{ m.title or m.type|upper }}</div>
           <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">📅 {{ m.date.strftime('%d.%m.%Y %H:%M') if m.date else '—' }} · <span class="badge b-plan">{{ m.type }}</span></div>
         </div>
-        {% if m.recording_url %}
-        <a href="{{ m.recording_url }}" target="_blank" class="btn btn-sm">▶️ Запись</a>
-        {% endif %}
       </div>
       {% if m.summary %}<p style="margin-top:8px;font-size:.82rem;color:var(--muted);">{{ m.summary[:200] }}</p>{% endif %}
-      {% if m.followup_status == 'sent' %}
-      <div style="font-size:.75rem;color:var(--green);margin-top:6px;">✅ Фолоуап отправлен</div>
-      {% elif m.followup_status == 'pending' %}
-      <div style="font-size:.75rem;margin-top:6px;"><a href="/followup/{{ client.id }}" style="color:var(--yellow);">⚠️ Написать фолоуап</a></div>
-      {% endif %}
+
+      <!-- Прогресс-трек встречи -->
+      <div style="display:flex;align-items:center;gap:0;margin:10px 0 8px;font-size:.72rem;">
+        <a href="/prep/{{ client.id }}" style="display:flex;align-items:center;gap:4px;padding:5px 10px;border-radius:6px 0 0 6px;border:1px solid var(--border);text-decoration:none;background:rgba(99,102,241,.1);color:#818cf8;font-weight:500;">
+          📋 Prep
+        </a>
+        <div style="padding:5px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--card);color:var(--muted);">→</div>
+        <div style="padding:5px 10px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--card);color:var(--text);font-weight:500;">
+          {% if m.date and m.date > now %}⏳{% else %}✅{% endif %} Встреча
+        </div>
+        <div style="padding:5px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--card);color:var(--muted);">→</div>
+        {% if m.followup_status == 'sent' %}
+        <div style="padding:5px 10px;border-radius:0 6px 6px 0;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.1);color:var(--green);font-weight:500;">✅ Фолоуап</div>
+        {% elif m.followup_status == 'skipped' %}
+        <div style="padding:5px 10px;border-radius:0 6px 6px 0;border:1px solid var(--border);background:var(--card);color:var(--muted);">⏭ Пропущен</div>
+        {% else %}
+        <a href="/followup/{{ client.id }}" style="padding:5px 10px;border-radius:0 6px 6px 0;border:1px solid rgba(234,179,8,.4);background:rgba(234,179,8,.1);color:#ca8a04;text-decoration:none;font-weight:500;">✍️ Фолоуап</a>
+        {% endif %}
+      </div>
+
+      <!-- Доп. кнопки -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        {% if m.recording_url %}
+        <a href="{{ m.recording_url }}" target="_blank" class="btn btn-sm" style="font-size:.72rem;padding:4px 10px;">▶️ Запись</a>
+        {% endif %}
+        {% if m.type == 'qbr' %}
+        <a href="/client/{{ client.id }}/qbr" class="btn btn-sm" style="font-size:.72rem;padding:4px 10px;background:rgba(139,92,246,.12);color:#a78bfa;border:1px solid rgba(139,92,246,.25);">📊 QBR</a>
+        {% endif %}
+        {% if m.followup_status == 'pending' %}
+        <button onclick="generateFollowup({{ m.id }})" class="btn btn-sm" style="font-size:.72rem;padding:4px 10px;background:rgba(99,102,241,.1);color:#818cf8;border:1px solid rgba(99,102,241,.3);">🤖 AI фолоуап</button>
+        {% endif %}
+      </div>
     </div>
     {% endfor %}
     {% else %}

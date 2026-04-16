@@ -145,6 +145,7 @@
       <div class="ai-label">
         🤖 AI-подготовка
         <button class="btn btn-sm" onclick="copyAI()">📋 Копировать</button>
+        <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:var(--accent,#6366f1);border:1px solid rgba(99,102,241,.3);" onclick="regenerateAI()" id="regenBtn">🔄 Перегенерировать</button>
       </div>
       <textarea id="aiText" rows="12">{{ prep_text }}</textarea>
     </div>
@@ -306,6 +307,26 @@ function savePrep(){
 function savePrepAndGo(){savePrep();window.location.href='/followup/{{ client.id }}';}
 
 function copyAI(){navigator.clipboard.writeText(document.getElementById('aiText').value);showToast('📋 Скопировано');}
+async function regenerateAI(){
+  const btn = document.getElementById('regenBtn');
+  const meetingType = document.querySelector('.type-btn.active')?.dataset.type || 'meeting';
+  btn.disabled = true; btn.textContent = '⏳ Генерирую...';
+  try {
+    const r = await fetch('/api/ai/generate-prep', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id: clientId, meeting_type: meetingType})
+    });
+    const d = await r.json();
+    if (d.text) {
+      document.getElementById('aiText').value = d.text;
+      showToast('✅ AI обновил подготовку');
+    } else {
+      showToast('❌ ' + (d.error || 'Ошибка AI'), 'var(--red)');
+    }
+  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+  btn.disabled = false; btn.textContent = '🔄 Перегенерировать';
+}
 
 function copyAll(){
   const type=document.querySelector('.type-btn.active')?.textContent||'';
