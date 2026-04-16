@@ -1,110 +1,117 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}AM Hub{% endblock %}</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%236474ff'/><text x='16' y='22' text-anchor='middle' font-size='16' font-family='sans-serif' font-weight='700' fill='white'>A</text></svg>">
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link href="https://fonts.bunny.net/css?family=geist:300,400,500,600,700|geist-mono:400,500" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
+  {% block head %}{% endblock %}
 </head>
 <body>
 {% block body %}
 <div class="layout">
-  <nav class="sidebar">
+
+  <!-- ── SIDEBAR ────────────────────────────────────────────── -->
+  <nav class="sidebar" id="sidebar">
+
     <div class="sidebar-logo">
       <div class="sidebar-logo-mark">A</div>
-      <span>AM <span>Hub</span></span>
+      <span class="sidebar-logo-text">AM Hub</span>
       <span class="sidebar-logo-badge">Beta</span>
     </div>
 
-    <!-- Быстрый поиск -->
     <div class="search-wrap">
-      <input type="text" id="sidebar-search" placeholder="Найти клиента…"
+      <input type="text" id="sidebar-search" placeholder="Поиск клиента…"
              autocomplete="off" oninput="sidebarSearch(this.value)">
       <div id="search-results" class="search-dropdown" style="display:none"></div>
     </div>
 
-    <a class="nav-link {% if request.url.path == '/hub' %}active{% endif %}" href="/hub"
-       style="background:var(--accent-glow,rgba(59,130,246,.08));border-left:2px solid var(--accent,#3b82f6);margin-bottom:6px">
-      <span class="icon">🎛️</span> Командный центр
-    </a>
+    <div class="sidebar-scroll">
 
-    <div class="nav-section-label">Ежедневное</div>
-    <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
-      <span class="icon">☀️</span> Сегодня
-    </a>
-    <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
-      <span class="icon">📊</span> Все клиенты
-    </a>
-    <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50">
-      <span class="icon">🏆</span> Top-50
-    </a>
-    <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks">
-      <span class="icon">✅</span> Задачи
-      <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.7rem;font-weight:600"></span>
-    </a>
+      <!-- Командный центр -->
+      <a class="nav-link {% if request.url.path == '/hub' %}active{% endif %}" href="/hub">
+        <span class="icon">🎛️</span> Командный центр
+      </a>
 
-    <div class="nav-section-label">Анализ</div>
-    <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
-      <span class="icon">📈</span> Аналитика
-    </a>
-    <a class="nav-link {% if request.url.path == '/kpi' %}active{% endif %}" href="/kpi">
-      <span class="icon">🎯</span> Мой KPI
-    </a>
-    <a class="nav-link {% if request.url.path == '/notifications' %}active{% endif %}" href="/notifications">
-      <span class="icon">🔔</span> Уведомления
-    </a>
+      <div class="nav-section-label">Ежедневное</div>
+      <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
+        <span class="icon">☀️</span> Сегодня
+      </a>
+      <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
+        <span class="icon">👥</span> Все клиенты
+      </a>
+      <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50">
+        <span class="icon">🏆</span> Top-50
+      </a>
+      <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks">
+        <span class="icon">✅</span> Задачи
+        <span id="nav-tasks-badge" class="badge" style="display:none;margin-left:auto"></span>
+      </a>
+      <a class="nav-link {% if request.url.path == '/meetings' %}active{% endif %}" href="/meetings">
+        <span class="icon">📅</span> Встречи
+      </a>
 
-    <a class="nav-link {% if request.url.path == '/kpi' %}active{% endif %}" href="/kpi">
-      <span class="icon">🎯</span> Мой KPI
-    </a>
-    <a class="nav-link {% if request.url.path == '/notifications' %}active{% endif %}" href="/notifications">
-      <span class="icon">🔔</span> Уведомления
-    </a>
-    <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar">
-      <span class="icon">📆</span> QBR Календарь
-    </a>
-    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
-      <span class="icon">🔒</span> Внутренние задачи
-    </a>
+      <div class="nav-section-label">Аналитика</div>
+      <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
+        <span class="icon">📈</span> Аналитика
+      </a>
+      <a class="nav-link {% if request.url.path == '/kpi' %}active{% endif %}" href="/kpi">
+        <span class="icon">🎯</span> Мой KPI
+      </a>
+      <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar">
+        <span class="icon">📆</span> QBR Календарь
+      </a>
 
-    <div class="nav-section-label">Инструменты</div>
-    <a class="nav-link {% if request.url.path == '/settings/my-clients' %}active{% endif %}" href="/settings/my-clients">
-      <span class="icon">👤</span> Мои клиенты
-    </a>
-    <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
-      <span class="icon">🗺️</span> Роадмап
-    </a>
-    <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank">
-      <span class="icon">📹</span> ktalk <span style="font-size:0.7rem;opacity:.5">↗</span>
-    </a>
-    <a class="nav-link" href="https://merchrules.any-platform.ru" target="_blank">
-      <span class="icon">🔗</span> Merchrules <span style="font-size:0.7rem;opacity:.5">↗</span>
-    </a>
+      <div class="nav-section-label">Рабочее</div>
+      <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
+        <span class="icon">🗺️</span> Роадмап
+      </a>
+      <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
+        <span class="icon">🔒</span> Внутренние задачи
+      </a>
+      <a class="nav-link {% if request.url.path == '/settings/my-clients' %}active{% endif %}" href="/settings/my-clients">
+        <span class="icon">👤</span> Мои клиенты
+      </a>
 
-    <!-- Статистика -->
-    <div id="sidebar-stats" class="sidebar-stats" style="display:none">
-      <div class="stat-item red"    id="stat-overdue">—</div>
-      <div class="stat-item yellow" id="stat-warning">—</div>
-      <div class="stat-item"        id="stat-tasks">—</div>
-    </div>
+      <div class="nav-section-label">Интеграции</div>
+      <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank">
+        <span class="icon">💬</span> KTalk
+        <span style="margin-left:auto;font-size:.65rem;color:var(--text-muted)">↗</span>
+      </a>
+      <a class="nav-link" href="https://merchrules.any-platform.ru" target="_blank">
+        <span class="icon">🔗</span> Merchrules
+        <span style="margin-left:auto;font-size:.65rem;color:var(--text-muted)">↗</span>
+      </a>
 
-    <!-- Уведомления (колокольчик) -->
-    <div class="notif-bell" id="notifBell" onclick="toggleNotifPanel()">
-      🔔 <span id="notifBadge" class="notif-badge" style="display:none">0</span>
-    </div>
+      <!-- Статистика -->
+      <div id="sidebar-stats" class="sidebar-stats">
+        <div class="stat-item red"    id="stat-overdue">—</div>
+        <div class="stat-item yellow" id="stat-warning">—</div>
+        <div class="stat-item"        id="stat-tasks">—</div>
+      </div>
+
+      <!-- Уведомления -->
+      <div class="notif-bell" id="notifBell" onclick="toggleNotifPanel()">
+        🔔 Уведомления
+        <span id="notifBadge" class="notif-badge" style="display:none">0</span>
+      </div>
+
+    </div><!-- /sidebar-scroll -->
 
     <div class="sidebar-bottom">
       {% if user %}
-        <a href="/profile" style="font-weight:500;color:var(--text)">👤 {{ user.name }}</a>
-        <a href="/logout">Выйти</a>
+        <a href="/profile" style="font-weight:500">👤 {{ user.name }}</a>
+        <a href="/settings" style="color:var(--text-muted)">⚙️</a>
+        <a href="/logout" style="color:var(--text-muted)">Выйти</a>
       {% endif %}
     </div>
+
   </nav>
 
-  <!-- Панель уведомлений -->
+  <!-- Notif panel -->
   <div id="notifPanel" class="notif-panel" style="display:none">
     <div class="notif-header">
       <span>🔔 Уведомления</span>
@@ -116,8 +123,31 @@
   </div>
   <div id="notifOverlay" class="notif-overlay" style="display:none" onclick="toggleNotifPanel()"></div>
 
+  <!-- ── MAIN ───────────────────────────────────────────────── -->
   <main class="main">
-    {% block content %}{% endblock %}
+
+    <!-- Sticky top bar -->
+    <div class="page-header">
+      <div>
+        <div class="page-title">{% block page_title %}AM Hub{% endblock %}</div>
+        {% block page_subtitle %}{% endblock %}
+      </div>
+      <div class="page-actions">
+        {% block page_actions %}{% endblock %}
+        <!-- Theme toggle -->
+        <button class="btn btn-ghost btn-icon" onclick="toggleTheme()" title="Сменить тему" style="font-size:.9rem">
+          <span id="theme-icon">🌙</span>
+        </button>
+        <!-- Mobile menu -->
+        <button class="btn btn-ghost btn-icon" onclick="toggleMobileMenu()" id="menu-btn"
+                style="display:none;font-size:1.1rem">☰</button>
+      </div>
+    </div>
+
+    <div class="page-body">
+      {% block content %}{% endblock %}
+    </div>
+
   </main>
 </div>
 {% endblock %}
@@ -125,15 +155,40 @@
 <!-- Toast -->
 {% if request.query_params.get('saved') %}
 <div class="toast success" id="toast">
-  ✅ Фолоуап сохранён
-  {% if request.query_params.get('tg') == 'ok' %} · отправлен в TG{% endif %}
-  {% if request.query_params.get('mr') == 'ok' %} · синхронизирован с Merchrules{% endif %}
+  ✅ Сохранено
+  {% if request.query_params.get('tg') == 'ok' %} · отправлено в TG{% endif %}
+  {% if request.query_params.get('mr') == 'ok' %} · синхронизировано{% endif %}
 </div>
 <script>setTimeout(()=>document.getElementById('toast')?.remove(), 4000)</script>
 {% endif %}
 
 <script>
-// ── Быстрый поиск ─────────────────────────────────────────────────────────
+// ── Theme ───────────────────────────────────────────────────
+const THEME_KEY = 'amhub_theme';
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-icon').textContent = t === 'light' ? '☀️' : '🌙';
+}
+(function() {
+  const saved = localStorage.getItem(THEME_KEY) || 'dark';
+  applyTheme(saved);
+})();
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'light' ? 'dark' : 'light';
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+}
+
+// ── Mobile menu ─────────────────────────────────────────────
+function toggleMobileMenu() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+if (window.innerWidth <= 768) {
+  document.getElementById('menu-btn').style.display = 'flex';
+}
+
+// ── Search ──────────────────────────────────────────────────
 let _searchTimer = null;
 function sidebarSearch(q) {
   clearTimeout(_searchTimer);
@@ -145,43 +200,42 @@ function sidebarSearch(q) {
       const data = await res.json();
       if (!data.length) { drop.style.display = 'none'; return; }
       drop.innerHTML = data.map(c =>
-        `<a href="/prep/${c.id}" class="search-item">
-          <span class="badge badge-${c.segment.toLowerCase().replace('+','-plus').replace('-','-minus')}">${c.segment}</span>
+        `<a href="/client/${c.id}" class="search-item">
+          <span class="badge badge-${(c.segment||'').toLowerCase().replace('+','-plus')}">${c.segment||'?'}</span>
           ${c.name}
         </a>`
       ).join('');
       drop.style.display = 'block';
     } catch(e) { drop.style.display = 'none'; }
-  }, 200);
+  }, 180);
 }
 document.addEventListener('click', e => {
   if (!e.target.closest('.search-wrap'))
     document.getElementById('search-results').style.display = 'none';
 });
 
-// ── Статистика ────────────────────────────────────────────────────────────
+// ── Stats ───────────────────────────────────────────────────
 (async function loadStats() {
   try {
     const s = await fetch('/api/stats').then(r => r.json());
-    const box = document.getElementById('sidebar-stats');
     document.getElementById('stat-overdue').textContent = `🔴 ${s.overdue} просроч.`;
     document.getElementById('stat-warning').textContent = `🟡 ${s.warning} скоро`;
     document.getElementById('stat-tasks').textContent   = `📋 ${s.open_tasks} задач`;
-    box.style.display = 'flex';
+    document.getElementById('sidebar-stats').style.display = 'flex';
     if (s.open_tasks > 0) {
-      const badge = document.getElementById('nav-tasks-badge');
-      if (badge) { badge.textContent = s.open_tasks; badge.style.display = 'inline'; }
+      const b = document.getElementById('nav-tasks-badge');
+      if (b) { b.textContent = s.open_tasks; b.style.display = 'inline'; }
     }
   } catch(e) {}
 })();
 
-// ── Уведомления ────────────────────────────────────────────────────────────
+// ── Notifications ───────────────────────────────────────────
 const NOTIF_COLORS = {
-  high: '#ef4444', medium: '#eab308', low: '#64748b',
-  overdue_checkup: '#ef4444', checkup_soon: '#eab308', blocked_task: '#ef4444',
-  info: '#6366f1', success: '#22c55e', warning: '#eab308', alert: '#ef4444'
+  high:'#f0556a', medium:'#f5a623', low:'#4c567a',
+  overdue_checkup:'#f0556a', checkup_soon:'#f5a623',
+  blocked_task:'#f0556a', info:'#6474ff', success:'#23d18b',
+  warning:'#f5a623', alert:'#f0556a'
 };
-
 let notifOpen = false;
 
 function toggleNotifPanel() {
@@ -197,55 +251,45 @@ async function loadNotifications() {
       fetch('/api/notifications').then(r => r.json()),
       fetch('/api/inbox/items').then(r => r.json()).catch(() => ({items:[]}))
     ]);
-
     const notifs = r1.notifications || [];
-    const inbox  = r2.items || [];
-    const all = [
-      ...notifs.map(n => ({...n, _src:'notif'})),
-      ...inbox.filter(i => i.type === 'notification').map(i => ({...i, _src:'inbox'}))
-    ];
-
-    const list = document.getElementById('notifList');
+    const inbox  = (r2.items || []).filter(i => i.type === 'notification');
+    const all    = [...notifs.map(n=>({...n,_src:'notif'})), ...inbox.map(i=>({...i,_src:'inbox'}))];
+    const list   = document.getElementById('notifList');
     if (!all.length) {
-      list.innerHTML = '<div class="notif-empty">✅ Всё под контролем</div>';
-      return;
+      list.innerHTML = '<div class="notif-empty">✅ Всё под контролем</div>'; return;
     }
-
     list.innerHTML = all.map(n => {
-      const color = NOTIF_COLORS[n.priority] || NOTIF_COLORS[n.type] || '#64748b';
-      const link = n.client_id ? `/client/${n.client_id}` : '#';
+      const color = NOTIF_COLORS[n.priority] || NOTIF_COLORS[n.type] || '#4c567a';
+      const link  = n.client_id ? `/client/${n.client_id}` : '#';
       return `<a href="${link}" class="notif-item" style="border-left-color:${color}">
-        <div class="notif-item-title">${n.title || n.message || ''}</div>
-        ${n.message && n.title ? `<div class="notif-item-msg">${n.message}</div>` : ''}
-        ${n.date ? `<div class="notif-item-date">${n.date}</div>` : ''}
+        <div class="notif-item-title">${n.title||n.message||''}</div>
+        ${n.message&&n.title?`<div class="notif-item-msg">${n.message}</div>`:''}
+        ${n.date?`<div class="notif-item-date">${n.date}</div>`:''}
       </a>`;
     }).join('');
-
-    // Бейдж
     updateBadge(all.length);
   } catch(e) {}
 }
 
 function updateBadge(count) {
-  const badge = document.getElementById('notifBadge');
-  if (!badge) return;
-  if (count > 0) { badge.textContent = count > 99 ? '99+' : count; badge.style.display = 'inline-flex'; }
-  else { badge.style.display = 'none'; }
+  const b = document.getElementById('notifBadge');
+  if (!b) return;
+  if (count > 0) { b.textContent = count > 99 ? '99+' : count; b.style.display = 'inline-flex'; }
+  else { b.style.display = 'none'; }
 }
 
 async function markAllRead() {
   try {
-    await fetch('/api/inbox/mark-read', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+    await fetch('/api/inbox/mark-read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
     document.getElementById('notifList').innerHTML = '<div class="notif-empty">✅ Всё прочитано</div>';
     updateBadge(0);
   } catch(e) {}
 }
 
-// Polling каждые 60 сек
 (async function pollNotifications() {
   try {
     const r = await fetch('/api/notifications').then(r => r.json());
-    const count = (r.notifications || []).filter(n => n.priority === 'high').length;
+    const count = (r.notifications||[]).filter(n=>n.priority==='high').length;
     updateBadge(count);
   } catch(e) {}
   setTimeout(pollNotifications, 60000);

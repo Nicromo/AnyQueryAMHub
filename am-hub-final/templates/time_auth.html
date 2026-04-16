@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tbank Time — подключение</title>
+<link rel="preconnect" href="https://fonts.bunny.net">
+<link href="https://fonts.bunny.net/css?family=geist:400,500,600,700|geist-mono:400,500" rel="stylesheet">
+<style>
+:root{--bg:#07090f;--surface:#0d1117;--surface-2:#131924;--surface-3:#192030;--border:rgba(255,255,255,.06);--border-s:rgba(255,255,255,.1);--text:#e8ecf4;--dim:#7d8aaa;--muted:#4c567a;--accent:#6474ff;--accent-dim:rgba(100,116,255,.12);--accent-ring:rgba(100,116,255,.15);--green:#23d18b;--green-bg:rgba(35,209,139,.09);--yellow:#f5a623;--yellow-bg:rgba(245,166,35,.09);--red:#f0556a;}
+[data-theme="light"]{--bg:#f3f5f9;--surface:#fff;--surface-2:#f7f9fc;--surface-3:#eef1f7;--border:rgba(0,0,0,.07);--border-s:rgba(0,0,0,.12);--text:#101828;--dim:#4b5563;--muted:#9ca3af;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Geist',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 16px;}
+.page{width:100%;max-width:540px;}
+.back{font-size:.8rem;color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:5px;margin-bottom:28px;transition:color .14s;}
+.back:hover{color:var(--text);}
+.header{margin-bottom:28px;}
+.logo-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.logo-m{width:34px;height:34px;background:linear-gradient(135deg,#6474ff,#b36bff);border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;color:#fff;box-shadow:0 2px 12px rgba(100,116,255,.3);}
+.heading{font-size:1.3rem;font-weight:700;letter-spacing:-.03em;}
+.subtext{font-size:.82rem;color:var(--dim);line-height:1.5;}
+code{background:var(--surface-3);padding:1px 5px;border-radius:4px;font-family:'Geist Mono',monospace;font-size:.79rem;color:var(--accent);}
+a{color:var(--accent);}
+
+.status-banner{padding:11px 15px;border-radius:10px;font-size:.82rem;display:flex;align-items:center;gap:8px;margin-bottom:18px;background:var(--green-bg);border:1px solid rgba(35,209,139,.2);color:var(--green);}
+
+.method{background:var(--surface);border:1px solid var(--border-s);border-radius:14px;padding:22px 24px;margin-bottom:14px;}
+.method-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;}
+.method-title{font-size:.95rem;font-weight:600;}
+.tag{font-size:.62rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:4px;flex-shrink:0;margin-top:2px;}
+.tag-rec{background:var(--green-bg);color:var(--green);border:1px solid rgba(35,209,139,.2);}
+.tag-fb{background:var(--yellow-bg);color:var(--yellow);border:1px solid rgba(245,166,35,.2);}
+.method-desc{font-size:.79rem;color:var(--dim);margin:6px 0 16px;line-height:1.55;}
+
+.steps{display:flex;flex-direction:column;gap:9px;margin-bottom:18px;}
+.step{display:flex;gap:10px;align-items:flex-start;}
+.sn{flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--accent-dim);border:1px solid rgba(100,116,255,.22);font-size:.68rem;font-weight:700;color:var(--accent);display:flex;align-items:center;justify-content:center;margin-top:1px;}
+.st{font-size:.79rem;color:var(--dim);line-height:1.55;}
+
+label{font-size:.75rem;font-weight:500;color:var(--dim);display:block;margin-bottom:5px;}
+.input{width:100%;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'Geist',sans-serif;font-size:.84rem;outline:none;transition:border-color .14s,box-shadow .14s;}
+.input:focus{border-color:rgba(100,116,255,.55);box-shadow:0 0 0 3px var(--accent-ring);}
+.input::placeholder{color:var(--muted);}
+.row{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;}
+.btn{padding:8px 16px;border-radius:8px;font-size:.81rem;font-weight:500;font-family:'Geist',sans-serif;cursor:pointer;transition:all .13s;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+.btn-p{background:var(--accent);color:#fff;border:none;box-shadow:0 2px 10px rgba(100,116,255,.3);}
+.btn-p:hover{filter:brightness(1.1);}
+.btn-o{background:transparent;color:var(--dim);border:1px solid var(--border-s);}
+.btn-o:hover{background:var(--surface-2);color:var(--text);}
+.result{font-size:.79rem;}
+.ok{color:var(--green)}.err{color:var(--red)}.warn{color:var(--yellow)}
+</style></head>
+<body>
+<div class="page">
+  <a href="/settings" class="back">← Вернуться в настройки</a>
+
+  <div class="header">
+    <div class="logo-row">
+      <div class="logo-m">T</div>
+      <div class="heading">Tbank Time</div>
+    </div>
+    <p class="subtext">Подключение для чтения тикетов из <code>any-team-support</code></p>
+  </div>
+
+  <div id="status" style="display:none" class="status-banner">
+    ✅ Подключено: <strong id="status-user"></strong>
+  </div>
+
+  <!-- PAT — рекомендуемый способ -->
+  <div class="method">
+    <div class="method-top">
+      <div class="method-title">🔑 Personal Access Token</div>
+      <span class="tag tag-rec">Рекомендуется</span>
+    </div>
+    <p class="method-desc">Создаётся один раз в настройках Time — <strong>не истекает</strong>. Это правильный способ для интеграций.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="sn">1</div>
+        <div class="st">Откройте <a href="https://time.tbank.ru" target="_blank">time.tbank.ru</a> → войдите через SSO Т-Банка (логин → пароль → SMS)</div>
+      </div>
+      <div class="step">
+        <div class="sn">2</div>
+        <div class="st">Нажмите на аватар (верхний правый угол) → <code>Account Settings</code></div>
+      </div>
+      <div class="step">
+        <div class="sn">3</div>
+        <div class="st">Вкладка <code>Security</code> → раздел <code>Personal Access Tokens</code> → кнопка <code>Create Token</code></div>
+      </div>
+      <div class="step">
+        <div class="sn">4</div>
+        <div class="st">Дайте название <code>amhub</code> → нажмите Create → скопируйте токен и вставьте ниже</div>
+      </div>
+    </div>
+
+    <label>Personal Access Token</label>
+    <input class="input" id="pat" type="password" placeholder="Вставьте сюда токен из Account Settings → Security…">
+    <div class="row">
+      <button class="btn btn-p" onclick="save('pat','pat-r')">💾 Подключить</button>
+      <a href="https://time.tbank.ru" target="_blank" class="btn btn-o">🌐 Открыть Time</a>
+      <span class="result" id="pat-r"></span>
+    </div>
+  </div>
+
+  <!-- MMAUTHTOKEN — запасной -->
+  <div class="method">
+    <div class="method-top">
+      <div class="method-title">🍪 Session Cookie</div>
+      <span class="tag tag-fb">Запасной вариант</span>
+    </div>
+    <p class="method-desc">Если PAT недоступен. Cookie <code>MMAUTHTOKEN</code> истекает через ~24 часа — придётся обновлять каждый день.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="sn">1</div>
+        <div class="st">Откройте <a href="https://time.tbank.ru" target="_blank">time.tbank.ru</a> и войдите через SSO</div>
+      </div>
+      <div class="step">
+        <div class="sn">2</div>
+        <div class="st">Нажмите <code>F12</code> → вкладка <code>Application</code> (Chrome) или <code>Storage</code> (Firefox)</div>
+      </div>
+      <div class="step">
+        <div class="sn">3</div>
+        <div class="st">Слева: <code>Cookies</code> → <code>https://time.tbank.ru</code> → строка <code>MMAUTHTOKEN</code> → скопируйте значение из колонки <code>Value</code></div>
+      </div>
+    </div>
+
+    <label>MMAUTHTOKEN (из DevTools → Cookies)</label>
+    <input class="input" id="mm" type="password" placeholder="Вставьте значение MMAUTHTOKEN…">
+    <div class="row">
+      <button class="btn btn-o" onclick="save('mm','mm-r')">💾 Сохранить</button>
+      <span class="result" id="mm-r"></span>
+    </div>
+  </div>
+
+</div>
+<script>
+async function checkStatus(){
+  try{
+    const r=await fetch('/api/integrations/test/tbank');
+    const d=await r.json();
+    if(d.ok){document.getElementById('status-user').textContent=d.username||d.email||'Time';document.getElementById('status').style.display='flex';}
+  }catch(e){}
+}
+checkStatus();
+
+async function save(inputId, resultId){
+  const token=document.getElementById(inputId).value.trim();
+  const el=document.getElementById(resultId);
+  if(!token){el.className='result err';el.textContent='❌ Вставьте токен';return;}
+  el.className='result warn';el.textContent='⏳ Проверяем...';
+  try{
+    const r=await fetch('/api/auth/time/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+    const d=await r.json();
+    if(d.ok){
+      el.className='result ok';
+      el.textContent='✅ '+(d.username||d.email||'OK')+(d.channel_id?' · канал найден':'');
+      document.getElementById('status-user').textContent=d.username||d.email||'Time';
+      document.getElementById('status').style.display='flex';
+    }else{
+      el.className='result err';el.textContent='❌ '+(d.error||'Ошибка');
+    }
+  }catch(e){el.className='result err';el.textContent='❌ '+e.message;}
+}
+document.getElementById('pat').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')save('pat','pat-r');});
+document.getElementById('mm').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')save('mm','mm-r');});
+</script>
+</body></html>
