@@ -291,6 +291,23 @@
   </div>
 
   <!-- Быстрая заметка -->
+  <!-- ══ Комбо-график: MRR + Health ══ -->
+  <div id="combo-chart-block" style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+      <div style="font-size:.85rem;font-weight:600;">📈 Динамика MRR &amp; Health Score</div>
+      <div style="display:flex;gap:12px;font-size:.72rem;color:var(--muted);">
+        <span><span style="display:inline-block;width:10px;height:3px;background:#6366f1;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>MRR</span>
+        <span><span style="display:inline-block;width:10px;height:3px;background:#22c55e;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Health %</span>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="setComboRange(3,this)" class="btn btn-sm" style="padding:4px 10px;font-size:.72rem;">3м</button>
+        <button onclick="setComboRange(6,this)" class="btn btn-sm active" style="padding:4px 10px;font-size:.72rem;">6м</button>
+        <button onclick="setComboRange(12,this)" class="btn btn-sm" style="padding:4px 10px;font-size:.72rem;">12м</button>
+      </div>
+    </div>
+    <div style="position:relative;height:200px;"><canvas id="combo-chart"></canvas></div>
+  </div>
+
   <div class="quick-note-wrap">
     <textarea id="quick-note-input" placeholder="💬 Быстрая заметка… (Ctrl+Enter для сохранения)"></textarea>
     <div class="quick-note-actions">
@@ -1742,6 +1759,110 @@ function copyExecSummary() {
     }
   } catch(e) {}
 })();
+
+// ── Комбо-график MRR + Health ────────────────────────────────────────────
+let comboChart = null;
+let comboMonths = 6;
+
+async function loadComboChart(months) {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch(`/api/clients/${clientId}/revenue/history?months=${months}`),
+      fetch(`/api/clients/${clientId}/health/history?months=${months}`)
+    ]);
+    const rev = await r1.json();
+    const health = await r2.json();
+
+    // Строим общую ось времени
+    const allPeriods = new Set([
+      ...(rev.history||[]).map(h => h.period),
+      ...(health.history||[]).map(h => h.period),
+    ]);
+    const periods = Array.from(allPeriods).sort();
+
+    const mrrMap = Object.fromEntries((rev.history||[]).map(h => [h.period, h.mrr]));
+    const healthMap = Object.fromEntries((health.history||[]).map(h => [h.period, h.score]));
+
+    const mrrData   = periods.map(p => mrrMap[p]   ?? null);
+    const healthData = periods.map(p => healthMap[p] ?? null);
+
+    const ctx = document.getElementById('combo-chart');
+    if (!ctx) return;
+    if (comboChart) comboChart.destroy();
+
+    comboChart = new Chart(ctx, {
+      data: {
+        labels: periods,
+        datasets: [
+          {
+            type: 'bar',
+            label: 'MRR (₽)',
+            data: mrrData,
+            backgroundColor: 'rgba(99,102,241,.4)',
+            borderColor: 'rgba(99,102,241,.8)',
+            borderWidth: 1,
+            borderRadius: 4,
+            yAxisID: 'yMrr',
+          },
+          {
+            type: 'line',
+            label: 'Health (%)',
+            data: healthData,
+            borderColor: '#22c55e',
+            backgroundColor: 'rgba(34,197,94,.1)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 4,
+            pointBackgroundColor: '#22c55e',
+            yAxisID: 'yHealth',
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                if (ctx.dataset.yAxisID === 'yMrr') return ' MRR: ' + (ctx.raw||0).toLocaleString('ru-RU') + ' ₽';
+                return ' Health: ' + (ctx.raw||0) + '%';
+              }
+            }
+          }
+        },
+        scales: {
+          yMrr: {
+            type: 'linear', position: 'left',
+            ticks: { color: '#818cf8', callback: v => v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v },
+            grid: { color: 'rgba(255,255,255,.04)' },
+          },
+          yHealth: {
+            type: 'linear', position: 'right', min: 0, max: 100,
+            ticks: { color: '#4ade80', callback: v => v + '%' },
+            grid: { display: false },
+          },
+          x: { ticks: { color: '#64748b' }, grid: { display: false } }
+        }
+      }
+    });
+
+    // Обновляем кнопки
+    document.querySelectorAll('[onclick*="setComboRange"]').forEach(b => b.classList.remove('active'));
+  } catch(e) { console.error('Combo chart error:', e); }
+}
+
+function setComboRange(months, btn) {
+  comboMonths = months;
+  document.querySelectorAll('[onclick*="setComboRange"]').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  loadComboChart(months);
+}
+
+// Загружаем при старте
+loadComboChart(6);
 
 </script>
 </body>
