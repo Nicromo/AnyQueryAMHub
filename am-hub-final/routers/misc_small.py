@@ -15,7 +15,7 @@ from models import (
     Notification, QBR, AccountPlan, ClientNote, TaskComment,
     FollowupTemplate, VoiceNote, ClientHistory,
 )
-from auth import decode_access_token, hash_password, verify_password, log_audit
+from auth import decode_access_token, hash_password, verify_password, log_audit, get_current_user
 from deps import require_user, require_admin, optional_user
 from error_handlers import log_error
 

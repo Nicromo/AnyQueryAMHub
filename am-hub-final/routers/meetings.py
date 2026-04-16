@@ -22,6 +22,7 @@ from models import (
 from auth import (
     authenticate_user, create_user, create_access_token,
     verify_password, hash_password, log_audit, decode_access_token,
+    get_current_user,
 )
 from error_handlers import log_error, handle_db_error
 
