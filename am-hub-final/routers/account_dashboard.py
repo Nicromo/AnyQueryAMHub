@@ -1079,3 +1079,102 @@ async def recalc_all_health(
 
     db.commit()
     return {"ok": True, "updated": updated}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ПОРТФЕЛЬНЫЙ ДАШБОРД — список всех клиентов с мини-метриками
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/api/portfolio")
+async def get_portfolio(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Все клиенты менеджера с мини-метриками для портфельного дашборда.
+    Возвращает данные для мгновенного понимания состояния портфеля.
+    """
+    user = _require_user(auth_token, db)
+    now = datetime.utcnow()
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.order_by(Client.health_score).all()  # сначала проблемные
+
+    items = []
+    for c in clients:
+        # Задачи
+        tasks = db.query(Task).filter(Task.client_id == c.id).all()
+        open_t  = sum(1 for t in tasks if t.status in ("plan", "in_progress"))
+        blocked = sum(1 for t in tasks if t.status == "blocked")
+        overdue_t = sum(1 for t in tasks if t.due_date and t.due_date < now and t.status not in ("done",))
+
+        # Дней без контакта
+        days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+
+        # Health
+        health_pct = round((c.health_score or 0) * 100)
+        risk = (
+            "critical" if health_pct < 30 or days_silent > 60 or blocked > 2
+            else "warning" if health_pct < 60 or days_silent > 30 or blocked > 0
+            else "good"
+        )
+
+        # Ближайшая встреча
+        next_meeting = (
+            db.query(Meeting)
+            .filter(Meeting.client_id == c.id, Meeting.date > now)
+            .order_by(Meeting.date)
+            .first()
+        )
+
+        # Незакрытые фолоуапы
+        pending_followups = db.query(Meeting).filter(
+            Meeting.client_id == c.id,
+            Meeting.followup_status == "pending",
+        ).count()
+
+        # Активный апсейл
+        active_upsell = db.query(UpsellEvent).filter(
+            UpsellEvent.client_id == c.id,
+            UpsellEvent.status.in_(["identified", "in_progress"]),
+            UpsellEvent.delta > 0,
+        ).count()
+
+        items.append({
+            "id": c.id,
+            "name": c.name,
+            "segment": c.segment or "—",
+            "manager": c.manager_email,
+            "health": health_pct,
+            "risk": risk,
+            "mrr": c.mrr or 0,
+            "nps": c.nps_last,
+            "days_silent": days_silent if days_silent < 999 else None,
+            "open_tasks": open_t,
+            "blocked_tasks": blocked,
+            "overdue_tasks": overdue_t,
+            "pending_followups": pending_followups,
+            "active_upsell": active_upsell,
+            "next_meeting": next_meeting.date.isoformat() if next_meeting else None,
+            "open_tickets": c.open_tickets or 0,
+        })
+
+    # Сводная статистика портфеля
+    total_mrr   = sum(i["mrr"] for i in items)
+    critical    = sum(1 for i in items if i["risk"] == "critical")
+    warning_cnt = sum(1 for i in items if i["risk"] == "warning")
+    upsell_cnt  = sum(i["active_upsell"] for i in items)
+
+    return {
+        "clients": items,
+        "summary": {
+            "total": len(items),
+            "total_mrr": total_mrr,
+            "critical": critical,
+            "warning": warning_cnt,
+            "healthy": len(items) - critical - warning_cnt,
+            "active_upsells": upsell_cnt,
+        },
+    }

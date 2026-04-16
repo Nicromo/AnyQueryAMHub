@@ -146,6 +146,94 @@
 <button class="theme-btn" onclick="toggleTheme()">🌓</button>
 <div class="main">
   <a href="/clients" class="back">← Клиенты</a>
+  <!-- ══════════ HERO BLOCK ══════════ -->
+  <div id="hero-block" style="
+    background: linear-gradient(135deg, rgba(99,102,241,.08) 0%, rgba(6,182,212,.05) 100%);
+    border: 1px solid rgba(99,102,241,.2);
+    border-radius: 16px;
+    padding: 20px 22px;
+    margin: 12px 0 20px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 16px;
+    align-items: center;
+  ">
+    <!-- Avatar -->
+    <div id="hero-avatar" style="
+      width: 52px; height: 52px;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.15rem; font-weight: 800;
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+      flex-shrink: 0;
+    ">{{ client.name[:2].upper() }}</div>
+
+    <!-- Main info -->
+    <div style="min-width:0;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:1.15rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ client.name }}</span>
+        {% if client.segment %}
+        <span style="font-size:.7rem;padding:2px 8px;border-radius:6px;background:rgba(99,102,241,.15);color:#818cf8;font-weight:700;">{{ client.segment }}</span>
+        {% endif %}
+        <span id="hero-risk-badge" style="font-size:.7rem;padding:2px 8px;border-radius:6px;font-weight:700;"></span>
+      </div>
+
+      <!-- Health bar -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <span style="font-size:.68rem;color:var(--muted);white-space:nowrap;">Health</span>
+        <div style="flex:1;max-width:160px;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;">
+          <div id="hero-health-bar" style="height:100%;border-radius:3px;transition:width .6s;"></div>
+        </div>
+        <span id="hero-health-val" style="font-size:.82rem;font-weight:700;min-width:34px;">
+          {{ (client.health_score * 100)|int if client.health_score else 0 }}%
+        </span>
+      </div>
+
+      <!-- Quick metrics -->
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div style="font-size:.76rem;color:var(--muted);">
+          💰 MRR: <strong id="hero-mrr" style="color:var(--text);">—</strong>
+        </div>
+        <div style="font-size:.76rem;color:var(--muted);">
+          ⭐ NPS: <strong id="hero-nps" style="color:var(--text);">{{ client.nps_last if client.nps_last else '—' }}</strong>
+        </div>
+        <div style="font-size:.76rem;color:var(--muted);">
+          📅 Контакт: <strong id="hero-contact" style="color:var(--text);">
+            {% if client.last_meeting_date %}
+              {{ ((now - client.last_meeting_date).days) }} дн. назад
+            {% else %}нет данных{% endif %}
+          </strong>
+        </div>
+        <div style="font-size:.76rem;color:var(--muted);">
+          🎫 Тикеты: <strong id="hero-tickets" style="color:var(--text);">{{ client.open_tickets or 0 }}</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0;">
+      <a href="/prep/{{ client.id }}" class="btn btn-sm btn-p" style="white-space:nowrap;">📋 Подготовка</a>
+      <a href="/followup/{{ client.id }}" class="btn btn-sm" style="white-space:nowrap;">✍️ Фолоуап</a>
+      <a href="/client/{{ client.id }}/qbr" class="btn btn-sm" style="white-space:nowrap;">📊 QBR</a>
+    </div>
+
+    <!-- AI-подсказка (загружается асинхронно) -->
+    <div id="hero-ai-hint" style="
+      grid-column: 1 / -1;
+      display: none;
+      background: rgba(99,102,241,.06);
+      border: 1px solid rgba(99,102,241,.15);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: .8rem;
+      line-height: 1.5;
+    ">
+      <span style="color:#818cf8;font-weight:600;margin-right:6px;">🤖 AI:</span>
+      <span id="hero-ai-text"></span>
+    </div>
+  </div>
+  <!-- ══════════ END HERO ══════════ -->
+
 
   <div class="header">
     <div>
@@ -1604,6 +1692,56 @@ function copyExecSummary() {
   ].join('\n');
   navigator.clipboard.writeText(text).then(() => toast('📋 Скопировано'));
 }
+
+// ── Hero block init ──────────────────────────────────────────────────────
+(async function initHero() {
+  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
+  const healthPct = parseInt(document.getElementById('hero-health-val')?.textContent) || 0;
+
+  // Health bar
+  const hc = healthPct >= 75 ? '#22c55e' : healthPct >= 50 ? '#60a5fa' : healthPct >= 30 ? '#f59e0b' : '#ef4444';
+  const bar = document.getElementById('hero-health-bar');
+  if (bar) { bar.style.width = healthPct + '%'; bar.style.background = hc; }
+  const hv = document.getElementById('hero-health-val');
+  if (hv) hv.style.color = hc;
+
+  // Risk badge
+  const risk = healthPct >= 70 ? {label:'🟢 Норма', bg:'rgba(34,197,94,.12)', color:'#4ade80'}
+             : healthPct >= 40 ? {label:'🟡 Внимание', bg:'rgba(245,158,11,.12)', color:'#fbbf24'}
+             :                   {label:'🔴 Критично', bg:'rgba(239,68,68,.12)', color:'#f87171'};
+  const badge = document.getElementById('hero-risk-badge');
+  if (badge) { badge.textContent = risk.label; badge.style.background = risk.bg; badge.style.color = risk.color; }
+
+  // MRR
+  try {
+    const r = await fetch(`/api/clients/${clientId}/revenue/history?months=1`);
+    const d = await r.json();
+    const mrr = d.current_mrr || 0;
+    const mrrEl = document.getElementById('hero-mrr');
+    if (mrrEl) {
+      mrrEl.textContent = mrr > 0
+        ? (mrr >= 1e6 ? (mrr/1e6).toFixed(1)+'M' : mrr >= 1e3 ? (mrr/1e3).toFixed(0)+'K' : mrr.toLocaleString('ru-RU')) + ' ₽'
+        : '—';
+      if (d.trend === 'up') mrrEl.innerHTML += ' <span style="color:#4ade80;font-size:.7rem;">↑'+d.trend_pct+'%</span>';
+      if (d.trend === 'down') mrrEl.innerHTML += ' <span style="color:#f87171;font-size:.7rem;">↓'+Math.abs(d.trend_pct)+'%</span>';
+    }
+  } catch(e) {}
+
+  // AI hint (загружаем в фоне, показываем если есть данные)
+  try {
+    const r = await fetch(`/api/clients/${clientId}/ai/summary`);
+    const d = await r.json();
+    if (d.next_best_actions && d.next_best_actions.length > 0) {
+      const top = d.next_best_actions[0];
+      const hint = document.getElementById('hero-ai-hint');
+      const text = document.getElementById('hero-ai-text');
+      if (hint && text) {
+        text.textContent = top.action + ' — ' + top.reason;
+        hint.style.display = 'block';
+      }
+    }
+  } catch(e) {}
+})();
 
 </script>
 </body>

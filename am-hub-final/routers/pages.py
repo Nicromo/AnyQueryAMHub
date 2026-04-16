@@ -227,6 +227,15 @@ async def my_day(request: Request, db: Session = Depends(get_db), auth_token: Op
 # CLIENTS
 # ============================================================================
 
+@router.get("/portfolio", response_class=HTMLResponse)
+async def portfolio_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Портфельный дашборд — все клиенты с мини-метриками."""
+    user = _get_user(auth_token, db)
+    if not user:
+        return _login_redirect()
+    return templates.TemplateResponse("portfolio.html", {"request": request, "user": user})
+
+
 @router.get("/clients", response_class=HTMLResponse)
 async def clients_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     user = _get_user(auth_token, db)
