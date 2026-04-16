@@ -1,124 +1,514 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Чекапы — AM Hub</title>
-  <style>
-    :root { --bg:#0a0e1a; --card:#111827; --border:#1e2a3a; --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --green:#22c55e; --yellow:#eab308; --red:#ef4444; }
-    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
-    .main { margin-left:240px; padding:24px 28px; }
-    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
-    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
-    .sidebar-logo h1 { font-size:1.1rem; }
-    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
-    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
-    .nav-item.active { color:var(--accent); background:rgba(99,102,241,.12); border-left-color:var(--accent); }
-    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
-    a { color:var(--accent); text-decoration:none; }
-    h1 { font-size:1.4rem; margin-bottom:4px; }
-    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
-    .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
-    .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; }
-    .client-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.03); }
-    .client-row:last-child { border-bottom:none; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
-    .badge-red { background:rgba(239,68,68,.15); color:var(--red); }
-    .badge-yellow { background:rgba(234,179,8,.15); color:var(--yellow); }
-    .btn { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:none; background:var(--accent); color:#fff; transition:filter .15s; }
-    .btn:hover { filter:brightness(1.15); }
-    .btn-sm { padding:5px 10px; font-size:.75rem; }
-    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); backdrop-filter:blur(4px); z-index:200; align-items:center; justify-content:center; }
-    .modal-overlay.visible { display:flex; }
-    .modal { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:28px; max-width:400px; width:90%; }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="sidebar">
-  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
-  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
-  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
-  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
-  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
-  <a class="nav-item active" href="/checkups"><span>📅</span> Чекапы</a>
-  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
-  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
-  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
-  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
-  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
-  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
-</div>
+{% extends "base.html" %}
 
-<div class="main">
-  <h1>📅 Умные чекапы</h1>
-  <p class="sub">Интервалы по сегментам: ENT — 30 дн., SME — 60 дн., SMB — 90 дн., SS — 180 дн.</p>
+{% block title %}Чекапы — AM Hub{% endblock %}
+{% block page_title %}Чекапы{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Search Quality + статус обхода клиентов</div>{% endblock %}
 
-  <div class="section">
-    <h3 style="color:var(--red);">🔴 Просрочены ({{ overdue|length }})</h3>
-    {% for c in overdue %}
-    <div class="client-row">
-      <div><a href="/client/{{ c.id }}"><b>{{ c.name }}</b></a> <span class="badge badge-red">{{ c.segment }}</span></div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:.78rem;color:var(--red);">{{ c.days_since }} дн. без контакта</span>
-        <button class="btn btn-sm" onclick="assignCheckup({{ c.id }})">📅 Назначить</button>
+{% block page_actions %}
+<button class="btn btn-sm" onclick="openExtModal()">🔌 Настроить расширение</button>
+<a href="/static/checkup-ext.zip" class="btn btn-primary btn-sm" id="dl-ext" download>⬇ Скачать расширение</a>
+{% endblock %}
+
+{% block content %}
+<style>
+/* ── Checkup-specific ────────────────────────────── */
+.ck-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 24px; }
+.ck-list { display: flex; flex-direction: column; gap: 4px; }
+.ck-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  transition: border-color var(--t), background var(--t); gap: 10px;
+}
+.ck-row:hover { border-color: var(--border-s); background: var(--surface-2); }
+.ck-row-left  { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.ck-row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ck-name { font-size: .84rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-days { font-size: .75rem; white-space: nowrap; }
+.ck-days.red    { color: var(--red); }
+.ck-days.yellow { color: var(--yellow); }
+.ck-days.dim    { color: var(--text-muted); }
+
+.ext-setup {
+  background: var(--surface); border: 1px solid var(--border-s);
+  border-radius: var(--radius-xl); padding: 24px 28px;
+  margin-bottom: 24px; position: relative; overflow: hidden;
+}
+.ext-setup::before {
+  content: ''; position: absolute; inset: 0; opacity: .04;
+  background: radial-gradient(ellipse at 80% 50%, var(--accent), transparent 60%);
+  pointer-events: none;
+}
+.ext-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; background: var(--accent-dim); border: 1px solid var(--accent-ring); border-radius: 5px; font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
+.ext-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+.ext-step { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; }
+.ext-step-n { width: 24px; height: 24px; border-radius: 50%; background: var(--accent-dim); border: 1px solid var(--accent-ring); display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+.ext-step-t { font-size: .78rem; font-weight: 500; margin-bottom: 3px; }
+.ext-step-d { font-size: .72rem; color: var(--text-dim); line-height: 1.5; }
+
+.results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.result-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 16px;
+  transition: border-color var(--t), box-shadow var(--t);
+}
+.result-card:hover { border-color: var(--border-s); box-shadow: var(--shadow-s); }
+.result-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.result-client { font-size: .86rem; font-weight: 600; }
+.result-date   { font-size: .72rem; color: var(--text-muted); margin-top: 2px; }
+.score-dist { display: flex; gap: 4px; margin: 10px 0 8px; }
+.sc-bar { flex: 1; border-radius: 4px; display: flex; flex-direction: column; align-items: center; padding: 5px 2px 4px; gap: 2px; }
+.sc-bar .n { font-size: .82rem; font-weight: 700; font-family: var(--font-mono); }
+.sc-bar .l { font-size: .62rem; font-weight: 600; }
+.sc-0 { background: var(--red-bg);    color: var(--red); }
+.sc-1 { background: var(--yellow-bg); color: var(--yellow); }
+.sc-2 { background: var(--blue-bg);   color: var(--blue); }
+.sc-3 { background: var(--green-bg);  color: var(--green); }
+.avg-score { font-size: 1.4rem; font-weight: 700; font-family: var(--font-mono); letter-spacing: -.03em; }
+
+.tab-bar { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+
+/* Modal */
+.cfg-modal { max-width: 480px; }
+.token-display {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface-3); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 12px;
+}
+.token-val { font-family: var(--font-mono); font-size: .78rem; color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+
+<!-- ── Расширение — онбординг ─────────────────────────────────── -->
+<div class="ext-setup" id="ext-onboarding">
+  <div class="ext-badge">🔌 Search Quality Checkup v2</div>
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+    <div>
+      <div style="font-size:1.05rem;font-weight:700;margin-bottom:4px">Автоматический чекапер поиска</div>
+      <div style="font-size:.82rem;color:var(--text-dim);max-width:520px;line-height:1.6">
+        Расширение проверяет качество поиска Diginetica по списку запросов, даёт оценки 0–3 и ИИ-рекомендации.
+        Результаты автоматически сохраняются в AM Hub.
       </div>
     </div>
-    {% endfor %}
-    {% if not overdue %}<div style="color:var(--muted);padding:10px;">Нет просроченных</div>{% endif %}
+    <div style="display:flex;gap:8px;flex-shrink:0;">
+      <button class="btn btn-sm" onclick="openExtModal()">⚙️ Настройки</button>
+      <a href="/static/checkup-ext.zip" class="btn btn-primary btn-sm" download>⬇ Скачать</a>
+    </div>
   </div>
 
-  <div class="section">
-    <h3 style="color:var(--yellow);">🟡 Скоро ({{ due_soon|length }})</h3>
-    {% for c in due_soon %}
-    <div class="client-row">
-      <div><a href="/client/{{ c.id }}"><b>{{ c.name }}</b></a> <span class="badge badge-yellow">{{ c.segment }}</span></div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:.78rem;color:var(--yellow);">через {{ c.days_until }} дн.</span>
-        <button class="btn btn-sm" onclick="assignCheckup({{ c.id }})">📅 Назначить</button>
-      </div>
+  <div class="ext-steps">
+    <div class="ext-step">
+      <div class="ext-step-n">1</div>
+      <div class="ext-step-t">Скачать</div>
+      <div class="ext-step-d">Скачайте ZIP с расширением и распакуйте в любую папку</div>
     </div>
-    {% endfor %}
-    {% if not due_soon %}<div style="color:var(--muted);padding:10px;">Нет приближающихся</div>{% endif %}
+    <div class="ext-step">
+      <div class="ext-step-n">2</div>
+      <div class="ext-step-t">Установить</div>
+      <div class="ext-step-d"><code>chrome://extensions</code> → Режим разработчика → Загрузить распакованное → папка <code>ext/</code></div>
+    </div>
+    <div class="ext-step">
+      <div class="ext-step-n">3</div>
+      <div class="ext-step-t">Подключить</div>
+      <div class="ext-step-d">Нажмите «Настройки» выше — скопируйте URL и токен в расширение</div>
+    </div>
+    <div class="ext-step">
+      <div class="ext-step-n">4</div>
+      <div class="ext-step-t">Чекапить</div>
+      <div class="ext-step-d">Введите ID клиента → тип запросов → запустить. Результаты появятся здесь автоматически</div>
+    </div>
   </div>
 
-  <div class="section">
-    <h3>🟢 Предстоящие ({{ upcoming|length }})</h3>
-    {% for c in upcoming %}
-    <div class="client-row">
-      <div><a href="/client/{{ c.id }}"><b>{{ c.name }}</b></a> <span style="font-size:.78rem;color:var(--muted);">{{ c.segment }}</span></div>
-      <span style="font-size:.78rem;color:var(--muted);">через {{ c.days_until }} дн.</span>
-    </div>
-    {% endfor %}
+  <!-- Статус подключения расширения -->
+  <div style="display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text-dim)">
+    <span id="ext-status-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text-muted);flex-shrink:0"></span>
+    <span id="ext-status-text">Проверяем подключение расширения...</span>
   </div>
 </div>
 
-<!-- Assign Modal -->
-<div class="modal-overlay" id="assignModal">
-  <div class="modal">
-    <h3>📅 Назначить чекап</h3>
-    <div style="margin:16px 0;">
-      <label style="display:block;font-size:.78rem;color:var(--muted);margin-bottom:4px;">Дата</label>
-      <input type="date" id="checkup-date" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+<!-- ── Tabs ─────────────────────────────────────────────────── -->
+<div class="tab-bar">
+  <button class="fbtn active" onclick="switchTab('overdue',this)">🔴 Просрочены <span id="cnt-overdue" class="tab-badge">—</span></button>
+  <button class="fbtn" onclick="switchTab('soon',this)">🟡 Скоро <span id="cnt-soon" class="tab-badge">—</span></button>
+  <button class="fbtn" onclick="switchTab('upcoming',this)">🟢 Предстоящие <span id="cnt-upcoming" class="tab-badge">—</span></button>
+  <button class="fbtn" onclick="switchTab('results',this)">📊 Результаты чекапов <span id="cnt-results" class="tab-badge">—</span></button>
+</div>
+
+<!-- ── Tab: Просрочены ─────────────────────────────────────── -->
+<div id="tab-overdue">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title" style="color:var(--red)">🔴 Требуют чекапа прямо сейчас</div>
+      <button class="btn btn-sm" onclick="assignBulk('overdue')">📅 Назначить всем</button>
     </div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn" onclick="doAssign()">Назначить</button>
-      <button class="btn" style="background:transparent;border:1px solid var(--border);" onclick="document.getElementById('assignModal').classList.remove('visible')">Отмена</button>
+    <div id="list-overdue" class="ck-list" style="padding:8px 12px 12px">
+      <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tab: Скоро ──────────────────────────────────────────── -->
+<div id="tab-soon" style="display:none">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title" style="color:var(--yellow)">🟡 Чекап в ближайшие 2 недели</div>
+    </div>
+    <div id="list-soon" class="ck-list" style="padding:8px 12px 12px">
+      <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tab: Предстоящие ────────────────────────────────────── -->
+<div id="tab-upcoming" style="display:none">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🟢 Предстоящие чекапы</div>
+    </div>
+    <div id="list-upcoming" class="ck-list" style="padding:8px 12px 12px">
+      <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tab: Результаты чекапов ─────────────────────────────── -->
+<div id="tab-results" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;flex-wrap:wrap">
+    <div style="font-size:.82rem;color:var(--text-dim)">Результаты автоматических чекапов из расширения</div>
+    <div style="display:flex;gap:6px">
+      <select id="filter-qtype" class="form-control" style="width:140px;font-size:.78rem" onchange="loadResults()">
+        <option value="">Все типы</option>
+        <option value="top">Топ запросы</option>
+        <option value="random">Случайные</option>
+        <option value="zero">Нулевые</option>
+        <option value="zeroquery">ZeroQuery</option>
+      </select>
+    </div>
+  </div>
+  <div id="results-grid" class="results-grid">
+    <div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Нет результатов</div><div class="empty-text">Запустите чекап в расширении — результаты появятся здесь</div></div>
+  </div>
+</div>
+
+<!-- ── Modal назначить чекап ──────────────────────────────── -->
+<div class="modal-overlay" id="assignModal" style="display:none" onclick="if(event.target===this)closeAssign()">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <span class="modal-title">📅 Назначить чекап</span>
+      <button class="modal-close" onclick="closeAssign()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Клиент</label>
+        <div id="assign-name" style="font-weight:500;padding:6px 0;font-size:.86rem"></div>
+      </div>
+      <div class="field">
+        <label>Дата чекапа</label>
+        <input type="date" id="checkup-date" class="form-control">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeAssign()">Отмена</button>
+      <button class="btn btn-primary" onclick="doAssign()">📅 Назначить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal настройки расширения ─────────────────────────── -->
+<div class="modal-overlay" id="extModal" style="display:none" onclick="if(event.target===this)closeExtModal()">
+  <div class="modal cfg-modal">
+    <div class="modal-header">
+      <span class="modal-title">🔌 Подключение расширения к AM Hub</span>
+      <button class="modal-close" onclick="closeExtModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:16px;line-height:1.6">
+        Вставьте эти данные в настройки расширения (иконка в Chrome → шестерёнка).
+      </p>
+
+      <div class="field">
+        <label>AM Hub URL</label>
+        <div class="token-display">
+          <span class="token-val" id="cfg-url"></span>
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="copy('cfg-url')" title="Копировать">⎘</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Токен авторизации</label>
+        <div class="token-display">
+          <span class="token-val" id="cfg-token" style="filter:blur(4px);cursor:pointer" onclick="revealToken(this)">
+            Нажмите чтобы показать
+          </span>
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="copyToken()" title="Копировать">⎘</button>
+        </div>
+        <div class="help">Токен привязан к вашей учётной записи. Не передавайте другим.</div>
+      </div>
+
+      <div class="field">
+        <label>Groq API Key (для ИИ-рекомендаций)</label>
+        <input type="text" id="cfg-groq" class="form-control" placeholder="gsk_..." style="font-family:var(--font-mono);font-size:.82rem">
+        <div class="help">Бесплатный ключ: <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent)">console.groq.com/keys</a></div>
+      </div>
+
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-top:4px">
+        <div style="font-size:.76rem;font-weight:600;margin-bottom:6px">Как передать в расширение:</div>
+        <div style="font-size:.75rem;color:var(--text-dim);line-height:1.7">
+          1. Откройте Chrome → расширение AM Hub Checkup → ⚙️<br>
+          2. Вставьте <strong>AM Hub URL</strong> и <strong>Токен</strong><br>
+          3. Опционально: Groq Key для ИИ-рекомендаций<br>
+          4. Нажмите «Сохранить» в расширении
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeExtModal()">Закрыть</button>
+      <button class="btn btn-primary" onclick="saveGroqKey()">💾 Сохранить Groq Key</button>
     </div>
   </div>
 </div>
 
 <script>
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-let assignClientId=null;
-function assignCheckup(id){assignClientId=id;document.getElementById('checkup-date').value=new Date(Date.now()+86400000*7).toISOString().slice(0,10);document.getElementById('assignModal').classList.add('visible');}
-async function doAssign(){
-  const r=await fetch('/api/checkups/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:assignClientId,date:document.getElementById('checkup-date').value})});
-  if(r.ok) location.reload();
+// ── State ──────────────────────────────────────────────────────────────────
+let activeTab = 'overdue';
+let checkupData = { overdue: [], due_soon: [], upcoming: [] };
+let assignClientId = null;
+let myToken = null;
+
+// ── Init ───────────────────────────────────────────────────────────────────
+(async function init() {
+  await Promise.all([loadCheckups(), loadResults()]);
+  loadMyToken();
+})();
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function switchTab(tab, btn) {
+  ['overdue','soon','upcoming','results'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t===tab ? 'block' : 'none';
+  });
+  document.querySelectorAll('.tab-bar .fbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  activeTab = tab;
+  if (tab === 'results') loadResults();
 }
+
+// ── Load checkups list ─────────────────────────────────────────────────────
+async function loadCheckups() {
+  try {
+    const d = await fetch('/api/checkups').then(r => r.json());
+    checkupData = d;
+
+    document.getElementById('cnt-overdue').textContent  = d.overdue.length || '';
+    document.getElementById('cnt-soon').textContent     = d.due_soon.length || '';
+    document.getElementById('cnt-upcoming').textContent = d.upcoming.length || '';
+
+    renderList('list-overdue',  d.overdue,  'red');
+    renderList('list-soon',     d.due_soon, 'yellow');
+    renderList('list-upcoming', d.upcoming, 'dim');
+  } catch(e) {
+    console.error('loadCheckups error:', e);
+  }
+}
+
+function renderList(elId, items, colorClass) {
+  const el = document.getElementById(elId);
+  if (!items.length) {
+    el.innerHTML = `<div class="empty" style="padding:24px">
+      <div class="empty-icon">${colorClass==='red'?'✅':'📅'}</div>
+      <div class="empty-text">${colorClass==='red'?'Нет просроченных — отлично!':'Нет клиентов в этой категории'}</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = items.map(c => `
+    <div class="ck-row">
+      <div class="ck-row-left">
+        <div class="client-avatar" style="width:28px;height:28px;font-size:.7rem">${(c.name||'?')[0].toUpperCase()}</div>
+        <div>
+          <div class="ck-name">${c.name}</div>
+          <div style="font-size:.7rem;color:var(--text-muted)">${c.segment||'—'} · интервал ${c.interval} дн.</div>
+        </div>
+      </div>
+      <div class="ck-row-right">
+        <span class="ck-days ${colorClass}">
+          ${c.days_until < 0 ? `просрочен ${Math.abs(c.days_until)} дн.` : `через ${c.days_until} дн.`}
+        </span>
+        <span class="badge badge-neutral" style="cursor:pointer;font-size:.65rem" onclick="startExtCheckup(${c.id},'${c.name.replace(/'/,'\\'')}')">🔍 Чекап</span>
+        <button class="btn btn-sm" style="padding:4px 10px;font-size:.73rem" onclick="openAssign(${c.id},'${c.name.replace(/'/,'\\'')}')">📅</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Load checkup results ───────────────────────────────────────────────────
+async function loadResults() {
+  try {
+    const qtype = document.getElementById('filter-qtype')?.value || '';
+    const params = qtype ? `?query_type=${qtype}` : '';
+    const d = await fetch('/api/checkup/results/all' + params).then(r => r.json()).catch(() => ({results:[]}));
+    const results = d.results || [];
+
+    document.getElementById('cnt-results').textContent = results.length || '';
+
+    const el = document.getElementById('results-grid');
+    if (!results.length) {
+      el.innerHTML = `<div class="empty" style="grid-column:1/-1">
+        <div class="empty-icon">📭</div>
+        <div class="empty-title">Нет результатов</div>
+        <div class="empty-text">Запустите чекап в расширении — результаты появятся здесь автоматически</div>
+      </div>`;
+      return;
+    }
+
+    el.innerHTML = results.map(r => {
+      const sd = r.score_dist || {};
+      const avg = r.avg_score != null ? r.avg_score.toFixed(2) : '—';
+      const color = r.avg_score == null ? 'var(--text-muted)'
+                  : r.avg_score >= 2.5 ? 'var(--green)'
+                  : r.avg_score >= 1.5 ? 'var(--yellow)'
+                  : 'var(--red)';
+      const dateStr = r.created_at
+        ? new Date(r.created_at).toLocaleString('ru-RU', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})
+        : '';
+      const qLabels = {top:'Топ',random:'Случайн.',zero:'Нулевые',zeroquery:'ZeroQ'};
+      return `<div class="result-card" onclick="openResultDetail(${r.id})">
+        <div class="result-card-top">
+          <div>
+            <div class="result-client">${r.client_name || 'Клиент #'+r.client_id}</div>
+            <div class="result-date">${dateStr} · ${r.manager_name||''}${r.mode?' · '+r.mode:''}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="avg-score" style="color:${color}">${avg}</div>
+            <div style="font-size:.67rem;color:var(--text-muted)">ср. балл</div>
+          </div>
+        </div>
+        <div class="score-dist">
+          ${[0,1,2,3].map(s=>`<div class="sc-bar sc-${s}">
+            <div class="n">${sd[s]||sd[String(s)]||0}</div>
+            <div class="l">Оц.${s}</div>
+          </div>`).join('')}
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+          <span style="font-size:.72rem;color:var(--text-muted)">${r.total_queries} запросов · ${qLabels[r.query_type]||r.query_type}</span>
+          <span class="badge badge-neutral" style="font-size:.65rem">подробнее →</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    console.error('loadResults:', e);
+  }
+}
+
+// ── Assign checkup ─────────────────────────────────────────────────────────
+function openAssign(id, name) {
+  assignClientId = id;
+  document.getElementById('assign-name').textContent = name;
+  const d = new Date(Date.now() + 7*86400000);
+  document.getElementById('checkup-date').value = d.toISOString().slice(0,10);
+  document.getElementById('assignModal').style.display = 'flex';
+}
+function closeAssign() { document.getElementById('assignModal').style.display = 'none'; }
+
+async function doAssign() {
+  const r = await fetch('/api/checkups/assign', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ client_id: assignClientId, date: document.getElementById('checkup-date').value })
+  });
+  if (r.ok) { closeAssign(); loadCheckups(); }
+}
+
+async function assignBulk(group) {
+  const items = checkupData[group === 'overdue' ? 'overdue' : 'due_soon'] || [];
+  if (!items.length) return;
+  const date = new Date(Date.now() + 7*86400000).toISOString().slice(0,10);
+  await Promise.all(items.map(c =>
+    fetch('/api/checkups/assign', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({client_id: c.id, date})
+    })
+  ));
+  loadCheckups();
+}
+
+// ── Extension helpers ──────────────────────────────────────────────────────
+function startExtCheckup(clientId, name) {
+  // Открываем попап расширения если установлено (нельзя программно)
+  // Копируем ID кабинета в буфер — менеджер вставит в расширение
+  navigator.clipboard.writeText(String(clientId)).catch(()=>{});
+  showToast(`ID кабинета ${clientId} (${name}) скопирован — вставьте в расширение`);
+}
+
+async function loadMyToken() {
+  try {
+    const d = await fetch('/api/auth/me/token').then(r=>r.json()).catch(()=>({}));
+    myToken = d.token || '';
+    document.getElementById('cfg-url').textContent = window.location.origin;
+  } catch(e) {}
+}
+
+function openExtModal() {
+  document.getElementById('cfg-url').textContent = window.location.origin;
+  if (myToken) {
+    const el = document.getElementById('cfg-token');
+    el.dataset.token = myToken;
+    el.textContent = 'Нажмите чтобы показать';
+    el.style.filter = 'blur(4px)';
+  }
+  document.getElementById('extModal').style.display = 'flex';
+}
+function closeExtModal() { document.getElementById('extModal').style.display = 'none'; }
+
+function revealToken(el) {
+  el.textContent = el.dataset.token || '—';
+  el.style.filter = 'none';
+}
+function copy(elId) {
+  const text = document.getElementById(elId).textContent;
+  navigator.clipboard.writeText(text).then(()=>showToast('Скопировано'));
+}
+function copyToken() {
+  const el = document.getElementById('cfg-token');
+  navigator.clipboard.writeText(el.dataset.token || '').then(()=>showToast('Токен скопирован'));
+}
+async function saveGroqKey() {
+  const key = document.getElementById('cfg-groq').value.trim();
+  if (!key) return;
+  await fetch('/api/settings/creds', {method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({groq: {api_key: key}})});
+  showToast('Groq Key сохранён');
+  closeExtModal();
+}
+
+// ── Result detail ──────────────────────────────────────────────────────────
+async function openResultDetail(id) {
+  window.location.href = `/checkup/result/${id}`;
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast success';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 3500);
+}
+
+// ── Extension status check ─────────────────────────────────────────────────
+(async function checkExtensionStatus() {
+  // Проверяем были ли результаты в последние 24ч
+  try {
+    const d = await fetch('/api/checkup/results/all?limit=1').then(r=>r.json()).catch(()=>({results:[]}));
+    const dot  = document.getElementById('ext-status-dot');
+    const text = document.getElementById('ext-status-text');
+    if ((d.results||[]).length) {
+      const last = new Date(d.results[0].created_at);
+      const hoursAgo = Math.round((Date.now()-last)/3600000);
+      dot.style.background = 'var(--green)';
+      dot.style.boxShadow  = '0 0 5px rgba(35,209,139,.5)';
+      text.textContent = `Последний чекап: ${hoursAgo < 1 ? 'менее часа назад' : hoursAgo + ' ч. назад'} · расширение подключено`;
+    } else {
+      dot.style.background = 'var(--yellow)';
+      text.textContent = 'Результатов пока нет — установите расширение и запустите первый чекап';
+    }
+  } catch(e) {}
+})();
 </script>
-</body>
-</html>
+{% endblock %}

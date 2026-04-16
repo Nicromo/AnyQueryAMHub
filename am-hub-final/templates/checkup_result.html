@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Чекап {{ client.name if client else '' }} — AM Hub{% endblock %}
+{% block page_title %}Результат чекапа{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">{{ client.name if client else 'Клиент' }} · {{ result.created_at.strftime('%d.%m.%Y %H:%M') if result.created_at else '' }}</div>{% endblock %}
+{% block page_actions %}
+<a href="/checkups" class="btn btn-ghost btn-sm">← Назад</a>
+<button class="btn btn-sm" onclick="window.print()">🖨 Печать</button>
+{% endblock %}
+
+{% block content %}
+<style>
+.score-chip{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;font-size:.82rem;font-weight:700;flex-shrink:0;}
+.s0{background:var(--red-bg);color:var(--red)} .s1{background:var(--yellow-bg);color:var(--yellow)}
+.s2{background:var(--blue-bg);color:var(--blue)} .s3{background:var(--green-bg);color:var(--green)}
+.q-row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:6px;transition:border-color var(--t);}
+.q-row:hover{border-color:var(--border-s);}
+.q-top{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.q-text{font-size:.86rem;font-weight:500;flex:1;}
+.q-imp{font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);}
+.q-reason{font-size:.78rem;color:var(--text-dim);margin-bottom:6px;}
+.q-recs{background:var(--surface-2);border-radius:6px;padding:9px 11px;}
+.q-rec{font-size:.76rem;color:var(--text-dim);margin-bottom:4px;line-height:1.5;}
+.q-rec:last-child{margin-bottom:0}
+.q-rec b{color:var(--text);}
+.q-ai{font-size:.76rem;color:var(--purple);margin-top:5px;padding-top:5px;border-top:1px solid var(--border);}
+.filter-row{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+</style>
+
+<!-- Summary cards -->
+<div class="kpi-row" style="margin-bottom:20px">
+  {% set avg = result.avg_score %}
+  {% set sd = result.score_dist or {} %}
+  <div class="kpi-card {% if avg and avg >= 2.5 %}c-green{% elif avg and avg >= 1.5 %}c-yellow{% else %}c-red{% endif %}">
+    <div class="kpi-label">Средний балл</div>
+    <div class="kpi-value">{{ '%.2f'|format(avg) if avg is not none else '—' }}</div>
+    <div class="kpi-sub">из 3.0 максимум</div>
+  </div>
+  <div class="kpi-card c-accent">
+    <div class="kpi-label">Запросов проверено</div>
+    <div class="kpi-value">{{ result.total_queries }}</div>
+    <div class="kpi-sub">{{ result.query_type or 'top' }} тип</div>
+  </div>
+  <div class="kpi-card c-red">
+    <div class="kpi-label">Оценка 0 (критично)</div>
+    <div class="kpi-value">{{ sd.get('0', sd.get(0, 0)) }}</div>
+    <div class="kpi-sub">требуют немедленно</div>
+  </div>
+  <div class="kpi-card c-yellow">
+    <div class="kpi-label">Оценка 1–2 (улучшить)</div>
+    <div class="kpi-value">{{ (sd.get('1', sd.get(1, 0)) or 0) + (sd.get('2', sd.get(2, 0)) or 0) }}</div>
+    <div class="kpi-sub">есть рекомендации</div>
+  </div>
+  <div class="kpi-card c-green">
+    <div class="kpi-label">Оценка 3 (хорошо)</div>
+    <div class="kpi-value">{{ sd.get('3', sd.get(3, 0)) }}</div>
+    <div class="kpi-sub">без действий</div>
+  </div>
+</div>
+
+<!-- Meta -->
+<div class="section" style="margin-bottom:20px">
+  <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:.82rem">
+    <span><span style="color:var(--text-muted)">Менеджер:</span> <strong>{{ result.manager_name or '—' }}</strong></span>
+    <span><span style="color:var(--text-muted)">Клиент:</span> <strong>{{ client.name if client else '—' }}</strong></span>
+    <span><span style="color:var(--text-muted)">Режим:</span> <strong>{{ result.mode or '—' }}</strong></span>
+    <span><span style="color:var(--text-muted)">Кабинет ID:</span> <code>{{ result.cabinet_id or result.client_id }}</code></span>
+    <span><span style="color:var(--text-muted)">Дата:</span> <strong>{{ result.created_at.strftime('%d.%m.%Y %H:%M') if result.created_at else '—' }}</strong></span>
+  </div>
+</div>
+
+<!-- Query results -->
+<div class="section">
+  <h3>Результаты по запросам</h3>
+
+  <div class="filter-row" id="score-filter">
+    <button class="fbtn active" onclick="filterScore(null,this)">Все</button>
+    <button class="fbtn" onclick="filterScore(0,this)">Оценка 0</button>
+    <button class="fbtn" onclick="filterScore(1,this)">Оценка 1</button>
+    <button class="fbtn" onclick="filterScore(2,this)">Оценка 2</button>
+    <button class="fbtn" onclick="filterScore(3,this)">Оценка 3</button>
+  </div>
+
+  <div id="q-list">
+    {% set results_data = result.results or [] %}
+    {% if results_data %}
+      {% for r in results_data %}
+      {% set score = r.get('manualScore') if r.get('manualScore') is not none else r.get('autoScore', 0) %}
+      <div class="q-row" data-score="{{ score }}">
+        <div class="q-top">
+          <div class="score-chip s{{ score|int }}">{{ score }}</div>
+          <div class="q-text">{{ r.get('query','') }}</div>
+          {% if r.get('impressions') %}
+          <span class="q-imp">{{ r.get('impressions') }} показов</span>
+          {% endif %}
+          {% if r.get('total') is not none %}
+          <span class="q-imp">{{ r.get('total') }} товаров</span>
+          {% endif %}
+        </div>
+        {% if r.get('reason') %}
+        <div class="q-reason">{{ r.get('reason') }}</div>
+        {% endif %}
+        {% set recs = r.get('recommendation', []) %}
+        {% set ai = r.get('aiRecommendation') %}
+        {% if recs or ai %}
+        <div class="q-recs">
+          {% for rec in recs %}
+          <div class="q-rec">{{ rec }}</div>
+          {% endfor %}
+          {% if ai %}
+          <div class="q-ai">🤖 {{ ai }}</div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">
+        <div class="empty-icon">📭</div>
+        <div class="empty-text">Нет данных по запросам</div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+let activeScore = null;
+function filterScore(score, btn) {
+  activeScore = score;
+  document.querySelectorAll('#score-filter .fbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.q-row').forEach(row => {
+    row.style.display = (score === null || parseInt(row.dataset.score) === score) ? 'block' : 'none';
+  });
+}
+</script>
+{% endblock %}

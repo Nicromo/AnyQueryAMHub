@@ -2824,6 +2824,262 @@ async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optio
 
 
 # ============================================================================
+# SEARCH QUALITY CHECKUP — API для расширения
+# ============================================================================
+
+def _checkup_auth(auth_token: Optional[str], db):
+    """Общая авторизация для checkup endpoints."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
+
+@app.get("/api/cabinets/{cabinet_id}")
+async def api_get_cabinet(
+    cabinet_id: str,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Возвращает данные кабинета для расширения Search Quality Checkup.
+    cabinet_id = client.id или client.merchrules_account_id
+    """
+    user = _checkup_auth(auth_token, db)
+
+    # Ищем клиента по id или по merchrules_account_id
+    client = None
+    if cabinet_id.isdigit():
+        client = db.query(Client).filter(Client.id == int(cabinet_id)).first()
+    if not client:
+        client = db.query(Client).filter(
+            Client.merchrules_account_id == cabinet_id
+        ).first()
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Кабинет {cabinet_id} не найден")
+
+    meta = client.integration_metadata or {}
+    api_key = (
+        meta.get("diginetica_api_key")
+        or meta.get("search_api_key")
+        or meta.get("apiKey")
+        or ""
+    )
+    site_url = client.domain or meta.get("site_url") or ""
+    if site_url and not site_url.startswith("http"):
+        site_url = "https://" + site_url
+
+    return {
+        "ok": True,
+        "cabinetId": str(client.id),
+        "clientName": client.name,
+        "apiKey": api_key,
+        "siteUrl": site_url,
+        "segment": client.segment,
+        "healthScore": client.health_score,
+    }
+
+
+@app.get("/api/checkup/{cabinet_id}/queries")
+async def api_checkup_queries(
+    cabinet_id: str,
+    type: str = "top",
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Возвращает список запросов для чекапа.
+    type: top | random | zero | zeroquery
+    Запросы берутся из integration_metadata.checkup_queries[type]
+    или из сохранённых результатов предыдущих чекапов.
+    """
+    user = _checkup_auth(auth_token, db)
+
+    client = None
+    if cabinet_id.isdigit():
+        client = db.query(Client).filter(Client.id == int(cabinet_id)).first()
+    if not client:
+        client = db.query(Client).filter(
+            Client.merchrules_account_id == cabinet_id
+        ).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Кабинет не найден")
+
+    meta = client.integration_metadata or {}
+    checkup_queries = meta.get("checkup_queries", {})
+    queries = checkup_queries.get(type, [])
+
+    # Если нет сохранённых — возвращаем пустой список (расширение попросит ввести вручную)
+    return {"ok": True, "queries": queries, "type": type, "client": client.name}
+
+
+@app.get("/api/cabinets/{cabinet_id}/merch-rules")
+async def api_merch_rules(
+    cabinet_id: str,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Мерч-правила клиента из integration_metadata."""
+    user = _checkup_auth(auth_token, db)
+
+    client = None
+    if cabinet_id.isdigit():
+        client = db.query(Client).filter(Client.id == int(cabinet_id)).first()
+    if not client:
+        client = db.query(Client).filter(
+            Client.merchrules_account_id == cabinet_id
+        ).first()
+    if not client:
+        return []
+
+    meta = client.integration_metadata or {}
+    return meta.get("merch_rules", [])
+
+
+@app.post("/api/checkup/{cabinet_id}/results")
+async def api_save_checkup_results(
+    cabinet_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Сохраняет результаты чекапа из расширения.
+    Расширение вызывает после завершения проверки.
+    """
+    user = _checkup_auth(auth_token, db)
+
+    client = None
+    if cabinet_id.isdigit():
+        client = db.query(Client).filter(Client.id == int(cabinet_id)).first()
+    if not client:
+        client = db.query(Client).filter(
+            Client.merchrules_account_id == cabinet_id
+        ).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Кабинет не найден")
+
+    body = await request.json()
+    results = body.get("results", [])
+    avg_score = (
+        sum(r.get("manualScore") or r.get("autoScore", 0) for r in results) / len(results)
+        if results else None
+    )
+    score_dist = {str(i): 0 for i in range(4)}
+    for r in results:
+        s = str(r.get("manualScore") or r.get("autoScore", 0))
+        score_dist[s] = score_dist.get(s, 0) + 1
+
+    from models import CheckupResult
+    cr = CheckupResult(
+        client_id=client.id,
+        cabinet_id=cabinet_id,
+        query_type=body.get("queryType", "top"),
+        manager_name=body.get("managerName") or user.name,
+        mode=body.get("mode"),
+        total_queries=len(results),
+        avg_score=avg_score,
+        score_dist=score_dist,
+        results=results,
+    )
+    db.add(cr)
+
+    # Обновляем дату последнего чекапа у клиента
+    client.last_checkup = datetime.utcnow()
+    db.commit()
+
+    logger.info(f"CheckupResult saved: client={client.name}, queries={len(results)}, avg={avg_score:.2f if avg_score else 'N/A'}")
+    return {"ok": True, "id": cr.id, "avg_score": avg_score, "total": len(results)}
+
+
+@app.get("/api/checkup/{cabinet_id}/history")
+async def api_checkup_history(
+    cabinet_id: str,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """История чекапов клиента."""
+    user = _checkup_auth(auth_token, db)
+
+    client_id = None
+    if cabinet_id.isdigit():
+        client_id = int(cabinet_id)
+    else:
+        c = db.query(Client).filter(Client.merchrules_account_id == cabinet_id).first()
+        if c:
+            client_id = c.id
+
+    if not client_id:
+        return {"results": []}
+
+    from models import CheckupResult
+    history = (
+        db.query(CheckupResult)
+        .filter(CheckupResult.client_id == client_id)
+        .order_by(CheckupResult.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "results": [
+            {
+                "id": r.id,
+                "query_type": r.query_type,
+                "manager_name": r.manager_name,
+                "mode": r.mode,
+                "total_queries": r.total_queries,
+                "avg_score": round(r.avg_score, 2) if r.avg_score else None,
+                "score_dist": r.score_dist,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in history
+        ]
+    }
+
+
+@app.put("/api/clients/{client_id}/checkup-config")
+async def api_save_checkup_config(
+    client_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Сохраняет конфиг чекапа клиента:
+    diginetica_api_key, site_url, checkup_queries (top/random/zero/zeroquery)
+    """
+    user = _checkup_auth(auth_token, db)
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+
+    body = await request.json()
+    meta = dict(client.integration_metadata or {})
+
+    if "diginetica_api_key" in body:
+        meta["diginetica_api_key"] = body["diginetica_api_key"]
+    if "site_url" in body:
+        meta["site_url"] = body["site_url"]
+    if "checkup_queries" in body:
+        meta["checkup_queries"] = body["checkup_queries"]
+    if "merch_rules" in body:
+        meta["merch_rules"] = body["merch_rules"]
+
+    from sqlalchemy.orm.attributes import flag_modified
+    client.integration_metadata = meta
+    flag_modified(client, "integration_metadata")
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
 # WORKFLOW: DASHBOARD ACTIONS
 # ============================================================================
 
@@ -3372,6 +3628,97 @@ async def checkups_page(request: Request, db: Session = Depends(get_db), auth_to
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("checkups.html", {"request": request, "user": user})
 
+
+
+@app.get("/api/checkup/results/all")
+async def api_checkup_results_all(
+    query_type: str = "",
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Все результаты чекапов менеджера (для страницы /checkups)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from models import CheckupResult
+    q = (
+        db.query(CheckupResult, Client)
+        .join(Client, CheckupResult.client_id == Client.id)
+        .order_by(CheckupResult.created_at.desc())
+    )
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    if query_type:
+        q = q.filter(CheckupResult.query_type == query_type)
+    rows = q.limit(limit).all()
+
+    return {
+        "results": [
+            {
+                "id": r.id,
+                "client_id": r.client_id,
+                "client_name": c.name,
+                "cabinet_id": r.cabinet_id,
+                "query_type": r.query_type,
+                "manager_name": r.manager_name,
+                "mode": r.mode,
+                "total_queries": r.total_queries,
+                "avg_score": round(r.avg_score, 2) if r.avg_score is not None else None,
+                "score_dist": r.score_dist,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r, c in rows
+        ]
+    }
+
+
+@app.get("/api/auth/me/token")
+async def api_me_token(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Возвращает текущий access token пользователя (для настройки расширения)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    return {"token": auth_token}
+
+
+@app.get("/checkup/result/{result_id}", response_class=HTMLResponse)
+async def checkup_result_page(
+    result_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Детальная страница результата чекапа."""
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    from models import CheckupResult
+    result = db.query(CheckupResult).filter(CheckupResult.id == result_id).first()
+    if not result:
+        raise HTTPException(status_code=404)
+    client = db.query(Client).filter(Client.id == result.client_id).first()
+
+    return templates.TemplateResponse("checkup_result.html", {
+        "request": request, "user": user,
+        "result": result, "client": client,
+    })
 
 @app.get("/api/checkups")
 async def api_checkups(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):

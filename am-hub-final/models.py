@@ -123,6 +123,23 @@ class CheckUp(Base):
         return self.status == "overdue" and self.scheduled_date < datetime.utcnow()
 
 
+class CheckupResult(Base):
+    """Результаты автоматического чекапа из расширения Search Quality Checkup"""
+    __tablename__ = "checkup_results"
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), index=True)
+    cabinet_id = Column(String, nullable=True)          # ID кабинета Diginetica
+    query_type = Column(String, default="top")          # top/random/zero/zeroquery
+    manager_name = Column(String, nullable=True)
+    mode = Column(String, nullable=True)                # api/site
+    total_queries = Column(Integer, default=0)
+    avg_score = Column(Float, nullable=True)
+    score_dist = Column(JSONB, default=dict)            # {0: N, 1: N, 2: N, 3: N}
+    results = Column(JSONB, default=list)               # полные результаты
+    created_at = Column(DateTime, default=datetime.utcnow)
+    client = relationship("Client", backref="checkup_results")
+
+
 class QBR(Base):
     """Quarterly Business Review"""
     __tablename__ = "qbrs"
