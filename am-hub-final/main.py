@@ -347,6 +347,25 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AM Hub", version="2.0.0", lifespan=lifespan)
 
+# ── Simple in-memory cache (для частых read-only запросов) ─────────────────
+import time as _time
+_cache: dict = {}
+
+def cache_get(key: str):
+    e = _cache.get(key)
+    return e["val"] if e and _time.time() < e["exp"] else None
+
+def cache_set(key: str, val, ttl: int = 60):
+    _cache[key] = {"val": val, "exp": _time.time() + ttl}
+
+def cache_del(prefix: str):
+    """Инвалидируем все ключи с данным префиксом."""
+    for k in list(_cache.keys()):
+        if k.startswith(prefix):
+            del _cache[k]
+
+
+
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(ErrorHandlingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
@@ -5794,6 +5813,12 @@ async def api_notifications(db: Session = Depends(get_db), auth_token: Optional[
     if not user:
         return {"notifications": []}
 
+    # Кеш 120 сек — polling каждые 60 сек от 18 менеджеров = экономим ~540 DB запросов/мин
+    ck = f"notif:{user.id}"
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     notifications = []
     now = datetime.now()
 
@@ -6314,6 +6339,12 @@ async def api_stats(db: Session = Depends(get_db), auth_token: Optional[str] = C
     if not user:
         return {"overdue": 0, "warning": 0, "open_tasks": 0}
 
+    # Кеш 90 сек — вызывается на каждой странице от 18 менеджеров
+    ck = f"stats:{user.id}"
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     now = datetime.now()
     q = db.query(Client)
     if user.role == "manager":
@@ -6340,7 +6371,9 @@ async def api_stats(db: Session = Depends(get_db), auth_token: Optional[str] = C
         tq = tq.filter(Client.manager_email == user.email)
     open_tasks = tq.count()
 
-    return {"overdue": overdue, "warning": warning, "open_tasks": open_tasks}
+    result = {"overdue": overdue, "warning": warning, "open_tasks": open_tasks}
+    cache_set(ck, result, ttl=90)
+    return result
 
 
 @app.get("/api/settings/my-clients")
