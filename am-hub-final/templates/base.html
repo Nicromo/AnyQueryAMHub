@@ -8,6 +8,13 @@
   <link rel="preconnect" href="https://fonts.bunny.net">
   <link href="https://fonts.bunny.net/css?family=geist:300,400,500,600,700|geist-mono:400,500" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#6474ff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AM Hub">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -57,6 +64,12 @@
       <div class="nav-section-label">Аналитика</div>
       <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
         <span class="icon">📈</span> Аналитика
+      </a>
+      <a class="nav-link {% if request.url.path == '/ai-chat' %}active{% endif %}" href="/ai-chat">
+        <span class="icon">🤖</span> AI-ассистент
+      </a>
+      <a class="nav-link {% if request.url.path == '/team' %}active{% endif %}" href="/team" id="team-link" style="display:none">
+        <span class="icon">👥</span> Команда
       </a>
       <a class="nav-link {% if request.url.path == '/kpi' %}active{% endif %}" href="/kpi">
         <span class="icon">🎯</span> Мой KPI
@@ -181,6 +194,8 @@
     if (r.role === 'admin') {
       const el = document.getElementById('admin-link');
       if (el) el.style.display = 'flex';
+      const tl = document.getElementById('team-link');
+      if (tl) tl.style.display = 'flex';
     }
   } catch(e) {}
 })();
@@ -427,6 +442,13 @@ async function markAllRead() {
   connect();
 })();
 
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function() {
+    navigator.serviceWorker.register("/sw.js").catch(function() {});
+  });
+}
 </script>
 </body>
 </html>

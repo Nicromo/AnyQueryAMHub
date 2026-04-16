@@ -347,22 +347,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AM Hub", version="2.0.0", lifespan=lifespan)
 
-# ── Simple in-memory cache (для частых read-only запросов) ─────────────────
-import time as _time
-_cache: dict = {}
+# ── Sentry ────────────────────────────────────────────────────────────────────
+from sentry_config import init_sentry
+init_sentry()
 
-def cache_get(key: str):
-    e = _cache.get(key)
-    return e["val"] if e and _time.time() < e["exp"] else None
-
-def cache_set(key: str, val, ttl: int = 60):
-    _cache[key] = {"val": val, "exp": _time.time() + ttl}
-
-def cache_del(prefix: str):
-    """Инвалидируем все ключи с данным префиксом."""
-    for k in list(_cache.keys()):
-        if k.startswith(prefix):
-            del _cache[k]
+# ── Redis cache (заменяем in-memory) ─────────────────────────────────────────
+from redis_cache import cache_get, cache_set, cache_del, cache_key
 
 
 
@@ -7977,6 +7967,25 @@ async def api_tokens_push(
     return {"ok": True, "updated": updated, "user": user.email}
 
 
+
+# ── PWA ───────────────────────────────────────────────────────────────────────
+from fastapi.responses import FileResponse
+import os as _os
+
+@app.get("/manifest.json")
+async def pwa_manifest():
+    p = "static/manifest.json"
+    if _os.path.exists(p): return FileResponse(p, media_type="application/manifest+json")
+    return {"name":"AM Hub","short_name":"AM Hub","start_url":"/","display":"standalone",
+            "background_color":"#07090f","theme_color":"#6474ff"}
+
+@app.get("/sw.js")
+async def service_worker():
+    p = "static/sw.js"
+    if _os.path.exists(p): return FileResponse(p, media_type="application/javascript",
+                                                  headers={"Service-Worker-Allowed": "/"})
+    return FileResponse("/dev/null", media_type="application/javascript")
+
 # ============================================================================
 # WEBSOCKET — real-time обновления
 # ============================================================================
@@ -8289,3 +8298,430 @@ async def api_metrics_upload(
         updated += 1
     db.commit()
     return {"ok": True, "updated": updated}
+
+
+# ============================================================================
+# AI CHAT
+# ============================================================================
+
+@app.get("/ai-chat", response_class=HTMLResponse)
+async def ai_chat_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("ai_chat.html", {"request": request, "user": user})
+
+
+@app.post("/api/ai/chat")
+async def api_ai_chat(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """AI чат с контекстом клиента."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    body = await request.json()
+    message   = body.get("message", "").strip()
+    client_id = body.get("client_id")
+    history   = body.get("history", [])
+
+    if not message:
+        return {"reply": "Напишите что-нибудь."}
+
+    # Собираем контекст клиента
+    context_parts = []
+    client = None
+    if client_id:
+        client = db.query(Client).filter(Client.id == client_id).first()
+    if client:
+        open_tasks = db.query(Task).filter(Task.client_id == client.id, Task.status != "done").all()
+        last_meeting = db.query(Meeting).filter(Meeting.client_id == client.id).order_by(Meeting.date.desc()).first()
+        context_parts.append(f"""Данные клиента:
+- Название: {client.name}
+- Сегмент: {client.segment or '—'}
+- Health Score: {client.health_score or 0:.0f}%
+- Домен: {client.domain or '—'}
+- Открытых задач: {len(open_tasks)}
+- Последняя встреча: {last_meeting.date.strftime('%d.%m.%Y') if last_meeting and last_meeting.date else 'нет'}
+- Топ задачи: {', '.join(t.title for t in open_tasks[:3])}""")
+    else:
+        # Общий контекст менеджера
+        q = db.query(Client)
+        if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+        clients = q.all()
+        health_vals = [c.health_score for c in clients if c.health_score is not None]
+        avg_h = sum(health_vals) / len(health_vals) if health_vals else 0
+        open_t = db.query(Task).join(Client, Task.client_id == Client.id).filter(
+            Task.status != "done"
+        )
+        if user.role == "manager": open_t = open_t.filter(Client.manager_email == user.email)
+        context_parts.append(f"""Портфель менеджера {user.name}:
+- Клиентов: {len(clients)}
+- Средний Health Score: {avg_h:.0f}%
+- Открытых задач: {open_t.count()}
+- Клиенты с low health: {sum(1 for h in health_vals if h < 50)}""")
+
+    system_prompt = f"""Ты — AI-ассистент AM Hub, помощник аккаунт-менеджера.
+Ты помогаешь управлять портфелем клиентов, составлять планы, писать фолоуапы и анализировать данные.
+Отвечай кратко, конкретно, на русском языке. Используй маркированные списки где уместно.
+
+{chr(10).join(context_parts)}
+
+Сегодня: {datetime.utcnow().strftime('%d.%m.%Y')}"""
+
+    # Groq API
+    u_settings = user.settings or {}
+    groq_key = u_settings.get("groq", {}).get("api_key") or env.GROQ_KEY
+    if not groq_key:
+        return {"reply": "AI не настроен. Добавьте GROQ_API_KEY в Settings → AI или в Railway Variables."}
+
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in history[-8:]:  # последние 8 сообщений контекста
+        if h.get("role") in ("user", "assistant"):
+            messages.append({"role": h["role"], "content": h["content"][:1000]})
+    messages.append({"role": "user", "content": message})
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=30) as hx:
+            r = await hx.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "messages": messages,
+                      "max_tokens": 800, "temperature": 0.7},
+            )
+        if r.status_code != 200:
+            return {"reply": f"Groq API error {r.status_code}. Проверьте API ключ."}
+        reply = r.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return {"reply": f"Ошибка AI: {e}"}
+
+    # Сохраняем в историю
+    from models import AIChat
+    for role, text in [("user", message), ("assistant", reply)]:
+        db.add(AIChat(client_id=client_id, user_id=user.id, role=role, content=text))
+    db.commit()
+
+    return {"reply": reply, "client_name": client.name if client else None}
+
+
+@app.get("/api/ai/chat/history")
+async def api_ai_chat_history(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    from models import AIChat
+    from sqlalchemy import func
+    # Группируем по session (первое сообщение user за последние 30 дней)
+    msgs = (db.query(AIChat)
+            .filter(AIChat.user_id == user.id, AIChat.role == "user")
+            .order_by(AIChat.created_at.desc()).limit(20).all())
+    return {"chats": [{"id": m.id, "first_message": m.content[:60], "created_at": m.created_at.isoformat()} for m in msgs]}
+
+
+# ============================================================================
+# CLIENT HISTORY (audit log)
+# ============================================================================
+
+@app.get("/api/clients/{client_id}/history")
+async def api_client_history(
+    client_id: int,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    from models import ClientHistory
+    history = (db.query(ClientHistory)
+               .filter(ClientHistory.client_id == client_id)
+               .order_by(ClientHistory.created_at.desc())
+               .limit(limit).all())
+    return {"history": [
+        {"id": h.id, "field": h.field, "old_value": h.old_value, "new_value": h.new_value,
+         "event_type": h.event_type, "comment": h.comment,
+         "user_name": h.user.name if h.user else "Система",
+         "created_at": h.created_at.isoformat()}
+        for h in history
+    ]}
+
+
+def log_client_change(db, client_id: int, user_id: Optional[int],
+                       field: str, old_val, new_val, event_type: str = "update", comment: str = None):
+    """Хелпер для записи истории изменений."""
+    from models import ClientHistory
+    if str(old_val) == str(new_val):
+        return  # нечего логировать
+    entry = ClientHistory(
+        client_id=client_id, user_id=user_id, field=field,
+        old_value=str(old_val) if old_val is not None else None,
+        new_value=str(new_val) if new_val is not None else None,
+        event_type=event_type, comment=comment,
+    )
+    db.add(entry)
+
+
+# ============================================================================
+# TELEGRAM SETTINGS + SMART NOTIFICATIONS
+# ============================================================================
+
+@app.get("/api/telegram/status")
+async def api_tg_status(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    from models import TelegramSubscription
+    sub = db.query(TelegramSubscription).filter(TelegramSubscription.user_id == user.id).first()
+    return {"connected": bool(sub and sub.chat_id), "chat_id": sub.chat_id if sub else None,
+            "settings": {k: getattr(sub, k) for k in ("notify_overdue","notify_health_drop","notify_tasks","notify_daily")} if sub else {}}
+
+
+@app.post("/api/telegram/connect")
+async def api_tg_connect(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    body = await request.json()
+    chat_id = str(body.get("chat_id", "")).strip()
+    if not chat_id: return {"ok": False, "error": "chat_id обязателен"}
+
+    # Проверяем что можем отправить сообщение
+    from telegram_bot import send_message
+    hub_url = str(request.base_url).rstrip("/")
+    ok = await send_message(chat_id, f"✅ <b>AM Hub подключён!</b>\nМенеджер: {user.name}\n<a href='{hub_url}'>Открыть хаб →</a>")
+    if not ok: return {"ok": False, "error": "Не удалось отправить сообщение. Проверьте chat_id и что бот запущен."}
+
+    from models import TelegramSubscription
+    sub = db.query(TelegramSubscription).filter(TelegramSubscription.user_id == user.id).first()
+    if sub:
+        sub.chat_id = chat_id; sub.is_active = True
+    else:
+        sub = TelegramSubscription(user_id=user.id, chat_id=chat_id)
+        db.add(sub)
+    db.commit()
+    return {"ok": True}
+
+
+@app.patch("/api/telegram/settings")
+async def api_tg_settings(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+    body = await request.json()
+    from models import TelegramSubscription
+    sub = db.query(TelegramSubscription).filter(TelegramSubscription.user_id == user.id).first()
+    if not sub: return {"ok": False, "error": "Сначала подключите Telegram"}
+    for k in ("notify_overdue","notify_health_drop","notify_tasks","notify_daily"):
+        if k in body: setattr(sub, k, body[k])
+    db.commit()
+    return {"ok": True}
+
+
+# ============================================================================
+# TEAM DASHBOARD (admin only)
+# ============================================================================
+
+@app.get("/team", response_class=HTMLResponse)
+async def team_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: return RedirectResponse(url="/login", status_code=303)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: return RedirectResponse(url="/login", status_code=303)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: return RedirectResponse(url="/login", status_code=303)
+    if user.role != "admin": raise HTTPException(status_code=403, detail="Только для администраторов")
+    return templates.TemplateResponse("team_dashboard.html", {"request": request, "user": user})
+
+
+@app.get("/api/team/stats")
+async def api_team_stats(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user or user.role != "admin": raise HTTPException(status_code=403)
+
+    managers = db.query(User).filter(User.role == "manager", User.is_active == True).all()
+    all_clients = db.query(Client).all()
+    health_all  = [c.health_score for c in all_clients if c.health_score is not None]
+
+    mgr_stats = []
+    now = datetime.utcnow()
+    for m in managers:
+        clients = [c for c in all_clients if c.manager_email == m.email]
+        h_vals  = [c.health_score for c in clients if c.health_score is not None]
+        avg_h   = sum(h_vals) / len(h_vals) if h_vals else 0
+        overdue = sum(1 for c in clients if (c.last_meeting_date and (now - c.last_meeting_date).days > CHECKUP_INTERVALS.get(c.segment or "", 90)))
+        mgr_stats.append({
+            "id": m.id, "name": m.name or m.email, "email": m.email,
+            "clients_count": len(clients), "avg_health": avg_h, "overdue": overdue,
+        })
+    mgr_stats.sort(key=lambda x: x["avg_health"], reverse=True)
+
+    risk_clients = sorted(
+        [{"id": c.id, "name": c.name, "health_score": c.health_score, "segment": c.segment,
+          "manager_name": next((m.name or m.email for m in managers if m.email == c.manager_email), "—"),
+          "last_contact": c.last_meeting_date.isoformat() if c.last_meeting_date else None}
+         for c in all_clients if c.health_score is not None and c.health_score < 55],
+        key=lambda x: x["health_score"]
+    )[:20]
+
+    open_tasks = db.query(Task).filter(Task.status != "done").count()
+    overdue_ck  = sum(1 for c in all_clients
+                      if c.last_meeting_date and
+                      (now - c.last_meeting_date).days > CHECKUP_INTERVALS.get(c.segment or "", 90))
+
+    return {
+        "managers_count": len(managers),
+        "total_clients":  len(all_clients),
+        "avg_health":     sum(health_all) / len(health_all) if health_all else 0,
+        "overdue_checkups": overdue_ck,
+        "open_tasks":     open_tasks,
+        "managers":       mgr_stats,
+        "risk_clients":   risk_clients,
+    }
+
+
+@app.get("/api/team/export")
+async def api_team_export(days: int = 30, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user or user.role != "admin": raise HTTPException(status_code=403)
+
+    import csv, io
+    managers = db.query(User).filter(User.role == "manager").all()
+    clients  = db.query(Client).all()
+    buf = io.StringIO()
+    w   = csv.writer(buf)
+    w.writerow(["Менеджер","Email","Клиентов","Avg Health","Просрочено"])
+    for m in managers:
+        mc = [c for c in clients if c.manager_email == m.email]
+        hv = [c.health_score for c in mc if c.health_score is not None]
+        ah = sum(hv)/len(hv) if hv else 0
+        now = datetime.utcnow()
+        ov  = sum(1 for c in mc if c.last_meeting_date and (now - c.last_meeting_date).days > 90)
+        w.writerow([m.name or "", m.email, len(mc), f"{ah:.0f}%", ov])
+    from fastapi.responses import Response
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=team_{datetime.utcnow().strftime('%Y%m%d')}.csv"})
+
+
+# ============================================================================
+# BULK OPERATIONS
+# ============================================================================
+
+@app.post("/api/bulk/assign-checkup")
+async def api_bulk_assign_checkup(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Назначить чекап нескольким клиентам сразу."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    body = await request.json()
+    client_ids = body.get("client_ids", [])
+    date_str   = body.get("date")
+    due_date   = datetime.fromisoformat(date_str) if date_str else datetime.utcnow() + timedelta(days=7)
+
+    created = 0
+    for cid in client_ids[:50]:  # лимит 50
+        task = Task(client_id=cid, title="Провести чекап", status="plan",
+                    priority="high", due_date=due_date, created_at=datetime.utcnow())
+        db.add(task)
+        created += 1
+    db.commit()
+    return {"ok": True, "created": created}
+
+
+@app.post("/api/bulk/create-task")
+async def api_bulk_create_task(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Создать одну задачу для нескольких клиентов."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    body = await request.json()
+    client_ids = body.get("client_ids", [])
+    title      = body.get("title", "Задача")
+    priority   = body.get("priority", "medium")
+    due_date   = datetime.fromisoformat(body["due_date"]) if body.get("due_date") else datetime.utcnow() + timedelta(days=3)
+
+    created = 0
+    for cid in client_ids[:50]:
+        db.add(Task(client_id=cid, title=title, status="plan", priority=priority,
+                    due_date=due_date, created_at=datetime.utcnow()))
+        created += 1
+    db.commit()
+    return {"ok": True, "created": created}
+
+
+@app.patch("/api/bulk/update-segment")
+async def api_bulk_update_segment(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Сменить сегмент у нескольких клиентов."""
+    _require_admin(auth_token, db)
+    body = await request.json()
+    client_ids = body.get("client_ids", [])
+    segment    = body.get("segment", "")
+    if not segment: raise HTTPException(status_code=400, detail="segment required")
+
+    db.query(Client).filter(Client.id.in_(client_ids)).update(
+        {"segment": segment}, synchronize_session=False
+    )
+    db.commit()
+    return {"ok": True, "updated": len(client_ids)}

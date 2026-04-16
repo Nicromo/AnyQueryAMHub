@@ -27,3 +27,6 @@ rich==13.7.0
 prometheus-client==0.19.0
 alembic==1.13.1
 itsdangerous==2.2.0
+sentry-sdk[fastapi]>=2.0.0
+redis>=5.0.0
+alembic>=1.13.0

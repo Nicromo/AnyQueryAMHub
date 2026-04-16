@@ -358,3 +358,50 @@ class AutoTaskRule(Base):
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user = relationship("User", backref="auto_task_rules")
 
+class ClientHistory(Base):
+    """История изменений клиента — audit log."""
+    __tablename__ = "client_history"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    field      = Column(String, nullable=False)       # что изменилось
+    old_value  = Column(Text, nullable=True)
+    new_value  = Column(Text, nullable=True)
+    event_type = Column(String, default="update")     # update|create|delete|note|meeting|task|checkup
+    comment    = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    client = relationship("Client", backref="history")
+    user   = relationship("User")
+
+
+class AIChat(Base):
+    """AI-чат по клиенту — история диалогов."""
+    __tablename__ = "ai_chats"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), index=True)
+    role       = Column(String, nullable=False)   # user | assistant
+    content    = Column(Text, nullable=False)
+    model      = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    client = relationship("Client")
+    user   = relationship("User")
+
+
+class TelegramSubscription(Base):
+    """Подписки на Telegram уведомления."""
+    __tablename__ = "telegram_subscriptions"
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), unique=True)
+    chat_id    = Column(String, nullable=False)
+    is_active  = Column(Boolean, default=True)
+    notify_overdue    = Column(Boolean, default=True)
+    notify_health_drop= Column(Boolean, default=True)
+    notify_tasks      = Column(Boolean, default=True)
+    notify_daily      = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", backref="tg_subscription")
+
