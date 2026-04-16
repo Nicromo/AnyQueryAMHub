@@ -1601,74 +1601,147 @@ async def api_test_ktalk(request: Request, auth_token: Optional[str] = Cookie(No
 async def ktalk_oauth_start(request: Request, auth_token: Optional[str] = Cookie(None)):
     """
     Запускает OIDC авторизацию через браузер.
-    Редиректит пользователя на страницу входа KTalk.
+    Редиректит пользователя на страницу входа KTalk (SSO Т-Банка с SMS).
     """
     if not auth_token:
         return RedirectResponse(url="/login")
     import secrets, urllib.parse
-    state = secrets.token_urlsafe(16)
-    redirect_uri = str(request.base_url).rstrip("/") + "/auth/ktalk/callback"
+
+    # client_id можно переопределить через env если у вас корпоративный OIDC клиент
+    client_id = os.environ.get("KTALK_OIDC_CLIENT_ID", "KTalk")
+    redirect_uri = os.environ.get(
+        "KTALK_REDIRECT_URI",
+        str(request.base_url).rstrip("/") + "/auth/ktalk/callback"
+    )
+
     params = urllib.parse.urlencode({
-        "client_id": "KTalk",
-        "response_type": "id_token token",
+        "client_id": client_id,
+        "response_type": "id_token token",  # implicit flow — токен сразу в hash
         "scope": "profile email allatclaims",
         "redirect_uri": redirect_uri,
         "nonce": secrets.token_urlsafe(16),
-        "state": state,
+        "state": secrets.token_urlsafe(16),
     })
-    return RedirectResponse(url=f"https://tbank.ktalk.ru/api/authorize/oidc/connect/authorize?{params}")
+    return RedirectResponse(
+        url=f"https://tbank.ktalk.ru/api/authorize/oidc/connect/authorize?{params}"
+    )
 
 
 @app.get("/auth/ktalk/callback", response_class=HTMLResponse)
 async def ktalk_oauth_callback(request: Request):
     """
-    Callback страница после OIDC авторизации KTalk.
-    Токен приходит в URL-фрагменте (#), JS читает его и отправляет на бэкенд.
+    Callback после OIDC авторизации KTalk (SSO Т-Банка).
+    Токен приходит в URL hash (#access_token=...) — JS читает и сохраняет.
     """
     return HTMLResponse(content="""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>KTalk — авторизация</title>
 <style>
-  body{font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
-  .card{background:#111827;border:1px solid #1e2a3a;border-radius:14px;padding:32px 40px;text-align:center;max-width:400px;}
-  h2{font-size:1.2rem;margin-bottom:8px;}
-  p{color:#64748b;font-size:.85rem;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;
+       display:flex;align-items:center;justify-content:center;min-height:100vh;}
+  .card{background:#111827;border:1px solid #1e2a3a;border-radius:14px;
+        padding:32px 40px;text-align:center;max-width:440px;width:90%;}
+  h2{font-size:1.2rem;margin-bottom:10px;}
+  p{color:#64748b;font-size:.85rem;line-height:1.6;}
   .ok{color:#22c55e;} .err{color:#ef4444;}
+  .btn{display:inline-block;margin-top:16px;padding:10px 20px;
+       background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-size:.85rem;}
+  .manual{margin-top:20px;padding:14px;background:#1e2a3a;border-radius:8px;text-align:left;}
+  .manual p{font-size:.78rem;color:#94a3b8;margin-bottom:6px;}
+  .manual code{display:block;background:#0a0e1a;padding:8px 10px;border-radius:6px;
+               font-size:.75rem;color:#818cf8;word-break:break-all;margin-top:4px;}
+  input{width:100%;padding:8px 10px;margin-top:8px;border-radius:6px;
+        border:1px solid #1e2a3a;background:#0a0e1a;color:#e2e8f0;font-size:.82rem;}
+  .paste-btn{margin-top:8px;padding:7px 14px;background:#22c55e;color:#fff;
+             border:none;border-radius:6px;cursor:pointer;font-size:.8rem;}
 </style></head>
 <body><div class="card">
-  <h2 id="title">⏳ Авторизация...</h2>
-  <p id="msg">Получаем токен KTalk</p>
+  <h2 id="title">⏳ Авторизация KTalk...</h2>
+  <p id="msg">Получаем токен от Т-Банк SSO</p>
+  <div id="manual-block" style="display:none" class="manual">
+    <p>Если автоматически не сработало — вставьте токен вручную:</p>
+    <p>Откройте DevTools (F12) → Console → введите:</p>
+    <code>copy(window.__ktalk_token || 'нет токена')</code>
+    <p style="margin-top:8px;">Или скопируйте access_token из URL адресной строки после #</p>
+    <input id="manual-token" placeholder="Вставьте access_token сюда...">
+    <button class="paste-btn" onclick="saveManualToken()">💾 Сохранить токен</button>
+  </div>
 </div>
 <script>
-(async function(){
-  const hash = window.location.hash.slice(1);
-  const params = Object.fromEntries(new URLSearchParams(hash));
-  const token = params.access_token || params.id_token;
-  if(!token){
-    document.getElementById('title').textContent = '❌ Ошибка';
-    document.getElementById('msg').textContent = 'Токен не получен. Попробуйте ещё раз.';
-    document.getElementById('msg').className = 'err';
-    return;
-  }
-  try{
+async function saveToken(token) {
+  try {
     const r = await fetch('/api/auth/ktalk/token', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({access_token: token, id_token: params.id_token})
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({access_token: token})
     });
     const d = await r.json();
-    if(d.ok){
-      document.getElementById('title').textContent = '✅ Подключено!';
-      document.getElementById('msg').innerHTML = 'KTalk: <b>' + (d.user?.firstname||'') + ' ' + (d.user?.surname||'') + '</b><br><br><a href="/settings" style="color:#6366f1">← Вернуться в настройки</a>';
+    if (d.ok) {
+      document.getElementById('title').textContent = '✅ KTalk подключён!';
+      document.getElementById('msg').innerHTML =
+        'Авторизован как: <b>' + (d.user?.firstname||'') + ' ' + (d.user?.surname||'') + '</b>' +
+        '<br><br><a href="/settings" class="btn">← Вернуться в настройки</a>';
       document.getElementById('msg').className = 'ok';
     } else {
-      document.getElementById('title').textContent = '❌ Ошибка';
-      document.getElementById('msg').textContent = d.error || 'Не удалось сохранить токен';
-      document.getElementById('msg').className = 'err';
+      showError(d.error || 'Не удалось сохранить токен');
     }
-  }catch(e){
-    document.getElementById('title').textContent = '❌ Ошибка';
-    document.getElementById('msg').textContent = e.message;
+  } catch(e) {
+    showError(e.message);
   }
+}
+
+function showError(msg) {
+  document.getElementById('title').textContent = '❌ Ошибка';
+  document.getElementById('msg').textContent = msg;
+  document.getElementById('msg').className = 'err';
+  document.getElementById('manual-block').style.display = 'block';
+}
+
+async function saveManualToken() {
+  const token = document.getElementById('manual-token').value.trim();
+  if (!token) return;
+  await saveToken(token);
+}
+
+// Основной flow: читаем токен из URL hash
+(async function() {
+  const hash = window.location.hash.slice(1);
+  const query = window.location.search.slice(1);
+  const hashParams = Object.fromEntries(new URLSearchParams(hash));
+  const queryParams = Object.fromEntries(new URLSearchParams(query));
+
+  // Токен может быть в hash (implicit flow) или query (code flow)
+  const token = hashParams.access_token || hashParams.id_token ||
+                queryParams.access_token || queryParams.id_token;
+
+  // Error от OIDC сервера
+  const error = hashParams.error || queryParams.error;
+  if (error) {
+    const desc = hashParams.error_description || queryParams.error_description || error;
+    // redirect_uri_mismatch — самая частая ошибка
+    if (error === 'invalid_request' || desc.includes('redirect_uri')) {
+      showError('redirect_uri не зарегистрирован в Ktalk. ' +
+        'Добавьте переменную KTALK_REDIRECT_URI в Railway Variables: ' +
+        window.location.origin + '/auth/ktalk/callback');
+    } else {
+      showError(desc);
+    }
+    return;
+  }
+
+  if (!token) {
+    // Нет токена и нет ошибки — может быть code flow
+    const code = queryParams.code;
+    if (code) {
+      showError('Получен authorization code вместо токена. ' +
+        'Нужна серверная обработка code flow. Обратитесь к администратору.');
+    } else {
+      showError('Токен не получен. Возможно redirect_uri не совпадает с зарегистрированным в Ktalk.');
+    }
+    return;
+  }
+
+  await saveToken(token);
 })();
 </script></body></html>""")
 
@@ -5903,3 +5976,200 @@ async def api_sheets_batch_update(
         return {"ok": result, "count": len(updates)}
     except Exception as e:
         return {"error": str(e)}
+
+# ============================================================================
+# ИНТЕГРАЦИИ: тест персональных кредов
+# ============================================================================
+
+@app.get("/api/integrations/status")
+async def api_integrations_status(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Статус всех интеграций для текущего менеджера.
+    Проверяет наличие кредов в user.settings и последний синк.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    s = user.settings or {}
+    mr = s.get("merchrules", {})
+    kt = s.get("ktalk", {})
+    at = s.get("airtable", {})
+    tg = s.get("telegram", {})
+    tm = s.get("tbank_time", {})
+    gs = s.get("sheets", {})
+
+    def last_sync(integration: str) -> str:
+        log = db.query(SyncLog).filter(
+            SyncLog.integration == integration,
+            SyncLog.status == "success",
+        ).order_by(SyncLog.started_at.desc()).first()
+        if not log or not log.started_at:
+            return None
+        ago = int((datetime.now() - log.started_at).total_seconds())
+        if ago < 60: return "только что"
+        if ago < 3600: return f"{ago//60} мин назад"
+        if ago < 86400: return f"{ago//3600} ч назад"
+        return f"{ago//86400} дн назад"
+
+    return {
+        "merchrules": {
+            "configured": bool(mr.get("login") and mr.get("password")),
+            "login": mr.get("login", ""),
+            "last_sync": last_sync("merchrules"),
+        },
+        "ktalk": {
+            "configured": bool(kt.get("access_token")),
+            "login": kt.get("login", ""),
+            "channel_id": kt.get("followup_channel_id", ""),
+            "last_sync": last_sync("ktalk"),
+        },
+        "airtable": {
+            "configured": bool(at.get("pat") or at.get("token")),
+            "base_id": at.get("base_id", ""),
+            "last_sync": last_sync("airtable"),
+        },
+        "tbank_time": {
+            "configured": bool(tm.get("login") or tm.get("session_cookie")),
+            "login": tm.get("login", ""),
+        },
+        "sheets": {
+            "configured": bool(gs.get("spreadsheet_id") or _env("SHEETS_SPREADSHEET_ID")),
+            "spreadsheet_id": gs.get("spreadsheet_id") or _env("SHEETS_SPREADSHEET_ID"),
+        },
+        "telegram": {
+            "configured": bool(user.telegram_id or tg.get("chat_id")),
+            "telegram_id": user.telegram_id,
+        },
+        "groq_ai": {
+            "configured": bool(_env("GROQ_API_KEY") or _env("QWEN_API_KEY")),
+        },
+    }
+
+
+@app.post("/api/integrations/test/{service}")
+async def api_test_integration(
+    service: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Проверить подключение конкретного сервиса с персональными кредами.
+    service: merchrules | ktalk | airtable | tbank_time | sheets
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    s = user.settings or {}
+    import httpx
+
+    if service == "merchrules":
+        mr = s.get("merchrules", {})
+        login = mr.get("login", "") or _env("MERCHRULES_LOGIN")
+        password = mr.get("password", "") or _env("MERCHRULES_PASSWORD")
+        if not login or not password:
+            return {"ok": False, "error": "Логин и пароль не заданы"}
+        base = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+        try:
+            async with httpx.AsyncClient(timeout=15) as hx:
+                for field in ("email", "login", "username"):
+                    r = await hx.post(f"{base}/backend-v2/auth/login",
+                                      json={field: login, "password": password}, timeout=10)
+                    if r.status_code == 200:
+                        body = r.json()
+                        token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                        if token:
+                            # Считаем клиентов
+                            ra = await hx.get(f"{base}/backend-v2/accounts?limit=1",
+                                              headers={"Authorization": f"Bearer {token}"}, timeout=10)
+                            count = len(ra.json().get("accounts", ra.json().get("items", []))) if ra.status_code == 200 else "?"
+                            return {"ok": True, "message": f"✅ Подключено ({field}={login})", "accounts": count}
+            return {"ok": False, "error": "Неверный логин или пароль"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    elif service == "ktalk":
+        kt = s.get("ktalk", {})
+        token = kt.get("access_token", "")
+        space = kt.get("space", "") or _env("KTALK_SPACE")
+        if not token or not space:
+            return {"ok": False, "error": "Нет токена — войдите через /auth/ktalk"}
+        try:
+            async with httpx.AsyncClient(timeout=10) as hx:
+                r = await hx.get(f"https://{space}.ktalk.ru/api/v4/users/me",
+                                  headers={"Authorization": f"Bearer {token}"})
+            if r.status_code == 200:
+                me = r.json()
+                return {"ok": True, "message": f"✅ {me.get('username', space)}", "email": me.get("email")}
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    elif service == "airtable":
+        at = s.get("airtable", {})
+        token = at.get("pat") or at.get("token") or _env("AIRTABLE_TOKEN")
+        base_id = at.get("base_id") or _env("AIRTABLE_BASE_ID")
+        if not token:
+            return {"ok": False, "error": "Токен не задан"}
+        try:
+            async with httpx.AsyncClient(timeout=10) as hx:
+                url = f"https://api.airtable.com/v0/meta/bases/{base_id}/tables" if base_id else "https://api.airtable.com/v0/meta/bases"
+                r = await hx.get(url, headers={"Authorization": f"Bearer {token}"})
+            if r.status_code == 200:
+                d = r.json()
+                count = len(d.get("tables", d.get("bases", [])))
+                return {"ok": True, "message": f"✅ Airtable подключён ({count} объектов)"}
+            return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:100]}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    elif service == "tbank_time":
+        tm = s.get("tbank_time", {})
+        login = tm.get("login", "")
+        password = tm.get("password", "")
+        session = tm.get("session_cookie", "") or _env("TIME_SESSION_COOKIE")
+        if not login and not session:
+            return {"ok": False, "error": "Логин или session cookie не заданы"}
+        try:
+            async with httpx.AsyncClient(timeout=10) as hx:
+                headers = {}
+                if session:
+                    headers["Cookie"] = f"MMAUTH={session}"
+                r = await hx.get("https://time.tbank.ru/api/v1/users/me", headers=headers)
+            if r.status_code == 200:
+                me = r.json()
+                return {"ok": True, "message": f"✅ {me.get('username', login)}"}
+            return {"ok": False, "error": f"HTTP {r.status_code} — проверьте session cookie"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    elif service == "sheets":
+        gs = s.get("sheets", {})
+        sheet_id = _extract_sheets_id(gs.get("spreadsheet_id") or _env("SHEETS_SPREADSHEET_ID"))
+        if not sheet_id:
+            return {"ok": False, "error": "Spreadsheet ID не задан"}
+        try:
+            from sheets import fetch_sheet_csv
+            rows = await fetch_sheet_csv(sheet_id)
+            return {"ok": bool(rows), "message": f"✅ Таблица доступна ({len(rows)} строк)" if rows else "❌ Таблица пустая или недоступна"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    return {"ok": False, "error": f"Неизвестный сервис: {service}"}
