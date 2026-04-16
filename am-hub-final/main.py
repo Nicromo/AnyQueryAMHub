@@ -2025,18 +2025,30 @@ async def api_send_followup(meeting_id: int, request: Request, db: Session = Dep
             settings = user.settings or {}
             kt = settings.get("ktalk", {})
             channel_id = kt.get("followup_channel_id") or kt.get("channel_id")
-            if channel_id:
-                from integrations.ktalk import send_followup as ktalk_send_followup
-                await ktalk_send_followup(
+            token = kt.get("access_token", "")
+            if channel_id and token:
+                from integrations.ktalk import send_followup_to_channel
+                await send_followup_to_channel(
                     channel_id=channel_id,
                     client_name=client.name if client else "",
                     followup_text=followup_text,
                     meeting_date=meeting.date,
-                    token_override=kt.get("access_token", ""),
-                    space_override=kt.get("space", ""),
+                    token=token,
                 )
         except Exception as e:
             logger.warning(f"Ktalk followup push failed: {e}")
+
+    # Push в Airtable — обновляем дату последней встречи
+    if client and client.airtable_record_id:
+        try:
+            from airtable_sync import sync_meeting_to_airtable
+            await sync_meeting_to_airtable(
+                record_id=client.airtable_record_id,
+                meeting_date=meeting.date or datetime.now(),
+                comment=f"Фолоуап отправлен: {(followup_text or '')[:100]}",
+            )
+        except Exception as e:
+            logger.warning(f"Airtable followup sync failed: {e}")
 
     # Push в Airtable — обновляем дату встречи
     if client and client.airtable_record_id:
@@ -2291,6 +2303,20 @@ async def api_create_qbr(client_id: int, request: Request, db: Session = Depends
         client.next_qbr_date = qbr.date + timedelta(days=90) if qbr.date else None
 
     db.commit()
+
+    # Push QBR в Airtable
+    if client and client.airtable_record_id and qbr.summary:
+        try:
+            from airtable_sync import push_qbr_to_airtable
+            await push_qbr_to_airtable(
+                client_name=client.name,
+                quarter=qbr.quarter or "",
+                summary=qbr.summary or "",
+                achievements=qbr.achievements or [],
+            )
+        except Exception as e:
+            logger.warning(f"Airtable QBR push failed: {e}")
+
     return {"ok": True, "qbr_id": qbr.id}
 
 
