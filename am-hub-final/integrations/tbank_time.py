@@ -240,11 +240,13 @@ async def count_open_tickets(account_name: str) -> int:
     Returns:
         int: Кол-во открытых обращений
     """
+    if token:
+        os.environ["TIME_API_TOKEN"] = token
     tickets = await get_support_tickets(account_name, status="open,in_progress")
     return len(tickets)
 
 
-async def sync_tickets_for_client(account_name: str) -> Dict[str, Any]:
+async def sync_tickets_for_client(account_name: str, token: str = "") -> Dict[str, Any]:
     """
     Синхронизировать обращения для клиента в БД
     

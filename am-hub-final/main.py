@@ -1253,13 +1253,29 @@ async def api_sync_airtable(
         raise HTTPException(status_code=401)
 
     from airtable_sync import sync_clients_from_airtable
-    body = await request.json()
-    token = body.get("token") or os.environ.get("AIRTABLE_TOKEN", "")
-    view_id = body.get("view_id", "")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # Приоритет: body → user.settings → env
+    u_settings = user.settings or {}
+    at_settings = u_settings.get("airtable", {})
+    token = (body.get("token")
+             or at_settings.get("pat") or at_settings.get("token")
+             or os.environ.get("AIRTABLE_TOKEN") or os.environ.get("AIRTABLE_PAT", ""))
+    base_id = (body.get("base_id")
+               or at_settings.get("base_id")
+               or os.environ.get("AIRTABLE_BASE_ID", ""))
+    view_id = body.get("view_id") or at_settings.get("view_id", "")
+
+    if not token:
+        return {"error": "Нет токена Airtable. Укажите в Настройках → Аккаунты."}
 
     result = await sync_clients_from_airtable(
         db=db,
         token=token,
+        base_id=base_id or None,
         view_id=view_id,
         default_manager_email=user.email,
     )
@@ -2520,13 +2536,20 @@ async def api_tbank_tickets(client_name: str, db: Session = Depends(get_db), aut
     if not payload:
         raise HTTPException(status_code=401)
 
-    time_token = env.TIME_TOKEN
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    u_settings = (user.settings or {}) if user else {}
+    tm = u_settings.get("tbank_time", {})
+
+    # Приоритет: user.settings → env
+    time_token = (tm.get("session_cookie") or tm.get("api_token")
+                  or env.TIME_TOKEN)
+
     if not time_token:
-        return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
+        return {"error": "Настройте доступ к Tbank Time в Настройках → Аккаунты", "tickets": []}
 
     from integrations.tbank_time import sync_tickets_for_client
     try:
-        result = await sync_tickets_for_client(client_name)
+        result = await sync_tickets_for_client(client_name, token=time_token)
         return result
     except Exception as e:
         return {"error": str(e), "open_count": 0, "total_count": 0, "last_ticket": None}
