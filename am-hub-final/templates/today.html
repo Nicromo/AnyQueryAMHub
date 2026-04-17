@@ -1,13 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Мой день — AM Hub{% endblock %}{% block scripts %}<script>
 
-// Search
-let searchTimeout=null;
-function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';}
-document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')document.getElementById('searchModal').style.display='none';});
-document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))e.target.style.display='none';});
-document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';return;}searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'">'+c.name+'</div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'">'+t.title+'</div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){}},300);});
-
 // My Day Schedule (drag-and-drop)
 let myDayTasks=[];
 async function loadMyDaySchedule(){try{const r=await fetch('/api/my-day/schedule');const d=await r.json();myDayTasks=d.schedule||[];renderSchedule();}catch(e){}}
@@ -173,14 +166,6 @@ loadSyncKpi();
     </div>
   </div>
 
-  <!-- Search Modal -->
-  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;"><span>🔍</span><input id="searchInput" type="text" placeholder="Поиск..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;"><kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd></div>
-      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
-    </div>
-  </div>
-
   <!-- KPI -->
   <div class="kpi-row">
     <div class="kpi"><div class="v" style="color:var(--yellow)">{{ today_tasks|length }}</div><div class="l">Задач сегодня</div></div>
@@ -272,13 +257,6 @@ loadSyncKpi();
 </div>
 
 <script>
-// Search
-let searchTimeout=null;
-function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';}
-document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')document.getElementById('searchModal').style.display='none';});
-document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))e.target.style.display='none';});
-document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';return;}searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'">'+c.name+'</div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'">'+t.title+'</div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){}},300);});
-
 // My Day Schedule (drag-and-drop)
 let myDayTasks=[];
 async function loadMyDaySchedule(){try{const r=await fetch('/api/my-day/schedule');const d=await r.json();myDayTasks=d.schedule||[];renderSchedule();}catch(e){}}

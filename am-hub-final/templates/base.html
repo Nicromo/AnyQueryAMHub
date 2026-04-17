@@ -728,6 +728,105 @@ if ("serviceWorker" in navigator) {
   })();
   </script>
 
+<!-- Global Search Modal (shared across all pages) -->
+<div class="global-search-overlay" id="searchModal" role="dialog" aria-label="Глобальный поиск">
+  <div class="global-search-modal">
+    <div class="global-search-head">
+      <span>🔍</span>
+      <input id="searchInput" type="text" placeholder="Поиск клиентов, задач, встреч, заметок..." autocomplete="off">
+      <kbd>ESC</kbd>
+    </div>
+    <div class="global-search-results" id="searchResults"></div>
+    <div id="searchEmpty" style="padding:30px;text-align:center;color:var(--muted);font-size:.85rem;display:none;">Начните вводить</div>
+  </div>
+</div>
+
+<script>
+/* ==================== Global toast ====================
+   showToast(msg)                 → тип 'ok'
+   showToast(msg, 'err'|'warn'|'info'|'ok')
+   showToast(msg, true)           → 'err' (legacy isError)
+   showToast(msg, 'var(--red)')   → прямое значение цвета (legacy)
+*/
+(function(){
+  function mapType(t){
+    if (t === true) return 'err';
+    if (!t || t === 'success') return 'ok';
+    if (t === 'error') return 'err';
+    if (['ok','err','warn','info'].includes(t)) return t;
+    return null; // raw color string → handled below
+  }
+  window.showToast = function(msg, type){
+    const kind = mapType(type);
+    const el = document.createElement('div');
+    el.className = 'toast ' + (kind || 'ok');
+    if (kind === null && typeof type === 'string') el.style.color = type; // legacy CSS var color
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(()=>el.remove(), 3000);
+  };
+})();
+
+/* ==================== Global Ctrl+K search ==================== */
+(function(){
+  const modal = document.getElementById('searchModal');
+  const inp   = document.getElementById('searchInput');
+  const res   = document.getElementById('searchResults');
+  const empty = document.getElementById('searchEmpty');
+  if (!modal) return;
+
+  window.openSearch = function(){
+    modal.classList.add('open');
+    inp.value = ''; res.innerHTML = '';
+    empty.style.display = 'block';
+    inp.focus();
+  };
+  window.closeSearch = function(){ modal.classList.remove('open'); };
+
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); window.openSearch(); }
+    if (e.key === 'Escape' && modal.classList.contains('open')) window.closeSearch();
+  });
+  modal.addEventListener('click', e => { if (e.target === modal) window.closeSearch(); });
+
+  const CATS = [
+    { key:'clients',  label:'👥 Клиенты', icon:'👤', title:c=>c.name,              sub:_=>''          },
+    { key:'tasks',    label:'📋 Задачи',  icon:'📋', title:t=>t.title,             sub:t=>t.client_name||'' },
+    { key:'meetings', label:'📅 Встречи', icon:'📅', title:m=>m.title||'—',        sub:_=>''          },
+    { key:'notes',    label:'📝 Заметки', icon:'📝', title:n=>(n.content||'').slice(0,60), sub:_=>'' },
+  ];
+  let timer = null;
+  inp.addEventListener('input', e => {
+    clearTimeout(timer);
+    const q = e.target.value.trim();
+    if (!q) { res.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+    timer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/search?q=' + encodeURIComponent(q) + '&limit=15');
+        if (!r.ok) return;
+        const d = await r.json();
+        let html = '';
+        for (const cat of CATS) {
+          const items = d[cat.key] || [];
+          if (!items.length) continue;
+          html += '<div class="search-cat">' + cat.label + '</div>';
+          for (const it of items) {
+            html += '<div class="search-item" onclick="location.href=\'' + it.url + '\'">' +
+              '<span class="s-icon">' + cat.icon + '</span>' +
+              '<div class="s-text"><div class="s-title">' + cat.title(it) + '</div>' +
+              (cat.sub(it) ? '<div class="s-sub">' + cat.sub(it) + '</div>' : '') +
+              '</div></div>';
+          }
+        }
+        if (!html) html = '<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';
+        res.innerHTML = html;
+      } catch(e) { console.error(e); }
+    }, 300);
+  });
+})();
+</script>
+
 {% block scripts %}{% endblock %}
 </body>
 </html>

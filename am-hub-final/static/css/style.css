@@ -584,6 +584,27 @@ tbody tr:hover td { background: var(--surface-2); color: var(--text); }
 @keyframes toastIn { from { opacity:0; transform:translateY(8px) scale(.97); } to { opacity:1; transform:none; } }
 .toast.success,.toast.ok { border-color: rgba(35,209,139,.28); color: var(--green); }
 .toast.error,.toast.err  { border-color: rgba(240,85,106,.28); color: var(--red); }
+.toast.warn              { border-color: rgba(245,166,35,.28); color: var(--yellow); }
+.toast.info              { border-color: rgba(100,165,255,.28); color: #60a5fa; }
+
+/* Global Search Modal */
+.global-search-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); backdrop-filter:blur(4px); z-index:200;
+  display:none; align-items:flex-start; justify-content:center; padding-top:12vh; }
+.global-search-overlay.open { display:flex; }
+.global-search-modal { background:var(--card); border:1px solid var(--border); border-radius:16px; width:90%;
+  max-width:600px; max-height:60vh; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.4); }
+.global-search-head { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+.global-search-head input { flex:1; background:transparent; border:none; color:var(--text); font-size:.95rem; outline:none; }
+.global-search-head kbd { padding:2px 6px; border-radius:4px; background:var(--bg); border:1px solid var(--border);
+  font-size:.68rem; color:var(--muted); }
+.global-search-results { overflow-y:auto; flex:1; padding:8px 0; }
+.search-cat { padding:6px 16px 4px; font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
+.search-item { padding:8px 16px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background .1s; }
+.search-item:hover { background:rgba(255,255,255,.04); }
+.search-item .s-icon { font-size:1rem; flex-shrink:0; width:20px; text-align:center; }
+.search-item .s-text { flex:1; min-width:0; }
+.search-item .s-title { font-size:.85rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.search-item .s-sub { font-size:.72rem; color:var(--muted); }
 
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.65);

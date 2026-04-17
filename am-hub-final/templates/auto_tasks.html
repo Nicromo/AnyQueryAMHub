@@ -250,6 +250,5 @@ async function testRule(id){
 
 async function delRule(id){if(!confirm('Удалить правило?'))return;await fetch('/api/auto-tasks/rules/'+id,{method:'DELETE'});allRules=allRules.filter(function(r){return r.id!==id;});render(allRules);}
 
-function showToast(msg){var t=document.createElement('div');t.className='toast success';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove();},3000);}
 </script>
 {% endblock %}

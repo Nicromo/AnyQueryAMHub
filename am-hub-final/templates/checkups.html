@@ -498,14 +498,6 @@ async function saveGroqKey() {
 async function openResultDetail(id) {
   window.location.href = '/checkup/result/' + id;
 }
-function showToast(msg) {
-  var t = document.createElement('div');
-  t.className = 'toast success';
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(function() { t.remove(); }, 3500);
-}
-
 (async function checkExtensionStatus() {
   try {
     var d = await fetch('/api/checkup/results/all?limit=1')

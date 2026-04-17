@@ -219,19 +219,6 @@
 
 <script>
 (function(){
-  var toastEl = document.getElementById('help-toast');
-  var toastTimer = null;
-  function showToast(msg, type){
-    if (!toastEl) return;
-    toastEl.textContent = msg;
-    toastEl.classList.remove('ok','err');
-    if (type === 'ok')  toastEl.classList.add('ok');
-    if (type === 'err') toastEl.classList.add('err');
-    toastEl.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 3800);
-  }
-
   function saveFallback(payload){
     try {
       var key = 'amhub_help_pending';

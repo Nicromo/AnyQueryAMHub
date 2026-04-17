@@ -198,46 +198,6 @@ async function loadActions(){
 }
 loadActions();
 
-// ── Global Search ──
-let searchTimeout=null;
-function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').value='';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';}
-function closeSearch(){document.getElementById('searchModal').style.display='none';}
-document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')closeSearch();});
-document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))closeSearch();});
-
-document.getElementById('searchInput').addEventListener('input',e=>{
-  clearTimeout(searchTimeout);
-  const q=e.target.value.trim();
-  if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}
-  document.getElementById('searchEmpty').style.display='none';
-  searchTimeout=setTimeout(async()=>{
-    try{
-      const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');
-      if(!r.ok)return;
-      const d=await r.json();
-      let html='';
-      if(d.clients.length){
-        html+='<div class="search-cat">👥 Клиенты ('+d.clients.length+')</div>';
-        d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div><div class="s-sub">'+(c.segment||'')+'</div></div><span class="s-badge">клиент</span></div>';});
-      }
-      if(d.tasks.length){
-        html+='<div class="search-cat">📋 Задачи ('+d.tasks.length+')</div>';
-        d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+' · '+t.status+'</div></div><span class="s-badge">задача</span></div>';});
-      }
-      if(d.meetings.length){
-        html+='<div class="search-cat">📅 Встречи ('+d.meetings.length+')</div>';
-        d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div><div class="s-sub">'+m.client_name+(m.date?' · '+m.date.slice(0,10):'')+'</div></div><span class="s-badge">встреча</span></div>';});
-      }
-      if(d.notes.length){
-        html+='<div class="search-cat">📝 Заметки ('+d.notes.length+')</div>';
-        d.notes.forEach(n=>{html+='<div class="search-item" onclick="location.href=\''+n.url+'\'"><span class="s-icon">'+(n.pinned?'📌':'📝')+'</span><div class="s-text"><div class="s-title">'+n.content+'</div><div class="s-sub">'+n.client_name+'</div></div><span class="s-badge">заметка</span></div>';});
-      }
-      if(!html) html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';
-      document.getElementById('searchResults').innerHTML=html;
-    }catch(e){console.error(e);}
-  },300);
-});
-
 // ── PWA Registration ──
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
 if('BeforeInstallPromptEvent' in window){window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window._pwaPrompt=e;});}
@@ -452,19 +412,6 @@ window.addEventListener('load',()=>{
       <button class="btn btn-sm" id="notifBell" onclick="location.href='/inbox'" title="Уведомления" aria-label="Уведомления">🔔</button>
       <button class="btn btn-sm" onclick="location.reload()" aria-label="Обновить страницу">🔄</button>
       <a class="btn btn-sm btn-p" href="/sync">Sync</a>
-    </div>
-  </div>
-
-  <!-- Search Modal -->
-  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.4);">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
-        <span style="font-size:1.1rem;">🔍</span>
-        <input id="searchInput" type="text" placeholder="Поиск клиентов, задач, встреч, заметок..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;" autocomplete="off">
-        <kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd>
-      </div>
-      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
-      <div id="searchEmpty" style="padding:30px;text-align:center;color:var(--muted);font-size:.85rem;display:none;">Начните вводить для поиска</div>
     </div>
   </div>
 

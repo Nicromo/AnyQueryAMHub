@@ -235,12 +235,6 @@ function toggleSummary(idx){
   el.style.display=el.style.display==='block'?'none':'block';
 }
 
-function showToast(msg,color='var(--green)'){
-  const t=document.getElementById('toast');
-  t.textContent=msg;t.style.background=color;t.style.display='block';
-  setTimeout(()=>t.style.display='none',2500);
-}
-
 function getAgenda(){
   return Array.from(document.querySelectorAll('#agendaList input[type=text]')).map(i=>i.value).filter(Boolean);
 }
@@ -278,9 +272,9 @@ async function regenerateAI(){
       document.getElementById('aiText').value = d.text;
       showToast('✅ AI обновил подготовку');
     } else {
-      showToast('❌ ' + (d.error || 'Ошибка AI'), 'var(--red)');
+      showToast('❌ ' + (d.error || 'Ошибка AI'), 'err');
     }
-  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+  } catch(e) { showToast('❌ ' + e.message, 'err'); }
   btn.disabled = false; btn.textContent = '🔄 Перегенерировать';
 }
 

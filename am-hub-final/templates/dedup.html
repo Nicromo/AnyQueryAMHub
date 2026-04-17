@@ -138,9 +138,5 @@ async function confirmMerge() {
   else showToast('❌ ' + (d.error || 'Ошибка'));
 }
 
-function showToast(m) {
-  var t = document.createElement('div'); t.className='toast success'; t.textContent=m;
-  document.body.appendChild(t); setTimeout(()=>t.remove(), 3000);
-}
 </script>
 {% endblock %}

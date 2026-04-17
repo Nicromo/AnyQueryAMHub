@@ -371,12 +371,6 @@ function saveAll(){
   showToast('💾 Сохранено');
 }
 
-function showToast(msg,color='var(--green)'){
-  const t=document.getElementById('toast');
-  t.textContent=msg;t.style.background=color;t.style.display='block';
-  setTimeout(()=>t.style.display='none',2500);
-}
-
 // Загружаем сохранённое
 try{
   const profile=JSON.parse(localStorage.getItem('onb_profile_{{ client.id }}')||'{}');

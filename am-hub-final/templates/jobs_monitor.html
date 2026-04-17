@@ -81,7 +81,6 @@ async function runJob(jobId, btn) {
   setTimeout(loadJobs, 1500);
 }
 
-function showToast(m){var t=document.createElement('div');t.className='toast success';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),3000);}
 loadJobs();
 setInterval(loadJobs, 15000);
 </script>

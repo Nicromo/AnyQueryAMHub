@@ -51,18 +51,6 @@
     </div>
   </div>
 
-  <!-- Search Modal (shared) -->
-  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.4);">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
-        <span style="font-size:1.1rem;">🔍</span>
-        <input id="searchInput" type="text" placeholder="Поиск..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;" autocomplete="off">
-        <kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd>
-      </div>
-      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
-      <div id="searchEmpty" style="padding:30px;text-align:center;color:var(--muted);font-size:.85rem;display:none;">Начните вводить</div>
-    </div>
-  </div>
   <div class="filter-bar">
     <button class="fbtn active" onclick="filterSeg('')">Все</button>
     {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
@@ -105,62 +93,5 @@ function filterTbl(q){
     tr.style.display=tr.dataset.name.includes(q)?'':'none';
   });
 }
-// Global Search
-let searchTimeout=null;
-function openSearch(){
-  const m=document.getElementById('searchModal');
-  m.style.display='flex';
-  document.getElementById('searchInput').value='';
-  document.getElementById('searchInput').focus();
-  document.getElementById('searchResults').innerHTML='';
-  document.getElementById('searchEmpty').style.display='block';
-}
-function closeSearch(){ document.getElementById('searchModal').style.display='none'; }
-document.addEventListener('keydown',e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}
-  if(e.key==='Escape')closeSearch();
-});
-document.getElementById('searchModal').addEventListener('click',e=>{
-  if(e.target===document.getElementById('searchModal'))closeSearch();
-});
-document.getElementById('searchInput').addEventListener('input',e=>{
-  clearTimeout(searchTimeout);
-  const q=e.target.value.trim();
-  if(!q){
-    document.getElementById('searchResults').innerHTML='';
-    document.getElementById('searchEmpty').style.display='block';
-    return;
-  }
-  document.getElementById('searchEmpty').style.display='none';
-  searchTimeout=setTimeout(async()=>{
-    try{
-      const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');
-      if(!r.ok)return;
-      const d=await r.json();
-      let html='';
-      const cats=[
-        {key:'clients', label:'👥 Клиенты', icon:'👤', sub:c=>''},
-        {key:'tasks',   label:'📋 Задачи',  icon:'📋', sub:t=>t.client_name||''},
-        {key:'meetings',label:'📅 Встречи', icon:'📅', sub:m=>'', title:m=>m.title||'—'},
-        {key:'notes',   label:'📝 Заметки', icon:'📝', sub:n=>'', title:n=>n.content.slice(0,60)},
-      ];
-      cats.forEach(cat=>{
-        const items=d[cat.key]||[];
-        if(!items.length)return;
-        html+='<div class="search-cat">'+cat.label+'</div>';
-        items.forEach(it=>{
-          const title=(cat.title?cat.title(it):it.name||it.title)||'';
-          const sub=cat.sub(it);
-          html+='<div class="search-item" onclick="location.href=\''+it.url+'\'">'+
-            '<span class="s-icon">'+cat.icon+'</span>'+
-            '<div class="s-text"><div class="s-title">'+title+'</div>'+
-            (sub?'<div class="s-sub">'+sub+'</div>':'')+'</div></div>';
-        });
-      });
-      if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';
-      document.getElementById('searchResults').innerHTML=html;
-    }catch(e){console.error(e);}
-  },300);
-});
 </script>
 {% endblock %}

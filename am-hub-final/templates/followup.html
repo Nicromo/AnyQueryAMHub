@@ -66,7 +66,7 @@ async function regenFollowup(){
     const d=await r.json();
     if(d.followup_text)document.getElementById('followupText').value=d.followup_text;
     showToast('✅ Перегенерировано');
-  }catch(e){showToast('Ошибка генерации','var(--red)');}
+  }catch(e){showToast('Ошибка генерации','err');}
 }
 
 function copyFollowup(){navigator.clipboard.writeText(document.getElementById('followupText').value);showToast('📋 Скопировано');}
@@ -114,7 +114,7 @@ async function applyTemplate(id) {
 
 async function saveAsTemplate() {
   const content = document.getElementById('followupText').value.trim();
-  if (!content) { showToast('❌ Нет текста для сохранения', 'var(--red)'); return; }
+  if (!content) { showToast('❌ Нет текста для сохранения', 'err'); return; }
   const name = prompt('Название шаблона:');
   if (!name?.trim()) return;
   try {
@@ -125,8 +125,8 @@ async function saveAsTemplate() {
     });
     const d = await r.json();
     if (d.ok) showToast('✅ Шаблон сохранён');
-    else showToast('❌ Ошибка', 'var(--red)');
-  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+    else showToast('❌ Ошибка', 'err');
+  } catch(e) { showToast('❌ ' + e.message, 'err'); }
 }
 
 async function deleteTemplate(id) {
@@ -192,7 +192,7 @@ async function applyTemplate(id) {
 
 async function saveAsTemplate() {
   const text = document.getElementById('followupText').value.trim();
-  if (!text) { showToast('❌ Текст пустой', 'var(--red)'); return; }
+  if (!text) { showToast('❌ Текст пустой', 'err'); return; }
   const name = prompt('Название шаблона:');
   if (!name) return;
   const catMap = {checkup:'checkup', qbr:'qbr', kickoff:'kickoff', sync:'sync'};
@@ -208,7 +208,7 @@ async function saveAsTemplate() {
       showToast('✅ Шаблон сохранён');
       _templatesLoaded = false;
     }
-  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+  } catch(e) { showToast('❌ ' + e.message, 'err'); }
 }
 
 async function deleteTemplate(id) {
@@ -222,7 +222,7 @@ async function deleteTemplate(id) {
 async function sendFollowup(){
   const r=await fetch('/api/meetings/{{ meeting.id }}/followup/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({followup_text:document.getElementById('followupText').value})});
   if(r.ok){showToast('✅ Фолоуап отправлен');setTimeout(()=>window.location.href='/client/{{ client.id }}',1500);}
-  else showToast('Ошибка','var(--red)');
+  else showToast('Ошибка','err');
 }
 async function skipFollowup(){
   const r=await fetch('/api/meetings/{{ meeting.id }}/followup/skip',{method:'POST'});
@@ -241,12 +241,6 @@ function saveAll(){
   };
   localStorage.setItem('followup_{{ client.id }}',JSON.stringify(data));
   showToast('💾 Сохранено');
-}
-
-function showToast(msg,color='var(--green)'){
-  const t=document.getElementById('toast');
-  t.textContent=msg;t.style.background=color;t.style.display='block';
-  setTimeout(()=>t.style.display='none',2500);
 }
 
 // Загружаем сохранённое
@@ -523,7 +517,7 @@ async function regenFollowup(){
     const d=await r.json();
     if(d.followup_text)document.getElementById('followupText').value=d.followup_text;
     showToast('✅ Перегенерировано');
-  }catch(e){showToast('Ошибка генерации','var(--red)');}
+  }catch(e){showToast('Ошибка генерации','err');}
 }
 
 function copyFollowup(){navigator.clipboard.writeText(document.getElementById('followupText').value);showToast('📋 Скопировано');}
@@ -571,7 +565,7 @@ async function applyTemplate(id) {
 
 async function saveAsTemplate() {
   const content = document.getElementById('followupText').value.trim();
-  if (!content) { showToast('❌ Нет текста для сохранения', 'var(--red)'); return; }
+  if (!content) { showToast('❌ Нет текста для сохранения', 'err'); return; }
   const name = prompt('Название шаблона:');
   if (!name?.trim()) return;
   try {
@@ -582,8 +576,8 @@ async function saveAsTemplate() {
     });
     const d = await r.json();
     if (d.ok) showToast('✅ Шаблон сохранён');
-    else showToast('❌ Ошибка', 'var(--red)');
-  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+    else showToast('❌ Ошибка', 'err');
+  } catch(e) { showToast('❌ ' + e.message, 'err'); }
 }
 
 async function deleteTemplate(id) {

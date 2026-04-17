@@ -221,18 +221,6 @@ function normalizePrefs(p) {
 
 let prefs = normalizePrefs(loadLocalPrefs());
 
-function showToast(msg, isError) {
-  let t = document.createElement("div");
-  t.className = "sb-toast" + (isError ? " error" : "");
-  t.textContent = msg;
-  document.body.appendChild(t);
-  requestAnimationFrame(() => t.classList.add("show"));
-  setTimeout(() => {
-    t.classList.remove("show");
-    setTimeout(() => t.remove(), 300);
-  }, 2200);
-}
-
 function renderSections() {
   const wrap = document.getElementById("sb-sections");
   wrap.innerHTML = SECTIONS.map(s => {

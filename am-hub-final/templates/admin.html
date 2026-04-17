@@ -295,12 +295,5 @@ async function resetData() {
   if (r.ok) location.reload();
 }
 
-// ── Toast ───────────────────────────────────────────────────────────────────
-function showToast(msg) {
-  const t = document.createElement('div');
-  t.className = 'toast success'; t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
-}
 </script>
 {% endblock %}
