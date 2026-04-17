@@ -200,21 +200,24 @@ async def lifespan(app: FastAPI):
             except Exception as _e:
                 logger.warning(f"Auto-migration warning: {_e}")
 
-        # Seed default admin if no users exist
+        # Создаём admin из env если БД пустая
         with SessionLocal() as db:
             if db.query(User).count() == 0:
-                import secrets, string
-                random_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+                admin_email = os.environ.get("ADMIN_EMAIL", "admin@amhub.ru")
+                admin_password = os.environ.get("ADMIN_PASSWORD", "")
+                if not admin_password:
+                    import secrets, string
+                    admin_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
                 admin = User(
-                    email="admin@company.ru",
+                    email=admin_email,
                     first_name="Администратор",
                     role="admin",
-                    hashed_password=hash_password(random_password),
-                    settings={},
+                    hashed_password=hash_password(admin_password),
+                    settings={"onboarding_complete": True},
                 )
                 db.add(admin)
                 db.commit()
-                logger.warning(f"✅ Default admin: admin@company.ru / {random_password} — CHANGE PASSWORD!")
+                logger.warning(f"✅ Admin created: {admin_email} — check ADMIN_PASSWORD in env")
 
         logger.info("✅ Database ready")
 

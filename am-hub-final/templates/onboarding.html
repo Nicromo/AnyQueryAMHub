@@ -45,10 +45,10 @@
 
 <script>
 var STEPS = [
-  { id: 'merchrules', icon: '🔗', title: 'Подключите Merchrules', desc: 'Ваши клиенты и задачи подтянутся автоматически из CRM.', action: '<a href="/settings" class="btn btn-primary btn-sm">Перейти в настройки</a>' },
-  { id: 'add_clients', icon: '👥', title: 'Добавьте клиентов в кабинет', desc: 'Выберите клиентов из общего пула которые находятся в вашей ответственности.', action: '<a href="/cabinet" class="btn btn-primary btn-sm">Открыть кабинет</a>' },
-  { id: 'first_task', icon: '✅', title: 'Создайте первую задачу', desc: 'Добавьте задачу по любому клиенту — это займёт 10 секунд.', action: '<a href="/tasks" class="btn btn-primary btn-sm">Перейти к задачам</a>' },
-  { id: 'tg_connect', icon: '📱', title: 'Подключите Telegram', desc: 'Получайте умные уведомления о просрочках и важных событиях.', action: '<a href="/settings#telegram" class="btn btn-primary btn-sm">Подключить</a>' },
+  { id: 'merchrules', icon: '🔗', title: 'Шаг 1: Подключите Merchrules', desc: 'Обязательно. Ваши клиенты и задачи подтянутся автоматически из CRM после авторизации.', action: '<a href="/settings" class="btn btn-primary btn-sm">Войти в Merchrules →</a>' },
+  { id: 'extension', icon: '🧩', title: 'Шаг 2: Установите расширение браузера', desc: 'Расширение AM Hub автоматически авторизует вас в KTalk и Tbank Time — ничего вводить не нужно.', action: '<a href="https://chrome.google.com/webstore" target="_blank" class="btn btn-primary btn-sm">Установить расширение →</a>' },
+  { id: 'add_clients', icon: '👥', title: 'Шаг 3: Откройте свой кабинет', desc: 'После синхронизации с Merchrules выберите клиентов в вашей ответственности.', action: '<a href="/cabinet" class="btn btn-primary btn-sm">Открыть кабинет →</a>' },
+  { id: 'tg_connect', icon: '📱', title: 'Шаг 4: Подключите Telegram (опционально)', desc: 'Получайте умные уведомления о просрочках, падении health score и важных событиях.', action: '<a href="/settings" class="btn btn-sm">Подключить →</a>' },
   { id: 'first_checkup', icon: '🔍', title: 'Запустите первый чекап', desc: 'Установите AM Hub Extension и проверьте качество поиска одного клиента.', action: '<a href="/checkups" class="btn btn-primary btn-sm">К чекапам</a>' },
 ];
 
