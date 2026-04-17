@@ -43,12 +43,16 @@ def _env_bool(key: str) -> bool:
 # SEARCH QUALITY CHECKUP — API для расширения
 # ============================================================================
 
-def _checkup_auth(auth_token: Optional[str], db):
-    """Общая авторизация для checkup endpoints."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
+def _checkup_auth(auth_token: Optional[str], db, request=None):
+    """Авторизация для checkup/cabinet endpoints. Cookie и Bearer (расширение)."""
     from auth import decode_access_token
-    payload = decode_access_token(auth_token)
+    bearer = ""
+    if request:
+        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = bearer or auth_token
+    if not token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(token)
     if not payload:
         raise HTTPException(status_code=401)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()

@@ -38,6 +38,22 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
+def _checkup_auth(auth_token: Optional[str], db, request=None):
+    from auth import decode_access_token
+    bearer = ""
+    if request:
+        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = bearer or auth_token
+    if not token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
 @router.get("/api/clients/{client_id}/qbr")
 async def api_get_qbr(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Получить QBR данные клиента."""

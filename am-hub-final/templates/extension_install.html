@@ -357,9 +357,9 @@
             </svg>
           </div>
         </div>
-        <a href="/extension/amhub-sync.zip"
+        <a href="/static/amhub-ext.zip"
            class="btn btn-primary ext-download-btn"
-           download
+           download="amhub-sync.zip"
            style="margin-top:10px">
           ⬇️ Скачать amhub-sync.zip
         </a>
@@ -552,6 +552,19 @@
             <button onclick="copyHubUrl()" title="Скопировать">📋</button>
           </div>
         </li>
+        <li><b>Токен авторизации</b> — ваш персональный токен AM Hub (для чекапера):
+          <div class="ext-copy-box" style="margin-top:6px;max-width:100%;overflow:hidden">
+            <span id="hub-token-display" style="
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+              max-width:260px;display:inline-block;vertical-align:middle">
+              {% if hub_token %}{{ hub_token[:24] }}…{% else %}— войдите в систему —{% endif %}
+            </span>
+            <button onclick="copyHubToken()" title="Скопировать токен" id="copy-token-btn">📋</button>
+          </div>
+          <div style="font-size:.8rem;color:var(--text-dim);margin-top:4px">
+            Вставьте этот токен в поле «Токен (из Настройки → Аккаунт)» в попапе расширения
+          </div>
+        </li>
       </ul>
       <div class="ext-tip" style="margin-top:12px">
         💡 После сохранения настроек расширение автоматически начнёт синхронизацию.
@@ -595,6 +608,17 @@
       var b = event && event.target; if (!b) return;
       var t = b.textContent; b.textContent = '✓';
       setTimeout(function(){ b.textContent = t; }, 1200);
+    });
+  };
+
+  // ── Копирование JWT-токена для расширения ────────────────────
+  var _hubToken = {{ hub_token | tojson if hub_token else 'null' }};
+  window.copyHubToken = function(){
+    if (!_hubToken) { extToast('Токен не найден — войдите в систему'); return; }
+    navigator.clipboard.writeText(_hubToken).then(function(){
+      extToast('✅ Токен скопирован — вставьте в поле «Токен» в попапе расширения');
+      var b = document.getElementById('copy-token-btn');
+      if (b) { var t = b.textContent; b.textContent = '✓'; setTimeout(function(){ b.textContent = t; }, 1500); }
     });
   };
 

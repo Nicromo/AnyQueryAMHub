@@ -164,7 +164,7 @@ async def settings_extension_page(
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse(
         "extension_install.html",
-        {"request": request, "user": user},
+        {"request": request, "user": user, "hub_token": auth_token},
     )
 
 

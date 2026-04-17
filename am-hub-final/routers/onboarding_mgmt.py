@@ -26,6 +26,21 @@ router = APIRouter()
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
+def _checkup_auth(auth_token: Optional[str], db, request=None):
+    bearer = ""
+    if request:
+        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = bearer or auth_token
+    if not token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
 @router.get("/api/cabinet/my-clients")
 async def api_cabinet_my_clients(
     db: Session = Depends(get_db),
@@ -192,6 +207,7 @@ async def api_cabinet_unassign(
 @router.get("/api/cabinets/{cabinet_id}")
 async def api_get_cabinet(
     cabinet_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
@@ -199,7 +215,7 @@ async def api_get_cabinet(
     Возвращает данные кабинета для расширения Search Quality Checkup.
     cabinet_id = client.id или client.merchrules_account_id
     """
-    user = _checkup_auth(auth_token, db)
+    user = _checkup_auth(auth_token, db, request)
 
     # Ищем клиента по id или по merchrules_account_id
     client = None
@@ -259,11 +275,12 @@ async def api_get_cabinet(
 @router.get("/api/cabinets/{cabinet_id}/merch-rules")
 async def api_merch_rules(
     cabinet_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
     """Мерч-правила клиента из integration_metadata."""
-    user = _checkup_auth(auth_token, db)
+    user = _checkup_auth(auth_token, db, request)
 
     client = None
     if cabinet_id.isdigit():

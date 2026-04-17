@@ -26,9 +26,25 @@ router = APIRouter()
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
+def _checkup_auth(auth_token: Optional[str], db, request=None):
+    bearer = ""
+    if request:
+        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = bearer or auth_token
+    if not token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
 @router.get("/api/checkup/{cabinet_id}/queries")
 async def api_checkup_queries(
     cabinet_id: str,
+    request: Request,
     type: str = "top",
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
@@ -39,7 +55,7 @@ async def api_checkup_queries(
     Запросы берутся из integration_metadata.checkup_queries[type]
     или из сохранённых результатов предыдущих чекапов.
     """
-    user = _checkup_auth(auth_token, db)
+    user = _checkup_auth(auth_token, db, request)
 
     client = None
     if cabinet_id.isdigit():
@@ -72,7 +88,7 @@ async def api_save_checkup_results(
     Сохраняет результаты чекапа из расширения.
     Расширение вызывает после завершения проверки.
     """
-    user = _checkup_auth(auth_token, db)
+    user = _checkup_auth(auth_token, db, request)
 
     client = None
     if cabinet_id.isdigit():
@@ -122,12 +138,13 @@ async def api_save_checkup_results(
 @router.get("/api/checkup/{cabinet_id}/history")
 async def api_checkup_history(
     cabinet_id: str,
+    request: Request,
     limit: int = 10,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
     """История чекапов клиента."""
-    user = _checkup_auth(auth_token, db)
+    user = _checkup_auth(auth_token, db, request)
 
     client_id = None
     if cabinet_id.isdigit():

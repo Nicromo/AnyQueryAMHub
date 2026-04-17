@@ -418,14 +418,18 @@ async def api_ktalk_save_token(
 
 @router.get("/api/auth/me")
 async def api_auth_me(
+    request: Request,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
-    """Данные текущего пользователя (роль, имя)."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
+    """Данные текущего пользователя. Поддерживает Cookie и Bearer токен (для расширения)."""
     from auth import decode_access_token
-    payload = decode_access_token(auth_token)
+    # Bearer token из расширения
+    bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = bearer or auth_token
+    if not token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(token)
     if not payload:
         raise HTTPException(status_code=401)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
