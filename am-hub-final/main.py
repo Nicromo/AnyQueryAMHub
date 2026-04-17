@@ -144,6 +144,62 @@ async def lifespan(app: FastAPI):
         # (useful for fresh deployments before first alembic run)
         init_db()
 
+        # Auto-migrate: добавляем новые колонки если их нет в БД
+        with SessionLocal() as db:
+            try:
+                from sqlalchemy import text as _text
+                # Колонки добавленные в миграции 002 (finance + health + nps)
+                _migrations = [
+                    ("clients", "mrr",       "ALTER TABLE clients ADD COLUMN mrr FLOAT DEFAULT 0"),
+                    ("clients", "nps_last",   "ALTER TABLE clients ADD COLUMN nps_last INTEGER"),
+                    ("clients", "nps_date",   "ALTER TABLE clients ADD COLUMN nps_date TIMESTAMP"),
+                    ("clients", "account_plan", "ALTER TABLE clients ADD COLUMN account_plan JSONB"),
+                    ("clients", "last_qbr_date","ALTER TABLE clients ADD COLUMN last_qbr_date TIMESTAMP"),
+                    ("clients", "next_qbr_date","ALTER TABLE clients ADD COLUMN next_qbr_date TIMESTAMP"),
+                ]
+                # Получаем список существующих колонок
+                existing = {
+                    row[0]
+                    for row in db.execute(_text(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'clients'"
+                    )).fetchall()
+                }
+                for table, col, sql in _migrations:
+                    if col not in existing:
+                        db.execute(_text(sql))
+                        db.commit()
+                        logger.info(f"✅ Auto-migrated: {table}.{col}")
+
+                # Создаём новые таблицы из миграции 002 если не существуют
+                _new_tables = {
+                    "revenue_entries": """CREATE TABLE IF NOT EXISTS revenue_entries (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        period VARCHAR NOT NULL, mrr FLOAT DEFAULT 0, arr FLOAT,
+                        currency VARCHAR DEFAULT 'RUB', note TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(), updated_by VARCHAR)""",
+                    "upsell_events": """CREATE TABLE IF NOT EXISTS upsell_events (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        event_type VARCHAR NOT NULL, status VARCHAR DEFAULT 'identified',
+                        amount_before FLOAT, amount_after FLOAT, delta FLOAT,
+                        description TEXT, owner_email VARCHAR, due_date TIMESTAMP,
+                        closed_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW(), created_by VARCHAR)""",
+                    "health_snapshots": """CREATE TABLE IF NOT EXISTS health_snapshots (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        score FLOAT NOT NULL, components JSONB,
+                        calculated_at TIMESTAMP DEFAULT NOW())""",
+                    "nps_entries": """CREATE TABLE IF NOT EXISTS nps_entries (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        score INTEGER NOT NULL, type VARCHAR DEFAULT 'nps',
+                        comment TEXT, source VARCHAR DEFAULT 'manual',
+                        recorded_at TIMESTAMP DEFAULT NOW(), recorded_by VARCHAR)""",
+                }
+                for tname, tsql in _new_tables.items():
+                    db.execute(_text(tsql))
+                db.commit()
+                logger.info("✅ Auto-migration complete")
+            except Exception as _e:
+                logger.warning(f"Auto-migration warning: {_e}")
+
         # Seed default admin if no users exist
         with SessionLocal() as db:
             if db.query(User).count() == 0:
