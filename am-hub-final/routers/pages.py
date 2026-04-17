@@ -114,18 +114,31 @@ async def dashboard(request: Request, db: Session = Depends(get_db), auth_token:
     counts = {"ENT": 0, "SME+": 0, "SME-": 0, "SME": 0, "SMB": 0, "SS": 0}
     healthy = warning = overdue = total_open = total_tasks = 0
 
+    # Один batch-запрос вместо N+1
+    from sqlalchemy import func, case
+    client_ids = [c.id for c in clients]
+
+    if client_ids:
+        task_stats = db.query(
+            Task.client_id,
+            func.count(Task.id).label("total"),
+            func.sum(case((Task.status.in_(["plan", "in_progress"]), 1), else_=0)).label("open"),
+            func.sum(case((Task.status == "blocked", 1), else_=0)).label("blocked"),
+        ).filter(Task.client_id.in_(client_ids)).group_by(Task.client_id).all()
+
+        stats_map = {r.client_id: r for r in task_stats}
+    else:
+        stats_map = {}
+
     for c in clients:
         seg = c.segment or ""
         if seg in counts:
             counts[seg] += 1
 
-        open_tasks = db.query(Task).filter(
-            Task.client_id == c.id, Task.status.in_(["plan", "in_progress"])
-        ).count()
-        blocked_tasks = db.query(Task).filter(
-            Task.client_id == c.id, Task.status == "blocked"
-        ).count()
-        total_client_tasks = db.query(Task).filter(Task.client_id == c.id).count()
+        row = stats_map.get(c.id)
+        open_tasks = int(row.open or 0) if row else 0
+        blocked_tasks = int(row.blocked or 0) if row else 0
+        total_client_tasks = int(row.total or 0) if row else 0
         total_open += open_tasks
         total_tasks += total_client_tasks
 
@@ -500,6 +513,7 @@ async def settings_page(request: Request, db: Session = Depends(get_db), auth_to
         "user": user,
         "user_settings": _settings,
         "rules": _settings.get("rules", {}),
+        "prefs": _settings.get("preferences", {}),
     })
 
 

@@ -1102,18 +1102,68 @@ async def get_portfolio(
         q = q.filter(Client.manager_email == user.email)
     clients = q.order_by(Client.health_score).all()  # сначала проблемные
 
+    # Batch queries вместо N+1
+    from sqlalchemy import func, case as sa_case
+
+    client_ids = [c.id for c in clients]
     items = []
+
+    if not client_ids:
+        pass
+    else:
+        # Задачи batch
+        task_agg = db.query(
+            Task.client_id,
+            func.sum(sa_case((Task.status.in_(["plan", "in_progress"]), 1), else_=0)).label("open"),
+            func.sum(sa_case((Task.status == "blocked", 1), else_=0)).label("blocked"),
+            func.sum(sa_case((
+                Task.due_date < now,
+                Task.status.notin_(["done"]),
+                1), else_=0)).label("overdue"),
+        ).filter(Task.client_id.in_(client_ids)).group_by(Task.client_id).all()
+        task_map = {r.client_id: r for r in task_agg}
+
+        # Pending followups batch
+        followup_agg = db.query(
+            Meeting.client_id,
+            func.count(Meeting.id).label("cnt"),
+        ).filter(
+            Meeting.client_id.in_(client_ids),
+            Meeting.followup_status == "pending",
+        ).group_by(Meeting.client_id).all()
+        followup_map = {r.client_id: r.cnt for r in followup_agg}
+
+        # Next meetings batch — берём min date > now per client
+        next_mtg_agg = db.query(
+            Meeting.client_id,
+            func.min(Meeting.date).label("next_date"),
+        ).filter(
+            Meeting.client_id.in_(client_ids),
+            Meeting.date > now,
+        ).group_by(Meeting.client_id).all()
+        next_mtg_map = {r.client_id: r.next_date for r in next_mtg_agg}
+
+        # Upsell batch
+        try:
+            upsell_agg = db.query(
+                UpsellEvent.client_id,
+                func.count(UpsellEvent.id).label("cnt"),
+            ).filter(
+                UpsellEvent.client_id.in_(client_ids),
+                UpsellEvent.status.in_(["identified", "in_progress"]),
+                UpsellEvent.delta > 0,
+            ).group_by(UpsellEvent.client_id).all()
+            upsell_map = {r.client_id: r.cnt for r in upsell_agg}
+        except Exception:
+            upsell_map = {}
+
     for c in clients:
-        # Задачи
-        tasks = db.query(Task).filter(Task.client_id == c.id).all()
-        open_t  = sum(1 for t in tasks if t.status in ("plan", "in_progress"))
-        blocked = sum(1 for t in tasks if t.status == "blocked")
-        overdue_t = sum(1 for t in tasks if t.due_date and t.due_date < now and t.status not in ("done",))
+        t = task_map.get(c.id) if client_ids else None
+        open_t    = int(t.open    or 0) if t else 0
+        blocked   = int(t.blocked or 0) if t else 0
+        overdue_t = int(t.overdue or 0) if t else 0
 
-        # Дней без контакта
         days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
-
-        # Health
         health_pct = round((c.health_score or 0) * 100)
         risk = (
             "critical" if health_pct < 30 or days_silent > 60 or blocked > 2
@@ -1121,29 +1171,9 @@ async def get_portfolio(
             else "good"
         )
 
-        # Ближайшая встреча
-        next_meeting = (
-            db.query(Meeting)
-            .filter(Meeting.client_id == c.id, Meeting.date > now)
-            .order_by(Meeting.date)
-            .first()
-        )
-
-        # Незакрытые фолоуапы
-        pending_followups = db.query(Meeting).filter(
-            Meeting.client_id == c.id,
-            Meeting.followup_status == "pending",
-        ).count()
-
-        # Активный апсейл
-        try:
-            active_upsell = db.query(UpsellEvent).filter(
-                UpsellEvent.client_id == c.id,
-                UpsellEvent.status.in_(["identified", "in_progress"]),
-                UpsellEvent.delta > 0,
-            ).count()
-        except Exception:
-            active_upsell = 0
+        next_date = next_mtg_map.get(c.id) if client_ids else None
+        pending_followups = followup_map.get(c.id, 0) if client_ids else 0
+        active_upsell = upsell_map.get(c.id, 0) if client_ids else 0
 
         items.append({
             "id": c.id,
@@ -1160,7 +1190,7 @@ async def get_portfolio(
             "overdue_tasks": overdue_t,
             "pending_followups": pending_followups,
             "active_upsell": active_upsell,
-            "next_meeting": next_meeting.date.isoformat() if next_meeting else None,
+            "next_meeting": next_date.isoformat() if next_date else None,
             "open_tickets": c.open_tickets or 0,
         })
 
