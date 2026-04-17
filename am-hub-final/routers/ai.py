@@ -169,8 +169,8 @@ Health Score: {(client.health_score or 0)*100:.0f}%
 
 async def _ai_chat(system: str, user: str, max_tokens: int = 1000) -> str:
     """AI чат через Groq или Qwen."""
-    groq_key = env.GROQ_KEY
-    qwen_key = env.QWEN_KEY
+    groq_key = _env("GROQ_API_KEY") or _env("API_GROQ")
+    qwen_key = _env("QWEN_API_KEY")
 
     if groq_key:
         import httpx
@@ -267,7 +267,7 @@ async def api_ai_chat(
 
     # Groq API
     u_settings = user.settings or {}
-    groq_key = u_settings.get("groq", {}).get("api_key") or env.GROQ_KEY
+    groq_key = u_settings.get("groq", {}).get("api_key") or _env("GROQ_API_KEY") or _env("API_GROQ")
     if not groq_key:
         return {"reply": "AI не настроен. Добавьте GROQ_API_KEY в Settings → AI или в Railway Variables."}
 

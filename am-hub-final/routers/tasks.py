@@ -62,12 +62,6 @@ async def api_create_task(
     db.commit()
     db.refresh(task)
     # WS real-time push
-    try:
-        pass  # ws_
-        # ws_invalidate_stats(user.id, db)
-        # ws_notify_user(user.id, "task_update", {"action": "created", "task_id": task.id})
-    except Exception:
-        pass
     return {"ok": True, "id": task.id}
 
 
@@ -132,8 +126,8 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     settings = (user.settings or {}) if user else {}
     mr = settings.get("merchrules", {})
-    login = mr.get("login") or env.MR_LOGIN
-    password = mr.get("password") or env.MR_PASSWORD
+    login = mr.get("login") or _env("MERCHRULES_LOGIN")
+    password = mr.get("password") or _env("MERCHRULES_PASSWORD")
     base_url = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
 
     if not login or not password:
@@ -263,8 +257,8 @@ async def api_update_task_status(task_id: int, request: Request, db: Session = D
         try:
             settings = (user.settings or {})
             mr = settings.get("merchrules", {})
-            login = mr.get("login") or env.MR_LOGIN
-            password = mr.get("password") or env.MR_PASSWORD
+            login = mr.get("login") or _env("MERCHRULES_LOGIN")
+            password = mr.get("password") or _env("MERCHRULES_PASSWORD")
             base_url = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
             if login and password:
                 import httpx as _httpx

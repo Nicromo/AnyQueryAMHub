@@ -27,6 +27,7 @@ from models import (
     TaskComment,
     User,
     VoiceNote,
+    CHECKUP_INTERVALS,
 )
 from auth import decode_access_token, hash_password, verify_password, log_audit
 from deps import require_user, require_admin, optional_user

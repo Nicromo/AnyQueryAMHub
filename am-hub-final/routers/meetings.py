@@ -424,7 +424,7 @@ async def api_meeting_transcribe(
     client = db.query(Client).filter(Client.id == meeting.client_id).first()
 
     u_settings = user.settings or {}
-    groq_key   = u_settings.get("groq", {}).get("api_key") or env.GROQ_KEY
+    groq_key   = u_settings.get("groq", {}).get("api_key") or _env("GROQ_API_KEY") or _env("API_GROQ")
     if not groq_key:
         return {"ok": False, "error": "Groq API key не настроен"}
 

@@ -124,7 +124,7 @@ async def api_ktalk_notify(
         raise HTTPException(status_code=401)
 
     data = await request.json()
-    webhook_url = env.KTALK_WEBHOOK
+    webhook_url = _env("KTALK_WEBHOOK_URL")
     if not webhook_url:
         return {"error": "KTALK_WEBHOOK_URL not set"}
 
@@ -155,7 +155,7 @@ async def api_ktalk_followup(
     summary = data.get("summary", "")
     tasks = data.get("tasks", [])
 
-    webhook_url = env.KTALK_WEBHOOK
+    webhook_url = _env("KTALK_WEBHOOK_URL")
     if not webhook_url:
         return {"error": "KTALK_WEBHOOK_URL not set"}
 
@@ -220,7 +220,7 @@ async def api_tbank_tickets(client_name: str, db: Session = Depends(get_db), aut
 
     # Приоритет: user.settings → env
     time_token = (tm.get("session_cookie") or tm.get("api_token")
-                  or env.TIME_TOKEN)
+                  or _env("TIME_API_TOKEN"))
 
     if not time_token:
         return {"error": "Настройте доступ к Tbank Time в Настройках → Аккаунты", "tickets": []}
@@ -244,7 +244,7 @@ async def api_tbank_all_tickets(db: Session = Depends(get_db), auth_token: Optio
     if not payload:
         raise HTTPException(status_code=401)
 
-    time_token = env.TIME_TOKEN
+    time_token = _env("TIME_API_TOKEN")
     if not time_token:
         return {"error": "TIME_API_TOKEN не настроен", "tickets": []}
 

@@ -260,8 +260,8 @@ async def api_sync_merchrules(
         body = {}
     settings = user.settings or {}
     mr = settings.get("merchrules", {})
-    login = body.get("login") or mr.get("login") or env.MR_LOGIN
-    password = body.get("password") or mr.get("password") or env.MR_PASSWORD
+    login = body.get("login") or mr.get("login") or _env("MERCHRULES_LOGIN")
+    password = body.get("password") or mr.get("password") or _env("MERCHRULES_PASSWORD")
     site_ids_input = body.get("site_ids") or mr.get("site_ids") or settings.get("merchrules_site_ids", [])
 
     if not login or not password:

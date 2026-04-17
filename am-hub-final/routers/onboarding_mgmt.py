@@ -13,7 +13,7 @@ from database import get_db, SessionLocal
 from models import (
     Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
     Notification, QBR, AccountPlan, ClientNote, TaskComment,
-    FollowupTemplate, VoiceNote, ClientHistory,
+    FollowupTemplate, VoiceNote, ClientHistory, CHECKUP_INTERVALS,
 )
 from auth import decode_access_token, hash_password, verify_password, log_audit, get_current_user
 from deps import require_user, require_admin, optional_user
