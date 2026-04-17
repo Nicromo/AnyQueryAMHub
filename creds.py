@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 
 CREDS_PATH = Path.home() / ".search-checkup-creds.json"
-MERCHRULES_BASE_URL = "https://merchrules-qa.any-platform.ru"
+MERCHRULES_BASE_URL = "https://merchrules.any-platform.ru"
 # API копирования задач (из доки): другой хост, лимит 10 запросов/мин
-COPY_API_BASE_URL = "https://api.merchrules-qa.any-platform.ru"
+COPY_API_BASE_URL = "https://api.merchrules.any-platform.ru"
 
 
 def load_merchrules_creds():

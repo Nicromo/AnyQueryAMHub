@@ -1,147 +1,278 @@
 {% extends "base.html" %}
 {% block title %}Аналитика — AM Hub{% endblock %}
+{% block page_title %}Аналитика{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Портфель и динамика клиентов</div>{% endblock %}
+{% block page_actions %}
+<select id="period-sel" class="form-control" style="width:130px;font-size:.8rem" onchange="loadAll()">
+  <option value="7">7 дней</option>
+  <option value="30" selected>30 дней</option>
+  <option value="90">90 дней</option>
+</select>
+<button class="btn btn-sm" onclick="exportCSV()">⬇ CSV</button>
+{% endblock %}
+
 {% block content %}
-
-<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-  <div>
-    <h1>📈 Аналитика</h1>
-    <p style="color:var(--text-muted)">Сводка: встречи, задачи, чекапы</p>
-  </div>
-  <div style="display:flex;gap:8px">
-    <button onclick="setRange('week')"  class="tab-btn active" id="range-week">Неделя</button>
-    <button onclick="setRange('month')" class="tab-btn" id="range-month">Месяц</button>
-    <button onclick="setRange('quarter')" class="tab-btn" id="range-quarter">Квартал</button>
-  </div>
-</div>
-
-<!-- KPI-карточки -->
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-  {% set open = stats.task_stats.get('open', 0) %}
-  {% set done = stats.task_stats.get('done', 0) %}
-  {% set blocked = stats.task_stats.get('blocked', 0) %}
-  {% set total_tasks = open + done + blocked %}
-
-  <div class="kpi-card">
-    <div class="kpi-val">{{ stats.meetings_weekly | sum(attribute='cnt') }}</div>
-    <div class="kpi-label">Встреч за 12 нед.</div>
-  </div>
-  <div class="kpi-card">
-    <div class="kpi-val" style="color:var(--yellow)">{{ open }}</div>
-    <div class="kpi-label">Открытых задач</div>
-  </div>
-  <div class="kpi-card">
-    <div class="kpi-val" style="color:var(--red)">{{ blocked }}</div>
-    <div class="kpi-label">Заблокировано</div>
-  </div>
-  <div class="kpi-card">
-    <div class="kpi-val" style="color:var(--accent)">
-      {% if total_tasks > 0 %}{{ (done / total_tasks * 100)|int }}%{% else %}—{% endif %}
-    </div>
-    <div class="kpi-label">Выполнено (всего)</div>
-  </div>
-</div>
-
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-
-  <!-- Встречи по неделям -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">📅 Встречи по неделям</h2>
-    {% if stats.meetings_weekly %}
-    <div style="display:flex;align-items:flex-end;gap:4px;height:120px">
-      {% set max_cnt = stats.meetings_weekly | map(attribute='cnt') | max %}
-      {% for w in stats.meetings_weekly[-8:] %}
-      {% set h = (w.cnt / max_cnt * 100)|int if max_cnt > 0 else 0 %}
-      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
-        <span style="font-size:.65rem;color:var(--text-muted)">{{ w.cnt }}</span>
-        <div style="width:100%;background:var(--accent);opacity:.8;border-radius:3px 3px 0 0;height:{{ h }}%"></div>
-        <span style="font-size:.6rem;color:var(--text-muted);writing-mode:vertical-rl;transform:rotate(180deg)">
-          {{ w.week[-2:] }}н
-        </span>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p style="color:var(--text-muted);text-align:center;padding:20px">Нет данных</p>
-    {% endif %}
-  </div>
-
-  <!-- Чекапы по сегментам -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">🎯 Соответствие ритму чекапов</h2>
-    {% for row in stats.clients_by_segment %}
-    {% set pct = (row.on_time / row.total * 100)|int if row.total > 0 else 0 %}
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
-        <span><span class="badge badge-{{ row.segment|lower }}">{{ row.segment }}</span></span>
-        <span style="color:{% if pct >= 80 %}var(--accent){% elif pct >= 50 %}var(--yellow){% else %}var(--red){% endif %}">
-          {{ row.on_time }}/{{ row.total }} ({{ pct }}%)
-        </span>
-      </div>
-      <div style="background:var(--border);border-radius:4px;height:5px">
-        <div style="background:{% if pct >= 80 %}var(--accent){% elif pct >= 50 %}var(--yellow){% else %}var(--red){% endif %};
-                    width:{{ pct }}%;height:5px;border-radius:4px"></div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-
-  <!-- Статус задач -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">✅ Задачи по статусам</h2>
-    {% set total = stats.task_stats.values() | sum %}
-    {% for status, color, label in [('open','var(--yellow)','Открытые'),('done','var(--accent)','Выполненные'),('blocked','var(--red)','Заблокированные')] %}
-    {% set cnt = stats.task_stats.get(status, 0) %}
-    {% set pct = (cnt / total * 100)|int if total > 0 else 0 %}
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-      <span style="width:90px;font-size:.82rem;color:{{ color }}">{{ label }}</span>
-      <div style="flex:1;background:var(--border);border-radius:4px;height:8px">
-        <div style="background:{{ color }};width:{{ pct }}%;height:8px;border-radius:4px"></div>
-      </div>
-      <span style="font-size:.82rem;font-weight:600;width:30px;text-align:right">{{ cnt }}</span>
-    </div>
-    {% endfor %}
-  </div>
-
-  <!-- Топ активных клиентов -->
-  <div class="card">
-    <h2 style="font-size:.95rem;margin-bottom:14px">🏆 Активные клиенты (квартал)</h2>
-    {% if stats.top_active %}
-    <div>
-      {% for row in stats.top_active %}
-      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:.75rem;color:var(--text-muted);width:20px;text-align:right">{{ loop.index }}</span>
-        <span style="flex:1;font-size:.85rem">{{ row.name }}</span>
-        <span class="badge badge-{{ row.segment|lower }}" style="font-size:.65rem">{{ row.segment }}</span>
-        <span style="font-size:.82rem;font-weight:600;color:var(--accent)">{{ row.meetings }} встреч</span>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p style="color:var(--text-muted);text-align:center;padding:20px">Нет данных</p>
-    {% endif %}
-  </div>
-
-</div>
-
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
-.kpi-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  text-align: center;
-}
-.kpi-val   { font-size: 2rem; font-weight: 700; line-height: 1; }
-.kpi-label { font-size: .78rem; color: var(--text-muted); margin-top: 4px; }
+.an-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px;}
+.an-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;}
+.chart-title{font-size:.84rem;font-weight:600;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
+.chart-wrap{position:relative;height:220px;}
+.seg-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);}
+.seg-row:last-child{border-bottom:none;}
+.seg-bar-wrap{flex:1;height:6px;background:var(--surface-3);border-radius:3px;overflow:hidden;}
+.seg-bar{height:100%;border-radius:3px;transition:width .6s;}
+.seg-cnt{font-size:.78rem;font-family:var(--font-mono);color:var(--text-dim);min-width:24px;text-align:right;}
+.health-dist{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}
+.health-bucket{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;text-align:center;}
+.health-num{font-size:1.4rem;font-weight:700;font-family:var(--font-mono);}
+.top-list{display:flex;flex-direction:column;gap:4px;}
+.top-row{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);font-size:.8rem;transition:border-color var(--t);}
+.top-row:hover{border-color:var(--border-s);}
+.rank{font-family:var(--font-mono);font-size:.72rem;color:var(--text-muted);min-width:18px;}
 </style>
 
+<!-- KPI row -->
+<div class="kpi-row" style="margin-bottom:20px" id="kpi-row">
+  <div class="kpi-card c-accent"><div class="kpi-label">Всего клиентов</div><div class="kpi-value" id="k-total">—</div></div>
+  <div class="kpi-card c-green"><div class="kpi-label">Средний Health</div><div class="kpi-value" id="k-health">—</div><div class="kpi-sub">%</div></div>
+  <div class="kpi-card c-yellow"><div class="kpi-label">Открытых задач</div><div class="kpi-value" id="k-tasks">—</div></div>
+  <div class="kpi-card c-red"><div class="kpi-label">Просроченных</div><div class="kpi-value" id="k-overdue">—</div></div>
+  <div class="kpi-card c-blue"><div class="kpi-label">Встреч за период</div><div class="kpi-value" id="k-meetings">—</div></div>
+  <div class="kpi-card c-purple"><div class="kpi-label">Фолоуапов</div><div class="kpi-value" id="k-followups">—</div></div>
+</div>
+
+<div class="an-grid">
+  <!-- Health trend -->
+  <div class="chart-card">
+    <div class="chart-title">📈 Динамика Health Score <span style="font-size:.72rem;color:var(--text-muted)" id="trend-sub"></span></div>
+    <div class="chart-wrap"><canvas id="chart-health"></canvas></div>
+  </div>
+
+  <!-- Segments -->
+  <div class="chart-card">
+    <div class="chart-title">👥 Сегменты</div>
+    <div id="seg-list" style="padding-top:4px"></div>
+  </div>
+</div>
+
+<div class="an-grid-3">
+  <!-- Health distribution -->
+  <div class="chart-card">
+    <div class="chart-title">🏥 Распределение Health</div>
+    <div class="health-dist">
+      <div class="health-bucket">
+        <div class="health-num" id="h-good" style="color:var(--green)">—</div>
+        <div style="font-size:.68rem;color:var(--text-muted);margin-top:2px">Хорошо<br>≥70%</div>
+      </div>
+      <div class="health-bucket">
+        <div class="health-num" id="h-warn" style="color:var(--yellow)">—</div>
+        <div style="font-size:.68rem;color:var(--text-muted);margin-top:2px">Риск<br>40–70%</div>
+      </div>
+      <div class="health-bucket">
+        <div class="health-num" id="h-bad" style="color:var(--red)">—</div>
+        <div style="font-size:.68rem;color:var(--text-muted);margin-top:2px">Критично<br>&lt;40%</div>
+      </div>
+    </div>
+    <div class="chart-wrap" style="height:140px;margin-top:12px"><canvas id="chart-health-pie"></canvas></div>
+  </div>
+
+  <!-- Tasks by status -->
+  <div class="chart-card">
+    <div class="chart-title">✅ Задачи по статусам</div>
+    <div class="chart-wrap" style="height:200px"><canvas id="chart-tasks"></canvas></div>
+  </div>
+
+  <!-- Activity -->
+  <div class="chart-card">
+    <div class="chart-title">📅 Активность по неделям</div>
+    <div class="chart-wrap" style="height:200px"><canvas id="chart-activity"></canvas></div>
+  </div>
+</div>
+
+<div class="an-grid">
+  <!-- Top clients by health drop -->
+  <div class="chart-card">
+    <div class="chart-title">⚠️ Клиенты в зоне риска</div>
+    <div id="risk-list" class="top-list"></div>
+  </div>
+  <!-- Top active clients -->
+  <div class="chart-card">
+    <div class="chart-title">🏆 Самые активные клиенты</div>
+    <div id="active-list" class="top-list"></div>
+  </div>
+</div>
+
 <script>
-function setRange(r) {
-  ['week','month','quarter'].forEach(x => {
-    document.getElementById('range-'+x)?.classList.toggle('active', x === r);
-  });
-  // TODO: reload with range param
-  window.location.href = '/analytics?range=' + r;
+var charts = {};
+var SEG_COLORS = {
+  Enterprise:'var(--purple)', 'Enterprise+':'var(--accent)',
+  SMB:'var(--blue)', SME:'var(--cyan)', Partner:'var(--green)',
+  SS:'var(--yellow)', Trial:'var(--orange)'
+};
+
+function period() { return parseInt(document.getElementById('period-sel').value); }
+
+async function loadAll() {
+  var d = period();
+  var [stats, health, tasks, activity] = await Promise.all([
+    fetch('/api/analytics/overview?days='+d).then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch('/api/analytics/health-trend?days='+d).then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch('/api/analytics/tasks-stats').then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch('/api/analytics/activity?days='+d).then(function(r){return r.json();}).catch(function(){return {};})
+  ]);
+  renderOverview(stats);
+  renderHealthTrend(health);
+  renderTasks(tasks);
+  renderActivity(activity);
+  renderSegments(stats.segments || []);
+  renderHealthDist(stats);
+  renderRisk(stats.risk_clients || []);
+  renderActive(stats.active_clients || []);
 }
+
+function renderOverview(s) {
+  document.getElementById('k-total').textContent     = s.total_clients    || '—';
+  document.getElementById('k-health').textContent    = s.avg_health != null ? s.avg_health.toFixed(0) : '—';
+  document.getElementById('k-tasks').textContent     = s.open_tasks       || '—';
+  document.getElementById('k-overdue').textContent   = s.overdue_tasks    || '—';
+  document.getElementById('k-meetings').textContent  = s.meetings_count   || '—';
+  document.getElementById('k-followups').textContent = s.followups_count  || '—';
+}
+
+function renderHealthTrend(d) {
+  var labels = (d.labels || []);
+  var data   = (d.values || []);
+  document.getElementById('trend-sub').textContent = labels.length ? labels[0]+' — '+labels[labels.length-1] : '';
+  destroyChart('chart-health');
+  charts['chart-health'] = new Chart(document.getElementById('chart-health'), {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Health Score',
+        data: data,
+        borderColor: 'rgba(100,116,255,1)',
+        backgroundColor: 'rgba(100,116,255,0.08)',
+        borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3,
+        pointBackgroundColor: 'rgba(100,116,255,1)'
+      }]
+    },
+    options: chartOpts({ y_min: 0, y_max: 100, y_label: '%' })
+  });
+}
+
+function renderTasks(d) {
+  var statuses = d.by_status || {};
+  destroyChart('chart-tasks');
+  charts['chart-tasks'] = new Chart(document.getElementById('chart-tasks'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Выполнено','В работе','Ревью','Блок','Планирование'],
+      datasets: [{
+        data: [statuses.done||0, statuses.in_progress||0, statuses.review||0, statuses.blocked||0, statuses.plan||0],
+        backgroundColor: ['rgba(35,209,139,.8)','rgba(100,116,255,.8)','rgba(245,166,35,.8)','rgba(240,85,106,.8)','rgba(76,165,255,.3)'],
+        borderWidth: 0, hoverOffset: 4
+      }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#7d8aaa', font:{size:11}, boxWidth:12 }}}}
+  });
+}
+
+function renderActivity(d) {
+  destroyChart('chart-activity');
+  charts['chart-activity'] = new Chart(document.getElementById('chart-activity'), {
+    type: 'bar',
+    data: {
+      labels: d.labels || [],
+      datasets: [
+        { label:'Встречи', data: d.meetings||[], backgroundColor:'rgba(100,116,255,.7)', borderRadius:3 },
+        { label:'Задачи', data: d.tasks||[], backgroundColor:'rgba(35,209,139,.5)', borderRadius:3 }
+      ]
+    },
+    options: chartOpts({ stacked: true })
+  });
+}
+
+function renderSegments(segs) {
+  if (!segs.length) return;
+  var total = segs.reduce(function(a,s){return a+s.count;}, 0);
+  document.getElementById('seg-list').innerHTML = segs.map(function(s) {
+    var pct = total ? Math.round(s.count/total*100) : 0;
+    var col = SEG_COLORS[s.segment] || 'var(--accent)';
+    return '<div class="seg-row">'
+      + '<div style="font-size:.8rem;font-weight:500;min-width:90px">'+s.segment+'</div>'
+      + '<div class="seg-bar-wrap"><div class="seg-bar" style="width:'+pct+'%;background:'+col+'"></div></div>'
+      + '<div class="seg-cnt">'+s.count+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+function renderHealthDist(s) {
+  document.getElementById('h-good').textContent = s.health_good || '—';
+  document.getElementById('h-warn').textContent = s.health_warn || '—';
+  document.getElementById('h-bad').textContent  = s.health_bad  || '—';
+  destroyChart('chart-health-pie');
+  charts['chart-health-pie'] = new Chart(document.getElementById('chart-health-pie'), {
+    type: 'bar',
+    data: {
+      labels: ['Хорошо', 'Риск', 'Критично'],
+      datasets: [{ data:[s.health_good||0,s.health_warn||0,s.health_bad||0],
+        backgroundColor:['rgba(35,209,139,.7)','rgba(245,166,35,.7)','rgba(240,85,106,.7)'],
+        borderRadius:6 }]
+    },
+    options: chartOpts({})
+  });
+}
+
+function renderRisk(list) {
+  var el = document.getElementById('risk-list');
+  if (!list.length) { el.innerHTML = '<div class="empty" style="padding:20px"><div class="empty-text">Нет клиентов в зоне риска</div></div>'; return; }
+  el.innerHTML = list.slice(0,8).map(function(c,i) {
+    var h = c.health_score != null ? c.health_score.toFixed(0)+'%' : '—';
+    var col = (c.health_score||0)<40 ? 'var(--red)' : 'var(--yellow)';
+    return '<div class="top-row"><span class="rank">'+(i+1)+'</span>'
+      +'<a href="/client/'+c.id+'" style="flex:1;color:var(--text)">'+c.name+'</a>'
+      +'<span class="badge badge-'+segBadge(c.segment)+'">'+c.segment+'</span>'
+      +'<span style="font-family:var(--font-mono);font-size:.78rem;color:'+col+'">'+h+'</span>'
+      +'</div>';
+  }).join('');
+}
+
+function renderActive(list) {
+  var el = document.getElementById('active-list');
+  if (!list.length) { el.innerHTML = '<div class="empty" style="padding:20px"><div class="empty-text">Нет данных</div></div>'; return; }
+  el.innerHTML = list.slice(0,8).map(function(c,i) {
+    return '<div class="top-row"><span class="rank">'+(i+1)+'</span>'
+      +'<a href="/client/'+c.id+'" style="flex:1;color:var(--text)">'+c.name+'</a>'
+      +'<span class="badge badge-neutral">'+c.activity_score+' очков</span>'
+      +'</div>';
+  }).join('');
+}
+
+function chartOpts(opts) {
+  return {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{ display: opts.stacked||false, labels:{ color:'#7d8aaa', font:{size:11}, boxWidth:12 }}},
+    scales:{
+      x:{ stacked:opts.stacked||false, grid:{color:'rgba(255,255,255,.04)'}, ticks:{color:'#4c567a',font:{size:10}} },
+      y:{ stacked:opts.stacked||false, min:opts.y_min, max:opts.y_max, grid:{color:'rgba(255,255,255,.04)'}, ticks:{color:'#4c567a',font:{size:10}, callback:function(v){return v+(opts.y_label||'');}} }
+    }
+  };
+}
+
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function segBadge(seg) {
+  var map={Enterprise:'enterprise','Enterprise+':'enterprise',SMB:'smb',SME:'smb',Partner:'partner',SS:'neutral',Trial:'trial'};
+  return map[seg]||'neutral';
+}
+
+function exportCSV() {
+  window.location.href = '/api/analytics/export?days='+period();
+}
+
+loadAll();
 </script>
 {% endblock %}

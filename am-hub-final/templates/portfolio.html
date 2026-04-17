@@ -1,0 +1,647 @@
+{% extends "base.html" %}
+{% block title %}Портфель — AM Hub{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --risk-critical: var(--red);
+  --risk-warning:  #f59e0b;
+  --risk-good:     var(--green);
+}
+
+/* ── Summary strip ── */
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+@media(max-width:1100px){ .summary-strip{ grid-template-columns:repeat(3,1fr); } }
+@media(max-width:640px){  .summary-strip{ grid-template-columns:repeat(2,1fr); } }
+
+.sum-card {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  transition: border-color .2s, transform .15s;
+}
+.sum-card:hover { border-color: rgba(129,140,248,.35); transform: translateY(-1px); }
+.sum-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.sum-card.c-blue::before  { background: linear-gradient(90deg,var(--accent),#06b6d4); }
+.sum-card.c-green::before { background: linear-gradient(90deg,var(--green),#06b6d4); }
+.sum-card.c-yellow::before{ background: linear-gradient(90deg,#f59e0b,#f97316); }
+.sum-card.c-red::before   { background: linear-gradient(90deg,var(--red),#f97316); }
+.sum-card.c-purple::before{ background: linear-gradient(90deg,#a855f7,var(--accent)); }
+.sum-card.c-cyan::before  { background: linear-gradient(90deg,#06b6d4,var(--green)); }
+.sum-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+.sum-value { font-size: 1.75rem; font-weight: 800; line-height: 1; }
+.sum-sub   { font-size: .72rem; color: var(--muted); margin-top: 4px; }
+
+/* ── Filters ── */
+.filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.filter-btn {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  color: var(--muted);
+  font-size: .78rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+.filter-btn:hover, .filter-btn.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(129,140,248,.12);
+}
+.filter-btn.f-critical.active { border-color: var(--risk-critical); color: var(--risk-critical); background: rgba(239,68,68,.1); }
+.filter-btn.f-warning.active  { border-color: var(--risk-warning);  color: var(--risk-warning);  background: rgba(245,158,11,.1); }
+.filter-btn.f-good.active     { border-color: var(--risk-good);     color: var(--risk-good);     background: rgba(34,197,94,.1); }
+
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  max-width: 300px;
+  padding: 7px 12px 7px 32px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  color: var(--text);
+  font-size: .82rem;
+  outline: none;
+  transition: border-color .15s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 10px center;
+}
+.search-input:focus { border-color: var(--accent); }
+
+.sort-select {
+  padding: 7px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  color: var(--muted);
+  font-size: .78rem;
+  cursor: pointer;
+  outline: none;
+}
+
+/* ── Portfolio grid ── */
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+@media(max-width:700px){ .portfolio-grid{ grid-template-columns: 1fr; } }
+
+/* ── Client card ── */
+.client-card {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: all .18s;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(4px);
+  text-decoration: none;
+  display: block;
+  color: var(--text);
+}
+.client-card:hover {
+  border-color: rgba(129,140,248,.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  text-decoration: none;
+  color: var(--text);
+}
+.client-card::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+}
+.client-card.risk-critical::after { background: var(--risk-critical); }
+.client-card.risk-warning::after  { background: var(--risk-warning); }
+.client-card.risk-good::after     { background: var(--risk-good); }
+
+/* Card header */
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.card-avatar {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: .95rem;
+  flex-shrink: 0;
+}
+.card-title { flex: 1; min-width: 0; }
+.card-name {
+  font-size: .9rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-seg {
+  font-size: .7rem;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.card-risk-badge {
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  flex-shrink: 0;
+}
+.risk-critical .card-risk-badge { background: rgba(239,68,68,.15); color: #f87171; }
+.risk-warning  .card-risk-badge { background: rgba(245,158,11,.15); color: #fbbf24; }
+.risk-good     .card-risk-badge { background: rgba(34,197,94,.15);  color: #4ade80; }
+
+/* Health bar */
+.health-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.health-bar-wrap {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.health-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .6s ease;
+}
+.health-val { font-size: .78rem; font-weight: 700; min-width: 32px; text-align: right; }
+
+/* Metrics grid */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.metric-chip {
+  background: rgba(255,255,255,.04);
+  border-radius: 8px;
+  padding: 6px 8px;
+  text-align: center;
+}
+.metric-chip .mc-val { font-size: .84rem; font-weight: 700; }
+.metric-chip .mc-lbl { font-size: .62rem; color: var(--muted); margin-top: 1px; text-transform: uppercase; letter-spacing: .3px; }
+.metric-chip.alert .mc-val { color: var(--risk-critical); }
+.metric-chip.warn  .mc-val { color: var(--risk-warning); }
+
+/* Tags row */
+.tags-row {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.tag {
+  font-size: .67rem;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.tag-blocked   { background: rgba(239,68,68,.12);  color: #f87171; }
+.tag-followup  { background: rgba(129,140,248,.12);  color: var(--accent-l); }
+.tag-upsell    { background: rgba(34,197,94,.12);   color: #4ade80; }
+.tag-silent    { background: rgba(245,158,11,.12);  color: #fbbf24; }
+.tag-meeting   { background: rgba(6,182,212,.12);   color: #22d3ee; }
+
+/* View toggle */
+.view-toggle { display: flex; gap: 4px; }
+.view-btn {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .9rem;
+  transition: all .15s;
+}
+.view-btn.active { background: rgba(129,140,248,.2); border-color: var(--accent); color: var(--accent-l); }
+
+/* Table view */
+.portfolio-table {
+  width: 100%;
+  border-collapse: collapse;
+  display: none;
+}
+.portfolio-table th {
+  font-size: .68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--glass-border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.portfolio-table th:hover { color: var(--text); }
+.portfolio-table td {
+  padding: 10px 12px;
+  font-size: .82rem;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  vertical-align: middle;
+}
+.portfolio-table tr:hover td { background: rgba(129,140,248,.05); }
+.portfolio-table tr { cursor: pointer; }
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+}
+.empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+.empty-state .title { font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.08) 50%, rgba(255,255,255,.04) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
+{% endblock %}
+
+{% block page_title %}Портфель клиентов{% endblock %}
+
+{% block content %}
+<!-- Summary strip (заполняется JS) -->
+<div class="summary-strip" id="summary-strip">
+  {% for i in range(6) %}
+  <div class="sum-card skeleton" style="height:80px;"></div>
+  {% endfor %}
+</div>
+
+<!-- Filters & search -->
+<div class="filters" id="filters-bar">
+  <button class="filter-btn active" data-filter="all" onclick="setFilter('all',this)">Все</button>
+  <button class="filter-btn f-critical" data-filter="critical" onclick="setFilter('critical',this)">🔴 Критичные</button>
+  <button class="filter-btn f-warning"  data-filter="warning"  onclick="setFilter('warning',this)">🟡 Внимание</button>
+  <button class="filter-btn f-good"     data-filter="good"     onclick="setFilter('good',this)">🟢 Здоровые</button>
+
+  <div style="margin-left:4px;width:1px;height:20px;background:var(--glass-border);"></div>
+
+  {% for seg in ["ENT","SME+","SME","SMB","SS"] %}
+  <button class="filter-btn" data-seg="{{ seg }}" onclick="setSeg('{{ seg }}',this)">{{ seg }}</button>
+  {% endfor %}
+
+  <div style="flex:1;"></div>
+
+  <input class="search-input" id="search-input" placeholder="Поиск клиента..." oninput="applyFilters()">
+
+  <select class="sort-select" id="sort-select" onchange="applyFilters()">
+    <option value="risk">По риску</option>
+    <option value="health_asc">Health ↑</option>
+    <option value="health_desc">Health ↓</option>
+    <option value="mrr_desc">MRR ↓</option>
+    <option value="silent_desc">Без контакта ↓</option>
+    <option value="name">По имени</option>
+  </select>
+
+  <div class="view-toggle">
+    <button class="view-btn active" id="btn-grid" onclick="setView('grid')" title="Карточки" aria-label="Вид карточками">⊞</button>
+    <button class="view-btn" id="btn-table" onclick="setView('table')" title="Таблица" aria-label="Вид таблицей">☰</button>
+  </div>
+</div>
+
+<!-- Grid view -->
+<div class="portfolio-grid" id="portfolio-grid"></div>
+
+<!-- Table view -->
+<table class="portfolio-table" id="portfolio-table">
+  <thead>
+    <tr>
+      <th onclick="sortBy('name')">Клиент ↕</th>
+      <th onclick="sortBy('segment')">Сег.</th>
+      <th onclick="sortBy('health')">Health ↕</th>
+      <th onclick="sortBy('mrr')">MRR ↕</th>
+      <th onclick="sortBy('nps')">NPS</th>
+      <th onclick="sortBy('days_silent')">Без контакта ↕</th>
+      <th onclick="sortBy('open_tasks')">Задачи</th>
+      <th>Теги</th>
+      <th>Действие</th>
+    </tr>
+  </thead>
+  <tbody id="portfolio-tbody"></tbody>
+</table>
+
+<div class="empty-state" id="empty-state" style="display:none;">
+  <div class="icon">🔍</div>
+  <div class="title">Клиенты не найдены</div>
+  <div>Попробуйте изменить фильтры</div>
+</div>
+
+<script>
+let ALL_CLIENTS = [];
+let activeFilter = 'all';
+let activeSeg = null;
+let currentView = 'grid';
+let sortKey = 'risk';
+
+// ── Аватар клиента с уникальным цветом ──
+const AVATAR_COLORS = [
+  ['#6366f1','#818cf8'],['#8b5cf6','#a78bfa'],['#06b6d4','#22d3ee'],
+  ['#0ea5e9','#38bdf8'],['#10b981','#34d399'],['#f59e0b','#fbbf24'],
+  ['#ef4444','#f87171'],['#ec4899','#f472b6'],
+];
+function avatarColor(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+function avatarInitials(name) {
+  const parts = name.trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+}
+
+// ── Health bar color ──
+function healthColor(pct) {
+  if (pct >= 75) return '#22c55e';
+  if (pct >= 50) return '#60a5fa';
+  if (pct >= 30) return '#f59e0b';
+  return '#ef4444';
+}
+
+// ── Risk label ──
+const RISK_LABELS = { critical: '🔴 Критично', warning: '🟡 Внимание', good: '🟢 Норма' };
+
+// ── Format numbers ──
+function fmtMrr(v) {
+  if (!v) return '—';
+  if (v >= 1e6) return (v/1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v/1e3).toFixed(0) + 'K';
+  return v.toLocaleString('ru-RU');
+}
+
+// ── Load data ──
+async function loadPortfolio() {
+  try {
+    const r = await fetch('/api/portfolio');
+    const d = await r.json();
+    ALL_CLIENTS = d.clients || [];
+    renderSummary(d.summary || {});
+    applyFilters();
+  } catch(e) {
+    console.error(e);
+    document.getElementById('portfolio-grid').innerHTML =
+      '<div style="color:var(--muted);padding:40px;text-align:center;">❌ Ошибка загрузки данных</div>';
+  }
+}
+
+// ── Summary strip ──
+function renderSummary(s) {
+  const cards = [
+    { label: 'Клиентов', value: s.total || 0, sub: 'в портфеле', cls: 'c-blue' },
+    { label: 'Total MRR', value: fmtMrr(s.total_mrr) + ' ₽', sub: 'месячная выручка', cls: 'c-cyan' },
+    { label: 'Критичных', value: s.critical || 0, sub: 'требуют действий', cls: 'c-red' },
+    { label: 'Внимание', value: s.warning || 0, sub: 'под наблюдением', cls: 'c-yellow' },
+    { label: 'Здоровых', value: s.healthy || 0, sub: 'всё хорошо', cls: 'c-green' },
+    { label: 'Апсейлов', value: s.active_upsells || 0, sub: 'активных', cls: 'c-purple' },
+  ];
+  document.getElementById('summary-strip').innerHTML = cards.map(c => `
+    <div class="sum-card ${c.cls}">
+      <div class="sum-label">${c.label}</div>
+      <div class="sum-value">${c.value}</div>
+      <div class="sum-sub">${c.sub}</div>
+    </div>`).join('');
+}
+
+// ── Filters ──
+function setFilter(f, btn) {
+  activeFilter = f;
+  document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilters();
+}
+
+function setSeg(seg, btn) {
+  if (activeSeg === seg) {
+    activeSeg = null;
+    btn.classList.remove('active');
+  } else {
+    document.querySelectorAll('[data-seg]').forEach(b => b.classList.remove('active'));
+    activeSeg = seg;
+    btn.classList.add('active');
+  }
+  applyFilters();
+}
+
+function sortBy(key) {
+  sortKey = key;
+  document.getElementById('sort-select').value = key;
+  applyFilters();
+}
+
+function applyFilters() {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  sortKey = document.getElementById('sort-select').value;
+
+  let list = ALL_CLIENTS.filter(c => {
+    if (activeFilter !== 'all' && c.risk !== activeFilter) return false;
+    if (activeSeg && c.segment !== activeSeg) return false;
+    if (q && !c.name.toLowerCase().includes(q) && !(c.segment||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Sort
+  const riskOrder = { critical: 0, warning: 1, good: 2 };
+  list.sort((a, b) => {
+    switch(sortKey) {
+      case 'risk':        return (riskOrder[a.risk]||2) - (riskOrder[b.risk]||2);
+      case 'health_asc':  return (a.health||0) - (b.health||0);
+      case 'health_desc': return (b.health||0) - (a.health||0);
+      case 'mrr_desc':    return (b.mrr||0) - (a.mrr||0);
+      case 'silent_desc': return (b.days_silent||0) - (a.days_silent||0);
+      case 'name':        return a.name.localeCompare(b.name, 'ru');
+      default:            return 0;
+    }
+  });
+
+  document.getElementById('empty-state').style.display = list.length ? 'none' : 'block';
+
+  if (currentView === 'grid') renderGrid(list);
+  else renderTable(list);
+}
+
+// ── Render grid ──
+function renderGrid(clients) {
+  if (!clients.length) { document.getElementById('portfolio-grid').innerHTML = ''; return; }
+  const [bg1, bg2] = avatarColor(clients[0].name);
+
+  document.getElementById('portfolio-grid').innerHTML = clients.map(c => {
+    const [c1, c2] = avatarColor(c.name);
+    const initials = avatarInitials(c.name);
+    const hc = healthColor(c.health);
+    const tags = buildTags(c);
+    const nextMtg = c.next_meeting ? new Date(c.next_meeting).toLocaleDateString('ru-RU',{day:'2-digit',month:'short'}) : null;
+
+    return `
+    <a href="/client/${c.id}" class="client-card risk-${c.risk}">
+      <div class="card-header">
+        <div class="card-avatar" style="background:linear-gradient(135deg,${c1},${c2})">
+          ${initials}
+        </div>
+        <div class="card-title">
+          <div class="card-name" title="${c.name}">${c.name}</div>
+          <div class="card-seg">${c.segment} ${c.manager ? '· ' + c.manager.split('@')[0] : ''}</div>
+        </div>
+        <div class="card-risk-badge">${RISK_LABELS[c.risk]||c.risk}</div>
+      </div>
+
+      <div class="health-row">
+        <span style="font-size:.68rem;color:var(--muted);min-width:44px;">Health</span>
+        <div class="health-bar-wrap">
+          <div class="health-bar-fill" style="width:${c.health}%;background:${hc}"></div>
+        </div>
+        <span class="health-val" style="color:${hc}">${c.health}%</span>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-chip ${c.mrr > 0 ? '' : ''}">
+          <div class="mc-val">${fmtMrr(c.mrr)} ₽</div>
+          <div class="mc-lbl">MRR</div>
+        </div>
+        <div class="metric-chip ${c.nps !== null ? '' : ''}">
+          <div class="mc-val">${c.nps !== null ? c.nps : '—'}</div>
+          <div class="mc-lbl">NPS</div>
+        </div>
+        <div class="metric-chip ${c.days_silent > 30 ? 'warn' : ''} ${c.days_silent > 60 ? 'alert' : ''}">
+          <div class="mc-val">${c.days_silent !== null ? c.days_silent + 'д' : '—'}</div>
+          <div class="mc-lbl">Без контакта</div>
+        </div>
+        <div class="metric-chip ${c.blocked_tasks > 0 ? 'alert' : ''}">
+          <div class="mc-val">${c.open_tasks}</div>
+          <div class="mc-lbl">Задач</div>
+        </div>
+        <div class="metric-chip ${c.open_tickets > 3 ? 'warn' : ''}">
+          <div class="mc-val">${c.open_tickets}</div>
+          <div class="mc-lbl">Тикетов</div>
+        </div>
+        <div class="metric-chip">
+          <div class="mc-val">${nextMtg || '—'}</div>
+          <div class="mc-lbl">Встреча</div>
+        </div>
+      </div>
+
+      ${tags.length ? `<div class="tags-row">${tags.join('')}</div>` : ''}
+    </a>`;
+  }).join('');
+}
+
+// ── Tags builder ──
+function buildTags(c) {
+  const tags = [];
+  if (c.blocked_tasks > 0)      tags.push(`<span class="tag tag-blocked">🔒 ${c.blocked_tasks} заблок.</span>`);
+  if (c.pending_followups > 0)  tags.push(`<span class="tag tag-followup">✍️ Фолоуап</span>`);
+  if (c.active_upsell > 0)      tags.push(`<span class="tag tag-upsell">💰 Апсейл</span>`);
+  if (c.days_silent > 45)       tags.push(`<span class="tag tag-silent">⏰ Давно не связывались</span>`);
+  if (c.next_meeting)           tags.push(`<span class="tag tag-meeting">📅 Встреча запланирована</span>`);
+  return tags;
+}
+
+// ── Render table ──
+function renderTable(clients) {
+  document.getElementById('portfolio-tbody').innerHTML = clients.map(c => {
+    const hc = healthColor(c.health);
+    const tags = buildTags(c);
+    return `
+    <tr onclick="location.href='/client/${c.id}'">
+      <td>
+        <div style="font-weight:600;font-size:.84rem;">${c.name}</div>
+      </td>
+      <td><span style="font-size:.72rem;padding:2px 6px;border-radius:5px;background:rgba(99,102,241,.12);color:#818cf8;">${c.segment}</span></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="width:50px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;">
+            <div style="width:${c.health}%;height:100%;background:${hc};border-radius:2px;"></div>
+          </div>
+          <span style="color:${hc};font-weight:700;font-size:.8rem;">${c.health}%</span>
+        </div>
+      </td>
+      <td style="font-weight:600;">${fmtMrr(c.mrr)} ₽</td>
+      <td style="font-weight:600;">${c.nps !== null ? c.nps : '—'}</td>
+      <td style="color:${c.days_silent > 30 ? 'var(--risk-warning)' : 'var(--muted)'};">
+        ${c.days_silent !== null ? c.days_silent + ' дн.' : '—'}
+      </td>
+      <td>
+        <span style="color:var(--text)">${c.open_tasks}</span>
+        ${c.blocked_tasks > 0 ? `<span style="color:var(--risk-critical);margin-left:4px;">(${c.blocked_tasks}🔒)</span>` : ''}
+      </td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap;">${tags.join('')}</div></td>
+      <td>
+        <a href="/client/${c.id}" onclick="event.stopPropagation()"
+           style="font-size:.75rem;padding:5px 10px;border-radius:7px;background:rgba(99,102,241,.15);color:#818cf8;text-decoration:none;white-space:nowrap;">
+          Открыть →
+        </a>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── View toggle ──
+function setView(v) {
+  currentView = v;
+  const grid  = document.getElementById('portfolio-grid');
+  const table = document.getElementById('portfolio-table');
+  document.getElementById('btn-grid').classList.toggle('active', v === 'grid');
+  document.getElementById('btn-table').classList.toggle('active', v === 'table');
+  if (v === 'grid') {
+    grid.style.display = 'grid';
+    table.style.display = 'none';
+  } else {
+    grid.style.display = 'none';
+    table.style.display = 'table';
+  }
+  applyFilters();
+}
+
+// ── Init ──
+loadPortfolio();
+// Auto-refresh every 5 min
+setInterval(loadPortfolio, 300000);
+</script>
+{% endblock %}

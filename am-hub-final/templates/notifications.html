@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Уведомления — AM Hub{% endblock %}
+{% block page_title %}Уведомления{% endblock %}
+
+{% block head %}
+<style>
+
+    .notif-row{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--border);text-decoration:none;color:var(--text);transition:background .1s;}
+    .notif-row:hover{background:var(--surface-2,rgba(255,255,255,.03));}
+    .notif-row.unread{background:rgba(129,140,248,.04);}
+    .notif-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px;}
+    .notif-body{flex:1;min-width:0;}
+    .notif-title{font-size:.86rem;font-weight:500;margin-bottom:2px;}
+    .notif-msg{font-size:.78rem;color:var(--text-dim,var(--muted));}
+    .notif-date{font-size:.72rem;color:var(--muted);white-space:nowrap;}
+    .filter-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;}
+    .filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="main">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+      <h1 style="font-size:1.4rem;font-weight:700;">🔔 Уведомления</h1>
+      <div style="display:flex;gap:8px;">
+        <button class="filter-btn active" onclick="filterNotifs('all',this)">Все</button>
+        <button class="filter-btn" onclick="filterNotifs('unread',this)">Непрочитанные</button>
+        <button class="filter-btn" onclick="markAllRead()" style="background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3);color:var(--green);">✓ Всё прочитано</button>
+      </div>
+    </div>
+
+    <!-- Живые уведомления из API -->
+    <div style="background:var(--surface,var(--card));border:1px solid var(--border);border-radius:12px;margin-bottom:16px;overflow:hidden;">
+      <div style="padding:10px 16px;font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);">
+        Требуют внимания
+      </div>
+      <div id="live-notifs">
+        <div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">⏳ Загрузка...</div>
+      </div>
+    </div>
+
+    <!-- Сохранённые уведомления из БД -->
+    <div style="background:var(--surface,var(--card));border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+      <div style="padding:10px 16px;font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);">
+        История уведомлений
+      </div>
+      <div id="db-notifs">
+        {% if notifications %}
+          {% for n in notifications %}
+          <a href="{{ '/client/' + n.related_resource_id|string if n.related_resource_id else '#' }}"
+             class="notif-row {% if not n.is_read %}unread{% endif %}"
+             data-read="{{ n.is_read|lower }}">
+            <div class="notif-dot" style="background:{% if n.type=='alert' %}var(--red){% elif n.type=='warning' %}var(--yellow){% elif n.type=='success' %}var(--green){% else %}var(--accent){% endif %}"></div>
+            <div class="notif-body">
+              <div class="notif-title">{{ n.title }}</div>
+              <div class="notif-msg">{{ n.message }}</div>
+            </div>
+            <div class="notif-date">{{ n.created_at.strftime('%d.%m %H:%M') if n.created_at else '' }}</div>
+          </a>
+          {% endfor %}
+        {% else %}
+          <div style="text-align:center;padding:32px;color:var(--muted);font-size:.84rem;">📭 Уведомлений нет</div>
+        {% endif %}
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const TYPE_COLOR = {alert:'var(--red)',warning:'var(--yellow)',success:'var(--green)',info:'var(--accent)',
+  overdue_checkup:'var(--red)',checkup_soon:'var(--yellow)',blocked_task:'var(--red)'};
+
+async function loadLiveNotifs() {
+  try {
+    const d = await fetch('/api/notifications').then(r => r.json());
+    const notifs = d.notifications || [];
+    const el = document.getElementById('live-notifs');
+    if (!notifs.length) {
+      el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--green);font-size:.84rem;">✅ Всё в порядке</div>';
+      return;
+    }
+    el.innerHTML = notifs.map(n => {
+      const color = TYPE_COLOR[n.type] || TYPE_COLOR[n.priority] || 'var(--accent)';
+      const link = n.client_id ? '/client/' + n.client_id : '#';
+      return `<a href="${link}" class="notif-row">
+        <div class="notif-dot" style="background:${color}"></div>
+        <div class="notif-body">
+          <div class="notif-title">${n.message || ''}</div>
+          ${n.client_name ? '<div class="notif-msg">👤 ' + n.client_name + '</div>' : ''}
+        </div>
+        <div class="notif-date" style="color:${color};font-size:.72rem;font-weight:600;">${n.priority || ''}</div>
+      </a>`;
+    }).join('');
+  } catch(e) {}
+}
+
+function filterNotifs(type, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#db-notifs .notif-row').forEach(row => {
+    if (type === 'unread') {
+      row.style.display = row.dataset.read === 'false' ? 'flex' : 'none';
+    } else {
+      row.style.display = 'flex';
+    }
+  });
+}
+
+async function markAllRead() {
+  await fetch('/api/inbox/mark-read', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  document.querySelectorAll('#db-notifs .notif-row').forEach(r => r.classList.remove('unread'));
+  document.querySelectorAll('#db-notifs .notif-row').forEach(r => r.dataset.read = 'true');
+}
+
+loadLiveNotifs();
+</script>
+{% endblock %}

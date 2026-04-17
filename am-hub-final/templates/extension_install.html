@@ -1,0 +1,651 @@
+{% extends "base.html" %}
+{% block title %}Расширение AM Hub Sync — AM Hub{% endblock %}
+{% block page_title %}🧩 Расширение AM Hub Sync{% endblock %}
+{% block page_subtitle %}<div style="color:var(--text-dim);font-size:.85rem;margin-top:4px">
+  Автоматически тянет данные из Merchrules каждые 30 минут и пушит их в хаб
+</div>{% endblock %}
+
+{% block head %}
+<style>
+  /* ── Страница установки расширения ─────────────────────────── */
+  .ext-wrap { display: flex; flex-direction: column; gap: 18px; max-width: 960px; }
+
+  .ext-hero {
+    display: flex; align-items: center; gap: 16px;
+    padding: 18px 22px;
+    background: linear-gradient(135deg, var(--accent-dim), transparent 75%);
+    border: 1px solid var(--border-s);
+    border-radius: var(--radius-lg);
+  }
+  .ext-hero-icon {
+    width: 56px; height: 56px; border-radius: 14px;
+    background: var(--accent); color: #fff;
+    display: grid; place-items: center;
+    font-size: 28px; flex-shrink: 0;
+    box-shadow: 0 6px 18px var(--accent-glow);
+  }
+  .ext-hero-text h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; }
+  .ext-hero-text p { color: var(--text-dim); font-size: .88rem; }
+
+  /* Баннер-статус */
+  .ext-banner {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px 20px;
+    border-radius: var(--radius-lg);
+    border: 1px solid;
+    transition: background .25s, border-color .25s;
+  }
+  .ext-banner.state-ok {
+    background: rgba(35,209,139,.10);
+    border-color: rgba(35,209,139,.45);
+  }
+  .ext-banner.state-info {
+    background: var(--accent-dim);
+    border-color: var(--accent-ring);
+  }
+  .ext-banner-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: grid; place-items: center;
+    font-size: 22px; flex-shrink: 0;
+    color: #fff;
+  }
+  .ext-banner.state-ok   .ext-banner-icon { background: var(--green); }
+  .ext-banner.state-info .ext-banner-icon { background: var(--accent); }
+  .ext-banner-title { font-weight: 600; margin-bottom: 2px; }
+  .ext-banner-sub   { color: var(--text-dim); font-size: .85rem; }
+  .ext-banner-hint  { margin-left: auto; color: var(--text-dim); font-size: .78rem; }
+
+  /* Шаги */
+  .ext-steps { display: flex; flex-direction: column; gap: 16px; }
+  .ext-step {
+    display: flex; gap: 16px;
+    padding: 18px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    transition: border-color var(--t), box-shadow var(--t);
+  }
+  .ext-step:hover {
+    border-color: var(--accent-ring);
+    box-shadow: 0 2px 14px var(--accent-glow);
+  }
+  .ext-step-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent-dim); color: var(--accent);
+    display: grid; place-items: center;
+    font-weight: 700; font-size: .88rem;
+    flex-shrink: 0;
+  }
+  .ext-step-body { flex: 1; min-width: 0; }
+  .ext-step-title {
+    font-weight: 600; font-size: .95rem; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ext-step-desc { color: var(--text-dim); font-size: .86rem; line-height: 1.55; }
+
+  /* Визуал шага */
+  .ext-visual {
+    margin-top: 12px;
+    padding: 14px;
+    background: var(--surface-3);
+    border: 1px dashed var(--border-s);
+    border-radius: var(--radius);
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100px;
+  }
+
+  /* Mock: адресная строка Chrome */
+  .url-bar-mock {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; max-width: 520px;
+    padding: 8px 12px;
+    background: #ffffff;
+    color: #202124;
+    border: 1px solid #dadce0;
+    border-radius: 24px;
+    font-family: var(--font-mono);
+    font-size: .86rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  }
+  .url-bar-lock { color: #5f6368; font-size: .85rem; }
+  .url-bar-text { flex: 1; color: #202124; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .url-bar-mock button {
+    background: transparent; border: none;
+    cursor: pointer; padding: 4px 6px;
+    border-radius: 4px; font-size: .9rem; color: #5f6368;
+  }
+  .url-bar-mock button:hover { background: #f1f3f4; color: #202124; }
+
+  /* Mock: правый верхний угол chrome://extensions — toggle */
+  .ext-topbar-mock {
+    width: 100%; max-width: 560px;
+    background: #fff; color: #202124;
+    border: 1px solid #dadce0;
+    border-radius: 10px;
+    padding: 10px 14px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.18);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .ext-topbar-title { font-size: .88rem; font-weight: 500; }
+  .ext-topbar-spacer { flex: 1; }
+  .ext-topbar-devtext { font-size: .8rem; color: #5f6368; }
+  .toggle-chrome {
+    position: relative; display: inline-block;
+    width: 34px; height: 14px;
+    background: #1a73e8; border-radius: 8px;
+    box-shadow: 0 0 0 3px rgba(26,115,232,.18);
+    animation: togglePulse 1.6s ease-in-out infinite;
+  }
+  .toggle-chrome::after {
+    content: '';
+    position: absolute; top: -3px; right: -2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #1a73e8;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3);
+  }
+  @keyframes togglePulse {
+    0%,100% { box-shadow: 0 0 0 3px rgba(26,115,232,.18); }
+    50%     { box-shadow: 0 0 0 6px rgba(26,115,232,.30); }
+  }
+  .ext-topbar-arrow {
+    position: relative;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: .78rem;
+  }
+
+  /* Mock: панель кнопок (Load unpacked) */
+  .ext-loadbar-mock {
+    width: 100%; max-width: 560px;
+    background: #fff; color: #202124;
+    border: 1px solid #dadce0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.18);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ext-loadbar-row { display: flex; gap: 8px; align-items: center; }
+  .ext-btn-chrome {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px;
+    background: #fff; color: #1a73e8;
+    border: 1px solid #dadce0; border-radius: 4px;
+    font-size: .82rem; font-weight: 500;
+    cursor: default;
+  }
+  .ext-btn-chrome.primary {
+    background: #1a73e8; color: #fff; border-color: #1a73e8;
+    box-shadow: 0 0 0 0 rgba(26,115,232,.5);
+    animation: btnPulse 1.8s ease-in-out infinite;
+  }
+  @keyframes btnPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(26,115,232,.45); }
+    50%     { box-shadow: 0 0 0 8px rgba(26,115,232,0); }
+  }
+  .ext-mock-caption {
+    font-size: .75rem; color: #5f6368;
+    border-top: 1px dashed #dadce0; padding-top: 6px;
+  }
+
+  /* SVG визуалы (шаги 1,2) */
+  .ext-svg-box {
+    display: grid; place-items: center;
+    width: 100%;
+  }
+  .ext-svg-box svg { width: 150px; height: 110px; }
+
+  /* Советы / подсказки */
+  .ext-tip {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--accent-dim);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: .82rem;
+  }
+  .ext-section-title {
+    font-size: .95rem; font-weight: 600;
+    margin: 10px 0 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ext-copy-box {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-s);
+    border-radius: var(--radius);
+    font-family: var(--font-mono); font-size: .82rem;
+    color: var(--accent-l);
+  }
+  .ext-copy-box button {
+    background: transparent; border: none;
+    color: var(--text-dim); cursor: pointer;
+    font-size: .8rem; padding: 2px 6px; border-radius: 4px;
+  }
+  .ext-copy-box button:hover { color: var(--accent); background: var(--accent-dim); }
+
+  .ext-check-list { list-style: none; padding: 0; margin: 0; }
+  .ext-check-list li {
+    padding: 8px 0; color: var(--text-dim); font-size: .88rem;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .ext-check-list li::before {
+    content: "✓";
+    color: var(--green); font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .ext-alert {
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    font-size: .85rem;
+    border: 1px solid;
+  }
+  .ext-alert-info {
+    background: var(--accent-dim);
+    border-color: var(--accent-ring);
+    color: var(--text);
+  }
+
+  .ext-download-btn {
+    font-size: .95rem;
+    padding: 10px 20px;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+
+  /* Troubleshooting */
+  .ext-troubles details {
+    margin-bottom: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+  }
+  .ext-troubles summary {
+    cursor: pointer;
+    font-weight: 500;
+    font-size: .92rem;
+    color: var(--text);
+    list-style: none;
+    padding: 4px 0;
+  }
+  .ext-troubles summary::-webkit-details-marker { display: none; }
+  .ext-troubles summary::before { content: '▸ '; color: var(--accent); }
+  .ext-troubles details[open] summary::before { content: '▾ '; }
+  .ext-troubles details > *:not(summary) {
+    margin-top: 8px;
+    color: var(--text-dim);
+    font-size: .86rem;
+    line-height: 1.55;
+  }
+
+  /* Mini toast */
+  .ext-toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--accent-ring);
+    padding: 10px 14px; border-radius: var(--radius);
+    font-size: .85rem;
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .2s, transform .2s;
+    pointer-events: none;
+    z-index: 9999;
+  }
+  .ext-toast.show { opacity: 1; transform: translateY(0); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ext-wrap">
+
+  <!-- Hero -->
+  <div class="ext-hero">
+    <div class="ext-hero-icon">🧩</div>
+    <div class="ext-hero-text">
+      <h2>AM Hub Sync для Chrome</h2>
+      <p>Расширение авторизуется в Merchrules от вашего имени и каждые <b>30 минут</b>
+         синхронизирует данные о клиентах, задачах и статусах в AM Hub.</p>
+    </div>
+  </div>
+
+  <!-- Баннер-статус -->
+  <div class="ext-banner state-info" id="ext-banner">
+    <div class="ext-banner-icon" id="ext-banner-icon">…</div>
+    <div>
+      <div class="ext-banner-title" id="ext-banner-title">Проверяем, установлено ли расширение…</div>
+      <div class="ext-banner-sub"   id="ext-banner-sub">Несколько секунд — и вы узнаете статус</div>
+    </div>
+    <span class="ext-banner-hint" id="ext-banner-hint"></span>
+  </div>
+
+  <!-- Инструкция -->
+  <div class="ext-section-title">📦 Установка за 5 шагов</div>
+  <div class="ext-steps">
+
+    <!-- Шаг 1 — SVG архив со стрелкой -->
+    <div class="ext-step">
+      <div class="ext-step-num">1</div>
+      <div class="ext-step-body">
+        <div class="ext-step-title">⬇️ Скачать ZIP-архив расширения</div>
+        <div class="ext-step-desc">
+          Нажмите кнопку ниже — начнётся загрузка файла <code>amhub-sync.zip</code>.
+        </div>
+        <div class="ext-visual">
+          <div class="ext-svg-box" aria-hidden="true">
+            <svg viewBox="0 0 150 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- архив -->
+              <rect x="40" y="18" width="56" height="66" rx="6"
+                    fill="var(--accent-dim)" stroke="var(--accent)" stroke-width="1.5"/>
+              <!-- "застёжка" архива -->
+              <rect x="62" y="18" width="12" height="10" fill="var(--accent)"/>
+              <rect x="62" y="30" width="12" height="6"  fill="var(--accent)"/>
+              <rect x="62" y="38" width="12" height="6"  fill="var(--accent)"/>
+              <rect x="62" y="46" width="12" height="6"  fill="var(--accent)"/>
+              <!-- подпись ZIP -->
+              <text x="68" y="72" font-size="10" font-family="monospace"
+                    fill="var(--text)" text-anchor="middle" font-weight="700">ZIP</text>
+              <!-- стрелка вниз -->
+              <path d="M116 40 L116 78 M108 70 L116 80 L124 70"
+                    stroke="var(--green)" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              <!-- линия пола -->
+              <line x1="30" y1="96" x2="130" y2="96"
+                    stroke="var(--border-s)" stroke-width="1" stroke-dasharray="3 3"/>
+            </svg>
+          </div>
+        </div>
+        <a href="/extension/amhub-sync.zip"
+           class="btn btn-primary ext-download-btn"
+           download
+           style="margin-top:10px">
+          ⬇️ Скачать amhub-sync.zip
+        </a>
+      </div>
+    </div>
+
+    <!-- Шаг 2 — SVG папка с документами -->
+    <div class="ext-step">
+      <div class="ext-step-num">2</div>
+      <div class="ext-step-body">
+        <div class="ext-step-title">📂 Распаковать архив</div>
+        <div class="ext-step-desc">
+          Правой кнопкой на <code>amhub-sync.zip</code> → <b>«Извлечь всё»</b>
+          (или используйте любой архиватор). Запомните путь — он понадобится на шаге 5.
+        </div>
+        <div class="ext-visual">
+          <div class="ext-svg-box" aria-hidden="true">
+            <svg viewBox="0 0 150 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- папка: задняя часть -->
+              <path d="M20 30 L55 30 L65 40 L130 40 L130 92 L20 92 Z"
+                    fill="var(--accent)" opacity="0.25"
+                    stroke="var(--accent)" stroke-width="1.5"/>
+              <!-- документы внутри -->
+              <rect x="38" y="48" width="28" height="36" rx="2"
+                    fill="#fff" stroke="var(--border)" stroke-width="1"/>
+              <line x1="42" y1="56" x2="62" y2="56" stroke="var(--text-muted)" stroke-width="1.2"/>
+              <line x1="42" y1="62" x2="62" y2="62" stroke="var(--text-muted)" stroke-width="1.2"/>
+              <line x1="42" y1="68" x2="58" y2="68" stroke="var(--text-muted)" stroke-width="1.2"/>
+
+              <rect x="70" y="54" width="28" height="36" rx="2"
+                    fill="#fff" stroke="var(--border)" stroke-width="1"/>
+              <line x1="74" y1="62" x2="94" y2="62" stroke="var(--text-muted)" stroke-width="1.2"/>
+              <line x1="74" y1="68" x2="94" y2="68" stroke="var(--text-muted)" stroke-width="1.2"/>
+              <line x1="74" y1="74" x2="90" y2="74" stroke="var(--text-muted)" stroke-width="1.2"/>
+
+              <!-- manifest.json "бейдж" -->
+              <rect x="100" y="60" width="22" height="14" rx="3"
+                    fill="var(--green)" opacity="0.9"/>
+              <text x="111" y="70" font-size="7" font-family="monospace"
+                    fill="#fff" text-anchor="middle" font-weight="700">JSON</text>
+
+              <!-- передняя кромка папки -->
+              <path d="M20 40 L130 40 L130 92 L20 92 Z"
+                    fill="var(--accent)" opacity="0.12"
+                    stroke="var(--accent)" stroke-width="1.5"/>
+            </svg>
+          </div>
+        </div>
+        <div class="ext-tip">
+          💡 Совет: распакуйте в <code>Документы\amhub-sync</code> — так легче найти потом.
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 3 — Mock адресной строки Chrome -->
+    <div class="ext-step">
+      <div class="ext-step-num">3</div>
+      <div class="ext-step-body">
+        <div class="ext-step-title">🌐 Открыть страницу расширений Chrome</div>
+        <div class="ext-step-desc">
+          Скопируйте адрес из «адресной строки» ниже и вставьте в Chrome, затем нажмите Enter:
+        </div>
+        <div class="ext-visual">
+          <div class="url-bar-mock" role="group" aria-label="Имитация адресной строки Chrome">
+            <span class="url-bar-lock" aria-hidden="true">🔒</span>
+            <span class="url-bar-text">chrome://extensions/</span>
+            <button type="button"
+                    onclick="navigator.clipboard.writeText('chrome://extensions/');extToast('Скопировано')"
+                    title="Скопировать">📋</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 4 — Mock правого верхнего угла с toggle -->
+    <div class="ext-step">
+      <div class="ext-step-num">4</div>
+      <div class="ext-step-body">
+        <div class="ext-step-title">🛠️ Включить «Режим разработчика»</div>
+        <div class="ext-step-desc">
+          На странице <code>chrome://extensions/</code> в <b>правом верхнем углу</b> найдите
+          тумблер «Режим разработчика» (Developer mode) — включите его. Он должен стать синим.
+        </div>
+        <div class="ext-visual">
+          <div class="ext-topbar-mock" aria-label="Имитация шапки chrome://extensions/">
+            <span class="ext-topbar-title">Расширения</span>
+            <span class="ext-topbar-spacer"></span>
+            <span class="ext-topbar-devtext">Режим разработчика</span>
+            <span class="toggle-chrome" aria-hidden="true"></span>
+            <span class="ext-topbar-arrow">◀ сюда</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 5 — Mock кнопки "Load unpacked" -->
+    <div class="ext-step">
+      <div class="ext-step-num">5</div>
+      <div class="ext-step-body">
+        <div class="ext-step-title">📁 Загрузить распакованное расширение</div>
+        <div class="ext-step-desc">
+          Слева сверху появятся 3 кнопки. Нажмите <b>«Загрузить распакованное»</b>
+          (Load unpacked) и выберите папку с шага 2 (внутри должен быть <code>manifest.json</code>).
+        </div>
+        <div class="ext-visual">
+          <div class="ext-loadbar-mock" aria-label="Имитация панели chrome://extensions/">
+            <div class="ext-loadbar-row">
+              <span class="ext-btn-chrome primary">📁 Загрузить распакованное</span>
+              <span class="ext-btn-chrome">📦 Упаковать расширение</span>
+              <span class="ext-btn-chrome">↻ Обновить</span>
+            </div>
+            <div class="ext-mock-caption">
+              Видно только при включённом «Режиме разработчика» (шаг 4)
+            </div>
+          </div>
+        </div>
+        <div class="ext-tip">
+          💡 После успешной загрузки в списке появится <b>AM Hub Sync</b> с зелёным тумблером.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Troubleshooting -->
+  <div class="ext-section-title">💡 Не получилось? Частые проблемы</div>
+  <div class="ext-troubles">
+    <details>
+      <summary>Chrome говорит «Manifest file is missing or unreadable»</summary>
+      <div>
+        Скорее всего, вы выбрали ZIP-архив, а не распакованную папку. Сначала распакуйте
+        <code>amhub-sync.zip</code> (шаг 2), а затем в шаге 5 указывайте именно папку
+        — внутри которой лежит файл <code>manifest.json</code>.
+      </div>
+    </details>
+    <details>
+      <summary>Расширение появилось, но не синхронизирует данные</summary>
+      <div>
+        Кликните по иконке <b>AM</b> в правом верхнем углу Chrome — откроется popup.
+        Введите логин и пароль <b>Merchrules</b>, а также URL хаба
+        (<span id="hub-url-inline"></span>). После «Сохранить» расширение запустит первую
+        синхронизацию в течение 1–2 минут.
+      </div>
+    </details>
+    <details>
+      <summary>Появляется ошибка 401 Unauthorized</summary>
+      <div>
+        Это значит, что токен AM Hub не принят сервером. Проверьте, что в popup расширения
+        указан правильный <b>API-токен</b> — скопировать актуальный можно из
+        <a href="/profile">профиля</a>. Если токена нет, сгенерируйте новый
+        и вставьте его в popup.
+      </div>
+    </details>
+  </div>
+
+  <!-- Как проверить -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">✅ Как проверить, что расширение работает</div>
+    </div>
+    <div class="card-body">
+      <ul class="ext-check-list">
+        <li>В правом верхнем углу Chrome (возле адресной строки) появилась
+          иконка <b>AM</b> — значит расширение загружено.</li>
+        <li>Клик по иконке открывает popup с формой логина Merchrules и URL хаба.</li>
+        <li>В списке <code>chrome://extensions/</code> расширение <b>AM Hub Sync</b>
+          помечено как «включено» (синий тумблер).</li>
+        <li>На этой странице сверху баннер стал <span style="color:var(--green)">
+          зелёным</span> и показывает «Расширение установлено и работает».</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Настройка -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">⚙️ Настройка после установки</div>
+    </div>
+    <div class="card-body">
+      <div class="ext-alert ext-alert-info" style="margin-bottom:14px">
+        После установки кликните по иконке <b>AM</b> в шапке Chrome и заполните 3 поля
+        в popup расширения:
+      </div>
+      <ul class="ext-check-list">
+        <li><b>Merchrules логин</b> — ваш e-mail от merchrules.any-platform.ru</li>
+        <li><b>Merchrules пароль</b> — тот же пароль, которым вы заходите в Merchrules</li>
+        <li><b>URL хаба</b> — адрес этого сайта:
+          <div class="ext-copy-box" style="margin-top:6px">
+            <span id="hub-url-display"></span>
+            <button onclick="copyHubUrl()" title="Скопировать">📋</button>
+          </div>
+        </li>
+      </ul>
+      <div class="ext-tip" style="margin-top:12px">
+        💡 После сохранения настроек расширение автоматически начнёт синхронизацию.
+        Первый сеанс может занять 1–2 минуты.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- mini toast -->
+<div class="ext-toast" id="ext-mini-toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  // ── Подставляем текущий URL хаба ─────────────────────────────
+  var hubEl = document.getElementById('hub-url-display');
+  if (hubEl) hubEl.textContent = window.location.origin;
+  var hubInline = document.getElementById('hub-url-inline');
+  if (hubInline) hubInline.textContent = window.location.origin;
+
+  // ── Mini toast (локальный — не трогает внешние реализации) ───
+  var toastEl = document.getElementById('ext-mini-toast');
+  var toastTimer = null;
+  window.extToast = function(msg){
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 1800);
+  };
+  // Если в проекте уже есть глобальный window.toast — не перезатираем его.
+  if (typeof window.toast !== 'function') {
+    window.toast = window.extToast;
+  }
+
+  // ── Копирование hub URL ──────────────────────────────────────
+  window.copyHubUrl = function(){
+    navigator.clipboard.writeText(window.location.origin).then(function(){
+      extToast('Скопировано: ' + window.location.origin);
+      var b = event && event.target; if (!b) return;
+      var t = b.textContent; b.textContent = '✓';
+      setTimeout(function(){ b.textContent = t; }, 1200);
+    });
+  };
+
+  // ── Детект расширения → баннер-статус ────────────────────────
+  var banner = document.getElementById('ext-banner');
+  var bIcon  = document.getElementById('ext-banner-icon');
+  var bTitle = document.getElementById('ext-banner-title');
+  var bSub   = document.getElementById('ext-banner-sub');
+  var bHint  = document.getElementById('ext-banner-hint');
+
+  function setOnline(version){
+    banner.classList.remove('state-info');
+    banner.classList.add('state-ok');
+    bIcon.textContent  = '✓';
+    bTitle.textContent = '✓ Расширение установлено и работает';
+    bSub.textContent   = 'AM Hub Sync подключён к этому хабу и готов синхронизировать данные';
+    if (version) bHint.textContent = 'v' + version;
+  }
+  function setOffline(){
+    banner.classList.remove('state-ok');
+    banner.classList.add('state-info');
+    bIcon.textContent  = '🧩';
+    bTitle.textContent = 'Расширение ещё не установлено';
+    bSub.textContent   = 'Следуйте инструкции ниже — займёт 2–3 минуты';
+    bHint.textContent  = '';
+  }
+
+  if (window.extensionStatus && window.extensionStatus.installed) {
+    setOnline(window.extensionStatus.version);
+    return;
+  }
+
+  var answered = false;
+  window.addEventListener('message', function(e){
+    if (e.source !== window) return;
+    var d = e.data || {};
+    if (d && d.source === 'amhub-sync-extension' && d.type === 'pong') {
+      answered = true;
+      setOnline(d.version);
+    }
+  });
+  window.postMessage({ source: 'amhub-sync-hub', type: 'ping' }, '*');
+
+  setTimeout(function(){
+    if (answered) return;
+    if (document.documentElement.getAttribute('data-amhub-sync') === '1') {
+      setOnline();
+    } else {
+      setOffline();
+    }
+  }, 900);
+})();
+</script>
+{% endblock %}

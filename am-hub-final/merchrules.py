@@ -26,21 +26,25 @@ async def _get_token(client: httpx.AsyncClient, login: str, password: str) -> Op
     cache_key = f"{login}:{password[:8]}"
     if cache_key in _token_cache:
         return _token_cache[cache_key]
-    try:
-        r = await client.post(
-            f"{MERCHRULES_URL}/backend-v2/auth/login",
-            json={"username": login, "password": password},
-            timeout=10,
-        )
-        if r.status_code == 200:
-            body = r.json()
-            token = body.get("token") or body.get("access_token") or body.get("accessToken", "")
-            if token:
-                _token_cache[cache_key] = token
-            return token
-        logger.warning("MR login failed %s %s: %s", login, r.status_code, r.text[:150])
-    except Exception as e:
-        logger.warning("MR login error (%s): %s", login, e)
+    for field in ("email", "login", "username"):
+        try:
+            r = await client.post(
+                f"{MERCHRULES_URL}/backend-v2/auth/login",
+                json={field: login, "password": password},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                body = r.json()
+                token = body.get("token") or body.get("access_token") or body.get("accessToken", "")
+                if token:
+                    _token_cache[cache_key] = token
+                    logger.info("MR auth OK for %s using field=%s", login, field)
+                    return token
+            elif r.status_code not in (400, 401, 422):
+                logger.warning("MR login failed %s field=%s %s: %s", login, field, r.status_code, r.text[:150])
+        except Exception as e:
+            logger.warning("MR login error (%s) field=%s: %s", login, field, e)
+    logger.warning("MR auth: all field variants failed for %s", login)
     return None
 
 

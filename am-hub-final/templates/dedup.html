@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Дедупликация клиентов — AM Hub{% endblock %}
+{% block page_title %}Дедупликация{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Поиск и слияние дублей клиентов</div>{% endblock %}
+{% block page_actions %}
+<button class="btn btn-sm" onclick="scanDuplicates()">🔍 Сканировать</button>
+{% endblock %}
+
+{% block content %}
+<style>
+.dup-group{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:12px;overflow:hidden}
+.dup-header{padding:10px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dup-title{font-size:.82rem;font-weight:600}
+.dup-score{font-size:.72rem;font-family:var(--font-mono);color:var(--accent)}
+.dup-row{display:grid;grid-template-columns:28px 1fr 100px 100px 100px 80px;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:.8rem}
+.dup-row:last-child{border-bottom:none}
+.dup-row:hover{background:var(--surface-2)}
+.merge-btn{padding:4px 12px;font-size:.72rem}
+.master-badge{background:var(--green-bg);color:var(--green);border:1px solid rgba(35,209,139,.2);padding:2px 7px;border-radius:4px;font-size:.65rem;font-weight:700}
+</style>
+
+<div class="section" style="margin-bottom:20px">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <select id="threshold-sel" class="form-control" style="width:160px">
+      <option value="90">Высокое сходство (90%)</option>
+      <option value="75" selected>Среднее сходство (75%)</option>
+      <option value="60">Низкое сходство (60%)</option>
+    </select>
+    <button class="btn btn-primary" onclick="scanDuplicates()">🔍 Найти дубли</button>
+    <span id="scan-status" style="font-size:.78rem;color:var(--text-dim)"></span>
+  </div>
+</div>
+
+<div id="dup-list">
+  <div class="empty">
+    <div class="empty-icon">🔍</div>
+    <div class="empty-title">Нажмите «Найти дубли»</div>
+    <div class="empty-text">Система сравнит названия клиентов и найдёт похожие</div>
+  </div>
+</div>
+
+<!-- Merge confirmation modal -->
+<div class="modal-overlay" id="mergeModal" style="display:none" onclick="if(event.target===this)closeMerge()">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title">Объединить клиентов</span>
+      <button class="modal-close" onclick="closeMerge()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:12px">
+        Данные дубликата (задачи, встречи, заметки) будут перенесены в основного клиента. Дубликат будет удалён.
+      </p>
+      <div class="field">
+        <label>Основной клиент (оставить)</label>
+        <div id="merge-master" style="font-size:.85rem;font-weight:600;padding:6px 0;color:var(--green)"></div>
+      </div>
+      <div class="field">
+        <label>Дубликат (удалить после слияния)</label>
+        <div id="merge-dup" style="font-size:.85rem;padding:6px 0;color:var(--red)"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMerge()">Отмена</button>
+      <button class="btn btn-primary" onclick="confirmMerge()">🔗 Объединить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var mergeData = null;
+
+async function scanDuplicates() {
+  var threshold = document.getElementById('threshold-sel').value;
+  var st = document.getElementById('scan-status');
+  st.textContent = '⏳ Сканируем...';
+  document.getElementById('dup-list').innerHTML =
+    '<div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Анализируем клиентов...</div></div>';
+  try {
+    var d = await fetch('/api/clients/duplicates?threshold=' + threshold).then(r => r.json());
+    var groups = d.groups || [];
+    st.textContent = groups.length
+      ? '⚠️ Найдено ' + groups.length + ' групп дублей'
+      : '✅ Дублей не найдено';
+    renderGroups(groups);
+  } catch(e) { st.textContent = '❌ ' + e.message; }
+}
+
+function renderGroups(groups) {
+  var el = document.getElementById('dup-list');
+  if (!groups.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">✅</div><div class="empty-title">Дублей не найдено</div></div>';
+    return;
+  }
+  el.innerHTML = groups.map(function(g, gi) {
+    var rows = g.clients.map(function(c, ci) {
+      var isMaster = ci === 0;
+      return '<div class="dup-row">'
+        + '<input type="radio" name="master-'+gi+'" value="'+c.id+'"' + (isMaster?' checked':'') + ' onchange="setMaster('+gi+','+c.id+')">'
+        + '<div><div style="font-weight:500">'+c.name+'</div>'
+        + '<div style="font-size:.7rem;color:var(--text-muted)">'+( c.domain||'—')+' · '+( c.segment||'—')+'</div></div>'
+        + '<div style="font-size:.74rem;color:var(--text-dim)">'+c.tasks_count+' задач</div>'
+        + '<div style="font-size:.74rem;color:var(--text-dim)">'+c.meetings_count+' встреч</div>'
+        + '<div>'+(isMaster?'<span class="master-badge">Основной</span>':'')+'</div>'
+        + '<div><button class="btn btn-sm merge-btn" onclick="openMerge('+g.clients[0].id+',\''+escHtml(g.clients[0].name)+'\','+c.id+',\''+escHtml(c.name)+'\')" '+(isMaster?'disabled style="opacity:.3"':'')+'>Слить</button></div>'
+        + '</div>';
+    }).join('');
+    return '<div class="dup-group">'
+      + '<div class="dup-header">'
+      + '  <div class="dup-title">Группа ' + (gi+1) + ' · ' + g.clients.length + ' записей</div>'
+      + '  <div class="dup-score">Сходство: ' + g.similarity + '%</div>'
+      + '</div>'
+      + rows + '</div>';
+  }).join('');
+}
+
+function escHtml(s){return (s||'').replace(/'/g,"\\'")}
+
+function setMaster(gi, id) { /* radio уже обновлён */ }
+
+function openMerge(masterId, masterName, dupId, dupName) {
+  mergeData = { masterId, dupId };
+  document.getElementById('merge-master').textContent = masterName;
+  document.getElementById('merge-dup').textContent = dupName;
+  document.getElementById('mergeModal').style.display = 'flex';
+}
+function closeMerge() { document.getElementById('mergeModal').style.display = 'none'; }
+
+async function confirmMerge() {
+  if (!mergeData) return;
+  var r = await fetch('/api/clients/merge', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(mergeData)
+  });
+  var d = await r.json();
+  closeMerge();
+  if (d.ok) { showToast('✅ Клиенты объединены'); scanDuplicates(); }
+  else showToast('❌ ' + (d.error || 'Ошибка'));
+}
+
+function showToast(m) {
+  var t = document.createElement('div'); t.className='toast success'; t.textContent=m;
+  document.body.appendChild(t); setTimeout(()=>t.remove(), 3000);
+}
+</script>
+{% endblock %}

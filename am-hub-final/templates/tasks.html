@@ -1,168 +1,295 @@
 {% extends "base.html" %}
-{% block title %}Все задачи — AM Hub{% endblock %}
+{% block title %}Задачи — AM Hub{% endblock %}
+{% block page_title %}Задачи{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Все задачи вашего портфеля</div>{% endblock %}
+{% block page_actions %}
+<button class="btn btn-primary btn-sm" onclick="openNewTask()">+ Новая задача</button>
+{% endblock %}
+
 {% block content %}
+<style>
+.task-filters{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center;}
+.task-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;}
+.sync-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;font-size:.65rem;font-weight:600;}
+.sync-ok{background:var(--green-bg);color:var(--green);}
+.sync-no{background:var(--surface-3);color:var(--text-muted);}
+.priority-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.p-high{background:var(--red);} .p-medium{background:var(--yellow);} .p-low{background:var(--blue);}
+</style>
 
-<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-  <div>
-    <h1>✅ Все задачи</h1>
-    <p>{{ tasks|length }} задач{% if status != 'open' %} ({{ status }}){% endif %}</p>
-  </div>
-  <a href="/roadmap" class="btn btn-primary">+ Создать задачи в Merchrules</a>
-</div>
-
-<!-- Подсказка: ритм чекапов -->
-<div class="card" style="background:#1a2030;border-color:#2e3a50;padding:12px 18px;margin-bottom:4px">
-  <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:0.85rem;color:var(--text-muted)">
-    <span>📆 <b style="color:var(--text)">Ритм чекапов:</b></span>
-    <span>🏢 ENT — раз в <b style="color:var(--red)">30 дней</b></span>
-    <span>📊 SME — раз в <b style="color:var(--yellow)">60 дней</b></span>
-    <span>🛒 SMB — раз в <b style="color:var(--green)">90 дней</b></span>
-    <span style="margin-left:auto;color:var(--text-muted)">
-      ⏱ Среднее время встречи: ENT 60 мин · SME 45 мин · SMB 30 мин
-    </span>
-  </div>
-</div>
-
-<!-- Фильтры -->
-<div class="filter-tabs">
-  <a href="/tasks?status=open"   class="tab-btn {% if status=='open'    %}active{% endif %}">🔵 Открытые ({{ total }})</a>
-  <a href="/tasks?status=done"   class="tab-btn {% if status=='done'    %}active{% endif %}">✅ Выполненные</a>
-  <a href="/tasks?status=blocked" class="tab-btn {% if status=='blocked' %}active{% endif %}">🔴 Заблокированные</a>
-  <a href="/tasks?status=open&owner=anyquery{% if segment %}&segment={{ segment }}{% endif %}"
-     class="tab-btn {% if owner=='anyquery' %}active{% endif %}">AnyQuery</a>
-  <a href="/tasks?status=open&owner=client{% if segment %}&segment={{ segment }}{% endif %}"
-     class="tab-btn {% if owner=='client'   %}active{% endif %}">Партнёры</a>
-</div>
-
-<!-- Фильтр по сегменту -->
-<div class="filter-tabs" style="margin-top:-8px">
-  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}"
-     class="tab-btn {% if not segment %}active{% endif %}">Все</a>
-  {% for seg in ['ENT','SME+','SME-','SMB','SS'] %}
-  <a href="/tasks?status={{ status }}{% if owner %}&owner={{ owner }}{% endif %}&segment={{ seg }}"
-     class="tab-btn {% if segment==seg %}active{% endif %}">{{ seg }}</a>
-  {% endfor %}
-</div>
-
-{% if not tasks %}
-<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
-  <div style="font-size:2rem;margin-bottom:8px">🎉</div>
-  <p>Нет задач в статусе «{{ status }}»</p>
-</div>
-{% else %}
-
-<!-- Сводка по времени -->
-{% set total_hours = namespace(val=0) %}
-{% for t in tasks %}
-  {% if t.hours_estimate %}{% set total_hours.val = total_hours.val + t.hours_estimate %}{% endif %}
-{% endfor %}
-{% if total_hours.val > 0 %}
-<div class="card" style="padding:12px 18px;background:#1e1a2e;border-color:#3a2e5a;margin-bottom:4px">
-  <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:0.85rem">
-    <span>⏱ <b style="color:var(--accent)">Итого по оценкам:</b> {{ "%.1f"|format(total_hours.val) }} ч</span>
-    <span style="color:var(--text-muted)">≈ {{ (total_hours.val / 8)|round(1) }} рабочих дней</span>
+<!-- Filters + Search -->
+<div class="task-filters">
+  <input type="text" id="task-search" class="form-control" style="max-width:220px"
+         placeholder="Поиск задачи..." oninput="filterTasks()">
+  <select id="f-status" class="form-control" style="width:130px" onchange="filterTasks()">
+    <option value="">Все статусы</option>
+    <option value="plan">Планирование</option>
+    <option value="in_progress">В работе</option>
+    <option value="review">Ревью</option>
+    <option value="blocked">Заблокирована</option>
+    <option value="done">Выполнена</option>
+  </select>
+  <select id="f-priority" class="form-control" style="width:120px" onchange="filterTasks()">
+    <option value="">Все приоритеты</option>
+    <option value="high">Высокий</option>
+    <option value="medium">Средний</option>
+    <option value="low">Низкий</option>
+  </select>
+  <select id="f-sync" class="form-control" style="width:140px" onchange="filterTasks()">
+    <option value="">Все задачи</option>
+    <option value="synced">Синхронизированы</option>
+    <option value="local">Только локальные</option>
+  </select>
+  <div style="margin-left:auto;display:flex;gap:6px">
+    <button class="btn btn-sm" onclick="syncAll()" id="sync-btn">🔄 Синх. все</button>
+    <span id="sync-status" style="font-size:.76rem;color:var(--text-dim);align-self:center"></span>
   </div>
 </div>
-{% endif %}
 
-<div class="card" style="padding:0;overflow:hidden">
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Клиент</th>
-        <th>Задача</th>
-        <th>Кто</th>
-        <th>⏱ Оценка</th>
-        <th>Дедлайн</th>
-        <th>Статус</th>
-        {% if status == 'open' %}<th></th>{% endif %}
-      </tr>
-    </thead>
-    <tbody>
-    {% for t in tasks %}
-    <tr>
-      <td>
-        <a href="/prep/{{ t.client_id }}" style="font-weight:600">{{ t.client_name }}</a>
-        <span class="badge badge-{{ t.segment|lower }}" style="margin-left:4px;font-size:0.7rem">{{ t.segment }}</span>
-      </td>
-      <td>
-        <span>{{ t.text }}</span>
-        {% if t.is_internal %}
-          <span style="font-size:0.72rem;background:#2a1a3a;color:#a08ad0;border-radius:4px;padding:1px 6px;margin-left:4px">внутр.</span>
-        {% endif %}
-        {% if t.internal_note %}
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">💬 {{ t.internal_note }}</div>
-        {% endif %}
-      </td>
-      <td>
-        <span style="color:{% if t.owner=='anyquery' %}var(--accent){% else %}var(--yellow){% endif %};font-size:0.85rem">
-          {% if t.owner == 'anyquery' %}🔵 AnyQuery{% else %}🟡 Партнёр{% endif %}
-        </span>
-      </td>
-      <td>
-        <!-- Инлайн редактирование оценки времени -->
-        <span class="hours-display" data-id="{{ t.id }}"
-              style="cursor:pointer;color:{% if t.hours_estimate %}var(--accent){% else %}var(--text-muted){% endif %};font-size:0.85rem"
-              onclick="editHours(this, {{ t.id }}, {{ t.hours_estimate or 0 }})">
-          {% if t.hours_estimate %}{{ "%.1f"|format(t.hours_estimate) }}ч{% else %}—{% endif %}
-        </span>
-      </td>
-      <td style="{% if t.due_date and t.due_date < today %}color:var(--red);font-weight:600{% endif %}">
-        {{ t.due_date or '—' }}
-        {% if t.due_date and t.due_date < today %}<span style="font-size:0.75rem"> ⚠️</span>{% endif %}
-      </td>
-      <td>
-        {% if t.status == 'blocked' %}
-          <span style="color:var(--red);font-size:0.82rem">🔴 Блок</span>
-        {% elif t.due_date and t.due_date < today %}
-          <span style="color:var(--red);font-size:0.82rem">⚠️ Просрочена</span>
-        {% else %}
-          <span style="color:var(--green);font-size:0.82rem">✅ В работе</span>
-        {% endif %}
-      </td>
-      {% if status == 'open' %}
-      <td>
-        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
-          <button type="submit" class="btn btn-ghost btn-sm" title="Отметить выполненной">✓</button>
-        </form>
-      </td>
-      {% endif %}
-    </tr>
-    {% endfor %}
+<!-- Stats chips -->
+<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap" id="task-stats"></div>
+
+<!-- Table -->
+<div class="task-table-wrap">
+  <table>
+    <thead><tr>
+      <th style="width:24px"></th>
+      <th>Задача</th>
+      <th>Клиент</th>
+      <th>Статус</th>
+      <th>Приоритет</th>
+      <th>Срок</th>
+      <th>Sync</th>
+      <th style="width:80px"></th>
+    </tr></thead>
+    <tbody id="task-tbody">
+      <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-muted)">⏳ Загрузка...</td></tr>
     </tbody>
   </table>
 </div>
-{% endif %}
+<div style="font-size:.75rem;color:var(--text-muted);margin-top:8px" id="task-count"></div>
+
+<!-- New/Edit task modal -->
+<div class="modal-overlay" id="taskModal" style="display:none" onclick="if(event.target===this)closeTask()">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="task-modal-title">Новая задача</span>
+      <button class="modal-close" onclick="closeTask()" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field" style="grid-column:1/-1">
+          <label>Название</label>
+          <input type="text" id="t-title" class="form-control" placeholder="Описание задачи...">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Клиент</label>
+          <select id="t-client" class="form-control"></select>
+        </div>
+        <div class="field">
+          <label>Статус</label>
+          <select id="t-status" class="form-control">
+            <option value="plan">Планирование</option>
+            <option value="in_progress">В работе</option>
+            <option value="review">Ревью</option>
+            <option value="blocked">Заблокирована</option>
+            <option value="done">Выполнена</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Приоритет</label>
+          <select id="t-priority" class="form-control">
+            <option value="medium">Средний</option>
+            <option value="high">Высокий</option>
+            <option value="low">Низкий</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Срок</label>
+          <input type="date" id="t-due" class="form-control">
+        </div>
+      </div>
+      <div class="field">
+        <label>Описание</label>
+        <textarea id="t-desc" class="form-control" rows="2" placeholder="Детали..."></textarea>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="t-push-mr"> Синхронизировать с Merchrules
+        </label>
+        <div class="help">Задача будет создана в Roadmap Merchrules</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeTask()">Отмена</button>
+      <button class="btn btn-primary" onclick="saveTask()">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
 
 <script>
-function editHours(el, taskId, current) {
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.step = '0.5';
-  input.min = '0';
-  input.max = '99';
-  input.value = current || '';
-  input.style.cssText = 'width:60px;padding:2px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.82rem';
-  el.replaceWith(input);
-  input.focus();
-  input.select();
-  async function save() {
-    const val = parseFloat(input.value) || 0;
-    await fetch(`/api/task/${taskId}/hours`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({hours: val})
-    });
-    const span = document.createElement('span');
-    span.className = 'hours-display';
-    span.dataset.id = taskId;
-    span.style.cssText = 'cursor:pointer;font-size:0.85rem;color:' + (val ? 'var(--accent)' : 'var(--text-muted)');
-    span.textContent = val ? val.toFixed(1) + 'ч' : '—';
-    span.onclick = () => editHours(span, taskId, val);
-    input.replaceWith(span);
+var allTasks = []; var editId = null;
+var STAT_LABELS = {plan:'Планирование',in_progress:'В работе',review:'Ревью',done:'Выполнено',blocked:'Заблокировано'};
+var STAT_COLORS = {plan:'var(--text-muted)',in_progress:'var(--accent)',review:'var(--yellow)',done:'var(--green)',blocked:'var(--red)'};
+
+(async function load() {
+  var d = await fetch('/api/tasks/all').then(function(r){return r.json();}).catch(function(){return {tasks:[]};});
+  allTasks = d.tasks || [];
+  renderStats(allTasks);
+  renderTasks(allTasks);
+  loadClientOptions();
+})();
+
+function renderStats(list) {
+  var counts = {};
+  list.forEach(function(t){ counts[t.status] = (counts[t.status]||0)+1; });
+  document.getElementById('task-stats').innerHTML =
+    Object.entries(STAT_LABELS).map(function(e) {
+      var k=e[0], v=e[1];
+      return '<span class="badge badge-neutral" style="font-size:.72rem">'
+        +'<span style="width:6px;height:6px;border-radius:50%;background:'+STAT_COLORS[k]+';display:inline-block;margin-right:4px"></span>'
+        +v+': '+(counts[k]||0)+'</span>';
+    }).join('');
+}
+
+function filterTasks() {
+  var q    = document.getElementById('task-search').value.toLowerCase();
+  var st   = document.getElementById('f-status').value;
+  var pr   = document.getElementById('f-priority').value;
+  var sync = document.getElementById('f-sync').value;
+  var filtered = allTasks.filter(function(t) {
+    return (!q || (t.title||'').toLowerCase().includes(q) || (t.client_name||'').toLowerCase().includes(q))
+        && (!st   || t.status === st)
+        && (!pr   || t.priority === pr)
+        && (!sync || (sync==='synced' ? t.merchrules_task_id : !t.merchrules_task_id));
+  });
+  renderTasks(filtered);
+}
+
+function renderTasks(list) {
+  document.getElementById('task-count').textContent = 'Показано: '+list.length+' задач';
+  var now = new Date();
+  document.getElementById('task-tbody').innerHTML = list.length
+    ? list.map(function(t) {
+        var due = t.due_date ? new Date(t.due_date) : null;
+        var overdue = due && due < now && t.status !== 'done';
+        var dueStr = due ? due.toLocaleDateString('ru-RU',{day:'numeric',month:'short'}) : '—';
+        var priCls = {high:'p-high',medium:'p-medium',low:'p-low'}[t.priority||'medium']||'p-medium';
+        var stColor = STAT_COLORS[t.status]||'var(--text-muted)';
+        var synced = t.merchrules_task_id;
+        return '<tr onclick="editTask('+t.id+')" style="cursor:pointer">'
+          +'<td><div class="priority-dot '+priCls+'"></div></td>'
+          +'<td class="td-accent" style="max-width:280px"><div class="truncate">'+t.title+'</div></td>'
+          +'<td><a href="/client/'+t.client_id+'" onclick="event.stopPropagation()" style="color:var(--text-dim);font-size:.78rem">'+t.client_name+'</a></td>'
+          +'<td><span style="font-size:.76rem;font-weight:500;color:'+stColor+'">'+STAT_LABELS[t.status]+'</span></td>'
+          +'<td><span style="font-size:.74rem;color:var(--text-dim)">'+{high:'🔴 Высокий',medium:'🟡 Средний',low:'🔵 Низкий'}[t.priority||'medium']+'</span></td>'
+          +'<td style="font-size:.76rem;color:'+(overdue?'var(--red)':'var(--text-dim)')+'">'+dueStr+'</td>'
+          +'<td><span class="sync-badge '+(synced?'sync-ok':'sync-no')+'">'+(synced?'✅ MR':'—')+'</span></td>'
+          +'<td onclick="event.stopPropagation()" style="display:flex;gap:4px">'
+          +'<button class="btn btn-ghost btn-sm btn-icon" onclick="pushToMR('+t.id+',this)" title="Push в Merchrules">🔗</button>'
+          +'<button class="btn btn-ghost btn-sm btn-icon" onclick="deleteTask('+t.id+')" title="Удалить" aria-label="Удалить задачу">✕</button>'
+          +'</td></tr>';
+      }).join('')
+    : '<tr><td colspan="8"><div class="empty" style="padding:32px"><div class="empty-icon">✅</div><div class="empty-text">Нет задач по выбранным фильтрам</div></div></td></tr>';
+}
+
+async function loadClientOptions() {
+  var d = await fetch('/api/cabinet/my-clients').then(function(r){return r.json();}).catch(function(){return {clients:[]};});
+  var sel = document.getElementById('t-client');
+  sel.innerHTML = '<option value="">— Выберите клиента —</option>'
+    + (d.clients||[]).map(function(c){return '<option value="'+c.id+'">'+c.name+'</option>';}).join('');
+}
+
+function openNewTask() {
+  editId = null;
+  document.getElementById('task-modal-title').textContent = 'Новая задача';
+  ['t-title','t-desc'].forEach(function(id){document.getElementById(id).value='';});
+  document.getElementById('t-status').value = 'plan';
+  document.getElementById('t-priority').value = 'medium';
+  document.getElementById('t-due').value = '';
+  document.getElementById('t-push-mr').checked = false;
+  document.getElementById('taskModal').style.display = 'flex';
+}
+
+function editTask(id) {
+  var t = allTasks.find(function(t){return t.id===id;});
+  if (!t) return;
+  editId = id;
+  document.getElementById('task-modal-title').textContent = 'Редактировать задачу';
+  document.getElementById('t-title').value    = t.title||'';
+  document.getElementById('t-status').value   = t.status||'plan';
+  document.getElementById('t-priority').value = t.priority||'medium';
+  document.getElementById('t-due').value      = t.due_date ? t.due_date.slice(0,10) : '';
+  document.getElementById('t-desc').value     = t.description||'';
+  document.getElementById('t-client').value   = t.client_id||'';
+  document.getElementById('taskModal').style.display = 'flex';
+}
+
+function closeTask() { document.getElementById('taskModal').style.display='none'; }
+
+async function saveTask() {
+  var body = {
+    title:       document.getElementById('t-title').value.trim(),
+    status:      document.getElementById('t-status').value,
+    priority:    document.getElementById('t-priority').value,
+    due_date:    document.getElementById('t-due').value||null,
+    description: document.getElementById('t-desc').value,
+    client_id:   parseInt(document.getElementById('t-client').value)||null,
+    push_mr:     document.getElementById('t-push-mr').checked,
+  };
+  if (!body.title) return;
+  var url = editId ? '/api/tasks/'+editId : '/api/tasks';
+  var method = editId ? 'PUT' : 'POST';
+  var r = await fetch(url, {method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (r.ok) {
+    closeTask();
+    var d = await fetch('/api/tasks/all').then(function(r){return r.json();});
+    allTasks = d.tasks||[];
+    renderStats(allTasks); renderTasks(allTasks);
+    showToast(editId ? 'Задача обновлена' : 'Задача создана');
   }
-  input.addEventListener('blur', save);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+}
+
+async function deleteTask(id) {
+  if (!confirm('Удалить задачу?')) return;
+  await fetch('/api/tasks/'+id, {method:'DELETE'});
+  allTasks = allTasks.filter(function(t){return t.id!==id;});
+  renderStats(allTasks); renderTasks(allTasks);
+}
+
+async function pushToMR(id, btn) {
+  btn.textContent = '⏳'; btn.disabled = true;
+  var r = await fetch('/api/tasks/'+id+'/push-roadmap', {method:'POST'});
+  var d = await r.json();
+  if (d.ok) { btn.textContent='✅'; showToast('Задача синхронизирована с Merchrules'); }
+  else { btn.textContent='❌'; btn.disabled=false; showToast('Ошибка: '+(d.error||'?')); }
+  // Обновляем статус синка в таблице
+  var t = allTasks.find(function(t){return t.id===id;});
+  if (t && d.ok) t.merchrules_task_id = d.mr_id || 'synced';
+  renderTasks(allTasks);
+}
+
+async function syncAll() {
+  var btn = document.getElementById('sync-btn');
+  var st  = document.getElementById('sync-status');
+  btn.disabled = true; btn.textContent = '⏳ Синхронизация...';
+  var r = await fetch('/api/sync/merchrules', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+  var d = await r.json().catch(function(){return {};});
+  btn.textContent = '🔄 Синх. все'; btn.disabled = false;
+  st.textContent = d.ok ? '✅ Синхронизировано' : '❌ '+(d.error||'Ошибка');
+  if (d.ok) {
+    var nd = await fetch('/api/tasks/all').then(function(r){return r.json();});
+    allTasks = nd.tasks||[]; renderStats(allTasks); renderTasks(allTasks);
+  }
+}
+
+function showToast(msg) {
+  var t=document.createElement('div'); t.className='toast success'; t.textContent=msg;
+  document.body.appendChild(t); setTimeout(function(){t.remove();},3000);
 }
 </script>
 {% endblock %}

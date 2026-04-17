@@ -1,702 +1,1113 @@
 """
-Планировщик — APScheduler внутри FastAPI.
-Автоматические задачи:
-  - 09:00 пн-пт  — утренний план в Telegram (чекапы + задачи)
-  - 17:00 пт     — еженедельный дайджест в Telegram
-  - каждые 60 мин — синхронизация статусов задач из Merchrules
-  - каждые 60 мин — авто-импорт клиентов из Airtable CS ALL
-  - каждые 30 мин — проверка напоминаний о встречах (24ч и 1ч)
-  - 08:00 ежедн.  — автозадачи на чекап (просроченные клиенты)
+scheduler.py — APScheduler.
+Все джобы читают креды из БД (user.settings), не только из env.
 """
 import os
 import logging
-from datetime import date, datetime, timedelta
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+from datetime import date, datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
+MSK = timezone(timedelta(hours=3))
 
-scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+_scheduler = None
 
-# TG_NOTIFY_CHAT_ID — куда шлём автоматические сообщения
-# Если не задан — используем ALLOWED_TG_IDS[0]
-def get_notify_chat_id() -> str | None:
-    chat = os.getenv("TG_NOTIFY_CHAT_ID", "")
-    if chat:
-        return chat
-    ids = [x.strip() for x in os.getenv("ALLOWED_TG_IDS", "").split(",") if x.strip()]
-    return ids[0] if ids else None
+
+def _get_scheduler():
+    global _scheduler
+    if _scheduler is None:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        _scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+    return _scheduler
+
+
+# ── Telegram helper ──────────────────────────────────────────────────────────
+
+async def send_telegram(chat_id: int, text: str) -> bool:
+    token = os.environ.get("TG_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        return False
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _get_all_users_with_creds(db, cred_key: str):
+    """Получить всех активных менеджеров у которых есть нужные креды."""
+    from models import User
+    users = db.query(User).filter(User.is_active == True).all()
+    result = []
+    for u in users:
+        settings = u.settings or {}
+        creds = settings.get(cred_key, {})
+        if creds and any(creds.values()):
+            result.append((u, creds))
+    return result
+
+
+# ── JOBS ─────────────────────────────────────────────────────────────────────
+
+async def job_sync_merchrules():
+    """Каждый час: синк Merchrules для ВСЕХ менеджеров с кредами в БД или env."""
+    logger.info("🔄 Syncing Merchrules (all managers)...")
+    try:
+        from database import SessionLocal
+        from models import Client, Task, Meeting, SyncLog, User
+        from merchrules_sync import get_auth_token, fetch_site_tasks, fetch_site_meetings
+        import httpx
+
+        db = SessionLocal()
+        base_url = os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+
+        # Собираем все источники кредов: env + каждый юзер из БД
+        creds_list = []
+
+        # 1. env-креды (глобальные)
+        env_login = os.environ.get("MERCHRULES_LOGIN", "")
+        env_pass = os.environ.get("MERCHRULES_PASSWORD", "")
+        if env_login and env_pass:
+            creds_list.append({"login": env_login, "password": env_pass,
+                                "manager_email": None, "source": "env"})
+
+        # 2. Персональные креды каждого менеджера
+        users = db.query(User).filter(User.is_active == True).all()
+        for u in users:
+            settings = u.settings or {}
+            mr = settings.get("merchrules", {})
+            login = mr.get("login", "")
+            password = mr.get("password", "")
+            if login and password and login != env_login:
+                creds_list.append({"login": login, "password": password,
+                                    "manager_email": u.email, "source": f"user:{u.email}"})
+
+        if not creds_list:
+            logger.info("Merchrules: no credentials found in env or user settings")
+            db.close()
+            return
+
+        total_tasks = 0
+        total_clients = 0
+
+        for cred in creds_list:
+            login = cred["login"]
+            password = cred["password"]
+            manager_email = cred["manager_email"]
+
+            sync_log = SyncLog(
+                integration="merchrules", resource_type="all",
+                action="sync", status="in_progress",
+                sync_data={"source": cred["source"]},
+            )
+
+            try:
+                async with httpx.AsyncClient(timeout=30) as hx:
+                    # Перебираем поля логина
+                    token = None
+                    for field in ("email", "login", "username"):
+                        try:
+                            r = await hx.post(
+                                f"{base_url}/backend-v2/auth/login",
+                                json={field: login, "password": password},
+                                timeout=15,
+                            )
+                            if r.status_code == 200:
+                                body = r.json()
+                                token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                                if token:
+                                    break
+                        except Exception:
+                            continue
+
+                    if not token:
+                        sync_log.status = "error"
+                        sync_log.message = f"Auth failed for {login}"
+                        logger.warning(f"MR auth failed: {login}")
+                        db.add(sync_log)
+                        db.commit()
+                        continue
+
+                    headers = {"Authorization": f"Bearer {token}"}
+
+                    # Тянем аккаунты
+                    accounts = []
+                    for ep in (
+                        f"{base_url}/backend-v2/accounts?limit=500",
+                        f"{base_url}/backend-v2/sites?limit=500",
+                    ):
+                        try:
+                            r = await hx.get(ep, headers=headers, timeout=20)
+                            if r.status_code == 200:
+                                data = r.json()
+                                for key in ("accounts", "sites", "items", "data"):
+                                    if isinstance(data.get(key), list) and data[key]:
+                                        accounts = data[key]
+                                        break
+                                if not accounts and isinstance(data, list):
+                                    accounts = data
+                                if accounts:
+                                    break
+                        except Exception:
+                            continue
+
+                    for acc in accounts:
+                        aid = acc.get("id") or acc.get("site_id") or acc.get("siteId")
+                        if not aid:
+                            continue
+                        site_id = str(aid)
+                        acc_name = acc.get("name") or acc.get("title") or acc.get("domain") or f"Account {site_id}"
+
+                        c = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
+                        if not c:
+                            c = Client(
+                                merchrules_account_id=site_id,
+                                name=acc_name,
+                                manager_email=manager_email,
+                                segment=acc.get("segment") or acc.get("tariff") or None,
+                            )
+                            db.add(c)
+                            db.flush()
+                            total_clients += 1
+                        else:
+                            c.name = acc_name
+                            if manager_email and not c.manager_email:
+                                c.manager_email = manager_email
+
+                        # Tasks
+                        try:
+                            r_tasks = await hx.get(
+                                f"{base_url}/backend-v2/tasks",
+                                params={"site_id": site_id, "limit": 100},
+                                headers=headers, timeout=15,
+                            )
+                            if r_tasks.status_code == 200:
+                                td = r_tasks.json()
+                                tasks_list = td.get("tasks") or td.get("items") or (td if isinstance(td, list) else [])
+                                for t in tasks_list:
+                                    tid = str(t.get("id", ""))
+                                    if not tid:
+                                        continue
+                                    existing = db.query(Task).filter(Task.merchrules_task_id == tid).first()
+                                    if not existing:
+                                        db.add(Task(
+                                            client_id=c.id, merchrules_task_id=tid,
+                                            title=t.get("title") or t.get("name") or "",
+                                            status=t.get("status", "plan"),
+                                            priority=t.get("priority", "medium"),
+                                            source="roadmap",
+                                            team=t.get("team") or t.get("assignee") or None,
+                                        ))
+                                        total_tasks += 1
+                                    else:
+                                        existing.status = t.get("status", existing.status)
+                        except Exception as e:
+                            logger.debug(f"Tasks fetch failed for {site_id}: {e}")
+
+                        # Meetings — last date
+                        try:
+                            r_m = await hx.get(
+                                f"{base_url}/backend-v2/meetings",
+                                params={"site_id": site_id, "limit": 10},
+                                headers=headers, timeout=15,
+                            )
+                            if r_m.status_code == 200:
+                                md = r_m.json()
+                                ml = md.get("meetings") or md.get("items") or (md if isinstance(md, list) else [])
+                                dates = [str(m.get("date") or m.get("meeting_date") or "")[:19]
+                                         for m in ml if m.get("date") or m.get("meeting_date")]
+                                if dates:
+                                    try:
+                                        c.last_meeting_date = datetime.fromisoformat(max(dates))
+                                    except Exception:
+                                        pass
+                        except Exception as e:
+                            logger.debug(f"Meetings fetch failed for {site_id}: {e}")
+
+                db.commit()
+                sync_log.status = "success"
+                sync_log.records_processed = total_tasks
+                logger.info(f"✅ MR sync done [{cred['source']}]: {len(accounts)} accounts, {total_tasks} tasks")
+
+            except Exception as e:
+                db.rollback()
+                sync_log.status = "error"
+                sync_log.message = str(e)
+                logger.error(f"❌ MR sync error [{cred['source']}]: {e}")
+
+            db.add(sync_log)
+            db.commit()
+
+        db.close()
+        logger.info(f"✅ Merchrules total: {total_clients} new clients, {total_tasks} new tasks")
+    except Exception as e:
+        logger.error(f"❌ job_sync_merchrules: {e}")
+
+
+async def job_sync_airtable_clients():
+    """Каждый час: синк клиентов из Airtable для КАЖДОГО менеджера со своим токеном."""
+    logger.info("🔄 Syncing Airtable clients (all managers)...")
+    try:
+        from database import SessionLocal
+        from models import Client, SyncLog, User
+        from airtable_sync import sync_clients_from_airtable
+
+        db = SessionLocal()
+
+        # Собираем токены: env (глобальный) + персональные из user.settings
+        token_sources = []
+        global_token = os.environ.get("AIRTABLE_TOKEN") or os.environ.get("AIRTABLE_PAT", "")
+        if global_token:
+            token_sources.append({"token": global_token, "manager_email": None, "source": "env"})
+
+        users = db.query(User).filter(User.is_active == True).all()
+        for u in users:
+            settings = u.settings or {}
+            at = settings.get("airtable", {})
+            t = at.get("pat") or at.get("token", "")
+            if t and t != global_token:
+                token_sources.append({"token": t, "manager_email": u.email, "source": f"user:{u.email}"})
+
+        if not token_sources:
+            logger.info("Airtable: no tokens found")
+            db.close()
+            return
+
+        for src in token_sources:
+            sync_log = SyncLog(integration="airtable", resource_type="clients",
+                               action="sync", status="in_progress",
+                               sync_data={"source": src["source"]})
+            try:
+                result = await sync_clients_from_airtable(
+                    db=db,
+                    token=src["token"],
+                    default_manager_email=src["manager_email"],
+                )
+                sync_log.status = "success"
+                sync_log.records_processed = result.get("synced", 0)
+                logger.info(f"✅ Airtable [{src['source']}]: {result}")
+            except Exception as e:
+                db.rollback()
+                sync_log.status = "error"
+                sync_log.message = str(e)
+                logger.error(f"❌ Airtable sync error [{src['source']}]: {e}")
+            finally:
+                db.add(sync_log)
+                db.commit()
+
+        db.close()
+    except Exception as e:
+        logger.error(f"❌ job_sync_airtable: {e}")
+
+
+async def job_sync_ktalk_meetings():
+    """Каждые 30 мин: синк встреч из Ktalk для всех менеджеров с токеном."""
+    logger.info("🔄 Syncing Ktalk meetings...")
+    try:
+        from database import SessionLocal
+        from models import Client, Meeting, Task, SyncLog, User
+        from meeting_slots import create_slots_for_meeting
+        from integrations.ktalk import get_events, get_transcript
+
+        db = SessionLocal()
+        sync_log = SyncLog(integration="ktalk", resource_type="meetings", action="sync", status="in_progress")
+
+        total_new = 0
+        total_slots = 0
+        now = datetime.utcnow()
+        window_from = now - timedelta(hours=2)
+        window_to = now + timedelta(days=7)
+
+        # Глобальный токен из env
+        global_token = os.environ.get("KTALK_API_TOKEN", "")
+        global_space = os.environ.get("KTALK_SPACE", "")
+
+        token_sources = []
+        if global_token and global_space:
+            token_sources.append({"token": global_token, "space": global_space, "user": None})
+
+        # Персональные токены менеджеров
+        users = db.query(User).filter(User.is_active == True).all()
+        for u in users:
+            settings = u.settings or {}
+            kt = settings.get("ktalk", {})
+            t = kt.get("access_token", "")
+            s = kt.get("space", "") or global_space
+            if t and s and t != global_token:
+                token_sources.append({"token": t, "space": s, "user": u})
+
+        for src in token_sources:
+            import httpx
+            try:
+                async with httpx.AsyncClient(timeout=20) as hx:
+                    base = f"https://{src['space']}.ktalk.ru"
+                    headers = {"Content-Type": "application/json", "X-Auth-Token": src["token"]}
+                    params = {
+                        "dateFrom": window_from.isoformat(),
+                        "dateTo": window_to.isoformat(),
+                        "limit": 100,
+                        "withCanceled": "false",
+                    }
+                    resp = await hx.get(
+                        f"{base}/api/v1/spaces/{src['space']}/events",
+                        headers=headers, params=params,
+                    )
+                    if resp.status_code != 200:
+                        continue
+
+                    data = resp.json()
+                    events = data.get("events") or data.get("items") or []
+
+                    for e in events:
+                        ext_id = f"ktalk_{e.get('id', '')}"
+                        if not e.get("id"):
+                            continue
+                        existing = db.query(Meeting).filter(Meeting.external_id == ext_id).first()
+
+                        # Парсим дату
+                        start_raw = e.get("start") or e.get("startDate", "")
+                        start = None
+                        try:
+                            start = datetime.fromisoformat(str(start_raw).replace("Z", ""))
+                        except Exception:
+                            pass
+                        if not start:
+                            continue
+
+                        # Тип встречи по названию
+                        title_lower = (e.get("title") or e.get("name") or "").lower()
+                        mtype = "meeting"
+                        for kw, mt in [("qbr", "qbr"), ("чекап", "checkup"), ("checkup", "checkup"),
+                                       ("онбординг", "onboarding"), ("kickoff", "kickoff"),
+                                       ("апсейл", "upsell"), ("upsell", "upsell"), ("sync", "sync")]:
+                            if kw in title_lower:
+                                mtype = mt
+                                break
+
+                        # Ищем клиента
+                        client = None
+                        all_clients = db.query(Client).all()
+                        participants = e.get("participants", [])
+                        for c in all_clients:
+                            if c.name.lower() in title_lower:
+                                client = c
+                                break
+                            for p in participants:
+                                pname = (p.get("name") or "").lower()
+                                pemail = (p.get("email") or "").lower()
+                                if c.name.lower() in pname or (c.domain and c.domain.lower() in pemail):
+                                    client = c
+                                    break
+                            if client:
+                                break
+
+                        if existing:
+                            # Обновляем запись
+                            if client and not existing.client_id:
+                                existing.client_id = client.id
+                        else:
+                            meeting = Meeting(
+                                client_id=client.id if client else None,
+                                date=start,
+                                type=mtype,
+                                title=e.get("title") or e.get("name") or "",
+                                source="ktalk",
+                                external_id=ext_id,
+                                followup_status="pending",
+                                attendees=[{"name": p.get("name", ""), "email": p.get("email", "")}
+                                           for p in participants],
+                            )
+                            db.add(meeting)
+                            db.flush()
+                            total_new += 1
+
+                            # Слоты prep/followup
+                            if client:
+                                slots = create_slots_for_meeting(db, meeting)
+                                total_slots += len(slots)
+
+                            # Подтягиваем транскрипт если встреча уже прошла
+                            if start < now and e.get("recordingAvailable"):
+                                try:
+                                    tr_resp = await hx.get(
+                                        f"{base}/api/v1/spaces/{src['space']}/events/{e['id']}/transcript",
+                                        headers=headers,
+                                    )
+                                    if tr_resp.status_code == 200:
+                                        tr_data = tr_resp.json()
+                                        text = tr_data.get("text", "")
+                                        if text and not existing:
+                                            meeting.transcript = text[:5000]
+                                except Exception:
+                                    pass
+
+                db.commit()
+                logger.info(f"✅ Ktalk synced [{src['space']}]: {total_new} new meetings, {total_slots} slots")
+
+            except Exception as e:
+                db.rollback()
+                logger.error(f"❌ Ktalk sync error [{src.get('space')}]: {e}")
+
+        sync_log.status = "success"
+        sync_log.records_processed = total_new
+        db.add(sync_log)
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.error(f"❌ job_sync_ktalk: {e}")
+
+
+async def job_deadline_reminders():
+    """Каждый день 08:30: напоминания о задачах со сроком сегодня/завтра."""
+    logger.info("⏰ Sending deadline reminders...")
+    try:
+        from database import SessionLocal
+        from models import User, Task, Client
+        db = SessionLocal()
+        now_msk = datetime.now(MSK)
+        today = now_msk.date()
+        tomorrow = today + timedelta(days=1)
+
+        users = db.query(User).filter(User.telegram_id != None, User.is_active == True).all()
+        for user in users:
+            # Задачи со сроком сегодня
+            today_tasks = db.query(Task).join(
+                Client, Task.client_id == Client.id, isouter=True
+            ).filter(
+                Task.due_date >= datetime.combine(today, datetime.min.time()),
+                Task.due_date < datetime.combine(tomorrow, datetime.min.time()),
+                Task.status.in_(["plan", "in_progress"]),
+                Client.manager_email == user.email,
+            ).all()
+
+            # Задачи со сроком завтра
+            tmr_tasks = db.query(Task).join(
+                Client, Task.client_id == Client.id, isouter=True
+            ).filter(
+                Task.due_date >= datetime.combine(tomorrow, datetime.min.time()),
+                Task.due_date < datetime.combine(tomorrow + timedelta(days=1), datetime.min.time()),
+                Task.status.in_(["plan", "in_progress"]),
+                Client.manager_email == user.email,
+            ).all()
+
+            # Просроченные
+            overdue = db.query(Task).join(
+                Client, Task.client_id == Client.id, isouter=True
+            ).filter(
+                Task.due_date < datetime.combine(today, datetime.min.time()),
+                Task.status.in_(["plan", "in_progress", "blocked"]),
+                Client.manager_email == user.email,
+            ).all()
+
+            if not today_tasks and not tmr_tasks and not overdue:
+                continue
+
+            msg = f"⏰ <b>Напоминания о задачах</b>\n"
+            msg += f"<i>{now_msk.strftime('%d.%m.%Y')}</i>\n\n"
+
+            if overdue:
+                msg += f"<b>🔴 Просрочено ({len(overdue)}):</b>\n"
+                for t in overdue[:5]:
+                    client_name = t.client.name if t.client else "—"
+                    msg += f"• {t.title} <i>[{client_name}]</i>\n"
+                if len(overdue) > 5:
+                    msg += f"  <i>…ещё {len(overdue)-5}</i>\n"
+                msg += "\n"
+
+            if today_tasks:
+                msg += f"<b>📋 Сегодня ({len(today_tasks)}):</b>\n"
+                for t in today_tasks[:5]:
+                    client_name = t.client.name if t.client else "—"
+                    msg += f"• {t.title} <i>[{client_name}]</i>\n"
+                msg += "\n"
+
+            if tmr_tasks:
+                msg += f"<b>📅 Завтра ({len(tmr_tasks)}):</b>\n"
+                for t in tmr_tasks[:3]:
+                    client_name = t.client.name if t.client else "—"
+                    msg += f"• {t.title} <i>[{client_name}]</i>\n"
+
+            await send_telegram(int(user.telegram_id), msg)
+
+        db.close()
+        logger.info(f"✅ Deadline reminders sent to {len(users)} users")
+    except Exception as e:
+        logger.error(f"❌ job_deadline_reminders: {e}")
+
+
+async def job_check_overdue_checkups():
+    """Ежедневно 08:00: создать задачи на просроченные чекапы."""
+    from models import CHECKUP_INTERVALS
+    logger.info("🔔 Checking overdue checkups...")
+    try:
+        from database import SessionLocal
+        from models import Client, Task, SyncLog
+        db = SessionLocal()
+        sync_log = SyncLog(integration="system", resource_type="checkups", action="check", status="in_progress")
+        try:
+            clients = db.query(Client).all()
+            created = 0
+            for c in clients:
+                interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+                last = c.last_meeting_date or c.last_checkup
+                if last and (datetime.utcnow() - last).days > interval:
+                    existing = db.query(Task).filter(
+                        Task.client_id == c.id, Task.source == "checkup",
+                        Task.status.in_(["plan", "in_progress"])
+                    ).first()
+                    if not existing:
+                        db.add(Task(
+                            client_id=c.id,
+                            title=f"Чекап: {c.name}",
+                            description=f"Последний контакт {(datetime.utcnow()-last).days} дн. назад (интервал {interval} дн.)",
+                            status="plan", priority="high", source="checkup",
+                        ))
+                        c.needs_checkup = True
+                        created += 1
+            db.commit()
+            sync_log.status = "success"
+            sync_log.records_processed = created
+            logger.info(f"✅ Created {created} checkup tasks")
+        except Exception as e:
+            db.rollback()
+            sync_log.status = "error"
+            sync_log.message = str(e)
+        finally:
+            db.add(sync_log)
+            db.commit()
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ job_check_overdue_checkups: {e}")
 
 
 async def job_morning_plan():
-    """Утренний план: просроченные чекапы + задачи на сегодня."""
-    chat_id = get_notify_chat_id()
-    if not chat_id:
-        return
-
+    """Пн-Пт 09:00 МСК: утренний план + встречи дня."""
+    logger.info("📋 Morning plan...")
     try:
-        from database import get_all_clients, get_today_overview, CHECKUP_DAYS
-        from tg_bot import send_message, format_morning_plan
+        from database import SessionLocal
+        from models import Client, Task, Meeting, User, CheckUp
+        db = SessionLocal()
+        now_msk = datetime.now(MSK)
+        today = now_msk.date()
+        tomorrow = today + timedelta(days=1)
 
-        # Считаем статусы
-        from database import checkup_status
-        clients = get_all_clients()
-        for c in clients:
-            c["status"] = checkup_status(
-                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
-            )
+        meetings_today = db.query(Meeting).filter(
+            Meeting.date >= datetime.combine(today, datetime.min.time()),
+            Meeting.date < datetime.combine(tomorrow, datetime.min.time()),
+        ).all()
 
-        overview = get_today_overview()
-        msg = format_morning_plan(clients, overview["urgent_tasks"], overview["week_tasks"])
-        await send_message(chat_id, msg)
-        logger.info("Morning plan sent to %s", chat_id)
-    except Exception as exc:
-        logger.error("job_morning_plan error: %s", exc)
+        overdue = db.query(CheckUp).filter(CheckUp.status == "overdue").all()
+
+        today_tasks = db.query(Task).filter(
+            Task.due_date >= datetime.combine(today, datetime.min.time()),
+            Task.due_date < datetime.combine(tomorrow, datetime.min.time()),
+            Task.status.in_(["plan", "in_progress"]),
+        ).all()
+
+        users = db.query(User).filter(User.telegram_id != None, User.is_active == True).all()
+        for user in users:
+            msg = f"☀️ <b>Доброе утро, {user.first_name or user.email}!</b>\n"
+            msg += f"📅 {now_msk.strftime('%d.%m.%Y')}\n\n"
+
+            user_meetings = meetings_today
+            if user.role == "manager":
+                user_meetings = [m for m in meetings_today if m.client and m.client.manager_email == user.email]
+
+            if user_meetings:
+                msg += f"<b>📅 Встречи ({len(user_meetings)}):</b>\n"
+                for m in user_meetings:
+                    time_str = m.date.strftime("%H:%M") if m.date else "—"
+                    client_name = m.client.name if m.client else "—"
+                    msg += f"• <b>{time_str}</b> — {client_name}: {m.title or m.type}\n"
+                msg += "\n"
+
+            user_tasks = today_tasks
+            if user.role == "manager":
+                user_tasks = [t for t in today_tasks if t.client and t.client.manager_email == user.email]
+            if user_tasks:
+                msg += f"<b>📋 Задачи на сегодня ({len(user_tasks)}):</b>\n"
+                for t in user_tasks[:5]:
+                    msg += f"• {t.title}\n"
+                if len(user_tasks) > 5:
+                    msg += f"  <i>…ещё {len(user_tasks)-5}</i>\n"
+                msg += "\n"
+
+            if overdue:
+                msg += f"<b>🔴 Просроченных чекапов: {len(overdue)}</b>\n"
+
+            app_url = os.environ.get("APP_URL", "/today")
+            msg += f"\n<a href=\"{app_url}\">📱 Открыть AM Hub</a>"
+
+            await send_telegram(int(user.telegram_id), msg)
+
+        logger.info(f"✅ Morning plan sent to {len(users)} users")
+        db.close()
+    except Exception as e:
+        logger.error(f"❌ job_morning_plan: {e}")
 
 
 async def job_weekly_digest():
-    """Еженедельный дайджест — каждую пятницу в 17:00."""
-    chat_id = get_notify_chat_id()
-    if not chat_id:
+    """Пятница 17:00: еженедельный дайджест."""
+    logger.info("📊 Weekly digest...")
+    try:
+        from database import SessionLocal
+        from models import Client, Task, Meeting, User
+        db = SessionLocal()
+        week_ago = datetime.utcnow() - timedelta(days=7)
+
+        total_tasks = db.query(Task).count()
+        done_tasks = db.query(Task).filter(Task.status == "done").count()
+        week_tasks = db.query(Task).filter(Task.created_at >= week_ago).count()
+        week_done = db.query(Task).filter(
+            Task.confirmed_at >= week_ago, Task.status == "done"
+        ).count()
+        week_meetings = db.query(Meeting).filter(Meeting.date >= week_ago).count()
+        clients = db.query(Client).count()
+
+        users = db.query(User).filter(User.telegram_id != None, User.is_active == True).all()
+        for user in users:
+            # Персональная статистика
+            my_done = db.query(Task).join(
+                Client, Task.client_id == Client.id, isouter=True
+            ).filter(
+                Client.manager_email == user.email,
+                Task.confirmed_at >= week_ago,
+                Task.status == "done",
+            ).count()
+
+            my_meetings = db.query(Meeting).join(
+                Client, Meeting.client_id == Client.id, isouter=True
+            ).filter(
+                Client.manager_email == user.email,
+                Meeting.date >= week_ago,
+            ).count()
+
+            msg = f"📊 <b>Итоги недели</b>\n\n"
+            msg += f"<b>Ваши результаты:</b>\n"
+            msg += f"✅ Задач закрыто: {my_done}\n"
+            msg += f"📅 Встреч проведено: {my_meetings}\n\n"
+            msg += f"<b>По команде:</b>\n"
+            msg += f"👥 Клиентов: {clients}\n"
+            msg += f"📋 Задач за неделю: {week_tasks} (закрыто: {week_done})\n"
+            msg += f"📅 Встреч: {week_meetings}\n\n"
+            msg += f"Хороших выходных! 🎉"
+            await send_telegram(int(user.telegram_id), msg)
+
+        logger.info(f"✅ Weekly digest sent to {len(users)} users")
+        db.close()
+    except Exception as e:
+        logger.error(f"❌ job_weekly_digest: {e}")
+
+
+async def job_sync_meetings_and_slots():
+    """Каждые 30 мин: синк встреч из Ktalk + Outlook, создание слотов."""
+    # Делегируем в job_sync_ktalk_meetings (там же создаются слоты)
+    await job_sync_ktalk_meetings()
+
+    # Outlook
+    outlook_client_id = os.environ.get("OUTLOOK_CLIENT_ID", "")
+    if not outlook_client_id:
         return
-
     try:
-        from database import get_all_clients, get_all_tasks
-        from tg_bot import send_message, format_weekly_digest
-        from database import checkup_status
-
-        clients = get_all_clients()
-        for c in clients:
-            c["status"] = checkup_status(
-                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
-            )
-
-        open_tasks = get_all_tasks("open")
-        msg = format_weekly_digest(clients, open_tasks)
-
-        # Разбиваем на части если > 4000 символов
-        for chunk in _split_message(msg, 3800):
-            await send_message(chat_id, chunk)
-
-        logger.info("Weekly digest sent to %s", chat_id)
-    except Exception as exc:
-        logger.error("job_weekly_digest error: %s", exc)
-
-
-async def job_mr_status_sync():
-    """Каждый час тянем обновлённые статусы из Merchrules."""
-    try:
-        from database import get_all_clients, update_task_status, get_all_tasks
-        from merchrules_sync import sync_clients_from_merchrules, invalidate_cache
-
-        invalidate_cache()
-        clients = get_all_clients()
-        mr_data = await sync_clients_from_merchrules(clients)
-
-        if not mr_data:
-            return
-
-        # Обновляем статусы задач в нашей БД по результатам MR
-        # (простой вариант: ищем задачи с совпадающим текстом)
-        open_tasks = get_all_tasks("open")
-        updated = 0
-
-        for site_id, data in mr_data.items():
-            mr_tasks = {t["title"].lower(): t["status"]
-                        for t in data.get("tasks", []) if t.get("title")}
-
-            for task in open_tasks:
-                key = task["text"].lower()
-                if key in mr_tasks:
-                    new_status = mr_tasks[key]
-                    if new_status in ("done", "completed"):
-                        update_task_status(task["id"], "done")
-                        updated += 1
-                    elif new_status == "blocked":
-                        update_task_status(task["id"], "blocked")
-                        updated += 1
-
-        if updated:
-            logger.info("MR status sync: updated %d tasks", updated)
-
-    except Exception as exc:
-        logger.error("job_mr_status_sync error: %s", exc)
-
-
-async def job_auto_checkup_tasks():
-    """
-    Ежедневно в 08:00: создаём задачу-напоминание на чекап,
-    если клиент просрочен и задачи ещё нет.
-    ENT — 1 раз в 30 дней, SME/SME+/SME- — 60 дней, SMB/SS — 90 дней.
-    """
-    try:
-        from database import get_all_clients, get_client_tasks, create_internal_task, checkup_status, CHECKUP_DAYS
-        clients = get_all_clients()
-        created = 0
-
-        for c in clients:
-            status = checkup_status(
-                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
-            )
-            # Только просроченные (red) или предупреждения (yellow)
-            if status["color"] not in ("red", "yellow"):
-                continue
-
-            # Проверяем, нет ли уже открытой задачи-напоминания
-            open_tasks = get_client_tasks(c["id"], "open")
-            has_reminder = any(
-                "чекап" in t["text"].lower() and t.get("is_internal")
-                for t in open_tasks
-            )
-            if has_reminder:
-                continue
-
-            # Получаем нужный интервал
-            days = CHECKUP_DAYS.get(c["segment"], 90)
-
-            # Создаём внутреннюю задачу
-            create_internal_task(
-                client_id=c["id"],
-                text=f"🔔 Провести чекап ({c['segment']}, раз в {days} дней)",
-                due_date=date.today().isoformat(),
-                internal_note=f"Автозадача: последний чекап — {c.get('last_checkup') or 'не проводился'}. Статус: {status['label']}",
-            )
-            created += 1
-
-        if created:
-            logger.info("Auto-checkup tasks created: %d", created)
-
-            # Уведомляем в TG если есть просрочки
-            chat_id = get_notify_chat_id()
-            if chat_id and created > 0:
-                from tg_bot import send_message
-                await send_message(chat_id, f"🔔 Создано {created} задач на чекап. Открой AM Hub → Внутренние задачи.")
-
-    except Exception as exc:
-        logger.error("job_auto_checkup_tasks error: %s", exc)
-
-
-async def job_airtable_sync():
-    """
-    Каждый час: авто-импорт клиентов из Airtable CS ALL view.
-    Upsert клиентов, автопривязка к менеджерам по display_name.
-    """
-    try:
-        from airtable_sync import import_clients_from_airtable
-        result = await import_clients_from_airtable()
-        if result.get("ok"):
-            logger.info(
-                "Airtable auto-sync: created/updated=%d, managers_linked=%d, skipped=%d",
-                result.get("created", 0),
-                result.get("managers_linked", 0),
-                result.get("skipped", 0),
-            )
-            # Если много непривязанных — логируем имена
-            unmatched = result.get("unmatched_managers", {})
-            if unmatched:
-                logger.warning("Airtable sync: unmatched managers: %s", list(unmatched.keys()))
-        else:
-            logger.warning("Airtable auto-sync failed: %s", result.get("error", "?"))
-    except Exception as exc:
-        logger.error("job_airtable_sync error: %s", exc)
-
-
-async def job_meeting_reminders():
-    """
-    Каждые 30 мин: проверяем planned_meeting у клиентов.
-    Если до встречи ~24ч или ~1ч — отправляем напоминание менеджеру в TG и K.Talk.
-    """
-    try:
-        from database import get_all_clients, get_all_manager_profiles, get_manager_client_ids, get_conn
-        from tg_bot import send_message
-
-        now = datetime.now()
-        today = now.date()
-
-        # Все клиенты у которых есть planned_meeting
-        with get_conn() as conn:
-            rows = conn.execute("""
-                SELECT c.id, c.name, c.segment, c.planned_meeting,
-                       c.manager_tg_id
-                FROM clients c
-                WHERE c.planned_meeting IS NOT NULL
-                  AND c.planned_meeting >= date('now')
-                  AND c.planned_meeting <= date('now', '+2 days')
-            """).fetchall()
-
-        clients_with_meetings = [dict(r) for r in rows]
-        if not clients_with_meetings:
-            return
-
-        # Профили менеджеров для уведомлений
-        profiles = get_all_manager_profiles()
-        tg_id_to_profile = {p["tg_id"]: p for p in profiles}
-
-        # manager_clients для определения кому слать
-        manager_client_map: dict[int, set[int]] = {}
-        for p in profiles:
-            ids = get_manager_client_ids(p["tg_id"])
-            if ids:
-                manager_client_map[p["tg_id"]] = set(ids)
-
-        try:
-            from ktalk import send_ktalk_notification
-            has_ktalk = True
-        except ImportError:
-            has_ktalk = False
-
-        for client in clients_with_meetings:
-            planned_str = client.get("planned_meeting")
-            if not planned_str:
-                continue
-
-            # planned_meeting — DATE (только дата), считаем что встреча в 10:00
-            try:
-                planned_date = date.fromisoformat(planned_str)
-            except ValueError:
-                continue
-
-            # Считаем часы до встречи (используем начало дня встречи = 10:00)
-            meet_dt = datetime.combine(planned_date, datetime.min.time().replace(hour=10))
-            hours_left = (meet_dt - now).total_seconds() / 3600
-
-            # Отправляем при 24ч (23-25) или 1ч (0.5-1.5)
-            is_24h = 23 <= hours_left <= 25
-            is_1h  = 0.5 <= hours_left <= 1.5
-
-            if not (is_24h or is_1h):
-                continue
-
-            when_label = "через 24 часа" if is_24h else "через 1 час"
-            msg = (
-                f"📆 *Напоминание о встрече*\n"
-                f"Клиент: *{client['name']}* ({client['segment']})\n"
-                f"Дата: {planned_date.strftime('%d.%m.%Y')}\n"
-                f"⏰ Встреча {when_label}!\n\n"
-                f"Открой подготовку: /prep/{client['id']}"
-            )
-
-            # Находим менеджера этого клиента
-            notified = set()
-            for tg_id, client_set in manager_client_map.items():
-                if client["id"] in client_set:
-                    profile = tg_id_to_profile.get(tg_id, {})
-                    chat = profile.get("tg_notify_chat", "")
-                    if chat and tg_id not in notified:
-                        await send_message(chat, msg)
-                        notified.add(tg_id)
-
-                        # K.Talk уведомление
-                        if has_ktalk:
-                            ktalk_webhook = profile.get("ktalk_webhook", "") or os.getenv("KTALK_WEBHOOK_URL", "")
-                            if ktalk_webhook:
-                                await send_ktalk_notification(
-                                    webhook_url=ktalk_webhook,
-                                    text=f"📆 Встреча с {client['name']} {when_label} ({planned_date.strftime('%d.%m.%Y')})",
-                                )
-
-            # Если нет привязанного менеджера — шлём на общий канал
-            if not notified:
-                chat_id = get_notify_chat_id()
-                if chat_id:
-                    await send_message(chat_id, msg)
-
-            logger.info(
-                "Meeting reminder sent: client=%s, hours_left=%.1f, notified=%s",
-                client["name"], hours_left, notified or "global_chat",
-            )
-
-    except Exception as exc:
-        logger.error("job_meeting_reminders error: %s", exc)
-
-
-async def job_client_morning_reminder():
-    """Каждый день в 09:00: напоминания клиентам о встречах на сегодня."""
-    try:
-        from database import get_conn, get_all_manager_profiles, get_manager_client_ids
-        from tg_bot import send_message
-
-        today = date.today().isoformat()
-
-        # Клиенты с запланированной встречей на сегодня
-        with get_conn() as conn:
-            rows = conn.execute("""
-                SELECT c.id, c.name, c.segment, c.tg_chat_id, c.manager_tg_id
-                FROM clients c
-                WHERE c.planned_meeting = ?
-            """, (today,)).fetchall()
-
-        clients = [dict(r) for r in rows]
-        if not clients:
-            return
-
-        profiles = get_all_manager_profiles()
-        tg_id_to_profile = {p["tg_id"]: p for p in profiles}
-
-        for client in clients:
-            # Отправляем сообщение в канал клиента если есть
-            if client.get("tg_chat_id"):
-                msg = (
-                    f"🗓️ <b>Напоминание о встрече с AnyQuery</b>\n\n"
-                    f"Сегодня, <b>{date.today().strftime('%d.%m.%Y')}</b>\n"
-                    f"📋 Тема: регулярный чекап с вашим менеджером\n\n"
-                    f"<b>Повестка встречи:</b>\n"
-                    f"• Итоги работы за период\n"
-                    f"• Статус текущих задач\n"
-                    f"• Новые потребности и вопросы\n"
-                    f"• Планы на следующий период\n\n"
-                    f"До встречи! 🚀\n"
-                    f"<i>anyquery AM Hub</i>"
-                )
-                await send_message(client["tg_chat_id"], msg)
-
-            # Отправляем менеджеру напоминание
-            if client.get("manager_tg_id"):
-                profile = tg_id_to_profile.get(client["manager_tg_id"], {})
-                notify_chat = profile.get("tg_notify_chat", "")
-                if notify_chat:
-                    manager_msg = f"📅 Сегодня встреча с {client['name']}. Напоминание отправлено в их канал."
-                    await send_message(notify_chat, manager_msg)
-
-        logger.info("Morning reminder sent to %d clients", len(clients))
-
-    except Exception as exc:
-        logger.error("job_client_morning_reminder error: %s", exc)
-
-
-async def job_qbr_prep_tasks():
-    """
-    Каждый день в 10:00: проверяем, находимся ли между 14-16 числом
-    последнего месяца квартала (3, 6, 9, 12). Если да — создаём QBR задачи.
-    """
-    try:
-        from database import get_all_clients, create_internal_task, get_client_tasks, get_all_manager_profiles, get_manager_client_ids
-        from tg_bot import send_message
-
-        today = date.today()
-        # Проверяем: последний месяц квартала и дата 14-16?
-        quarter_end_months = [3, 6, 9, 12]
-        if today.month not in quarter_end_months or not (14 <= today.day <= 16):
-            return
-
-        # Получаем всех клиентов
-        clients = get_all_clients()
-
-        # Фильтруем ENT и SME (и SME+, SME-)
-        target_clients = [c for c in clients if c["segment"] in ("ENT", "SME", "SME+", "SME-")]
-
-        # Группируем по менеджерам
-        profiles = get_all_manager_profiles()
-        manager_created: dict[int, int] = {}
-
-        for client in target_clients:
-            # Проверяем, нет ли уже похожей задачи в последние 60 дней
-            tasks = get_client_tasks(client["id"], "open")
-            cutoff = today - timedelta(days=60)
-            has_qbr = any(
-                "qbr" in t["text"].lower() and "подготовить" in t["text"].lower() and
-                (t.get("created_at") or "") >= cutoff.isoformat()
-                for t in tasks
-            )
-            if has_qbr:
-                continue
-
-            # Создаём задачу
-            text = f"📊 Подготовить QBR для {client['name']} ({client['segment']}) — до конца квартала"
-            create_internal_task(client["id"], text)
-
-            # Считаем по менеджерам
-            manager_id = client.get("manager_tg_id", 0)
-            if manager_id:
-                manager_created[manager_id] = manager_created.get(manager_id, 0) + 1
-
-        # Уведомляем менеджеров в TG
-        tg_id_to_profile = {p["tg_id"]: p for p in profiles}
-        for manager_id, count in manager_created.items():
-            profile = tg_id_to_profile.get(manager_id, {})
-            notify_chat = profile.get("tg_notify_chat", "")
-            if notify_chat:
-                msg = f"📊 Через 2 недели конец квартала! Созданы задачи QBR для {count} клиентов."
-                await send_message(notify_chat, msg)
-
-        logger.info("QBR prep tasks created for %d clients", sum(manager_created.values()))
-
-    except Exception as exc:
-        logger.error("job_qbr_prep_tasks error: %s", exc)
-
-
-async def job_auto_escalation():
-    """
-    Каждый понедельник в 10:00: ищем клиентов с красным статусом чекапа (14+ дней).
-    Уведомляем менеджеров.
-    """
-    try:
-        from database import get_all_clients, checkup_status, CHECKUP_DAYS, get_all_manager_profiles, get_manager_client_ids
-        from tg_bot import send_message
-
-        clients = get_all_clients()
-        overdue = []
-
-        for c in clients:
-            status = checkup_status(c.get("last_checkup") or c.get("last_meeting"), c["segment"])
-            # Красный статус = более N дней без чекапа
-            if status["color"] != "red":
-                continue
-
-            # Проверяем: 14+ дней?
-            days = CHECKUP_DAYS.get(c["segment"], 90)
-            last_date_str = c.get("last_checkup") or c.get("last_meeting")
-            if last_date_str:
-                try:
-                    last_date = date.fromisoformat(last_date_str)
-                    days_overdue = (date.today() - last_date).days - days
-                    if days_overdue >= 14:
-                        overdue.append((c, days_overdue))
-                except ValueError:
-                    pass
-            else:
-                # Нет никогда было встреч — это критично
-                overdue.append((c, 999))
-
-        if not overdue:
-            return
-
-        # Группируем по менеджерам и отправляем
-        profiles = get_all_manager_profiles()
-        tg_id_to_profile = {p["tg_id"]: p for p in profiles}
-
-        for manager_profile in profiles:
-            manager_id = manager_profile["tg_id"]
-            notify_chat = manager_profile.get("tg_notify_chat", "")
-            if not notify_chat:
-                continue
-
-            # Клиенты этого менеджера
-            client_ids = get_manager_client_ids(manager_id)
-            manager_overdue = [(c, d) for c, d in overdue if c["id"] in client_ids]
-
-            if manager_overdue:
-                lines = ["🚨 <b>Эскалация</b>", ""]
-                for client, days in manager_overdue:
-                    lines.append(f"• <b>{client['name']}</b> [{client['segment']}] — просрочен чекап на {days} дней! Требуется контакт.")
-                msg = "\n".join(lines)
-                await send_message(notify_chat, msg)
-
-        logger.info("Auto escalation: %d overdue clients notified", len(overdue))
-
-    except Exception as exc:
-        logger.error("job_auto_escalation error: %s", exc)
-
-
-async def job_risk_detection():
-    """
-    Каждую пятницу в 18:00: ищем рисковые клиенты.
-    - 3+ встречи с mood = neutral или risk
-    - 3+ заблокированных задач
-    Отправляем consolidated report всем менеджерам.
-    """
-    try:
-        from database import get_all_clients, get_client_meetings, get_client_tasks, get_all_manager_profiles
-        from tg_bot import send_message
-
-        clients = get_all_clients()
-
-        mood_risk = []  # Клиенты с плохим настроением
-        task_risk = []  # Клиенты с заблокированными задачами
-
-        for client in clients:
-            # Проверяем последние 3 встречи
-            meetings = get_client_meetings(client["id"], limit=3)
-            if len(meetings) >= 3:
-                moods = [m.get("mood", "neutral") for m in meetings]
-                if all(m in ("neutral", "risk") for m in moods):
-                    mood_risk.append((client, moods))
-
-            # Проверяем заблокированные задачи
-            tasks = get_client_tasks(client["id"], "blocked")
-            if len(tasks) >= 3:
-                task_risk.append((client, len(tasks)))
-
-        if not mood_risk and not task_risk:
-            return
-
-        # Отправляем консолидированный отчёт
-        lines = [
-            "⚠️ <b>Детекция рисков — AM Hub</b>",
-            "",
-        ]
-
-        if mood_risk:
-            lines.append("<b>Риск по настроению (3+ встречи не позитивные):</b>")
-            for client, moods in mood_risk:
-                mood_str = ", ".join(moods)
-                lines.append(f"• <b>{client['name']}</b> [{client['segment']}] — последние 3: {mood_str}")
-            lines.append("")
-
-        if task_risk:
-            lines.append("<b>Много заблокированных задач:</b>")
-            for client, count in task_risk:
-                lines.append(f"• <b>{client['name']}</b> [{client['segment']}] — {count} заблокированных задач")
-
-        msg = "\n".join(lines)
-
-        # Отправляем всем менеджерам
-        profiles = get_all_manager_profiles()
-        for profile in profiles:
-            notify_chat = profile.get("tg_notify_chat", "")
-            if notify_chat:
-                await send_message(notify_chat, msg)
-
-        logger.info("Risk detection: %d mood risks, %d task risks", len(mood_risk), len(task_risk))
-
-    except Exception as exc:
-        logger.error("job_risk_detection error: %s", exc)
-
-
-async def job_weekly_pdf_digest():
-    """Каждую пятницу в 16:30: отправляем еженедельный дайджест в TG (расширенный)."""
-    try:
-        from database import get_all_clients, get_all_tasks, checkup_status
-        from tg_bot import send_message, format_weekly_digest
-
-        clients = get_all_clients()
-        for c in clients:
-            c["status"] = checkup_status(
-                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
-            )
-
-        open_tasks = get_all_tasks("open")
-
-        # Получаем базовый дайджест и добавляем доп. данные
-        msg = format_weekly_digest(clients, open_tasks)
-
-        # Дополняем статистикой
-        today = date.today()
-        week_start = (today - timedelta(days=today.weekday())).strftime("%d.%m")
-
-        # Добавляем детальные метрики в конец
-        by_segment = {}
-        for c in clients:
-            seg = c["segment"]
-            by_segment[seg] = by_segment.get(seg, 0) + 1
-
-        segment_line = "Распределение по сегментам: " + ", ".join(
-            f"{seg}({count})" for seg, count in sorted(by_segment.items())
+        from database import SessionLocal
+        from models import Client, Meeting, SyncLog
+        from integrations.outlook import get_calendar_events
+        from meeting_slots import create_slots_for_meeting
+
+        db = SessionLocal()
+        now = datetime.utcnow()
+        events = await get_calendar_events(
+            date_from=now - timedelta(hours=1),
+            date_to=now + timedelta(days=7),
         )
+        new_count = 0
+        for e in events:
+            ext_id = f"outlook_{e['external_id']}"
+            if db.query(Meeting).filter(Meeting.external_id == ext_id).first():
+                continue
+            if not e.get("start"):
+                continue
 
-        msg += f"\n\n📈 {segment_line}"
+            client = None
+            all_clients = db.query(Client).all()
+            attendee_emails = [a["email"].lower() for a in e.get("attendees", [])]
+            attendee_names = [a["name"].lower() for a in e.get("attendees", [])]
+            for c in all_clients:
+                c_lower = c.name.lower()
+                if any(c_lower in n for n in attendee_names):
+                    client = c
+                    break
+                if c.domain and any(c.domain.lower() in em for em in attendee_emails):
+                    client = c
+                    break
 
-        # Разбиваем на части если нужно
-        for chunk in _split_message(msg, 3800):
-            await send_message(get_notify_chat_id(), chunk)
+            meeting = Meeting(
+                client_id=client.id if client else None,
+                date=e["start"], type=e.get("meeting_type", "meeting"),
+                title=e.get("title", ""), source="outlook",
+                external_id=ext_id, followup_status="pending",
+                attendees=[{"name": a["name"], "email": a["email"]}
+                           for a in e.get("attendees", [])],
+            )
+            db.add(meeting)
+            db.flush()
+            if client:
+                create_slots_for_meeting(db, meeting)
+            new_count += 1
 
-        logger.info("Weekly PDF digest sent")
+        db.commit()
+        db.close()
+        if new_count:
+            logger.info(f"✅ Outlook: {new_count} new meetings synced")
+    except Exception as e:
+        logger.error(f"❌ job_sync_outlook: {e}")
 
-    except Exception as exc:
-        logger.error("job_weekly_pdf_digest error: %s", exc)
+
+# ── START ────────────────────────────────────────────────────────────────────
 
 
-def _split_message(text: str, max_len: int = 3800) -> list[str]:
-    if len(text) <= max_len:
-        return [text]
-    parts = []
-    current = ""
-    for line in text.split("\n"):
-        if len(current) + len(line) + 1 > max_len:
-            parts.append(current)
-            current = line
-        else:
-            current += ("\n" if current else "") + line
-    if current:
-        parts.append(current)
-    return parts
 
+async def job_health_recalc_all():
+    """Ночной пересчёт health score всех клиентов + TG алерт при падении."""
+    logger.info("🔄 Recalculating health scores for all clients...")
+    try:
+        from database import SessionLocal
+        from models import Client, User, HealthSnapshot, TelegramSubscription
+        from routers.account_dashboard import _calculate_health
+        db = SessionLocal()
+        try:
+            clients = db.query(Client).all()
+            updated = 0
+            dropped = []  # клиенты у которых упал health
+
+            for c in clients:
+                try:
+                    old_score = c.health_score or 0
+                    result = _calculate_health(c, db)
+                    new_score = result["score"]
+                    c.health_score = new_score
+                    snap = HealthSnapshot(
+                        client_id=c.id,
+                        score=new_score,
+                        components=result["components"],
+                    )
+                    db.add(snap)
+                    updated += 1
+                    # Фиксируем падение > 15%
+                    if (old_score - new_score) > 0.15 and new_score < 0.6:
+                        dropped.append((c, old_score, new_score))
+                except Exception as e:
+                    logger.warning(f"Health recalc failed for client {c.id}: {e}")
+
+            db.commit()
+            logger.info(f"✅ Health recalculated: {updated} clients, {len(dropped)} dropped")
+
+            # TG алерт при падении health
+            if dropped:
+                subs = db.query(TelegramSubscription).filter(
+                    TelegramSubscription.is_active == True,
+                    TelegramSubscription.notify_health_drop == True,
+                ).all()
+                for sub in subs:
+                    user = sub.user
+                    if not user or not user.is_active:
+                        continue
+                    user_dropped = [
+                        (c, old, new) for c, old, new in dropped
+                        if user.role == "admin" or c.manager_email == user.email
+                    ]
+                    if not user_dropped:
+                        continue
+                    lines = [f"📉 <b>Падение Health Score ({len(user_dropped)} клиентов)</b>\n"]
+                    for c, old, new in user_dropped[:8]:
+                        icon = "🔴" if new < 0.3 else "🟡"
+                        lines.append(
+                            f"{icon} <b>{c.name}</b>: "
+                            f"{round(old*100)}% → {round(new*100)}%"
+                        )
+                    await send_telegram(int(sub.chat_id), "\n".join(lines))
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Health recalc job error: {e}")
+
+
+async def job_ktalk_sync():
+    """Каждые 2 часа: синхронизация встреч из Контур.Толк."""
+    ktalk_token = os.environ.get("KTALK_API_TOKEN", "")
+    ktalk_space = os.environ.get("KTALK_SPACE", "")
+    if not ktalk_token or not ktalk_space:
+        return
+    logger.info("🔄 Syncing Ktalk meetings...")
+    try:
+        from database import SessionLocal
+        from models import Client, Meeting, SyncLog
+        import httpx
+        db = SessionLocal()
+        sync_log = SyncLog(
+            integration="ktalk", resource_type="meetings",
+            action="sync", status="in_progress"
+        )
+        db.add(sync_log)
+        db.commit()
+        synced = 0
+        try:
+            base_url = os.environ.get("KTALK_BASE_URL", "https://tbank.ktalk.ru")
+            headers = {
+                "Authorization": f"Bearer {ktalk_token}",
+                "Content-Type": "application/json",
+            }
+            from datetime import timezone
+            since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            async with httpx.AsyncClient(timeout=30) as hx:
+                resp = await hx.get(
+                    f"{base_url}/api/v1/events",
+                    headers=headers,
+                    params={"from": since, "limit": 100},
+                )
+                if resp.status_code != 200:
+                    raise Exception(f"Ktalk API {resp.status_code}: {resp.text[:200]}")
+                events = resp.json().get("events", resp.json().get("data", []))
+
+            clients = db.query(Client).all()
+            client_map = {c.name.lower(): c for c in clients}
+
+            for event in events:
+                ext_id = str(event.get("id", ""))
+                if not ext_id:
+                    continue
+                # Ищем уже существующую встречу
+                existing = db.query(Meeting).filter(Meeting.external_id == ext_id).first()
+                if existing:
+                    # Обновляем транскрипцию/запись если появились
+                    if event.get("recording_url") and not existing.recording_url:
+                        existing.recording_url = event["recording_url"]
+                    if event.get("transcript_url") and not existing.transcript_url:
+                        existing.transcript_url = event["transcript_url"]
+                    continue
+
+                # Новая встреча — ищем клиента по участникам
+                title = event.get("title", "")
+                attendees = event.get("attendees", event.get("participants", []))
+                client_obj = None
+                for att in attendees:
+                    email_or_name = att.get("email", att.get("name", "")).lower()
+                    for cname, c in client_map.items():
+                        if cname in email_or_name or email_or_name in cname:
+                            client_obj = c
+                            break
+                    if client_obj:
+                        break
+
+                if not client_obj:
+                    continue  # не нашли клиента — пропускаем
+
+                try:
+                    from datetime import datetime as dt
+                    meet_date = dt.fromisoformat(
+                        event.get("started_at", event.get("date", "")).replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                except Exception:
+                    continue
+
+                meet = Meeting(
+                    client_id=client_obj.id,
+                    external_id=ext_id,
+                    title=title,
+                    date=meet_date,
+                    type="sync",
+                    source="ktalk",
+                    recording_url=event.get("recording_url"),
+                    transcript_url=event.get("transcript_url"),
+                    attendees=[a.get("email", a.get("name", "")) for a in attendees],
+                    followup_status="pending",
+                )
+                db.add(meet)
+                client_obj.last_meeting_date = meet_date
+                synced += 1
+
+            db.commit()
+            sync_log.status = "success"
+            sync_log.records_processed = synced
+            logger.info(f"✅ Ktalk synced: {synced} new meetings")
+        except Exception as e:
+            db.rollback()
+            sync_log.status = "error"
+            sync_log.message = str(e)
+            logger.error(f"❌ Ktalk sync error: {e}")
+        finally:
+            db.add(sync_log)
+            db.commit()
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Ktalk job error: {e}")
+
+
+async def job_renewal_alerts():
+    """Еженедельно ПН 09:30: алерты о клиентах с высоким риском оттока."""
+    logger.info("📊 Checking renewal risks...")
+    try:
+        from database import SessionLocal
+        from models import Client, Task, User, TelegramSubscription
+        db = SessionLocal()
+        try:
+            subs = db.query(TelegramSubscription).filter(
+                TelegramSubscription.is_active == True,
+            ).all()
+            now = datetime.now()
+            for sub in subs:
+                user = sub.user
+                if not user or not user.is_active:
+                    continue
+                q = db.query(Client)
+                if user.role == "manager":
+                    q = q.filter(Client.manager_email == user.email)
+                clients = q.all()
+                at_risk = []
+                for c in clients:
+                    health = round((c.health_score or 0) * 100)
+                    days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
+                    tasks = db.query(Task).filter(Task.client_id == c.id).all()
+                    blocked = sum(1 for t in tasks if t.status == "blocked")
+                    risk = (1-(c.health_score or 0))*30 + min(25, days_silent/90*25) + min(15, blocked*5)
+                    risk = min(100, round(risk))
+                    if risk >= 50:
+                        at_risk.append((risk, c.name, c.segment or "—", c.mrr or 0))
+                if not at_risk:
+                    continue
+                at_risk.sort(reverse=True)
+                lines = [f"📊 <b>Риски продления на неделю ({len(at_risk)} клиентов)</b>\n"]
+                for risk, name, seg, mrr in at_risk[:10]:
+                    mrr_s = f"{mrr/1e3:.0f}K" if mrr >= 1000 else str(int(mrr))
+                    icon = "🔴" if risk >= 70 else "🟡"
+                    lines.append(f"{icon} {name} [{seg}] — риск {risk}%, MRR {mrr_s}₽")
+                await send_telegram(int(sub.chat_id), "\n".join(lines))
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Renewal alerts error: {e}")
 
 def start_scheduler():
-    """Запустить планировщик при старте приложения."""
-    # Утренний план — пн-пт в 9:00 МСК
-    scheduler.add_job(
-        job_morning_plan,
-        CronTrigger(day_of_week="mon-fri", hour=9, minute=0),
-        id="morning_plan",
-        replace_existing=True,
-    )
-    # Еженедельный дайджест — пт в 17:00
-    scheduler.add_job(
-        job_weekly_digest,
-        CronTrigger(day_of_week="fri", hour=17, minute=0),
-        id="weekly_digest",
-        replace_existing=True,
-    )
-    # Синхронизация статусов из MR — каждые 60 минут
-    scheduler.add_job(
-        job_mr_status_sync,
-        CronTrigger(minute=0),  # каждый час в :00
-        id="mr_sync",
-        replace_existing=True,
-    )
-    # Автозадачи на чекап — каждый день в 08:00
-    scheduler.add_job(
-        job_auto_checkup_tasks,
-        CronTrigger(hour=8, minute=0),
-        id="auto_checkup_tasks",
-        replace_existing=True,
-    )
-    # Авто-импорт из Airtable — каждый час в :30
-    scheduler.add_job(
-        job_airtable_sync,
-        CronTrigger(minute=30),
-        id="airtable_sync",
-        replace_existing=True,
-    )
-    # Напоминания о встречах — каждые 30 минут
-    scheduler.add_job(
-        job_meeting_reminders,
-        CronTrigger(minute="0,30"),
-        id="meeting_reminders",
-        replace_existing=True,
-    )
-    # Напоминания клиентам о встречах на сегодня — каждый день в 09:00
-    scheduler.add_job(
-        job_client_morning_reminder,
-        CronTrigger(hour=9, minute=0),
-        id="client_morning_reminder",
-        replace_existing=True,
-    )
-    # Подготовка QBR задач — каждый день в 10:00 (проверяет дату 14-16 последнего месяца квартала)
-    scheduler.add_job(
-        job_qbr_prep_tasks,
-        CronTrigger(hour=10, minute=0),
-        id="qbr_prep_tasks",
-        replace_existing=True,
-    )
-    # Автоэскалация просроченных клиентов — каждый понедельник в 10:00
-    scheduler.add_job(
-        job_auto_escalation,
-        CronTrigger(day_of_week="mon", hour=10, minute=0),
-        id="auto_escalation",
-        replace_existing=True,
-    )
-    # Детекция рисков — каждую пятницу в 18:00
-    scheduler.add_job(
-        job_risk_detection,
-        CronTrigger(day_of_week="fri", hour=18, minute=0),
-        id="risk_detection",
-        replace_existing=True,
-    )
-    # Еженедельный PDF дайджест — каждую пятницу в 16:30
-    scheduler.add_job(
-        job_weekly_pdf_digest,
-        CronTrigger(day_of_week="fri", hour=16, minute=30),
-        id="weekly_pdf_digest",
-        replace_existing=True,
-    )
-    scheduler.start()
-    logger.info(
-        "Scheduler started with 11 jobs: morning_plan (9:00 пн-пт), weekly_digest (пт 17:00), "
-        "mr_sync (каждый час в :00), airtable_sync (каждый час в :30), "
-        "meeting_reminders (каждые 30 мин), auto_checkup_tasks (08:00), "
-        "client_morning_reminder (09:00), qbr_prep_tasks (10:00), "
-        "auto_escalation (пн 10:00), risk_detection (пт 18:00), weekly_pdf_digest (пт 16:30)"
-    )
+    sched = _get_scheduler()
+
+    # Синки данных
+    sched.add_job(job_sync_merchrules, "interval", hours=1,
+                  id="sync_merchrules", name="Sync Merchrules (all users)", replace_existing=True)
+
+    if os.environ.get("AIRTABLE_TOKEN") or os.environ.get("AIRTABLE_PAT"):
+        sched.add_job(job_sync_airtable_clients, "interval", hours=1,
+                      id="sync_airtable", name="Sync Airtable", replace_existing=True)
+
+    sched.add_job(job_sync_meetings_and_slots, "interval", minutes=30,
+                  id="sync_meetings_slots", name="Sync Ktalk/Outlook meetings", replace_existing=True)
+
+    # Ежедневные
+    sched.add_job(job_check_overdue_checkups, "cron", hour=8, minute=0,
+                  id="check_overdue", name="Check Overdue Checkups", replace_existing=True)
+    sched.add_job(job_deadline_reminders, "cron", hour=8, minute=30,
+                  id="deadline_reminders", name="Deadline Reminders TG", replace_existing=True)
+    sched.add_job(job_morning_plan, "cron", hour=9, minute=0, day_of_week="mon-fri",
+                  id="morning_plan", name="Morning Plan TG", replace_existing=True)
+
+    # Еженедельный
+    sched.add_job(job_weekly_digest, "cron", hour=17, minute=0, day_of_week="fri",
+                  id="weekly_digest", name="Weekly Digest", replace_existing=True)
+    sched.add_job(job_health_recalc_all, "cron", hour=3, minute=0,
+                  id="health_recalc", name="Nightly Health Recalc", replace_existing=True)
+    sched.add_job(job_ktalk_sync, "interval", hours=2,
+                  id="ktalk_sync", name="Ktalk Meeting Sync", replace_existing=True)
+    sched.add_job(job_renewal_alerts, "cron", hour=9, minute=30, day_of_week="mon",
+                  id="renewal_alerts", name="Weekly Renewal Alerts", replace_existing=True)
+
+    sched.start()
+    logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")
+
+
+if __name__ == "__main__":
+    import logging, asyncio
+    logging.basicConfig(level=logging.INFO)
+    start_scheduler()
+    try:
+        asyncio.get_event_loop().run_forever()
+    except KeyboardInterrupt:
+        _get_scheduler().shutdown()
+
+async def job_telegram_notifications():
+    """Ежедневные умные Telegram уведомления (9:00)."""
+    from database import SessionLocal
+    from models import User, Client, Task, TelegramSubscription
+    from telegram_bot import send_daily_digest, notify_overdue_checkup, notify_task_overdue
+    import os
+
+    hub_url = os.environ.get("RAILWAY_STATIC_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+    if hub_url and not hub_url.startswith("http"):
+        hub_url = "https://" + hub_url
+
+    db = SessionLocal()
+    try:
+        subs = db.query(TelegramSubscription).filter(
+            TelegramSubscription.is_active == True,
+            TelegramSubscription.notify_daily == True
+        ).all()
+
+        now = datetime.now()
+        from models import CHECKUP_INTERVALS
+
+        for sub in subs:
+            user = sub.user
+            if not user or not user.is_active:
+                continue
+
+            q = db.query(Client)
+            if user.role == "manager":
+                q = q.filter(Client.manager_email == user.email)
+            clients = q.all()
+
+            overdue_checkups = 0
+            overdue_names = []
+            for c in clients:
+                interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+                last = c.last_meeting_date or c.last_checkup
+                if last and (now - last).days > interval:
+                    overdue_checkups += 1
+                    overdue_names.append(c.name)
+
+            # Задачи к сегодняшнему дедлайну
+            today_end = now.replace(hour=23, minute=59)
+            tq = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True).filter(
+                Task.status != "done",
+                Task.due_date <= today_end
+            )
+            if user.role == "manager":
+                tq = tq.filter(Client.manager_email == user.email)
+            tasks_due = tq.all()
+
+            # Встречи сегодня
+            from models import Meeting
+            mq = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True).filter(
+                Meeting.date >= now.replace(hour=0, minute=0),
+                Meeting.date <= today_end
+            )
+            if user.role == "manager":
+                mq = mq.filter(Client.manager_email == user.email)
+            meetings_today = mq.count()
+
+            health_crit = sum(1 for c in clients if (c.health_score or 0) < 40)
+
+            import asyncio
+            asyncio.create_task(send_daily_digest(sub.chat_id, {
+                "overdue_checkups": overdue_checkups,
+                "tasks_due_today": len(tasks_due),
+                "health_critical": health_crit,
+                "meetings_today": meetings_today,
+            }, hub_url))
+    finally:
+        db.close()
+
+

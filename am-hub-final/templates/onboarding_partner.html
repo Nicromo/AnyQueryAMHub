@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Онбординг: {{ client.name }} — AM Hub</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .main { margin-left:240px; padding:28px; max-width:960px; }
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .page-header h1 { font-size:1.4rem; }
+    .meta { color:var(--muted); font-size:.82rem; margin-top:4px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; }
+    .section-title { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .badge-seg { background:rgba(129,140,248,.15); color:#a5b4fc; }
+    .badge-done { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-pending { background:rgba(234,179,8,.15); color:#fbbf24; }
+    .badge-overdue { background:rgba(239,68,68,.15); color:#f87171; }
+    .btn { padding:8px 16px; border-radius:8px; font-size:.82rem; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; display:inline-flex; align-items:center; gap:6px; }
+    .btn:hover { border-color:var(--accent); }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-primary:hover { filter:brightness(1.1); }
+    .btn-sm { padding:5px 10px; font-size:.75rem; }
+    .form-row { margin-bottom:14px; }
+    .form-row label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:6px; font-weight:500; }
+    input[type=text], input[type=date], input[type=url], textarea, select { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.85rem; padding:8px 12px; font-family:inherit; }
+    input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); }
+    textarea { resize:vertical; line-height:1.6; }
+    /* Timeline (касания) */
+    .timeline { position:relative; padding-left:24px; }
+    .timeline::before { content:''; position:absolute; left:8px; top:0; bottom:0; width:2px; background:var(--border); }
+    .tl-item { position:relative; margin-bottom:16px; }
+    .tl-dot { position:absolute; left:-20px; top:4px; width:12px; height:12px; border-radius:50%; border:2px solid var(--border); background:var(--bg); }
+    .tl-dot.done { background:var(--green); border-color:var(--green); }
+    .tl-dot.active { background:var(--accent); border-color:var(--accent); }
+    .tl-dot.pending { background:var(--bg); border-color:var(--muted); }
+    .tl-content { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+    .tl-content.active { border-color:var(--accent); }
+    .tl-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+    .tl-title { font-size:.88rem; font-weight:600; }
+    .tl-day { font-size:.72rem; color:var(--muted); }
+    .tl-desc { font-size:.82rem; color:var(--muted); margin-bottom:8px; line-height:1.5; }
+    textarea.tl-note { font-size:.82rem; padding:8px; rows:2; background:var(--bg); border:1px solid var(--border); border-radius:6px; margin-top:6px; min-height:60px; }
+    .tl-actions { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+    /* Прогресс */
+    .progress-bar { background:var(--border); border-radius:20px; height:8px; margin-bottom:4px; overflow:hidden; }
+    .progress-fill { background:var(--accent); height:100%; border-radius:20px; transition:width .5s; }
+    .progress-label { font-size:.78rem; color:var(--muted); display:flex; justify-content:space-between; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .toast { position:fixed; bottom:24px; right:24px; background:var(--green); color:#fff; padding:10px 18px; border-radius:10px; font-size:.85rem; display:none; z-index:999; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .msg-template { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:.82rem; line-height:1.6; white-space:pre-wrap; margin-top:8px; }
+    .copy-btn { font-size:.72rem; color:var(--accent); cursor:pointer; background:none; border:none; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard">📊 Дашборд</a>
+  <a class="nav-item" href="/today">📅 Мой день</a>
+  <a class="nav-item active" href="/clients">👥 Клиенты</a>
+  <a class="nav-item" href="/kanban">📋 Канбан</a>
+  <a class="nav-item" href="/checkups">🩺 Чекапы</a>
+  <a class="nav-item" href="/calendar">📅 Календарь</a>
+  <a class="nav-item" href="/analytics">📈 Аналитика</a>
+  <a class="nav-item" href="/sync">🔄 Sync</a>
+  <a class="nav-item" href="/settings">⚙️ Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+
+  <div class="page-header">
+    <div>
+      <h1>🚀 Онбординг партнёра</h1>
+      <div class="meta">
+        <span class="badge badge-seg">{{ client.segment or '—' }}</span>
+        {{ client.name }}
+      </div>
+    </div>
+    <a href="/prep/{{ client.id }}" class="btn btn-primary">📋 Подготовиться к встрече →</a>
+  </div>
+
+  <!-- Прогресс -->
+  <div class="card">
+    <div class="section-title">📊 Прогресс онбординга</div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    <div class="progress-label"><span id="progressText">0 из 7 шагов</span><span id="progressPct">0%</span></div>
+  </div>
+
+  <!-- Карточка партнёра -->
+  <div class="card">
+    <div class="section-title">👤 Данные партнёра</div>
+    <div class="form-grid">
+      <div class="form-row">
+        <label>Контактное лицо</label>
+        <input type="text" id="contactName" placeholder="Имя Фамилия">
+      </div>
+      <div class="form-row">
+        <label>Должность</label>
+        <input type="text" id="contactRole" placeholder="CEO / Маркетолог...">
+      </div>
+      <div class="form-row">
+        <label>Telegram</label>
+        <input type="text" id="contactTg" placeholder="@username">
+      </div>
+      <div class="form-row">
+        <label>Email</label>
+        <input type="text" id="contactEmail" placeholder="email@company.ru">
+      </div>
+      <div class="form-row">
+        <label>Дата старта</label>
+        <input type="date" id="startDate" value="{{ now.strftime('%Y-%m-%d') }}">
+      </div>
+      <div class="form-row">
+        <label>Канал коммуникации</label>
+        <select id="commChannel">
+          <option value="ktalk">Контур.Толк</option>
+          <option value="telegram">Telegram</option>
+          <option value="email">Email</option>
+          <option value="other">Другое</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Цель партнёра / Ожидания</label>
+      <textarea id="partnerGoals" rows="2" placeholder="Что партнёр хочет получить от работы с нами..."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="saveProfile()">💾 Сохранить карточку</button>
+  </div>
+
+  <!-- Таймлайн касаний -->
+  <div class="card">
+    <div class="section-title">📅 Касания с партнёром</div>
+    <div class="timeline" id="timeline">
+
+      <!-- День 0: Встреча онбординга -->
+      <div class="tl-item" id="step-0">
+        <div class="tl-dot active" id="dot-0"></div>
+        <div class="tl-content active" id="content-0">
+          <div class="tl-header">
+            <span class="tl-title">🚀 День 0 — Встреча онбординга (1 час)</span>
+            <span class="badge badge-pending" id="badge-0">В работе</span>
+          </div>
+          <div class="tl-desc">Знакомство, обзор продукта, настройка, ответы на вопросы. Следующий контакт — когда?</div>
+          <div class="msg-template" id="msg-0">Привет! Рад познакомиться 👋 Я {{ user.first_name or 'ваш менеджер' }} — буду вашим AM в {{ client.name }}.
+
+Сегодня мы:
+• Познакомились с продуктом
+• Настроили базовый доступ
+• Разобрали первые шаги
+
+Следующий шаг с вашей стороны: [...]
+
+Буду на связи — пишите в любое время!</div>
+          <div class="tl-actions">
+            <button class="btn btn-sm btn-primary" onclick="completeStep(0)">✅ Выполнено</button>
+            <button class="copy-btn" onclick="copyMsg(0)">📋 Копировать сообщение</button>
+          </div>
+          <textarea class="tl-note" id="note-0" placeholder="Заметки по встрече..."></textarea>
+        </div>
+      </div>
+
+      <!-- День 3 -->
+      <div class="tl-item" id="step-1">
+        <div class="tl-dot pending" id="dot-1"></div>
+        <div class="tl-content" id="content-1">
+          <div class="tl-header">
+            <span class="tl-title">💬 День 3 — Первый чек-ин</span>
+            <span class="badge badge-pending" id="badge-1">Ожидает</span>
+          </div>
+          <div class="tl-desc">Убедиться что всё настроено, нет блокеров, партнёр не потерялся.</div>
+          <div class="msg-template" id="msg-1">Привет! Как идут дела после нашей встречи?
+
+Всё настроилось? Есть вопросы или что-то не работает?
+
+Если нужна помощь — пишите, разберёмся 🙌</div>
+          <div class="tl-actions">
+            <button class="btn btn-sm btn-primary" onclick="completeStep(1)">✅ Выполнено</button>
+            <button class="copy-btn" onclick="copyMsg(1)">📋 Копировать</button>
+          </div>
+          <textarea class="tl-note" id="note-1" placeholder="Ответ партнёра..."></textarea>
+        </div>
+      </div>
+
+      <!-- День 7 -->
+      <div class="tl-item" id="step-2">
+        <div class="tl-dot pending" id="dot-2"></div>
+        <div class="tl-content" id="content-2">
+          <div class="tl-header">
+            <span class="tl-title">📊 День 7 — Первые результаты</span>
+            <span class="badge badge-pending" id="badge-2">Ожидает</span>
+          </div>
+          <div class="tl-desc">Посмотреть первые цифры, поддержать энтузиазм, снять возражения.</div>
+          <div class="msg-template" id="msg-2">Привет! Прошла неделя с начала работы 🎉
+
+Как первые впечатления? Что уже запустили?
+
+Если хотите — можем созвониться на 15 минут и посмотреть первые результаты вместе.</div>
+          <div class="tl-actions">
+            <button class="btn btn-sm btn-primary" onclick="completeStep(2)">✅ Выполнено</button>
+            <button class="copy-btn" onclick="copyMsg(2)">📋 Копировать</button>
+          </div>
+          <textarea class="tl-note" id="note-2" placeholder="Заметки..."></textarea>
+        </div>
+      </div>
+
+      <!-- День 14 -->
+      <div class="tl-item" id="step-3">
+        <div class="tl-dot pending" id="dot-3"></div>
+        <div class="tl-content" id="content-3">
+          <div class="tl-header">
+            <span class="tl-title">🩺 День 14 — Мини-чекап</span>
+            <span class="badge badge-pending" id="badge-3">Ожидает</span>
+          </div>
+          <div class="tl-desc">Короткий созвон 30 мин: что работает, что нет, скорректировать план.</div>
+          <div class="msg-template" id="msg-3">Привет! Две недели прошло — самое время быстро синхронизироваться.
+
+Предлагаю созвониться на 30 минут:
+• Посмотрим что работает
+• Разберём блокеры если есть
+• Скорректируем план на следующие 2 недели
+
+Когда удобно?</div>
+          <div class="tl-actions">
+            <button class="btn btn-sm btn-primary" onclick="completeStep(3)">✅ Выполнено</button>
+            <button class="copy-btn" onclick="copyMsg(3)">📋 Копировать</button>
+          </div>
+          <textarea class="tl-note" id="note-3" placeholder="Итоги созвона..."></textarea>
+        </div>
+      </div>
+
+      <!-- День 30 -->
+      <div class="tl-item" id="step-4">
+        <div class="tl-dot pending" id="dot-4"></div>
+        <div class="tl-content" id="content-4">
+          <div class="tl-header">
+            <span class="tl-title">🎯 День 30 — Итоги первого месяца</span>
+            <span class="badge badge-pending" id="badge-4">Ожидает</span>
+          </div>
+          <div class="tl-desc">Полноценный чекап 60 мин: метрики, достижения, план на квартал.</div>
+          <div class="msg-template" id="msg-4">Привет! Первый месяц позади — поздравляю 🚀
+
+Предлагаю провести итоговую встречу:
+• Разберём метрики за месяц
+• Отметим достижения
+• Поставим цели на следующий квартал
+
+Встреча ~1 час. Когда удобно?</div>
+          <div class="tl-actions">
+            <button class="btn btn-sm btn-primary" onclick="completeStep(4)">✅ Выполнено</button>
+            <button class="copy-btn" onclick="copyMsg(4)">📋 Копировать</button>
+          </div>
+          <textarea class="tl-note" id="note-4" placeholder="Итоги встречи..."></textarea>
+        </div>
+      </div>
+
+      <!-- Апсейл-момент -->
+      <div class="tl-item" id="step-5">
+        <div class="tl-dot pending" id="dot-5"></div>
+        <div class="tl-content" id="content-5">
+          <div class="tl-header">
+            <span class="tl-title">📈 По ситуации — Апсейл / расширение</span>
+            <span class="badge badge-pending" id="badge-5">Ожидает</span>
+          </div>
+          <div class="tl-desc">Если партнёр активен и доволен — предложить расширение.</div>
+          <div class="msg-template" id="msg-5">Привет! Вижу что вы активно используете продукт — это здорово 💪
+
+Хотел бы рассказать о нескольких возможностях которые помогут вам [ЦЕЛЬ ПАРТНЁРА].
+
+Когда можем созвониться на 20 минут?</div>
+          <div class="tl-actions">
+            <button class="btn btn-sm btn-primary" onclick="completeStep(5)">✅ Выполнено</button>
+            <button class="copy-btn" onclick="copyMsg(5)">📋 Копировать</button>
+          </div>
+          <textarea class="tl-note" id="note-5" placeholder="Результат..."></textarea>
+        </div>
+      </div>
+
+      <!-- Стабильный режим -->
+      <div class="tl-item" id="step-6">
+        <div class="tl-dot pending" id="dot-6"></div>
+        <div class="tl-content" id="content-6">
+          <div class="tl-header">
+            <span class="tl-title">✅ Онбординг завершён — переход в штатный режим</span>
+            <span class="badge badge-pending" id="badge-6">Ожидает</span>
+          </div>
+          <div class="tl-desc">Партнёр самостоятелен, переходит на стандартный цикл чекапов по сегменту.</div>
+          <div class="tl-actions">
+            <button class="btn btn-sm btn-primary" onclick="completeStep(6)">✅ Завершить онбординг</button>
+          </div>
+          <textarea class="tl-note" id="note-6" placeholder="Итоговые заметки..."></textarea>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button class="btn btn-primary" onclick="saveAll()">💾 Сохранить всё</button>
+    <a href="/client/{{ client.id }}" class="btn">← К клиенту</a>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
+
+const TOTAL_STEPS=7;
+let completedSteps=new Set();
+
+function updateProgress(){
+  const pct=Math.round((completedSteps.size/TOTAL_STEPS)*100);
+  document.getElementById('progressFill').style.width=pct+'%';
+  document.getElementById('progressText').textContent=`${completedSteps.size} из ${TOTAL_STEPS} шагов`;
+  document.getElementById('progressPct').textContent=pct+'%';
+}
+
+function completeStep(idx){
+  completedSteps.add(idx);
+  document.getElementById('dot-'+idx).className='tl-dot done';
+  document.getElementById('badge-'+idx).className='badge badge-done';
+  document.getElementById('badge-'+idx).textContent='Выполнено';
+  document.getElementById('content-'+idx).style.opacity='0.7';
+  // Активируем следующий
+  if(idx+1<TOTAL_STEPS){
+    document.getElementById('dot-'+(idx+1)).className='tl-dot active';
+    document.getElementById('content-'+(idx+1)).classList.add('active');
+  }
+  updateProgress();
+  saveAll();
+  showToast('✅ Шаг выполнен');
+}
+
+function copyMsg(idx){
+  const text=document.getElementById('msg-'+idx).textContent;
+  navigator.clipboard.writeText(text);
+  showToast('📋 Сообщение скопировано');
+}
+
+function saveProfile(){
+  const d={
+    contactName:document.getElementById('contactName').value,
+    contactRole:document.getElementById('contactRole').value,
+    contactTg:document.getElementById('contactTg').value,
+    contactEmail:document.getElementById('contactEmail').value,
+    startDate:document.getElementById('startDate').value,
+    commChannel:document.getElementById('commChannel').value,
+    partnerGoals:document.getElementById('partnerGoals').value
+  };
+  localStorage.setItem('onb_profile_{{ client.id }}',JSON.stringify(d));
+  showToast('💾 Карточка сохранена');
+}
+
+function saveAll(){
+  saveProfile();
+  const notes={};
+  for(let i=0;i<TOTAL_STEPS;i++) notes[i]=document.getElementById('note-'+i).value;
+  localStorage.setItem('onb_notes_{{ client.id }}',JSON.stringify(notes));
+  localStorage.setItem('onb_steps_{{ client.id }}',JSON.stringify([...completedSteps]));
+  // Сохраняем в БД
+  fetch('/api/clients/{{ client.id }}/onboarding/' + idx, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({done: true})
+  }).catch(e => console.debug('onboarding save:', e));
+  showToast('💾 Сохранено');
+}
+
+function showToast(msg,color='var(--green)'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.background=color;t.style.display='block';
+  setTimeout(()=>t.style.display='none',2500);
+}
+
+// Загружаем сохранённое
+try{
+  const profile=JSON.parse(localStorage.getItem('onb_profile_{{ client.id }}')||'{}');
+  if(profile.contactName)document.getElementById('contactName').value=profile.contactName;
+  if(profile.contactRole)document.getElementById('contactRole').value=profile.contactRole;
+  if(profile.contactTg)document.getElementById('contactTg').value=profile.contactTg;
+  if(profile.contactEmail)document.getElementById('contactEmail').value=profile.contactEmail;
+  if(profile.startDate)document.getElementById('startDate').value=profile.startDate;
+  if(profile.commChannel)document.getElementById('commChannel').value=profile.commChannel;
+  if(profile.partnerGoals)document.getElementById('partnerGoals').value=profile.partnerGoals;
+}catch(e){}
+
+try{
+  const notes=JSON.parse(localStorage.getItem('onb_notes_{{ client.id }}')||'{}');
+  for(let i=0;i<TOTAL_STEPS;i++) if(notes[i])document.getElementById('note-'+i).value=notes[i];
+}catch(e){}
+
+try{
+  // Загружаем прогресс из БД (приоритет), localStorage — fallback
+  (async function() {
+    try {
+      const r = await fetch('/api/clients/{{ client.id }}/onboarding');
+      const d = await r.json();
+      (d.checklist || []).forEach(item => {
+        if (item.done) completeStep(item.id - 1);
+      });
+    } catch(e) {
+      // fallback localStorage
+      const steps=JSON.parse(localStorage.getItem('onb_steps_{{ client.id }}')||'[]');
+      steps.forEach(i=>completeStep(Number(i)));
+    }
+  })();
+}catch(e){}
+
+updateProgress();
+</script>
+</body>
+</html>

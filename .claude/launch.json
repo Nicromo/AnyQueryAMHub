@@ -1,0 +1,37 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "roadmap-flask",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app.py"],
+      "port": 5051
+    },
+    {
+      "name": "am-hub",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "uvicorn",
+        "main:app",
+        "--app-dir", "am-hub",
+        "--host", "127.0.0.1",
+        "--port", "8000",
+        "--reload"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "am-hub-final",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "uvicorn",
+        "main:app",
+        "--app-dir", "am-hub-final",
+        "--host", "127.0.0.1",
+        "--port", "8001",
+        "--reload"
+      ],
+      "port": 8001
+    }
+  ]
+}

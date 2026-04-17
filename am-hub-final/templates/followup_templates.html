@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Шаблоны фолоуапов — AM Hub{% endblock %}
+{% block page_title %}Шаблоны фолоуапов{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Быстрые шаблоны для отправки после встреч</div>{% endblock %}
+{% block page_actions %}
+<button class="btn btn-primary btn-sm" onclick="openNew()">+ Новый шаблон</button>
+{% endblock %}
+
+{% block content %}
+<style>
+.tmpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.tmpl-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;transition:border-color var(--t),box-shadow var(--t);cursor:pointer;}
+.tmpl-card:hover{border-color:var(--accent-ring);box-shadow:var(--shadow-s);}
+.tmpl-name{font-size:.88rem;font-weight:600;margin-bottom:4px;}
+.tmpl-preview{font-size:.76rem;color:var(--text-dim);line-height:1.55;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.tmpl-footer{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);}
+.cat-chip{font-size:.65rem;font-weight:600;padding:2px 8px;border-radius:4px;}
+.cat-general{background:var(--surface-3);color:var(--text-dim);}
+.cat-qbr{background:var(--purple-bg);color:var(--purple);}
+.cat-checkup{background:var(--blue-bg);color:var(--blue);}
+.cat-kickoff{background:var(--green-bg);color:var(--green);}
+.cat-sync{background:var(--yellow-bg);color:var(--yellow);}
+.var-chip{display:inline-block;background:var(--accent-dim);color:var(--accent);border-radius:3px;padding:0 4px;font-size:.72rem;font-family:var(--font-mono);}
+.preview-box{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;font-size:.82rem;line-height:1.7;white-space:pre-wrap;max-height:200px;overflow-y:auto;}
+</style>
+
+<!-- Filters -->
+<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">
+  <button class="fbtn active" onclick="filterCat('',this)">Все</button>
+  <button class="fbtn" onclick="filterCat('general',this)">Общие</button>
+  <button class="fbtn" onclick="filterCat('checkup',this)">Чекап</button>
+  <button class="fbtn" onclick="filterCat('qbr',this)">QBR</button>
+  <button class="fbtn" onclick="filterCat('kickoff',this)">Кикофф</button>
+  <button class="fbtn" onclick="filterCat('sync',this)">Синк</button>
+  <div style="margin-left:auto;font-size:.76rem;color:var(--text-muted);align-self:center">
+    Переменные: <span class="var-chip">{{client}}</span> <span class="var-chip">{{manager}}</span> <span class="var-chip">{{date}}</span> <span class="var-chip">{{tasks}}</span>
+  </div>
+</div>
+
+<div id="tmpl-grid" class="tmpl-grid">
+  <div class="empty" style="grid-column:1/-1"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+</div>
+
+<!-- Edit/Create modal -->
+<div class="modal-overlay" id="tmplModal" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Новый шаблон</span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field">
+          <label>Название шаблона</label>
+          <input type="text" id="t-name" class="form-control" placeholder="Например: Фолоуап после чекапа">
+        </div>
+        <div class="field">
+          <label>Категория</label>
+          <select id="t-cat" class="form-control">
+            <option value="general">Общий</option>
+            <option value="checkup">Чекап</option>
+            <option value="qbr">QBR</option>
+            <option value="kickoff">Кикофф</option>
+            <option value="sync">Синк</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Текст шаблона</label>
+        <div style="display:flex;gap:4px;margin-bottom:5px;flex-wrap:wrap">
+          <span class="var-chip" style="cursor:pointer" onclick="insertVar('{{client}}')">{{client}}</span>
+          <span class="var-chip" style="cursor:pointer" onclick="insertVar('{{manager}}')">{{manager}}</span>
+          <span class="var-chip" style="cursor:pointer" onclick="insertVar('{{date}}')">{{date}}</span>
+          <span class="var-chip" style="cursor:pointer" onclick="insertVar('{{tasks}}')">{{tasks}}</span>
+          <span class="var-chip" style="cursor:pointer" onclick="insertVar('{{next_meeting}}')">{{next_meeting}}</span>
+        </div>
+        <textarea id="t-content" class="form-control" rows="8"
+                  placeholder="Привет, {{client}}!&#10;&#10;Спасибо за встречу..."></textarea>
+      </div>
+      <div id="preview-section" style="display:none">
+        <div style="font-size:.76rem;font-weight:600;color:var(--text-dim);margin-bottom:6px">Предпросмотр:</div>
+        <div class="preview-box" id="preview-content"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="togglePreview()">👁 Предпросмотр</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-primary" onclick="saveTmpl()">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Apply modal -->
+<div class="modal-overlay" id="applyModal" style="display:none" onclick="if(event.target===this)closeApply()">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title">Применить шаблон</span>
+      <button class="modal-close" onclick="closeApply()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Клиент</label>
+        <select id="apply-client" class="form-control" onchange="renderApply()"></select>
+      </div>
+      <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:6px">Результат:</div>
+      <div class="preview-box" id="apply-preview" style="min-height:120px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeApply()">Отмена</button>
+      <button class="btn btn-sm" onclick="copyApplied()">⎘ Копировать</button>
+      <button class="btn btn-primary" onclick="sendToKtalk()">💬 Отправить в KTalk</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var allTmpls = []; var editId = null; var applyTmpl = null; var filterCatVal = '';
+var CAT_LABELS = {general:'Общий',checkup:'Чекап',qbr:'QBR',kickoff:'Кикофф',sync:'Синк'};
+
+(async function load() {
+  var d = await fetch('/api/followup/templates').then(function(r){return r.json();}).catch(function(){return {templates:[]};});
+  allTmpls = d.templates || [];
+  if (!allTmpls.length) seedDefaults();
+  else render(allTmpls);
+  loadClients();
+})();
+
+function seedDefaults() {
+  var defaults = [
+    {name:'Фолоуап после чекапа',category:'checkup',content:'Привет, {{client}}!\n\nСпасибо за встречу сегодня.\n\nПодведём итоги:\n{{tasks}}\n\nЕсли появятся вопросы — пишите!\n\nС уважением, {{manager}}'},
+    {name:'Кикофф-письмо',category:'kickoff',content:'Привет, {{client}}!\n\nРады начать работу вместе! 🎉\n\nМы договорились:\n{{tasks}}\n\nСледующая встреча: {{next_meeting}}\n\n{{manager}}'},
+    {name:'Напоминание QBR',category:'qbr',content:'{{client}}, добрый день!\n\nНапоминаю о нашем квартальном обзоре {{date}}.\n\nПовестка:\n• Итоги квартала\n• Планы на следующий период\n• Ваши вопросы\n\n{{manager}}'},
+    {name:'Синк-звонок',category:'sync',content:'{{client}},\n\nСпасибо за звонок!\n\nОбсудили:\n{{tasks}}\n\nДо встречи!\n{{manager}}'},
+    {name:'Общий фолоуап',category:'general',content:'Привет, {{client}}!\n\n{{tasks}}\n\nС уважением, {{manager}}'},
+  ];
+  Promise.all(defaults.map(function(t){
+    return fetch('/api/followup/templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(t)});
+  })).then(async function(){
+    var d = await fetch('/api/followup/templates').then(function(r){return r.json();});
+    allTmpls = d.templates||[]; render(allTmpls);
+  });
+}
+
+function filterCat(cat, btn) {
+  filterCatVal = cat;
+  document.querySelectorAll('.tab-bar .fbtn, .fbtn').forEach(function(b){b.classList.remove('active');});
+  btn.classList.add('active');
+  render(allTmpls);
+}
+
+function render(list) {
+  var filtered = filterCatVal ? list.filter(function(t){return t.category===filterCatVal;}) : list;
+  var el = document.getElementById('tmpl-grid');
+  if (!filtered.length) {
+    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="empty-icon">📝</div><div class="empty-title">Нет шаблонов</div><div class="empty-text">Создайте первый шаблон</div></div>';
+    return;
+  }
+  el.innerHTML = filtered.map(function(t) {
+    var catCls = 'cat-'+(t.category||'general');
+    return '<div class="tmpl-card" onclick="openApply('+t.id+')">'
+      +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">'
+      +'  <div class="tmpl-name">'+t.name+'</div>'
+      +'  <span class="cat-chip '+catCls+'">'+CAT_LABELS[t.category||'general']+'</span>'
+      +'</div>'
+      +'<div class="tmpl-preview">'+escHtml(t.content)+'</div>'
+      +'<div class="tmpl-footer">'
+      +'  <span style="font-size:.7rem;color:var(--text-muted)">'+formatDate(t.created_at)+'</span>'
+      +'  <div style="display:flex;gap:4px" onclick="event.stopPropagation()">'
+      +'    <button class="btn btn-ghost btn-sm btn-icon" onclick="openEdit('+t.id+')" title="Редактировать">✏️</button>'
+      +'    <button class="btn btn-ghost btn-sm btn-icon" onclick="delTmpl('+t.id+')" title="Удалить">✕</button>'
+      +'  </div>'
+      +'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function formatDate(s){ return s ? new Date(s).toLocaleDateString('ru-RU',{day:'numeric',month:'short'}) : ''; }
+
+function openNew() { editId=null; document.getElementById('modal-title').textContent='Новый шаблон'; ['t-name','t-content'].forEach(function(id){document.getElementById(id).value=''}); document.getElementById('t-cat').value='general'; document.getElementById('preview-section').style.display='none'; document.getElementById('tmplModal').style.display='flex'; }
+function openEdit(id) { var t=allTmpls.find(function(t){return t.id===id;}); if(!t)return; editId=id; document.getElementById('modal-title').textContent='Редактировать'; document.getElementById('t-name').value=t.name; document.getElementById('t-cat').value=t.category||'general'; document.getElementById('t-content').value=t.content; document.getElementById('preview-section').style.display='none'; document.getElementById('tmplModal').style.display='flex'; event.stopPropagation(); }
+function closeModal() { document.getElementById('tmplModal').style.display='none'; }
+
+function insertVar(v) { var el=document.getElementById('t-content'); var pos=el.selectionStart; el.value=el.value.slice(0,pos)+v+el.value.slice(el.selectionEnd); el.focus(); el.setSelectionRange(pos+v.length,pos+v.length); }
+
+function togglePreview() {
+  var sec = document.getElementById('preview-section');
+  if (sec.style.display==='none') {
+    sec.style.display='block';
+    document.getElementById('preview-content').textContent = applyVars(document.getElementById('t-content').value, {client:'Клиент', manager:'Менеджер', date:new Date().toLocaleDateString('ru-RU'), tasks:'• Задача 1\n• Задача 2', next_meeting:'пятница 14:00'});
+  } else { sec.style.display='none'; }
+}
+
+async function saveTmpl() {
+  var body={name:document.getElementById('t-name').value.trim(),category:document.getElementById('t-cat').value,content:document.getElementById('t-content').value};
+  if(!body.name||!body.content)return;
+  var url=editId?'/api/followup/templates/'+editId:'/api/followup/templates';
+  var r=await fetch(url,{method:editId?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.ok){closeModal();var d=await fetch('/api/followup/templates').then(function(r){return r.json();});allTmpls=d.templates||[];render(allTmpls);showToast('Сохранено');}
+}
+
+async function delTmpl(id) { if(!confirm('Удалить шаблон?'))return; await fetch('/api/followup/templates/'+id,{method:'DELETE'}); allTmpls=allTmpls.filter(function(t){return t.id!==id;}); render(allTmpls); }
+
+// Apply
+var applyClients = [];
+async function loadClients(){var d=await fetch('/api/cabinet/my-clients').then(function(r){return r.json();}).catch(function(){return{clients:[]};});applyClients=d.clients||[];var sel=document.getElementById('apply-client');sel.innerHTML='<option value="">— Выберите клиента —</option>'+(applyClients.map(function(c){return'<option value="'+c.id+'" data-name="'+escHtml(c.name)+'">'+c.name+'</option>';}).join(''));}
+
+function openApply(id){applyTmpl=allTmpls.find(function(t){return t.id===id;});if(!applyTmpl)return;renderApply();document.getElementById('applyModal').style.display='flex';}
+function closeApply(){document.getElementById('applyModal').style.display='none';}
+
+function renderApply(){
+  if(!applyTmpl)return;
+  var sel=document.getElementById('apply-client');
+  var opt=sel.options[sel.selectedIndex];
+  var clientName=opt&&opt.value?(opt.dataset.name||opt.text):'Клиент';
+  var vars={client:clientName,manager:'{{ user.name if user else "Менеджер" }}',date:new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}),tasks:'(задачи будут подставлены)',next_meeting:'(дата следующей встречи)'};
+  document.getElementById('apply-preview').textContent=applyVars(applyTmpl.content,vars);
+}
+
+function applyVars(text,vars){return text.replace(/\{\{(\w+)\}\}/g,function(_,k){return vars[k]||('{{'+k+'}}');});}
+
+function copyApplied(){navigator.clipboard.writeText(document.getElementById('apply-preview').textContent).then(function(){showToast('Скопировано');});}
+
+async function sendToKtalk(){
+  var clientId=document.getElementById('apply-client').value;
+  var text=document.getElementById('apply-preview').textContent;
+  if(!clientId){showToast('Выберите клиента');return;}
+  var r=await fetch('/api/ktalk/send-dm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:parseInt(clientId),message:text})});
+  var d=await r.json();
+  showToast(d.ok?'✅ Отправлено в KTalk':'❌ '+(d.error||'Ошибка'));
+  if(d.ok)closeApply();
+}
+
+function showToast(msg){var t=document.createElement('div');t.className='toast success';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove();},3000);}
+</script>
+{% endblock %}

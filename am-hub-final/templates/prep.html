@@ -1,470 +1,317 @@
 {% extends "base.html" %}
-{% block title %}Подготовка — {{ client.name }}{% endblock %}
+{% block title %}Подготовка к встрече — AM Hub{% endblock %}
+{% block page_title %}Подготовка к встрече{% endblock %}
+
+{% block head %}
+<style>
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    .meta { color:var(--muted); font-size:.82rem; margin-top:4px; }
+    .tabs { display:flex; gap:4px; margin-bottom:20px; border-bottom:1px solid var(--border); }
+    .tab { padding:8px 16px; font-size:.85rem; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px; }
+    .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+    .card p { font-size:.82rem; color:var(--muted); }
+    .badge-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
+    .badge-in_progress { background:rgba(234,179,8,.15); color:#fbbf24; }
+    .badge-blocked { background:rgba(240,85,106,.15); color:#f87171; }
+    .badge-done { background:rgba(35,209,139,.15); color:#4ade80; }
+    .badge-seg { background:rgba(129,140,248,.15); color:#a5b4fc; }
+    .ai-block { background:rgba(129,140,248,.06); border:1px solid rgba(129,140,248,.2); border-radius:12px; padding:18px; margin-bottom:16px; }
+    .ai-label { font-size:.72rem; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; font-weight:600; display:flex; align-items:center; justify-content:space-between; }
+    textarea { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.88rem; line-height:1.7; padding:12px; resize:vertical; font-family:inherit; }
+    textarea:focus { outline:none; border-color:var(--accent); }
+    .form-row { margin-bottom:14px; }
+    .form-row label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:6px; font-weight:500; }
+    input[type=text], input[type=date], input[type=time], select { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.85rem; padding:8px 12px; font-family:inherit; }
+    input:focus, select:focus { outline:none; border-color:var(--accent); }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .actions-bar { display:flex; gap:8px; margin-top:20px; flex-wrap:wrap; }
+    .agenda-item { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); }
+    .agenda-item:last-child { border-bottom:none; }
+    .agenda-item input[type=checkbox] { width:16px; height:16px; cursor:pointer; accent-color:var(--accent); flex-shrink:0; }
+    .agenda-item input[type=text] { flex:1; border:none; background:transparent; font-size:.85rem; padding:4px 0; color:var(--text); }
+    .agenda-item input[type=text]:focus { outline:none; border-bottom:1px solid var(--accent); }
+    .agenda-add { color:var(--accent); font-size:.82rem; cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:8px 0; background:none; border:none; }
+    .risk-item { display:flex; align-items:center; gap:8px; font-size:.85rem; padding:8px 0; border-bottom:1px solid var(--border); }
+    .risk-item:last-child { border-bottom:none; }
+    .section-title { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
+    .toast { position:fixed; bottom:24px; right:24px; background:var(--green); color:#fff; padding:10px 18px; border-radius:10px; font-size:.85rem; display:none; z-index:999; }
+    .meeting-type-btns { display:flex; gap:8px; flex-wrap:wrap; }
+    .type-btn { padding:5px 12px; border-radius:20px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
+    .type-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(129,140,248,.1); }
+    .meeting-summary { display:none; font-size:.82rem; color:var(--muted); margin-top:8px; padding-top:8px; border-top:1px solid var(--border); line-height:1.5; }
+</style>
+{% endblock %}
+
 {% block content %}
+<a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
 
-<div class="page-header">
-  <p><a href="/">← Все клиенты</a></p>
-  <h1 style="margin-top:8px">
-    📋 {{ client.name }}
-    <span class="badge badge-{{ client.segment|lower }}" style="font-size:0.8rem;vertical-align:middle">{{ client.segment }}</span>
-  </h1>
-  <p style="color:var(--text-muted)">Чекап раз в {{ checkup_days }} дней · {{ client.segment }}</p>
-  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-    <a href="/checklist/{{ client.id }}" class="btn btn-ghost btn-sm">✅ Чеклист</a>
-    <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm">✍️ Фолоуап</a>
-    <a href="/roadmap?client_id={{ client.id }}" class="btn btn-ghost btn-sm">🗺️ Роадмап</a>
-    <a href="/qbr/{{ client.id }}" class="btn btn-ghost btn-sm">📊 QBR</a>
-    <button onclick="loadAiPrep()" class="btn btn-ghost btn-sm" id="ai-prep-btn">🤖 ИИ-подготовка</button>
-    <button onclick="loadSmartFollowup()" class="btn btn-ghost btn-sm" id="ai-followup-btn">✨ Умный фолоуап</button>
-    <button onclick="loadRisk()" class="btn btn-ghost btn-sm" id="ai-risk-btn">⚠️ Анализ рисков</button>
-    <button onclick="loadMetrics()" class="btn btn-ghost btn-sm" id="metrics-btn">📊 Метрики MR</button>
-  </div>
-</div>
-
-<!-- ИИ-панель (скрыта до нажатия) -->
-<div id="ai-panel" style="display:none;margin-bottom:16px">
-  <div class="card" style="border-left:3px solid var(--accent)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <h3 id="ai-panel-title" style="font-size:1rem;margin:0">🤖 ИИ-помощник</h3>
-      <button onclick="document.getElementById('ai-panel').style.display='none'"
-              style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem">✕</button>
-    </div>
-    <div id="ai-panel-content" style="font-size:0.88rem;line-height:1.7;white-space:pre-wrap;color:var(--text)">
-      <div style="text-align:center;padding:20px;color:var(--text-muted)">⏳ Загружаю данные...</div>
-    </div>
-    <div id="ai-panel-actions" style="margin-top:12px;display:none">
-      <button onclick="copyAiContent()" class="btn btn-ghost btn-sm">📋 Скопировать</button>
-    </div>
-  </div>
-</div>
-
-<!-- Статус чекапа + БЫСТРОЕ ЗАКРЫТИЕ -->
-<div class="card" style="border-left:4px solid
-  {% if status.color == 'red' %}var(--red){% elif status.color == 'yellow' %}var(--yellow){% else %}var(--green){% endif %}">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
+  <div class="page-header">
     <div>
-      <div style="font-size:0.82rem;color:var(--text-muted)">Статус чекапа</div>
-      <div style="font-size:1.1rem;font-weight:600;margin-top:4px;
-        color:{% if status.color == 'red' %}var(--red){% elif status.color == 'yellow' %}var(--yellow){% else %}var(--green){% endif %}">
-        {{ status.label }}
+      <h1>📋 Подготовка к встрече</h1>
+      <div class="meta">
+        <span class="badge badge-seg">{{ client.segment or '—' }}</span>
+        {{ client.name }} · {{ client.manager_email or '' }}
       </div>
-      {% if status.next_date %}
-      <div style="font-size:0.82rem;color:var(--text-muted);margin-top:2px">Следующий: {{ status.next_date }}</div>
-      {% endif %}
-      {% if client.planned_meeting %}
-      <div style="font-size:0.82rem;color:var(--accent);margin-top:4px">
-        📅 Запланировано: <b>{{ client.planned_meeting }}</b>
-        <button onclick="clearPlanned()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.75rem;margin-left:4px">✕</button>
-      </div>
-      {% endif %}
     </div>
-
-    <!-- Быстро отметить чекап проведённым -->
-    <div id="quick-checkup-box" style="background:var(--surface2);border-radius:10px;padding:14px;min-width:280px">
-      <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px">⚡ Быстро закрыть чекап</div>
-
-      <!-- Оценка настроения -->
-      <div style="display:flex;gap:6px;margin-bottom:10px" id="mood-btns">
-        <button onclick="setMood('positive')" class="mood-btn" data-mood="positive">🟢 Хорошо</button>
-        <button onclick="setMood('neutral')"  class="mood-btn active" data-mood="neutral">🟡 Нейтрально</button>
-        <button onclick="setMood('risk')"     class="mood-btn" data-mood="risk">🔴 Риск</button>
-      </div>
-
-      <!-- Рейтинг 1-5 -->
-      <div style="display:flex;gap:4px;margin-bottom:10px" id="rating-stars">
-        {% for i in range(1,6) %}
-        <button onclick="setRating({{ i }})" class="star-btn" data-val="{{ i }}">☆</button>
-        {% endfor %}
-      </div>
-
-      <!-- Краткое резюме -->
-      <textarea id="quick-summary" class="form-control" rows="2" style="margin-bottom:10px;font-size:0.82rem"
-        placeholder="Краткое резюме встречи (необязательно)..."></textarea>
-
-      <!-- Планировать следующую -->
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-        <label style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap">Следующая:</label>
-        <input type="date" id="next-meeting-date" class="form-control" value="{{ suggested_next }}"
-               style="flex:1;font-size:0.82rem">
-      </div>
-
-      <button onclick="quickCloseCheckup()" class="btn btn-primary" style="width:100%">
-        ✅ Чекап проведён
-      </button>
-      <div id="quick-result" style="margin-top:8px;font-size:0.82rem"></div>
-    </div>
-  </div>
-</div>
-
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-
-<!-- Открытые задачи -->
-<div class="card">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-    <h3 style="font-size:1rem;margin:0">⚡ Открытые задачи ({{ open_tasks|length }})</h3>
-    <a href="/tasks?status=open" style="font-size:0.78rem;color:var(--accent)">Все задачи →</a>
+    <a href="/followup/{{ client.id }}" class="btn">✍️ Followup →</a>
   </div>
 
-  {% if open_tasks %}
-    {% for t in open_tasks %}
-    <div class="task-item" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-      <span class="task-owner {% if t.owner == 'anyquery' %}owner-aq{% else %}owner-cl{% endif %}"
-            style="font-size:0.7rem;padding:2px 6px;border-radius:4px;flex-shrink:0">
-        {{ 'AQ' if t.owner == 'anyquery' else '🤝' }}
-      </span>
-      <span class="task-text" style="flex:1;font-size:0.85rem">{{ t.text }}</span>
-      {% if t.due_date %}
-      <span style="font-size:0.75rem;color:{% if t.due_date < today %}var(--red){% else %}var(--text-muted){% endif %}">
-        {{ t.due_date[:10] }}
-      </span>
-      {% endif %}
-      <form method="post" action="/api/task/{{ t.id }}/done" style="margin:0">
-        <button type="submit" class="btn btn-ghost btn-sm">✓</button>
-      </form>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="section-title">🎯 Параметры встречи</div>
+    <div class="form-row">
+      <label>Тип встречи</label>
+      <div class="meeting-type-btns" id="meetingTypeBtns">
+        <button class="type-btn active" data-type="checkup" onclick="setType(this)">🩺 Чекап</button>
+        <button class="type-btn" data-type="qbr" onclick="setType(this)">📊 QBR</button>
+        <button class="type-btn" data-type="onboarding" onclick="setType(this)">🚀 Онбординг</button>
+        <button class="type-btn" data-type="upsell" onclick="setType(this)">📈 Апсейл</button>
+        <button class="type-btn" data-type="sync" onclick="setType(this)">🔄 Синк</button>
+        <button class="type-btn" data-type="other" onclick="setType(this)">💬 Другое</button>
+      </div>
     </div>
-    {% endfor %}
-    <!-- Быстрый пуш задач в MR -->
-    <button onclick="pushTasksToMR()" class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%">
-      🚀 Синхронизировать задачи → Merchrules
-    </button>
-    <div id="mr-tasks-result" style="font-size:0.78rem;margin-top:4px"></div>
-  {% else %}
-    <div style="text-align:center;padding:20px;color:var(--text-muted)">
-      <div style="font-size:1.5rem">🎉</div>
-      <p style="margin-top:8px;font-size:0.9rem">Нет открытых задач</p>
-      <a href="/followup/{{ client.id }}" class="btn btn-primary btn-sm" style="margin-top:8px">
-        + Добавить после встречи
-      </a>
+    <div class="form-grid">
+      <div class="form-row">
+        <label>Дата</label>
+        <input type="date" id="meetingDate" value="{{ now.strftime('%Y-%m-%d') }}">
+      </div>
+      <div class="form-row">
+        <label>Время</label>
+        <input type="time" id="meetingTime" value="10:00">
+      </div>
     </div>
-  {% endif %}
-</div>
+    <div class="form-row">
+      <label>Участники (через запятую)</label>
+      <input type="text" id="attendees" placeholder="Иван Иванов, Мария Петрова...">
+    </div>
+    <div class="form-row">
+      <label>Ссылка на встречу</label>
+      <input type="text" id="meetingLink" placeholder="https://...">
+    </div>
+  </div>
 
-<!-- История встреч -->
-<div class="card">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-    <h3 style="font-size:1rem;margin:0">🗓 История встреч</h3>
-    {% if not meetings %}
-    <span style="font-size:0.78rem;color:var(--text-muted)">Первая встреча?</span>
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('ai')">🤖 AI-подготовка</div>
+    <div class="tab" onclick="showTab('agenda')">📝 Агенда</div>
+    <div class="tab" onclick="showTab('tasks')">📋 Задачи ({{ tasks|length }})</div>
+    <div class="tab" onclick="showTab('history')">📅 История ({{ meetings|length }})</div>
+    <div class="tab" onclick="showTab('risks')">⚠️ Риски</div>
+  </div>
+
+  <div class="tab-pane active" id="tab-ai">
+    <div class="ai-block">
+      <div class="ai-label">
+        🤖 AI-подготовка
+        <button class="btn btn-sm" onclick="copyAI()">📋 Копировать</button>
+        <button class="btn btn-sm" style="background:rgba(129,140,248,.15);color:var(--accent);border:1px solid rgba(129,140,248,.3);" onclick="regenerateAI()" id="regenBtn">🔄 Перегенерировать</button>
+      </div>
+      <textarea id="aiText" rows="12">{{ prep_text }}</textarea>
+    </div>
+    <div class="form-row">
+      <label>Личные заметки перед встречей</label>
+      <textarea id="prepNotes" rows="4" placeholder="Что хочу обсудить, о чём не забыть..."></textarea>
+    </div>
+  </div>
+
+  <div class="tab-pane" id="tab-agenda">
+    <div class="card">
+      <div class="section-title">📝 Агенда встречи</div>
+      <div id="agendaList"></div>
+      <button class="agenda-add" onclick="addAgendaItem()">+ Добавить пункт</button>
+    </div>
+  </div>
+
+  <div class="tab-pane" id="tab-tasks">
+    {% if tasks %}
+      {% for t in tasks %}
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <h3>{{ t.title }}</h3>
+          <span class="badge badge-{{ t.status }}">{{ t.status }}</span>
+        </div>
+        {% if t.description %}<p style="margin-top:4px;">{{ t.description[:120] }}</p>{% endif %}
+        <div style="font-size:.72rem;color:var(--muted);margin-top:6px;">
+          {{ t.priority }}{% if t.due_date %} · до {{ t.due_date.strftime('%d.%m.%Y') }}{% endif %}{% if t.team %} · {{ t.team }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="color:var(--muted);padding:20px;text-align:center;">Нет открытых задач</div>
     {% endif %}
   </div>
 
-  {% if meetings %}
-    {% for m in meetings %}
-    <div class="meeting-item" style="padding:8px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-weight:600;font-size:0.85rem">{{ m.meeting_date[:10] }}</span>
-        <span class="badge" style="background:var(--surface2);color:var(--text-muted);font-size:0.7rem">
-          {{ {'checkup':'Чекап','qbr':'QBR','urgent':'Экстренная'}.get(m.meeting_type, m.meeting_type) }}
-        </span>
-        {% if m.mood == 'positive' %}<span title="Позитивно">🟢</span>
-        {% elif m.mood == 'risk' %}<span title="Риск">🔴</span>
-        {% else %}<span title="Нейтрально">🟡</span>{% endif %}
-        {% if m.checkup_rating %}
-        <span style="font-size:0.75rem;color:var(--yellow)">{{ '★' * m.checkup_rating }}{{ '☆' * (5 - m.checkup_rating) }}</span>
+  <div class="tab-pane" id="tab-history">
+    {% if meetings %}
+      {% for m in meetings %}
+      <div class="card" style="cursor:pointer;" onclick="toggleSummary({{ loop.index }})">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <h3>{{ m.title or m.type }}</h3>
+          <span style="font-size:.75rem;color:var(--muted);">{{ m.date.strftime('%d.%m.%Y') if m.date else '' }}</span>
+        </div>
+        <div class="meeting-summary" id="summary-{{ loop.index }}">
+          {% if m.summary %}{{ m.summary }}{% else %}<span style="color:var(--muted)">Нет записи итогов</span>{% endif %}
+          {% if m.followup_text %}<div style="margin-top:8px;"><b>Followup:</b> {{ m.followup_text[:300] }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="color:var(--muted);padding:20px;text-align:center;">Нет истории встреч</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane" id="tab-risks">
+    <div class="card">
+      <div class="section-title">⚠️ Риски по клиенту</div>
+      {% set blocked = tasks | selectattr('status', 'equalto', 'blocked') | list %}
+      {% if blocked %}
+      <div class="risk-item">🔴 {{ blocked|length }} заблокированных задач</div>
+      {% endif %}
+      {% if client.health_score and client.health_score < 0.5 %}
+      <div class="risk-item">📉 Низкий health score: {{ (client.health_score * 100)|int }}%</div>
+      {% endif %}
+      {% if client.last_meeting_date %}
+        {% set days_since = (now - client.last_meeting_date).days %}
+        {% if days_since > 30 %}
+        <div class="risk-item">📅 Нет встреч {{ days_since }} дней</div>
         {% endif %}
-        {% if m.tg_sent %}<span title="Отправлено в TG" style="font-size:0.75rem">✈️</span>{% endif %}
-        {% if m.mr_synced %}<span title="Синхронизировано с Merchrules" style="font-size:0.75rem">🔄</span>{% endif %}
-      </div>
-      {% if m.summary %}
-      <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
-        {{ m.summary[:150] }}{% if m.summary|length > 150 %}…{% endif %}
-      </div>
+      {% endif %}
+      {% if client.open_tickets and client.open_tickets > 0 %}
+      <div class="risk-item">🎫 Открытых тикетов: {{ client.open_tickets }}</div>
+      {% endif %}
+      {% if not blocked %}
+      <div class="risk-item">✅ <span style="color:var(--muted);">Критических рисков не обнаружено</span></div>
       {% endif %}
     </div>
-    {% endfor %}
-  {% else %}
-    <div style="text-align:center;padding:24px;color:var(--text-muted)">
-      <div style="font-size:1.5rem">📅</div>
-      <p style="font-size:0.88rem;margin-top:8px">Встреч ещё не было</p>
-      <p style="font-size:0.78rem;margin-top:4px">После встречи — нажми «Фолоуап»</p>
-    </div>
-  {% endif %}
+  </div>
+
+  <div class="actions-bar">
+    <button class="btn btn-primary" onclick="savePrepAndGo()">✅ Готов — открыть Followup</button>
+    <button class="btn" onclick="savePrep()">💾 Сохранить черновик</button>
+    <button class="btn" onclick="copyAll()">📋 Скопировать всё</button>
+  </div>
 </div>
 
-</div>
-
-<!-- Запланировать регулярную встречу с буфером -->
-<div class="card" style="margin-top:0">
-  <details>
-    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">📅 Запланировать встречу (+30 мин буфер)</summary>
-    <div style="margin-top:14px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-        <div>
-          <label style="font-size:0.8rem;color:var(--text-muted)">Дата и время встречи</label>
-          <input type="datetime-local" id="plan-dt" class="form-control" style="margin-top:4px"
-                 value="{{ today }}T10:00">
-        </div>
-        <div>
-          <label style="font-size:0.8rem;color:var(--text-muted)">Длительность (мин)</label>
-          <select id="plan-dur" class="form-control" style="margin-top:4px">
-            <option value="30">30 мин</option>
-            <option value="45">45 мин</option>
-            <option value="60" selected>60 мин</option>
-            <option value="90">90 мин</option>
-          </select>
-        </div>
-      </div>
-
-      <div id="plan-preview" style="background:var(--surface2);border-radius:8px;padding:12px;font-size:0.82rem;margin-bottom:10px;display:none">
-        <div style="color:var(--text-muted);margin-bottom:6px">Расписание с буфером 30 мин:</div>
-        <div>🟡 <span id="buf-before-time"></span> — Подготовка (30 мин)</div>
-        <div>🟢 <span id="meeting-time-range"></span> — Встреча с {{ client.name }}</div>
-        <div>🟡 <span id="buf-after-time"></span> — Фолоуап (30 мин)</div>
-      </div>
-
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button onclick="calcBuffer()" class="btn btn-ghost btn-sm">🔍 Рассчитать</button>
-        <button onclick="saveAndGoogleCal()" class="btn btn-primary btn-sm">📅 Добавить в Google Calendar</button>
-        <button onclick="savePlannedDate()" class="btn btn-ghost btn-sm">💾 Сохранить дату</button>
-      </div>
-    </div>
-  </details>
-</div>
-
-<!-- TG канал клиента -->
-<div class="card" style="margin-top:0">
-  <details>
-    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">✈️ Настройка Telegram-канала</summary>
-    <form method="post" action="/api/client/{{ client.id }}/tg" style="display:flex;gap:10px;align-items:flex-end;margin-top:12px">
-      <div class="form-group" style="flex:1;margin:0">
-        <label>Chat ID или @username канала</label>
-        <input type="text" name="tg_chat_id" class="form-control"
-               value="{{ client.tg_chat_id or '' }}" placeholder="-100123456789 или @channelname">
-      </div>
-      <button type="submit" class="btn btn-ghost">💾</button>
-    </form>
-  </details>
-</div>
-
-<style>
-.mood-btn { background:var(--surface2); border:1px solid var(--border); border-radius:6px;
-            padding:4px 10px; font-size:0.78rem; cursor:pointer; color:var(--text); }
-.mood-btn.active { border-color:var(--accent); background:rgba(99,102,241,.15); }
-.star-btn { background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--yellow);
-            padding:0 2px; transition:transform .1s; }
-.star-btn:hover { transform:scale(1.2); }
-</style>
+<div class="toast" id="toast"></div>
 
 <script>
-let _mood = 'neutral';
-let _rating = 0;
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
 
-function setMood(m) {
-  _mood = m;
-  document.querySelectorAll('.mood-btn').forEach(b => b.classList.toggle('active', b.dataset.mood === m));
+const AGENDAS={
+  checkup:['Приветствие и цель встречи','Статус по открытым задачам','Обзор метрик и health score','Вопросы и обратная связь','Следующие шаги'],
+  qbr:['Приветствие и повестка','Итоги квартала — метрики','Достижения и проблемы','Цели на следующий квартал','Q&A'],
+  onboarding:['Знакомство с командой','Обзор продукта и возможностей','Настройка и первые шаги','Ответы на вопросы','Первый контрольный чекап — когда?'],
+  upsell:['Приветствие','Текущие результаты клиента','Обзор новых возможностей','Обсуждение условий','Следующие шаги'],
+  sync:['Обновление по задачам','Блокеры и проблемы','Приоритеты на следующий период'],
+  other:['Цель встречи','Обсуждение','Итоги и следующие шаги']
+};
+
+function showTab(name){
+  const names=['ai','agenda','tasks','history','risks'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',names[i]===name));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
 }
 
-function setRating(val) {
-  _rating = val;
-  document.querySelectorAll('.star-btn').forEach(b => {
-    b.textContent = parseInt(b.dataset.val) <= val ? '★' : '☆';
-  });
+function setType(btn){
+  document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAgenda(AGENDAS[btn.dataset.type]||AGENDAS.other);
 }
 
-async function quickCloseCheckup() {
-  const summary = document.getElementById('quick-summary').value.trim();
-  const nextDate = document.getElementById('next-meeting-date').value;
-  const res = document.getElementById('quick-result');
-  res.textContent = '⏳ Сохраняем...';
+function renderAgenda(items){
+  const list=document.getElementById('agendaList');
+  list.innerHTML=items.map(item=>`<div class="agenda-item"><input type="checkbox"><input type="text" value="${item}"></div>`).join('');
+}
 
+function addAgendaItem(){
+  const div=document.createElement('div');
+  div.className='agenda-item';
+  div.innerHTML='<input type="checkbox"><input type="text" placeholder="Новый пункт...">';
+  document.getElementById('agendaList').appendChild(div);
+  div.querySelector('input[type=text]').focus();
+}
+
+function toggleSummary(idx){
+  const el=document.getElementById('summary-'+idx);
+  el.style.display=el.style.display==='block'?'none':'block';
+}
+
+function showToast(msg,color='var(--green)'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.background=color;t.style.display='block';
+  setTimeout(()=>t.style.display='none',2500);
+}
+
+function getAgenda(){
+  return Array.from(document.querySelectorAll('#agendaList input[type=text]')).map(i=>i.value).filter(Boolean);
+}
+
+function savePrep(){
+  const data={
+    meeting_type:document.querySelector('.type-btn.active')?.dataset.type||'checkup',
+    meeting_date:document.getElementById('meetingDate').value,
+    meeting_time:document.getElementById('meetingTime').value,
+    attendees:document.getElementById('attendees').value,
+    meeting_link:document.getElementById('meetingLink').value,
+    prep_notes:document.getElementById('prepNotes').value,
+    agenda:getAgenda(),
+    ai_text:document.getElementById('aiText').value
+  };
+  localStorage.setItem('prep_{{ client.id }}',JSON.stringify(data));
+  showToast('💾 Черновик сохранён');
+}
+
+function savePrepAndGo(){savePrep();window.location.href='/followup/{{ client.id }}';}
+
+function copyAI(){navigator.clipboard.writeText(document.getElementById('aiText').value);showToast('📋 Скопировано');}
+async function regenerateAI(){
+  const btn = document.getElementById('regenBtn');
+  const meetingType = document.querySelector('.type-btn.active')?.dataset.type || 'meeting';
+  btn.disabled = true; btn.textContent = '⏳ Генерирую...';
   try {
-    const r = await fetch('/api/client/{{ client.id }}/checkup-done', {
+    const r = await fetch('/api/ai/generate-prep', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ mood: _mood, rating: _rating, summary, next_meeting: nextDate }),
+      body: JSON.stringify({client_id: clientId, meeting_type: meetingType})
     });
     const d = await r.json();
-    if (d.ok) {
-      res.innerHTML = '✅ Сохранено' +
-        (d.mr ? ' · MR ✓' : '') +
-        (d.airtable ? ' · Airtable ✓' : '');
-      res.style.color = 'var(--accent)';
-      setTimeout(() => location.reload(), 1500);
+    if (d.text) {
+      document.getElementById('aiText').value = d.text;
+      showToast('✅ AI обновил подготовку');
     } else {
-      res.textContent = '❌ ' + (d.error || 'Ошибка');
-      res.style.color = 'var(--red)';
+      showToast('❌ ' + (d.error || 'Ошибка AI'), 'var(--red)');
     }
-  } catch(e) {
-    res.textContent = '❌ ' + e.message;
-    res.style.color = 'var(--red)';
-  }
+  } catch(e) { showToast('❌ ' + e.message, 'var(--red)'); }
+  btn.disabled = false; btn.textContent = '🔄 Перегенерировать';
 }
 
-async function pushTasksToMR() {
-  const res = document.getElementById('mr-tasks-result');
-  res.textContent = '⏳ Отправляем в Merchrules...';
-  try {
-    const r = await fetch('/api/client/{{ client.id }}/push-tasks', { method: 'POST' });
-    const d = await r.json();
-    if (d.ok) {
-      res.textContent = `✅ Загружено в MR: ${d.count} задач`;
-      res.style.color = 'var(--accent)';
-    } else {
-      res.textContent = '⚠️ ' + (d.error || d.note || 'Нет кредов MR');
-      res.style.color = 'var(--yellow)';
+function copyAll(){
+  const type=document.querySelector('.type-btn.active')?.textContent||'';
+  const agenda=getAgenda().map((a,i)=>`${i+1}. ${a}`).join('\n');
+  const notes=document.getElementById('prepNotes').value;
+  const text=`ПОДГОТОВКА: {{ client.name }}\nТип: ${type}\nДата: ${document.getElementById('meetingDate').value} ${document.getElementById('meetingTime').value}\n\nАГЕНДА:\n${agenda}${notes?'\n\nЗАМЕТКИ:\n'+notes:''}\n\nAI:\n${document.getElementById('aiText').value}`;
+  navigator.clipboard.writeText(text);
+  showToast('📋 Всё скопировано');
+}
+
+// Загружаем сохранённый черновик или рендерим агенду по умолчанию
+const saved=localStorage.getItem('prep_{{ client.id }}');
+if(saved){
+  try{
+    const d=JSON.parse(saved);
+    if(d.meeting_date)document.getElementById('meetingDate').value=d.meeting_date;
+    if(d.meeting_time)document.getElementById('meetingTime').value=d.meeting_time;
+    if(d.attendees)document.getElementById('attendees').value=d.attendees;
+    if(d.meeting_link)document.getElementById('meetingLink').value=d.meeting_link;
+    if(d.prep_notes)document.getElementById('prepNotes').value=d.prep_notes;
+    if(d.agenda&&d.agenda.length)renderAgenda(d.agenda);
+    else renderAgenda(AGENDAS.checkup);
+    if(d.meeting_type){
+      document.querySelectorAll('.type-btn').forEach(b=>b.classList.toggle('active',b.dataset.type===d.meeting_type));
     }
-  } catch(e) {
-    res.textContent = '❌ ' + e.message;
-    res.style.color = 'var(--red)';
-  }
-}
-
-async function clearPlanned() {
-  await fetch('/api/client/{{ client.id }}/planned-meeting', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ date: null }),
-  });
-  location.reload();
-}
-
-function calcBuffer() {
-  const dt = document.getElementById('plan-dt').value;
-  const dur = parseInt(document.getElementById('plan-dur').value);
-  if (!dt) return;
-
-  const start = new Date(dt);
-  const bufBefore = new Date(start.getTime() - 30 * 60000);
-  const meetingEnd = new Date(start.getTime() + dur * 60000);
-  const bufAfter = new Date(meetingEnd.getTime() + 30 * 60000);
-
-  const fmt = d => d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
-  const fmtFull = d => d.toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-
-  document.getElementById('buf-before-time').textContent = `${fmtFull(bufBefore)} – ${fmt(start)}`;
-  document.getElementById('meeting-time-range').textContent = `${fmt(start)} – ${fmt(meetingEnd)}`;
-  document.getElementById('buf-after-time').textContent = `${fmt(meetingEnd)} – ${fmt(bufAfter)}`;
-  document.getElementById('plan-preview').style.display = 'block';
-}
-
-function saveAndGoogleCal() {
-  const dt = document.getElementById('plan-dt').value;
-  const dur = parseInt(document.getElementById('plan-dur').value);
-  if (!dt) { alert('Выбери дату и время'); return; }
-
-  const start = new Date(dt);
-  const end = new Date(start.getTime() + dur * 60000);
-  const fmt = d => d.toISOString().replace(/[-:]/g,'').replace('.000','');
-
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: `Чекап — {{ client.name }}`,
-    dates: `${fmt(start)}/${fmt(end)}`,
-    details: `Клиент: {{ client.name }} ({{ client.segment }})\nПодготовка за 30 мин до. Фолоуап 30 мин после.`,
-    sf: 'true',
-  });
-  window.open('https://calendar.google.com/calendar/r/eventedit?' + params.toString(), '_blank');
-
-  // Также сохраняем дату в AM Hub
-  savePlannedDate();
-}
-
-async function savePlannedDate() {
-  const dt = document.getElementById('plan-dt').value;
-  if (!dt) return;
-  const dateOnly = dt.split('T')[0];
-  const r = await fetch('/api/client/{{ client.id }}/planned-meeting', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ date: dateOnly }),
-  });
-  const d = await r.json();
-  if (d.ok) location.reload();
-}
-
-// ── ИИ-помощник ────────────────────────────────────────────────────────────
-function showAiPanel(title) {
-  const panel = document.getElementById('ai-panel');
-  document.getElementById('ai-panel-title').textContent = title;
-  document.getElementById('ai-panel-content').innerHTML =
-    '<div style="text-align:center;padding:20px;color:var(--text-muted)">⏳ ИИ думает...</div>';
-  document.getElementById('ai-panel-actions').style.display = 'none';
-  panel.style.display = 'block';
-  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-async function fetchAiEndpoint(url, title) {
-  showAiPanel(title);
-  try {
-    const r = await fetch(url);
-    const d = await r.json();
-    const content = document.getElementById('ai-panel-content');
-    const actions = document.getElementById('ai-panel-actions');
-    if (d.ok === false || d.error) {
-      content.innerHTML = `<span style="color:var(--red)">❌ ${d.error || 'Ошибка'}</span>`;
-    } else {
-      const text = d.brief || d.text || JSON.stringify(d, null, 2);
-      content.textContent = text;
-      actions.style.display = 'block';
-    }
-  } catch(e) {
-    document.getElementById('ai-panel-content').innerHTML =
-      `<span style="color:var(--red)">❌ ${e.message}</span>`;
-  }
-}
-
-function loadAiPrep() {
-  fetchAiEndpoint('/api/client/{{ client.id }}/prep-brief', '🤖 ИИ-подготовка к встрече');
-}
-
-function loadSmartFollowup() {
-  fetchAiEndpoint('/api/client/{{ client.id }}/smart-followup', '✨ Предложение фолоуапа');
-}
-
-async function loadRisk() {
-  showAiPanel('⚠️ Анализ рисков аккаунта');
-  try {
-    const r = await fetch('/api/client/{{ client.id }}/risk');
-    const d = await r.json();
-    const content = document.getElementById('ai-panel-content');
-    const levelEmoji = { low: '🟢', medium: '🟡', high: '🔴' }[d.risk_level] || '⚪';
-    let html = `<b>${levelEmoji} Уровень риска: ${d.risk_level?.toUpperCase() || '—'}</b>\n\n`;
-    if (d.flags?.length) {
-      html += 'Флаги:\n' + d.flags.map(f => `• ${f}`).join('\n') + '\n\n';
-    }
-    if (d.recommendation) {
-      html += `💡 Рекомендация: ${d.recommendation}`;
-    }
-    content.textContent = html;
-    document.getElementById('ai-panel-actions').style.display = 'block';
-  } catch(e) {
-    document.getElementById('ai-panel-content').innerHTML =
-      `<span style="color:var(--red)">❌ ${e.message}</span>`;
-  }
-}
-
-async function loadMetrics() {
-  showAiPanel('📊 Метрики Merchrules');
-  try {
-    const r = await fetch('/api/client/{{ client.id }}/metrics');
-    const d = await r.json();
-    const content = document.getElementById('ai-panel-content');
-    if (d.error === 'no_site_ids') {
-      content.textContent = '⚠️ У клиента не заданы Site ID для Merchrules. Добавь их в профиле клиента.';
-      return;
-    }
-    if (d.error) {
-      content.innerHTML = `<span style="color:var(--yellow)">⚠️ ${d.error}</span>`;
-      return;
-    }
-    const fmt = n => n ? Number(n).toLocaleString('ru-RU') : '—';
-    content.textContent =
-      `GMV: ${fmt(d.gmv)} ₽\n` +
-      `Заказы: ${fmt(d.orders)}\n` +
-      `Конверсия: ${d.conversion ? (d.conversion * 100).toFixed(2) + '%' : '—'}\n` +
-      `CTR поиска: ${d.search_ctr ? (d.search_ctr * 100).toFixed(2) + '%' : '—'}`;
-    document.getElementById('ai-panel-actions').style.display = 'block';
-  } catch(e) {
-    document.getElementById('ai-panel-content').innerHTML =
-      `<span style="color:var(--red)">❌ ${e.message}</span>`;
-  }
-}
-
-function copyAiContent() {
-  const text = document.getElementById('ai-panel-content').textContent;
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = event.target;
-    btn.textContent = '✅ Скопировано';
-    setTimeout(() => btn.textContent = '📋 Скопировать', 1500);
-  });
-}
+  }catch(e){renderAgenda(AGENDAS.checkup);}
+}else{renderAgenda(AGENDAS.checkup);}
 </script>
 {% endblock %}

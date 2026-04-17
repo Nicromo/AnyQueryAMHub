@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}AI-ассистент — AM Hub{% endblock %}
+{% block page_title %}AI-ассистент{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Спросите всё о своих клиентах</div>{% endblock %}
+
+{% block content %}
+<style>
+.chat-wrap{display:grid;grid-template-columns:260px 1fr;gap:16px;height:calc(100vh - 120px)}
+.chat-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column}
+.chat-main{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);display:flex;flex-direction:column;overflow:hidden}
+.chat-list{flex:1;overflow-y:auto;padding:8px}
+.chat-item{padding:8px 10px;border-radius:var(--radius);cursor:pointer;font-size:.8rem;color:var(--text-dim);transition:background var(--t);display:flex;align-items:center;justify-content:space-between;gap:6px}
+.chat-item:hover,.chat-item.active{background:var(--surface-2);color:var(--text)}
+.chat-item-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-item-date{font-size:.67rem;color:var(--text-muted);flex-shrink:0}
+.client-selector{padding:10px;border-bottom:1px solid var(--border)}
+.messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.msg{display:flex;gap:10px;align-items:flex-start;animation:fadeSlideIn .2s ease}
+.msg.user{flex-direction:row-reverse}
+.msg-avatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700}
+.msg-avatar.ai{background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff}
+.msg-avatar.user{background:var(--surface-3);color:var(--text-dim)}
+.msg-bubble{max-width:72%;padding:10px 14px;border-radius:12px;font-size:.84rem;line-height:1.6}
+.msg-bubble.ai{background:var(--surface-2);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg-bubble.user{background:var(--accent-dim);border:1px solid var(--accent-ring);border-bottom-right-radius:4px;text-align:right}
+.msg-bubble code{font-size:.8em}
+.msg-bubble ul,.msg-bubble ol{padding-left:16px;margin:4px 0}
+.msg-bubble li{margin:2px 0}
+.chat-input-wrap{padding:12px 14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end}
+.chat-input{flex:1;resize:none;min-height:40px;max-height:120px;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--font);font-size:.84rem;line-height:1.5;outline:none;transition:border-color var(--t)}
+.chat-input:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px var(--accent-ring)}
+.typing{display:flex;align-items:center;gap:4px;padding:8px 12px}
+.typing span{width:6px;height:6px;border-radius:50%;background:var(--text-muted);animation:typing 1.2s infinite}
+.typing span:nth-child(2){animation-delay:.2s}
+.typing span:nth-child(3){animation-delay:.4s}
+@keyframes typing{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+.suggestions{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--border)}
+.sug{padding:5px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:20px;font-size:.74rem;cursor:pointer;color:var(--text-dim);transition:all var(--t)}
+.sug:hover{border-color:var(--accent-ring);color:var(--text);background:var(--accent-dim)}
+.empty-chat{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);gap:12px;padding:32px}
+.empty-chat .icon{font-size:2.5rem;opacity:.5}
+.empty-chat .title{font-size:.92rem;font-weight:600;color:var(--text-dim)}
+.empty-chat .desc{font-size:.78rem;text-align:center;max-width:260px;line-height:1.6}
+@media(max-width:768px){.chat-wrap{grid-template-columns:1fr}.chat-sidebar{display:none}}
+</style>
+
+<div class="chat-wrap">
+  <!-- Sidebar: клиент + история чатов -->
+  <div class="chat-sidebar">
+    <div class="client-selector">
+      <select id="client-sel" class="form-control" style="font-size:.8rem" onchange="onClientChange()">
+        <option value="">🌐 Общий чат</option>
+      </select>
+    </div>
+    <div style="padding:8px 10px;border-bottom:1px solid var(--border)">
+      <button class="btn btn-primary btn-sm" style="width:100%" onclick="newChat()">+ Новый чат</button>
+    </div>
+    <div class="chat-list" id="chat-list">
+      <div style="padding:12px;font-size:.75rem;color:var(--text-muted)">Нет истории</div>
+    </div>
+  </div>
+
+  <!-- Main chat -->
+  <div class="chat-main">
+    <div class="messages" id="messages">
+      <div class="empty-chat" id="empty-state">
+        <div class="icon">🤖</div>
+        <div class="title">AI-ассистент AM Hub</div>
+        <div class="desc">Задайте вопрос о клиентах, попросите составить план или проанализировать портфель</div>
+      </div>
+    </div>
+
+    <!-- Suggestions -->
+    <div class="suggestions" id="suggestions">
+      <div class="sug" onclick="useSug(this)">Какие клиенты требуют внимания сегодня?</div>
+      <div class="sug" onclick="useSug(this)">Составь план работы на неделю</div>
+      <div class="sug" onclick="useSug(this)">Клиенты с падающим health score</div>
+      <div class="sug" onclick="useSug(this)">Напиши фолоуап после встречи</div>
+    </div>
+
+    <!-- Input -->
+    <div class="chat-input-wrap">
+      <textarea class="chat-input" id="chat-input" rows="1" placeholder="Спросите что-нибудь... (Enter — отправить, Shift+Enter — перенос строки)"></textarea>
+      <button class="btn btn-primary btn-icon" onclick="sendMessage()" id="send-btn" title="Отправить">➤</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var currentClientId = null;
+var chatHistory = [];  // {role, content}
+var isTyping = false;
+
+// ── Init ────────────────────────────────────────────────────────────────────
+(async function init() {
+  // Загружаем клиентов в selector
+  var d = await fetch('/api/cabinet/my-clients').then(r=>r.json()).catch(()=>({clients:[]}));
+  var sel = document.getElementById('client-sel');
+  (d.clients||[]).forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value = c.id; opt.textContent = c.name;
+    sel.appendChild(opt);
+  });
+  loadChatHistory();
+
+  // URL param: ?client=ID
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('client')) {
+    sel.value = params.get('client');
+    onClientChange();
+  }
+})();
+
+function onClientChange() {
+  currentClientId = document.getElementById('client-sel').value || null;
+  newChat();
+}
+
+function newChat() {
+  chatHistory = [];
+  document.getElementById('messages').innerHTML = `
+    <div class="empty-chat" id="empty-state">
+      <div class="icon">🤖</div>
+      <div class="title">AI-ассистент AM Hub</div>
+      <div class="desc">Задайте вопрос о клиентах, попросите составить план или проанализировать портфель</div>
+    </div>`;
+  document.getElementById('chat-input').focus();
+}
+
+async function loadChatHistory() {
+  var d = await fetch('/api/ai/chat/history').then(r=>r.json()).catch(()=>({chats:[]}));
+  var list = document.getElementById('chat-list');
+  var chats = d.chats || [];
+  if (!chats.length) { list.innerHTML='<div style="padding:12px;font-size:.75rem;color:var(--text-muted)">Нет истории</div>'; return; }
+  list.innerHTML = chats.map(function(c) {
+    return '<div class="chat-item" onclick="loadChat('+c.id+')">'
+      +'<div class="chat-item-title">'+escHtml(c.first_message)+'</div>'
+      +'<div class="chat-item-date">'+formatDate(c.created_at)+'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function escHtml(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function formatDate(s){if(!s)return'';var d=new Date(s);return d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'});}
+
+// ── Send message ────────────────────────────────────────────────────────────
+async function sendMessage() {
+  var input = document.getElementById('chat-input');
+  var text = input.value.trim();
+  if (!text || isTyping) return;
+
+  // Убираем empty state
+  var empty = document.getElementById('empty-state');
+  if (empty) empty.remove();
+  document.getElementById('suggestions').style.display = 'none';
+
+  // Показываем сообщение пользователя
+  appendMsg('user', text);
+  chatHistory.push({role: 'user', content: text});
+  input.value = ''; input.style.height = 'auto';
+
+  // Typing indicator
+  isTyping = true;
+  var typingEl = document.createElement('div');
+  typingEl.className = 'msg'; typingEl.id = 'typing-indicator';
+  typingEl.innerHTML = '<div class="msg-avatar ai">AI</div><div class="msg-bubble ai"><div class="typing"><span></span><span></span><span></span></div></div>';
+  document.getElementById('messages').appendChild(typingEl);
+  scrollToBottom();
+
+  try {
+    var r = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        message: text,
+        client_id: currentClientId ? parseInt(currentClientId) : null,
+        history: chatHistory.slice(-10),  // последние 10 сообщений
+      })
+    });
+    var d = await r.json();
+    typingEl.remove();
+    isTyping = false;
+
+    var reply = d.reply || d.response || 'Извините, не могу ответить.';
+    appendMsg('ai', reply);
+    chatHistory.push({role: 'assistant', content: reply});
+    loadChatHistory();
+  } catch(e) {
+    typingEl.remove();
+    isTyping = false;
+    appendMsg('ai', '❌ Ошибка: ' + e.message);
+  }
+}
+
+function appendMsg(role, content) {
+  var msgs = document.getElementById('messages');
+  var div = document.createElement('div');
+  div.className = 'msg ' + role;
+  // Простой markdown → HTML
+  var html = content
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^• /gm, '&bull; ')
+    .replace(/\n/g, '<br>');
+  var initial = role === 'ai' ? 'AI' : '{{ user.name[0] if user and user.name else "М" }}';
+  div.innerHTML = '<div class="msg-avatar '+role+'">'+initial+'</div>'
+    +'<div class="msg-bubble '+role+'">'+html+'</div>';
+  msgs.appendChild(div);
+  scrollToBottom();
+}
+
+function scrollToBottom() {
+  var msgs = document.getElementById('messages');
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function useSug(el) {
+  document.getElementById('chat-input').value = el.textContent;
+  sendMessage();
+}
+
+// Enter = отправить, Shift+Enter = перенос
+document.getElementById('chat-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+// Авторастягивание textarea
+document.getElementById('chat-input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+</script>
+{% endblock %}

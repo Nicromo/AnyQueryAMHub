@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Мой KPI — AM Hub{% endblock %}
+{% block page_title %}Мой KPI{% endblock %}
+{% block head %}
+<style>
+  .period-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim,var(--muted));cursor:pointer;font-size:.8rem;}
+  .period-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px;margin-bottom:24px;}
+  .kpi-card .val{font-size:2rem;font-weight:700;line-height:1;margin-bottom:4px;}
+  .kpi-card .label{font-size:.72rem;color:var(--text-dim,var(--muted));text-transform:uppercase;letter-spacing:.04em;}
+  .kpi-card .sub{font-size:.78rem;color:var(--text-dim,var(--muted));margin-top:6px;}
+  .kpi-gl{border-left:3px solid var(--green);}
+  .kpi-rl{border-left:3px solid var(--red);}
+  .kpi-yl{border-left:3px solid var(--yellow);}
+  .kpi-bl{border-left:3px solid var(--accent);}
+  .bar-wrap{background:var(--border);border-radius:4px;height:8px;overflow:hidden;margin-top:6px;}
+  .bar-fill{height:100%;border-radius:4px;transition:width .5s;}
+  .det-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:.84rem;}
+  .det-row:last-child{border-bottom:none;}
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="main">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+      <div>
+        <h1 style="font-size:1.4rem;font-weight:700;">📈 Мой KPI</h1>
+        <div style="color:var(--text-dim,var(--muted));font-size:.82rem;margin-top:2px;">{{ user.first_name or user.email }}</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="period-btn active" onclick="loadKPI(7,this)">7 дней</button>
+        <button class="period-btn" onclick="loadKPI(30,this)">30 дней</button>
+        <button class="period-btn" onclick="loadKPI(90,this)">90 дней</button>
+      </div>
+    </div>
+    <div class="kpi-grid" id="kpi-grid"><div style="text-align:center;padding:40px;color:var(--muted);grid-column:1/-1;">⏳ Загрузка...</div></div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:20px 0 10px;">Детали</div>
+    <div id="kpi-details"></div>
+  </main>
+</div>
+<script>
+async function loadKPI(days, btn) {
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  try {
+    const d = await fetch('/api/manager/kpi?period_days=' + days).then(r => r.json());
+    const fr = d.meetings_held > 0 ? Math.round(d.followups_sent / d.meetings_held * 100) : 0;
+    const h = Math.round((d.avg_health_score || 0) * 100);
+    const hc = h >= 70 ? 'var(--green)' : h >= 40 ? 'var(--yellow)' : 'var(--red)';
+    const frc = fr >= 80 ? 'var(--green)' : fr >= 50 ? 'var(--yellow)' : 'var(--red)';
+    document.getElementById('kpi-grid').innerHTML = `
+      <div class="kpi-card kpi-gl"><div class="val" style="color:var(--green)">${d.tasks_closed}</div><div class="label">Задач закрыто</div><div class="sub">Создано: ${d.tasks_created}</div></div>
+      <div class="kpi-card kpi-bl"><div class="val" style="color:var(--accent)">${d.meetings_held}</div><div class="label">Встреч проведено</div><div class="sub">Фолоуапов: ${d.followups_sent}</div></div>
+      <div class="kpi-card"><div class="val" style="color:${frc}">${fr}%</div><div class="label">Фолоуап-rate</div><div class="bar-wrap"><div class="bar-fill" style="width:${fr}%;background:${frc}"></div></div></div>
+      <div class="kpi-card ${d.tasks_overdue > 0 ? 'kpi-rl' : 'kpi-gl'}"><div class="val" style="color:${d.tasks_overdue > 0 ? 'var(--red)' : 'var(--green)'}">${d.tasks_overdue}</div><div class="label">Просрочено</div><div class="sub">Pending фолоуапов: ${d.followups_pending}</div></div>
+      <div class="kpi-card kpi-bl"><div class="val" style="color:var(--accent)">${d.total_clients}</div><div class="label">Клиентов</div><div class="sub">Без контакта 60+ дн: ${d.clients_no_contact}</div></div>
+      <div class="kpi-card"><div class="val" style="color:${hc}">${h}%</div><div class="label">Avg Health Score</div><div class="bar-wrap"><div class="bar-fill" style="width:${h}%;background:${hc}"></div></div></div>`;
+    document.getElementById('kpi-details').innerHTML = `
+      <div style="background:var(--surface,var(--card));border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <div class="det-row"><span>✅ Задач закрыто</span><strong>${d.tasks_closed}</strong></div>
+        <div class="det-row"><span>📝 Задач создано</span><strong>${d.tasks_created}</strong></div>
+        <div class="det-row"><span>🔴 Просроченных задач</span><strong style="color:var(--red)">${d.tasks_overdue}</strong></div>
+        <div class="det-row"><span>📅 Встреч проведено</span><strong>${d.meetings_held}</strong></div>
+        <div class="det-row"><span>✍️ Фолоуапов отправлено</span><strong>${d.followups_sent}</strong></div>
+        <div class="det-row"><span>⏳ Фолоуапов ожидают</span><strong style="color:var(--yellow)">${d.followups_pending}</strong></div>
+        <div class="det-row"><span>👥 Клиентов без контакта 60+ дн.</span><strong style="color:${d.clients_no_contact > 0 ? 'var(--red)' : 'var(--green)'}">${d.clients_no_contact}</strong></div>
+      </div>`;
+  } catch(e) {
+    document.getElementById('kpi-grid').innerHTML = '<div style="color:var(--red);padding:20px;grid-column:1/-1;">❌ Ошибка загрузки</div>';
+  }
+}
+loadKPI(30, null);
+</script>
+
+<script>
+
+async function loadKPI(days, btn) {
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  try {
+    const d = await fetch('/api/manager/kpi?period_days=' + days).then(r => r.json());
+    const fr = d.meetings_held > 0 ? Math.round(d.followups_sent / d.meetings_held * 100) : 0;
+    const h = Math.round((d.avg_health_score || 0) * 100);
+    const hc = h >= 70 ? 'var(--green)' : h >= 40 ? 'var(--yellow)' : 'var(--red)';
+    const frc = fr >= 80 ? 'var(--green)' : fr >= 50 ? 'var(--yellow)' : 'var(--red)';
+    document.getElementById('kpi-grid').innerHTML = `
+      <div class="kpi-card kpi-gl"><div class="val" style="color:var(--green)">${d.tasks_closed}</div><div class="label">Задач закрыто</div><div class="sub">Создано: ${d.tasks_created}</div></div>
+      <div class="kpi-card kpi-bl"><div class="val" style="color:var(--accent)">${d.meetings_held}</div><div class="label">Встреч проведено</div><div class="sub">Фолоуапов: ${d.followups_sent}</div></div>
+      <div class="kpi-card"><div class="val" style="color:${frc}">${fr}%</div><div class="label">Фолоуап-rate</div><div class="bar-wrap"><div class="bar-fill" style="width:${fr}%;background:${frc}"></div></div></div>
+      <div class="kpi-card ${d.tasks_overdue > 0 ? 'kpi-rl' : 'kpi-gl'}"><div class="val" style="color:${d.tasks_overdue > 0 ? 'var(--red)' : 'var(--green)'}">${d.tasks_overdue}</div><div class="label">Просрочено</div><div class="sub">Pending фолоуапов: ${d.followups_pending}</div></div>
+      <div class="kpi-card kpi-bl"><div class="val" style="color:var(--accent)">${d.total_clients}</div><div class="label">Клиентов</div><div class="sub">Без контакта 60+ дн: ${d.clients_no_contact}</div></div>
+      <div class="kpi-card"><div class="val" style="color:${hc}">${h}%</div><div class="label">Avg Health Score</div><div class="bar-wrap"><div class="bar-fill" style="width:${h}%;background:${hc}"></div></div></div>`;
+    document.getElementById('kpi-details').innerHTML = `
+      <div style="background:var(--surface,var(--card));border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <div class="det-row"><span>✅ Задач закрыто</span><strong>${d.tasks_closed}</strong></div>
+        <div class="det-row"><span>📝 Задач создано</span><strong>${d.tasks_created}</strong></div>
+        <div class="det-row"><span>🔴 Просроченных задач</span><strong style="color:var(--red)">${d.tasks_overdue}</strong></div>
+        <div class="det-row"><span>📅 Встреч проведено</span><strong>${d.meetings_held}</strong></div>
+        <div class="det-row"><span>✍️ Фолоуапов отправлено</span><strong>${d.followups_sent}</strong></div>
+        <div class="det-row"><span>⏳ Фолоуапов ожидают</span><strong style="color:var(--yellow)">${d.followups_pending}</strong></div>
+        <div class="det-row"><span>👥 Клиентов без контакта 60+ дн.</span><strong style="color:${d.clients_no_contact > 0 ? 'var(--red)' : 'var(--green)'}">${d.clients_no_contact}</strong></div>
+      </div>`;
+  } catch(e) {
+    document.getElementById('kpi-grid').innerHTML = '<div style="color:var(--red);padding:20px;grid-column:1/-1;">❌ Ошибка загрузки</div>';
+  }
+}
+loadKPI(30, null);
+
+</script>
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Канбан — AM Hub{% endblock %}
+{% block page_title %}Канбан{% endblock %}
+
+{% block head %}
+<style>
+    /* Kanban */
+    .kanban { display:flex; gap:14px; overflow-x:auto; padding-bottom:20px; min-height:calc(100vh - 160px); }
+    .kanban-col { min-width:260px; max-width:300px; flex:1; background:var(--bg); border:1px solid var(--border); border-radius:12px; display:flex; flex-direction:column; }
+    .kanban-header { padding:12px 14px; font-size:.85rem; font-weight:600; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); border-radius:12px 12px 0 0; z-index:1; }
+    .kanban-count { background:var(--border); border-radius:10px; padding:2px 8px; font-size:.72rem; color:var(--muted); }
+    .kanban-body { padding:8px; flex:1; overflow-y:auto; min-height:100px; transition:background .15s; }
+    .kanban-body.drag-over { background:rgba(129,140,248,.08); }
+    .k-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:grab; transition:box-shadow .15s,border-color .15s; }
+    .k-card:hover { border-color:var(--accent); box-shadow:0 2px 8px rgba(0,0,0,.2); }
+    .k-card.dragging { opacity:.5; }
+    .k-card-title { font-size:.82rem; font-weight:500; margin-bottom:4px; }
+    .k-card-meta { font-size:.7rem; color:var(--muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .k-badge { padding:1px 6px; border-radius:4px; font-size:.62rem; font-weight:600; }
+    .k-badge-high { background:rgba(240,85,106,.15); color:var(--red); }
+    .k-badge-medium { background:rgba(234,179,8,.15); color:var(--yellow); }
+    .k-badge-low { background:rgba(35,209,139,.15); color:var(--green); }
+    .k-due { color:var(--muted); }
+    .k-due.overdue { color:var(--red); }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>📋 Канбан задач</h1>
+  <p class="sub">Перетаскивайте задачи между колонками для изменения статуса</p>
+
+  <div class="kanban" id="kanban">
+    <div class="kanban-col">
+      <div class="kanban-header">📝 Plan <span class="kanban-count" id="count-plan">0</span></div>
+      <div class="kanban-body" data-status="plan" id="col-plan"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">🔄 In Progress <span class="kanban-count" id="count-in_progress">0</span></div>
+      <div class="kanban-body" data-status="in_progress" id="col-in_progress"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">👀 Review <span class="kanban-count" id="count-review">0</span></div>
+      <div class="kanban-body" data-status="review" id="col-review"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">✅ Done <span class="kanban-count" id="count-done">0</span></div>
+      <div class="kanban-body" data-status="done" id="col-done"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-header">🔴 Blocked <span class="kanban-count" id="count-blocked">0</span></div>
+      <div class="kanban-body" data-status="blocked" id="col-blocked"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+const today = new Date().toISOString().slice(0,10);
+let draggedId = null;
+
+async function loadKanban(){
+  try{
+    const r=await fetch('/api/kanban');
+    if(!r.ok) return;
+    const d=await r.json();
+    const cols = {plan:[], in_progress:[], review:[], done:[], blocked:[]};
+    Object.entries(d).forEach(([status, tasks])=>{
+      cols[status] = tasks;
+      document.getElementById('count-'+status).textContent = tasks.length;
+      const el = document.getElementById('col-'+status);
+      el.innerHTML = tasks.map(t=>{
+        const due = t.due_date ? t.due_date.slice(0,10) : '';
+        const overdue = due && due < today;
+        const prioBadge = t.priority ? '<span class="k-badge k-badge-'+t.priority+'">'+t.priority+'</span>' : '';
+        const dueBadge = due ? '<span class="k-due'+(overdue?' overdue':'')+'">'+(overdue?'⚠️ ':'')+due+'</span>' : '';
+        return '<div class="k-card" draggable="true" data-id="'+t.id+'" data-status="'+status+'">'+
+          '<div class="k-card-title">'+(t.title||'Без названия')+'</div>'+
+          '<div class="k-card-meta">'+prioBadge+dueBadge+'<span>'+t.client_name+'</span></div></div>';
+      }).join('');
+    });
+    initDragDrop();
+  }catch(e){console.error(e);}
+}
+
+function initDragDrop(){
+  document.querySelectorAll('.k-card').forEach(card=>{
+    card.addEventListener('dragstart',e=>{draggedId=card.dataset.id;card.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
+    card.addEventListener('dragend',()=>{card.classList.remove('dragging');draggedId=null;document.querySelectorAll('.kanban-body').forEach(c=>c.classList.remove('drag-over'));});
+  });
+  document.querySelectorAll('.kanban-body').forEach(col=>{
+    col.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';col.classList.add('drag-over');});
+    col.addEventListener('dragleave',()=>{col.classList.remove('drag-over');});
+    col.addEventListener('drop',async e=>{
+      e.preventDefault();col.classList.remove('drag-over');
+      const newStatus=col.dataset.status;
+      if(!draggedId || draggedId===null) return;
+      try{
+        const r=await fetch('/api/tasks/'+draggedId+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})});
+        if(r.ok) loadKanban();
+      }catch(e){console.error(e);}
+    });
+  });
+}
+
+loadKanban();
+</script>
+{% endblock %}

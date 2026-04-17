@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+{% block title %}Пользователи — AM Hub{% endblock %}
+{% block page_title %}Пользователи{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Управление менеджерами и администраторами</div>{% endblock %}
+
+{% block content %}
+<style>
+  .users-toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    align-items: center; margin-bottom: 16px;
+  }
+  .users-toolbar .spacer { flex: 1; }
+  .users-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .users-table th, .users-table td {
+    text-align: left; padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .users-table th {
+    font-size: .72rem; text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600;
+    letter-spacing: .04em;
+  }
+  .users-table tbody tr:hover { background: var(--surface-2); }
+  .role-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: .7rem; font-weight: 600;
+  }
+  .role-admin   { background: var(--red-bg, rgba(240,85,106,.15)); color: var(--red, #f0556a); }
+  .role-manager { background: var(--accent-dim, rgba(90,130,255,.15)); color: var(--accent, #5a82ff); }
+  .role-viewer  { background: var(--surface-3); color: var(--text-dim); }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .status-active   { background: var(--green, #23d18b); }
+  .status-inactive { background: var(--text-muted); }
+  .users-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .users-actions button { padding: 4px 8px; font-size: .72rem; }
+
+  /* Modal */
+  .udialog {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface-1, #1a1d24);
+    color: var(--text, #e8e8ea);
+    padding: 0; max-width: 520px; width: 90%;
+  }
+  .udialog::backdrop { background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
+  .udialog-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .udialog-header h3 { margin: 0; font-size: 1rem; }
+  .udialog-body   { padding: 18px 20px; }
+  .udialog-footer {
+    padding: 12px 20px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px; justify-content: flex-end;
+  }
+  .form-row { margin-bottom: 12px; }
+  .form-row label {
+    display: block; font-size: .75rem;
+    color: var(--text-dim); margin-bottom: 4px;
+  }
+  .form-row input, .form-row select {
+    width: 100%; padding: 8px 10px;
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: .85rem;
+  }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .alert {
+    padding: 10px 12px; border-radius: var(--radius);
+    margin-bottom: 12px; font-size: .82rem;
+  }
+  .alert-success { background: var(--green-bg, rgba(35,209,139,.12)); color: var(--green, #23d18b); }
+  .alert-error   { background: var(--red-bg, rgba(240,85,106,.12)); color: var(--red, #f0556a); }
+  .pwd-box {
+    margin-top: 10px; padding: 10px 12px;
+    background: var(--surface-3); border-radius: var(--radius);
+    font-family: var(--font-mono, monospace); font-size: .82rem;
+    word-break: break-all;
+  }
+</style>
+
+<div class="card" style="padding:20px;">
+  <div class="users-toolbar">
+    <button class="btn btn-primary" onclick="openCreateModal()">+ Добавить пользователя</button>
+    <button class="btn btn-ghost" onclick="openImportModal()">Импорт CSV</button>
+    <a class="btn btn-ghost" href="/api/admin/users/export.csv">Экспорт CSV</a>
+    <div class="spacer"></div>
+    <input type="search" id="userFilter" placeholder="Поиск по email / имени..."
+           style="padding:6px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.85rem;width:240px;"
+           oninput="filterUsers()"/>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="users-table" id="usersTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Email</th>
+          <th>Имя</th>
+          <th>Роль</th>
+          <th>Telegram</th>
+          <th>Статус</th>
+          <th>Создан</th>
+          <th style="text-align:right;">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr data-uid="{{ u.id }}" data-email="{{ u.email|lower }}" data-name="{{ ((u.first_name or '') ~ ' ' ~ (u.last_name or ''))|lower }}">
+          <td>{{ u.id }}</td>
+          <td>{{ u.email }}</td>
+          <td>{{ (u.first_name or '') }} {{ (u.last_name or '') }}</td>
+          <td>
+            <select onchange="changeRole({{ u.id }}, this.value)"
+                    style="background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:3px 6px;font-size:.75rem;">
+              <option value="admin"   {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+              <option value="manager" {% if u.role == 'manager' %}selected{% endif %}>manager</option>
+              <option value="viewer"  {% if u.role == 'viewer' %}selected{% endif %}>viewer</option>
+            </select>
+          </td>
+          <td>{{ u.telegram_id or '—' }}</td>
+          <td>
+            {% if u.is_active %}
+              <span class="status-dot status-active"></span> активен
+            {% else %}
+              <span class="status-dot status-inactive"></span> отключён
+            {% endif %}
+          </td>
+          <td>{{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '—' }}</td>
+          <td>
+            <div class="users-actions" style="justify-content:flex-end;">
+              <button class="btn btn-ghost" onclick="resetPassword({{ u.id }}, '{{ u.email }}')">Сбросить пароль</button>
+              {% if u.is_active %}
+                <button class="btn btn-ghost" onclick="deactivateUser({{ u.id }}, '{{ u.email }}')">Деактивировать</button>
+              {% else %}
+                <button class="btn btn-ghost" onclick="activateUser({{ u.id }})">Активировать</button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Create user dialog -->
+<dialog id="createDialog" class="udialog">
+  <div class="udialog-header">
+    <h3>Новый пользователь</h3>
+    <button class="btn btn-ghost" onclick="document.getElementById('createDialog').close()">✕</button>
+  </div>
+  <form id="createForm" onsubmit="return submitCreate(event)">
+    <div class="udialog-body">
+      <div id="createAlert"></div>
+      <div class="form-row">
+        <label>Email *</label>
+        <input type="email" name="email" required placeholder="user@company.ru"/>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Имя</label>
+          <input type="text" name="first_name"/>
+        </div>
+        <div class="form-row">
+          <label>Фамилия</label>
+          <input type="text" name="last_name"/>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Роль</label>
+          <select name="role">
+            <option value="manager">manager</option>
+            <option value="admin">admin</option>
+            <option value="viewer">viewer</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Telegram ID</label>
+          <input type="text" name="telegram_id" placeholder="(опционально)"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Пароль (если пусто — сгенерируется)</label>
+        <input type="text" name="password" placeholder="(опционально)"/>
+      </div>
+      <div id="createPwdBox"></div>
+    </div>
+    <div class="udialog-footer">
+      <button type="button" class="btn btn-ghost" onclick="document.getElementById('createDialog').close()">Отмена</button>
+      <button type="submit" class="btn btn-primary">Создать</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Import CSV dialog -->
+<dialog id="importDialog" class="udialog">
+  <div class="udialog-header">
+    <h3>Импорт пользователей из CSV</h3>
+    <button class="btn btn-ghost" onclick="document.getElementById('importDialog').close()">✕</button>
+  </div>
+  <form id="importForm" onsubmit="return submitImport(event)">
+    <div class="udialog-body">
+      <div id="importAlert"></div>
+      <p style="font-size:.8rem;color:var(--text-dim);margin:0 0 12px 0;">
+        Колонки: <code>email, first_name, last_name, role, telegram_id</code>.
+        Для каждого будет сгенерирован случайный пароль.
+      </p>
+      <div class="form-row">
+        <label>CSV файл</label>
+        <input type="file" name="file" accept=".csv,text/csv" required/>
+      </div>
+      <div id="importResult"></div>
+    </div>
+    <div class="udialog-footer">
+      <button type="button" class="btn btn-ghost" onclick="document.getElementById('importDialog').close()">Закрыть</button>
+      <button type="submit" class="btn btn-primary">Импортировать</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Password reveal dialog -->
+<dialog id="pwdDialog" class="udialog">
+  <div class="udialog-header">
+    <h3>Пароль сгенерирован</h3>
+    <button class="btn btn-ghost" onclick="document.getElementById('pwdDialog').close()">✕</button>
+  </div>
+  <div class="udialog-body">
+    <p style="font-size:.82rem;color:var(--text-dim);">
+      Сохраните пароль — он отображается <b>один раз</b>. Передайте его пользователю безопасным каналом.
+    </p>
+    <div><b>Email:</b> <span id="pwdEmail"></span></div>
+    <div class="pwd-box" id="pwdValue"></div>
+  </div>
+  <div class="udialog-footer">
+    <button type="button" class="btn btn-ghost" onclick="copyPwd()">Скопировать</button>
+    <button type="button" class="btn btn-primary" onclick="document.getElementById('pwdDialog').close()">Готово</button>
+  </div>
+</dialog>
+
+<script>
+function openCreateModal() {
+  document.getElementById('createAlert').innerHTML = '';
+  document.getElementById('createPwdBox').innerHTML = '';
+  document.getElementById('createForm').reset();
+  document.getElementById('createDialog').showModal();
+}
+function openImportModal() {
+  document.getElementById('importAlert').innerHTML = '';
+  document.getElementById('importResult').innerHTML = '';
+  document.getElementById('importForm').reset();
+  document.getElementById('importDialog').showModal();
+}
+
+async function submitCreate(e) {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  const alertEl = document.getElementById('createAlert');
+  alertEl.innerHTML = '';
+  try {
+    const res = await fetch('/api/admin/users', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      alertEl.innerHTML = '<div class="alert alert-error">' + (data.error || data.detail || 'Ошибка') + '</div>';
+      return false;
+    }
+    if (data.generated && data.password) {
+      document.getElementById('createPwdBox').innerHTML =
+        '<div class="alert alert-success">Пользователь создан. Сгенерирован пароль (сохраните):</div>' +
+        '<div class="pwd-box">' + escapeHtml(data.password) + '</div>';
+      setTimeout(() => location.reload(), 3000);
+    } else {
+      alertEl.innerHTML = '<div class="alert alert-success">Пользователь создан</div>';
+      setTimeout(() => location.reload(), 800);
+    }
+  } catch (err) {
+    alertEl.innerHTML = '<div class="alert alert-error">' + err.message + '</div>';
+  }
+  return false;
+}
+
+async function submitImport(e) {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  const alertEl = document.getElementById('importAlert');
+  const resEl = document.getElementById('importResult');
+  alertEl.innerHTML = ''; resEl.innerHTML = '';
+  try {
+    const res = await fetch('/api/admin/users/import-csv', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      alertEl.innerHTML = '<div class="alert alert-error">' + (data.detail || 'Ошибка') + '</div>';
+      return false;
+    }
+    let html = '<div class="alert alert-success">Создано: ' + data.created + ', пропущено: ' + data.skipped + '</div>';
+    if (data.errors && data.errors.length) {
+      html += '<div style="font-size:.78rem;color:var(--text-dim);margin-top:8px;">Ошибки:<ul>';
+      data.errors.forEach(err => html += '<li>' + escapeHtml(err) + '</li>');
+      html += '</ul></div>';
+    }
+    if (data.created_users && data.created_users.length) {
+      html += '<div style="font-size:.78rem;margin-top:8px;"><b>Сгенерированные пароли (сохраните!):</b><div class="pwd-box">';
+      data.created_users.forEach(u => html += escapeHtml(u.email) + ' : ' + escapeHtml(u.password) + '\n');
+      html += '</div></div>';
+    }
+    resEl.innerHTML = html;
+    setTimeout(() => { if (data.created > 0) location.reload(); }, 5000);
+  } catch (err) {
+    alertEl.innerHTML = '<div class="alert alert-error">' + err.message + '</div>';
+  }
+  return false;
+}
+
+async function resetPassword(uid, email) {
+  if (!confirm('Сбросить пароль для ' + email + '?')) return;
+  const res = await fetch('/api/admin/users/' + uid + '/reset-password', { method: 'POST' });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('pwdEmail').textContent = data.email;
+    document.getElementById('pwdValue').textContent = data.password;
+    document.getElementById('pwdDialog').showModal();
+  } else {
+    alert('Ошибка: ' + (data.detail || data.error || 'unknown'));
+  }
+}
+
+async function deactivateUser(uid, email) {
+  if (!confirm('Деактивировать ' + email + '?')) return;
+  const res = await fetch('/api/admin/users/' + uid + '/deactivate', { method: 'POST' });
+  const data = await res.json();
+  if (data.ok) location.reload();
+  else alert('Ошибка: ' + (data.error || data.detail || 'unknown'));
+}
+
+async function activateUser(uid) {
+  const res = await fetch('/api/admin/users/' + uid + '/activate', { method: 'POST' });
+  const data = await res.json();
+  if (data.ok) location.reload();
+  else alert('Ошибка: ' + (data.error || data.detail || 'unknown'));
+}
+
+async function changeRole(uid, role) {
+  const fd = new FormData();
+  fd.append('role', role);
+  const res = await fetch('/api/admin/users/' + uid + '/role', { method: 'POST', body: fd });
+  const data = await res.json();
+  if (!data.ok) {
+    alert('Ошибка смены роли: ' + (data.error || data.detail || 'unknown'));
+    location.reload();
+  }
+}
+
+function copyPwd() {
+  const v = document.getElementById('pwdValue').textContent;
+  navigator.clipboard.writeText(v).then(() => {
+    const btn = event.target;
+    const old = btn.textContent;
+    btn.textContent = 'Скопировано!';
+    setTimeout(() => btn.textContent = old, 1500);
+  });
+}
+
+function filterUsers() {
+  const q = document.getElementById('userFilter').value.toLowerCase().trim();
+  document.querySelectorAll('#usersTable tbody tr').forEach(tr => {
+    if (!q) { tr.style.display = ''; return; }
+    const email = tr.dataset.email || '';
+    const name = tr.dataset.name || '';
+    tr.style.display = (email.includes(q) || name.includes(q)) ? '' : 'none';
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+{% endblock %}
