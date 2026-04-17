@@ -164,7 +164,7 @@ async def sync_meeting_to_merchrules(client_name: str, meeting_date: str, meetin
     meeting_result = await push_meeting(ids, meeting_date, meeting_type, summary, mood,
                                          next_meeting, login=login, password=password)
     tasks_to_push = [
-        {"title": t["text"], "due_date": t.get("due_date"), "status": "plan"}
+        {"title": t.get("title") or t.get("text") or "", "due_date": t.get("due_date"), "status": "plan"}
         for t in aq_tasks if t.get("text")
     ]
     tasks_result = (

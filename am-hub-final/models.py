@@ -80,6 +80,15 @@ class Task(Base):
     client = relationship("Client", back_populates="tasks")
     meeting = relationship("Meeting", back_populates="created_tasks")
 
+    @property
+    def text(self):
+        """Alias для совместимости с шаблонами."""
+        return self.title or ""
+
+    @text.setter
+    def text(self, value):
+        self.title = value
+
 
 class Meeting(Base):
     __tablename__ = "meetings"

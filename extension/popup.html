@@ -147,8 +147,9 @@ async function init() {
   if (s.hub_token) {
     // Проверяем что токен ещё валиден
     try {
+      // Проверяем токен через Bearer header
       const r = await fetch(`${HUB_URL}/api/auth/me`, {
-        headers: { "Cookie": `auth_token=${s.hub_token}` }
+        headers: { "Authorization": `Bearer ${s.hub_token}` }
       });
       if (r.ok) {
         showMain(s);

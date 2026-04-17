@@ -1304,3 +1304,46 @@ async def api_list_attachments(
 
 
 
+
+
+@router.delete("/api/clients/{client_id}/notes/{note_id}")
+async def delete_client_note(
+    client_id: int, note_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token or "")
+    if not payload:
+        raise HTTPException(status_code=401)
+    note = db.query(ClientNote).filter(
+        ClientNote.id == note_id, ClientNote.client_id == client_id
+    ).first()
+    if not note:
+        raise HTTPException(status_code=404)
+    db.delete(note)
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/api/clients/{client_id}/notes/{note_id}")
+async def update_client_note(
+    client_id: int, note_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token or "")
+    if not payload:
+        raise HTTPException(status_code=401)
+    note = db.query(ClientNote).filter(
+        ClientNote.id == note_id, ClientNote.client_id == client_id
+    ).first()
+    if not note:
+        raise HTTPException(status_code=404)
+    data = await request.json()
+    if "text" in data:
+        note.text = data["text"]
+    db.commit()
+    return {"ok": True, "id": note.id}
