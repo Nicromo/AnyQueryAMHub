@@ -217,6 +217,12 @@ class User(Base):
     settings = Column(JSONB, default=dict)
     assigned_clients = relationship("Client", secondary="user_client_assignment", backref="assigned_managers")
 
+    @property
+    def name(self) -> str:
+        """Derived display name from first_name + last_name, falls back to email prefix."""
+        parts = [p for p in [self.first_name, self.last_name] if p and p.strip()]
+        return " ".join(parts) if parts else (self.email or "").split("@")[0]
+
 
 class UserClientAssignment(Base):
     __tablename__ = "user_client_assignment"
