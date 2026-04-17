@@ -66,13 +66,118 @@ def _enrich_clients(clients, db: Session, now: datetime):
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": request.query_params.get("error"),
+        "bot_username": os.getenv("TG_BOT_USERNAME", ""),
+    })
 
 
 @router.get("/logout")
 async def logout():
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(key="auth_token")
+    return response
+
+
+# ============================================================================
+# TELEGRAM LOGIN — HMAC validation per core.telegram.org/widgets/login
+# ============================================================================
+
+@router.get("/auth/telegram")
+async def auth_telegram(request: Request, db: Session = Depends(get_db)):
+    """Callback от Telegram Login Widget.
+
+    Ожидаемые query params: id, first_name, last_name, username, photo_url, auth_date, hash
+    Валидирует HMAC-SHA256 подпись с помощью SHA256(BOT_TOKEN) как ключа.
+    Создаёт/обновляет пользователя, ставит cookie auth_token, редиректит на /dashboard.
+    """
+    from auth import verify_tg_auth, create_access_token, hash_password
+
+    bot_token = os.getenv("TG_BOT_TOKEN", "")
+    if not bot_token:
+        return RedirectResponse(url="/login?error=TG_BOT_TOKEN не настроен в .env", status_code=303)
+
+    # Собираем data dict из query params
+    qp = dict(request.query_params)
+    tg_id_raw = qp.get("id")
+    if not tg_id_raw:
+        return RedirectResponse(url="/login?error=Нет id в callback от Telegram", status_code=303)
+
+    # Whitelist из ALLOWED_TG_IDS
+    allowed_raw = os.getenv("ALLOWED_TG_IDS", "").strip()
+    if allowed_raw:
+        allowed_set = {x.strip() for x in allowed_raw.split(",") if x.strip()}
+        if tg_id_raw not in allowed_set:
+            return RedirectResponse(
+                url="/login?error=Ваш Telegram не в whitelist. Обратитесь к администратору.",
+                status_code=303,
+            )
+
+    # verify_tg_auth мутирует dict (удаляет hash), поэтому передаём копию
+    data_for_check = {k: v for k, v in qp.items()}
+    if not verify_tg_auth(data_for_check, bot_token):
+        return RedirectResponse(
+            url="/login?error=Неверная подпись Telegram или устарело (&gt;1 часа)",
+            status_code=303,
+        )
+
+    # Найти или создать пользователя по telegram_id
+    tg_id = str(tg_id_raw)
+    first_name = qp.get("first_name", "")
+    last_name  = qp.get("last_name", "")
+    username   = qp.get("username", "")
+
+    user = db.query(User).filter(User.telegram_id == tg_id).first()
+    if not user:
+        # Создаём нового. Email подставляем синтетический — меняется в профиле.
+        fallback_email = f"tg{tg_id}@amhub.local"
+        # если такой email уже есть (редкий случай) — делаем уникальный
+        while db.query(User).filter(User.email == fallback_email).first():
+            fallback_email = f"tg{tg_id}-{int(datetime.now().timestamp())}@amhub.local"
+
+        # Пароль — случайный хэш, пользоваться через email не будет
+        import secrets
+        random_pw = secrets.token_urlsafe(16)
+
+        user = User(
+            email=fallback_email,
+            first_name=first_name or None,
+            last_name=last_name or None,
+            role="manager",  # default
+            is_active=True,
+            telegram_id=tg_id,
+            hashed_password=hash_password(random_pw),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        # Обновляем имя/username если пришли
+        changed = False
+        if first_name and user.first_name != first_name:
+            user.first_name = first_name; changed = True
+        if last_name and user.last_name != last_name:
+            user.last_name = last_name; changed = True
+        if changed:
+            db.commit()
+
+    if not user.is_active:
+        return RedirectResponse(
+            url="/login?error=Аккаунт деактивирован. Обратитесь к администратору.",
+            status_code=303,
+        )
+
+    # Выдаём токен и редирект
+    token = create_access_token({"sub": str(user.id)})
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=86400 * 30,
+    )
     return response
 
 
