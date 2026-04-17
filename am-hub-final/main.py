@@ -543,7 +543,34 @@ async def qbr_calendar_page(request: Request, db: Session = Depends(get_db), aut
     if not payload: return RedirectResponse(url="/login", status_code=303)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user: return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("qbr_calendar.html", {"request": request, "user": user})
+    from models import QBR
+    from sqlalchemy import desc as _desc
+    now_dt = datetime.now()
+    q_clients = db.query(Client)
+    if user.role == "manager":
+        q_clients = q_clients.filter(Client.manager_email == user.email)
+    all_clients = q_clients.all()
+
+    upcoming = []
+    needs_qbr = []
+    for c in all_clients:
+        if c.next_qbr_date and c.next_qbr_date > now_dt:
+            upcoming.append({"client": c, "date": c.next_qbr_date})
+        if not c.last_qbr_date or (now_dt - c.last_qbr_date).days > 90:
+            needs_qbr.append(c)
+
+    qbr_history = (
+        db.query(QBR).join(Client)
+        .filter(Client.manager_email == user.email if user.role == "manager" else True)
+        .order_by(_desc(QBR.date)).limit(20).all()
+    )
+
+    return templates.TemplateResponse("qbr_calendar.html", {
+        "request": request, "user": user,
+        "upcoming": sorted(upcoming, key=lambda x: x["date"]),
+        "needs_qbr": needs_qbr,
+        "qbr_history": qbr_history,
+    })
 
 
 # ── Ktalk DM ────────────────────────────────────────────────────────────────

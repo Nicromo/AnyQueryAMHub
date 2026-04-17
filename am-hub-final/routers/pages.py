@@ -329,9 +329,18 @@ async def followup_page(request: Request, client_id: int, db: Session = Depends(
     except Exception as e:
         followup_text = f"AI недоступен: {e}"
 
+    # Последняя встреча с pending followup (или просто последняя)
+    meeting = (
+        db.query(Meeting)
+        .filter(Meeting.client_id == client_id, Meeting.followup_status == "pending")
+        .order_by(Meeting.date.desc())
+        .first()
+    ) or (meetings[0] if meetings else None)
+
     return templates.TemplateResponse("followup.html", {
         "request": request, "user": user, "client": client,
         "tasks": tasks, "meetings": meetings, "followup_text": followup_text,
+        "meeting": meeting,
         "now": datetime.now(),
     })
 
@@ -469,7 +478,11 @@ async def settings_page(request: Request, db: Session = Depends(get_db), auth_to
     user = _get_user(auth_token, db)
     if not user:
         return _login_redirect()
-    return templates.TemplateResponse("settings.html", {"request": request, "user": user})
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "user": user,
+        "user_settings": user.settings or {},
+    })
 
 
 # ============================================================================
