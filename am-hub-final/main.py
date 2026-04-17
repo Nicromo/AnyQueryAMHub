@@ -540,7 +540,15 @@ async def roadmap_page(request: Request, db: Session = Depends(get_db), auth_tok
     if not payload: return RedirectResponse(url="/login", status_code=303)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user: return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("roadmap.html", {"request": request, "user": user})
+    prefill_client_name = request.query_params.get("client_name", "")
+    prefill_site_ids = request.query_params.get("site_ids", "")
+    merchrules_url = os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
+    return templates.TemplateResponse("roadmap.html", {
+        "request": request, "user": user,
+        "prefill_client_name": prefill_client_name,
+        "prefill_site_ids": prefill_site_ids,
+        "merchrules_url": merchrules_url,
+    })
 
 @app.get("/internal-tasks", response_class=HTMLResponse)
 async def internal_tasks_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
@@ -550,7 +558,15 @@ async def internal_tasks_page(request: Request, db: Session = Depends(get_db), a
     if not payload: return RedirectResponse(url="/login", status_code=303)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user: return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("internal_tasks.html", {"request": request, "user": user})
+    from models import Task
+    today_dt = datetime.now()
+    internal_tasks = db.query(Task).filter(
+        Task.client_id == None, Task.status != "done"
+    ).order_by(Task.due_date).limit(50).all()
+    return templates.TemplateResponse("internal_tasks.html", {
+        "request": request, "user": user,
+        "tasks": internal_tasks, "today": today_dt,
+    })
 
 @app.get("/qbr-calendar", response_class=HTMLResponse)
 async def qbr_calendar_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):

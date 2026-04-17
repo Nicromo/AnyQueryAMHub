@@ -304,9 +304,13 @@ async def prep_page(request: Request, client_id: int, db: Session = Depends(get_
     except Exception as e:
         prep_text = f"AI недоступен: {e}"
 
+    days_since = (datetime.now() - client.last_meeting_date).days if client.last_meeting_date else None
+    blocked = [t for t in tasks if t.status == "blocked"]
     return templates.TemplateResponse("prep.html", {
         "request": request, "user": user, "client": client,
         "tasks": tasks, "meetings": meetings, "prep_text": prep_text,
+        "days_since": days_since,
+        "blocked": blocked,
         "now": datetime.now(),
     })
 
@@ -490,10 +494,12 @@ async def settings_page(request: Request, db: Session = Depends(get_db), auth_to
     user = _get_user(auth_token, db)
     if not user:
         return _login_redirect()
+    _settings = user.settings or {}
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "user": user,
-        "user_settings": user.settings or {},
+        "user_settings": _settings,
+        "rules": _settings.get("rules", {}),
     })
 
 
@@ -549,7 +555,14 @@ async def client_focus_page(request: Request, client_id: int, db: Session = Depe
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404)
-    return templates.TemplateResponse("client_focus.html", {"request": request, "user": user, "client": client})
+        tasks_focus = db.query(Task).filter(Task.client_id == client.id).order_by(Task.created_at.desc()).limit(20).all()
+    meetings_focus = db.query(Meeting).filter(Meeting.client_id == client.id).order_by(Meeting.date.desc()).limit(10).all()
+    from models import ClientNote
+    notes_focus = db.query(ClientNote).filter(ClientNote.client_id == client.id).order_by(ClientNote.created_at.desc()).limit(10).all()
+    return templates.TemplateResponse("client_focus.html", {
+        "request": request, "user": user, "client": client,
+        "tasks": tasks_focus, "meetings": meetings_focus, "notes": notes_focus,
+    })
 
 
 # ============================================================================
