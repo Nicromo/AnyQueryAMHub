@@ -38,14 +38,17 @@ def _env_bool(key: str) -> bool:
 
 @router.post("/api/settings/creds")
 async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Сохранить персональные креды пользователя для ВСЕХ сервисов."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
+    """Сохранить персональные креды. Принимает cookie или Bearer token."""
     from auth import decode_access_token
-    payload = decode_access_token(auth_token)
+    # Пробуем Bearer header (расширение браузера)
+    bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = bearer or auth_token
+    if not token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(token)
     if not payload:
         raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    user = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
     if not user:
         raise HTTPException(status_code=401)
 

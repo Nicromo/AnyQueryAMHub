@@ -530,6 +530,7 @@ async def top50_page(request: Request, db: Session = Depends(get_db), auth_token
         "mode": mode,
         "sheet_url": sheet_url,
         "month_name": datetime.now().strftime("%B %Y"),
+        "metrics": None,
     })
 
 @app.get("/roadmap", response_class=HTMLResponse)

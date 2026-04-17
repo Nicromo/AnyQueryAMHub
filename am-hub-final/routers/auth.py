@@ -543,3 +543,38 @@ from fastapi.responses import FileResponse
 import os as _os
 
 
+
+
+@router.post("/api/auth/login")
+async def api_login_for_extension(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Логин для расширения браузера — принимает {email, password},
+    возвращает JWT токен для использования в Bearer header.
+    """
+    data = await request.json()
+    email = str(data.get("email", "")).strip()
+    password = str(data.get("password", ""))
+
+    if not email or not password:
+        raise HTTPException(status_code=422, detail="email and password required")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.hashed_password:
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    if not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Аккаунт деактивирован")
+
+    token = create_access_token({"sub": str(user.id), "email": user.email})
+    return {
+        "token": token,
+        "user": user.email,
+        "role": user.role,
+        "first_name": user.first_name or "",
+    }

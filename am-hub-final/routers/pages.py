@@ -102,15 +102,16 @@ async def dashboard(request: Request, db: Session = Depends(get_db), auth_token:
         return _login_redirect()
 
     settings = user.settings or {}
-    # Онбординг — только если 0 клиентов и не admin
-    if not settings.get("onboarding_complete"):
+    # admin всегда видит дашборд
+    # manager — редирект на онбординг только если совсем нет клиентов
+    if user.role != "admin" and not settings.get("onboarding_complete"):
         client_count = db.query(Client).filter(
             Client.manager_email == user.email
         ).count()
-        if client_count == 0 and user.role != "admin":
+        if client_count == 0:
             return RedirectResponse(url="/onboarding", status_code=303)
-        elif client_count > 0:
-            # Клиенты есть — автоматически помечаем онбординг пройденным
+        else:
+            # Клиенты есть — онбординг пройден автоматически
             user.settings = {**settings, "onboarding_complete": True}
             db.commit()
 
