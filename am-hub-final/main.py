@@ -513,7 +513,24 @@ async def top50_page(request: Request, db: Session = Depends(get_db), auth_token
     if not payload: return RedirectResponse(url="/login", status_code=303)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user: return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("top50.html", {"request": request, "user": user})
+    # Загружаем данные Top-50
+    try:
+        from sheets import get_top50_data
+        mode = request.query_params.get("mode", "weekly")
+        top50_data = await get_top50_data(user_email=user.email)
+        data = top50_data if top50_data and not top50_data.get("error") else None
+    except Exception:
+        data = None
+        mode = "weekly"
+    sheets_id = os.environ.get("SHEETS_SPREADSHEET_ID", "")
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheets_id}" if sheets_id else ""
+    return templates.TemplateResponse("top50.html", {
+        "request": request, "user": user,
+        "data": data or {"rows": [], "headers": [], "fetched_at": ""},
+        "mode": mode,
+        "sheet_url": sheet_url,
+        "month_name": datetime.now().strftime("%B %Y"),
+    })
 
 @app.get("/roadmap", response_class=HTMLResponse)
 async def roadmap_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):

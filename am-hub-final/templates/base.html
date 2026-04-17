@@ -454,5 +454,98 @@ if ("serviceWorker" in navigator) {
   });
 }
 </script>
+
+  <!-- ── Плавающий AI-чат ── -->
+  <div id="ai-chat-widget" style="
+    position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  ">
+    <!-- Окно чата -->
+    <div id="ai-chat-window" style="
+      display: none;
+      width: 360px; height: 480px;
+      background: var(--card, #111827);
+      border: 1px solid var(--border, #1e2a3a);
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    ">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span>🤖</span>
+          <span style="font-size:.85rem;font-weight:600;">AI-ассистент</span>
+        </div>
+        <button onclick="toggleAIChat()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
+      </div>
+      <div id="ai-chat-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;"></div>
+      <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;">
+        <input id="ai-chat-input" placeholder="Спросите что-нибудь..." style="
+          flex:1;padding:8px 12px;border-radius:8px;
+          border:1px solid var(--border);background:var(--bg,#0a0e1a);
+          color:var(--text);font-size:.82rem;outline:none;
+        " onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMsg();}">
+        <button onclick="sendAIMsg()" style="
+          padding:8px 14px;border-radius:8px;background:#6366f1;
+          border:none;color:#fff;cursor:pointer;font-size:.82rem;
+        ">↑</button>
+      </div>
+    </div>
+    <!-- Кнопка -->
+    <button onclick="toggleAIChat()" style="
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+      border: none; cursor: pointer;
+      font-size: 1.3rem;
+      box-shadow: 0 4px 20px rgba(99,102,241,.4);
+      transition: transform .15s;
+      display: flex; align-items: center; justify-content: center;
+    " onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">🤖</button>
+  </div>
+
+  <script>
+  function toggleAIChat() {
+    const w = document.getElementById('ai-chat-window');
+    const showing = w.style.display === 'flex';
+    w.style.display = showing ? 'none' : 'flex';
+    w.style.flexDirection = 'column';
+    if (!showing) document.getElementById('ai-chat-input').focus();
+  }
+
+  async function sendAIMsg() {
+    const input = document.getElementById('ai-chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    input.value = '';
+
+    const msgs = document.getElementById('ai-chat-msgs');
+    msgs.innerHTML += `<div style="align-self:flex-end;background:#6366f1;color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;font-size:.82rem;max-width:80%;">${msg}</div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+
+    const loading = document.createElement('div');
+    loading.style.cssText = 'align-self:flex-start;background:var(--card-h,#1a2235);color:var(--muted);padding:8px 12px;border-radius:12px 12px 12px 2px;font-size:.82rem;';
+    loading.textContent = '...';
+    msgs.appendChild(loading);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    try {
+      const r = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg, client_id: window.__clientId || null})
+      });
+      const d = await r.json();
+      loading.style.color = 'var(--text)';
+      loading.textContent = d.reply || d.response || d.content || JSON.stringify(d);
+    } catch(e) {
+      loading.style.color = 'var(--red, #ef4444)';
+      loading.textContent = '❌ Ошибка: ' + e.message;
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+  </script>
+
 </body>
 </html>

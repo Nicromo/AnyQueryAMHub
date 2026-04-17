@@ -1136,11 +1136,14 @@ async def get_portfolio(
         ).count()
 
         # Активный апсейл
-        active_upsell = db.query(UpsellEvent).filter(
-            UpsellEvent.client_id == c.id,
-            UpsellEvent.status.in_(["identified", "in_progress"]),
-            UpsellEvent.delta > 0,
-        ).count()
+        try:
+            active_upsell = db.query(UpsellEvent).filter(
+                UpsellEvent.client_id == c.id,
+                UpsellEvent.status.in_(["identified", "in_progress"]),
+                UpsellEvent.delta > 0,
+            ).count()
+        except Exception:
+            active_upsell = 0
 
         items.append({
             "id": c.id,

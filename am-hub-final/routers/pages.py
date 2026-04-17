@@ -346,6 +346,18 @@ async def followup_page(request: Request, client_id: int, db: Session = Depends(
 
 
 # ============================================================================
+# FOLLOWUP TEMPLATES PAGE
+# ============================================================================
+
+@router.get("/followup-templates", response_class=HTMLResponse)
+async def followup_templates_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    user = _get_user(auth_token, db)
+    if not user:
+        return _login_redirect()
+    return templates.TemplateResponse("followup_templates.html", {"request": request, "user": user})
+
+
+# ============================================================================
 # TASKS & KANBAN
 # ============================================================================
 

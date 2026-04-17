@@ -670,23 +670,22 @@ async def api_manager_kpi(
     return {
         "period_days": period_days,
         "manager": user.email,
-        "tasks": {
-            "closed": tasks_closed,
-            "created": tasks_created,
-            "overdue": tasks_overdue,
-            "close_rate": round(tasks_closed / max(tasks_created, 1) * 100, 1),
-        },
-        "meetings": {
-            "held": meetings_held,
-            "followups_sent": followups_sent,
-            "followups_pending": followups_pending,
-            "followup_rate": round(followups_sent / max(meetings_held, 1) * 100, 1),
-        },
-        "clients": {
-            "total": total_clients,
-            "no_contact_60d": clients_no_contact,
-            "avg_health_score": round(float(avg_health) * 100, 1),
-        },
+        # Плоская структура для совместимости с kpi.html
+        "tasks_closed": tasks_closed,
+        "tasks_created": tasks_created,
+        "tasks_overdue": tasks_overdue,
+        "close_rate": round(tasks_closed / max(tasks_created, 1) * 100, 1),
+        "meetings_held": meetings_held,
+        "followups_sent": followups_sent,
+        "followups_pending": followups_pending,
+        "followup_rate": round(followups_sent / max(meetings_held, 1) * 100, 1),
+        "total_clients": total_clients,
+        "clients_no_contact_60d": clients_no_contact,
+        "avg_health_score": round(float(avg_health) * 100, 1),
+        # Вложенные тоже для обратной совместимости
+        "tasks": {"closed": tasks_closed, "created": tasks_created, "overdue": tasks_overdue},
+        "meetings": {"held": meetings_held, "followups_sent": followups_sent, "followups_pending": followups_pending},
+        "clients": {"total": total_clients, "no_contact_60d": clients_no_contact, "avg_health_score": round(float(avg_health) * 100, 1)},
     }
 
 
