@@ -1,9 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Мой день — AM Hub{% endblock %}{% block scripts %}<script>
 
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
-
 // Search
 let searchTimeout=null;
 function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';}
@@ -275,9 +272,6 @@ loadSyncKpi();
 </div>
 
 <script>
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
-
 // Search
 let searchTimeout=null;
 function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';}
@@ -379,8 +373,10 @@ async function loadDaySlots() {
         '<div style="flex:1;">' +
           '<div style="font-size:.83rem;font-weight:500;">' + (done ? '<s>' : '') + s.title + (done ? '</s>' : '') + '</div>' +
           '<div style="font-size:.72rem;color:var(--muted);">до ' + s.time + (s.client_name ? ' · ' + s.client_name : '') + '</div>' +
-        '
-
-{% for script_content in [] %}
-{% endfor %}
+        '</div></a>';
+    }).join('');
+  } catch(e) {}
+}
+loadDaySlots();
+</script>
 {% endblock %}

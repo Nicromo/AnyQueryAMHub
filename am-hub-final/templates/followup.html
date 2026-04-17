@@ -1,9 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Followup: {{ client.name }} — AM Hub{% endblock %}{% block scripts %}<script>
 
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
-
 function showTab(name){
   const names=['followup','summary','tasks','send'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',names[i]===name));
@@ -461,9 +458,6 @@ if(saved){
 <div class="toast" id="toast"></div>
 
 <script>
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
-
 function showTab(name){
   const names=['followup','summary','tasks','send'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',names[i]===name));
@@ -633,7 +627,30 @@ async function loadTemplates() {
         <button onclick="deleteTemplate(${t.id})"
           style="padding:3px 6px;border-radius:5px;border:none;background:none;color:var(--muted);cursor:pointer;font-size:.8rem;"
           title="Удалить">✕</button>
+      </div>`
+    ).join('');
+  } catch(e) {
+    list.innerHTML = '<span style="font-size:.78rem;color:var(--red);">Ошибка загрузки шаблонов</span>';
+  }
+}
 
-{% for script_content in [] %}
-{% endfor %}
+async function applyTemplate(id){
+  try{
+    const r=await fetch('/api/followup-templates/'+id);
+    if(!r.ok) return;
+    const t=await r.json();
+    const el=document.getElementById('followup-text');
+    if(el) el.value=t.content||'';
+    toggleTemplates();
+  }catch(e){}
+}
+
+async function deleteTemplate(id){
+  if(!confirm('Удалить шаблон?')) return;
+  try{
+    const r=await fetch('/api/followup-templates/'+id,{method:'DELETE'});
+    if(r.ok) loadTemplates();
+  }catch(e){}
+}
+</script>
 {% endblock %}

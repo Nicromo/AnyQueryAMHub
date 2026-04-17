@@ -1,334 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Настройки — AM Hub{% endblock %}{% block scripts %}<script>
-
-async function getToken() {
-  try {
-    const r = await fetch('/api/auth/token');
-    const d = await r.json();
-    const inp = document.getElementById('ext-token');
-    inp.value = d.token;
-    inp.type = 'text';
-  } catch(e) { alert('Ошибка: ' + e.message); }
-}
-
-async function copyToken() {
-  const inp = document.getElementById('ext-token');
-  if (!inp.value) await getToken();
-  await navigator.clipboard.writeText(inp.value);
-  const msg = document.getElementById('saved-ext');
-  msg.style.display = 'inline';
-  setTimeout(() => msg.style.display = 'none', 2000);
-}
-
-function copyHubUrl() {
-  const val = document.getElementById('hub-url-display').value.replace(/\/$/, '');
-  navigator.clipboard.writeText(val);
-  const msg = document.getElementById('saved-ext');
-  msg.style.display = 'inline';
-  setTimeout(() => msg.style.display = 'none', 2000);
-}
-
-function toggleTheme(){
-  const h=document.documentElement;
-  const t=h.getAttribute('data-theme')==='light'?'dark':'light';
-  h.setAttribute('data-theme',t);
-  localStorage.setItem('theme',t);
-  const el=document.getElementById('pref-theme');
-  if(el) el.value=t;
-}
-const s=localStorage.getItem('theme');
-if(s){document.documentElement.setAttribute('data-theme',s);const el=document.getElementById('pref-theme');if(el)el.value=s;}
-
-function showTab(id,btn){
-  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-  document.getElementById('tab-'+id).classList.add('active');
-  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-}
-
-function showSaved(id){
-  const el=document.getElementById(id);
-  el.classList.add('show');
-  setTimeout(()=>el.classList.remove('show'),2000);
-}
-
-async function saveCreds(){
-  const data={
-    merchrules:{
-      login:document.getElementById('mr-login').value,
-      password:document.getElementById('mr-pass').value
-    },
-    tbank_time:{
-      login:document.getElementById('tm-login').value,
-      password:document.getElementById('tm-pass').value,
-      session_cookie:document.getElementById('tm-session')?.value || ''
-    },
-    airtable:{
-      pat:document.getElementById('at-token')?.value || '',
-      token:document.getElementById('at-token')?.value || '',
-      base_id:document.getElementById('at-base')?.value || '',
-      table_id:document.getElementById('at-table')?.value || ''
-    },
-    sheets:{
-      spreadsheet_id:document.getElementById('gs-id')?.value || ''
-    },
-  };
-  const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  if(r.ok) showSaved('saved-creds');
-}
-
-async function testAirtable(){
-  const el=document.getElementById('at-result');
-  const token=document.getElementById('at-token').value;
-  if(!token){el.style.color='var(--red)';el.textContent='❌ Введите токен';return;}
-  // Сохраняем перед тестом
-  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({airtable:{pat:token,token,base_id:document.getElementById('at-base')?.value||'',table_id:document.getElementById('at-table')?.value||''}})});
-  el.textContent='⏳ Проверяем...';el.style.color='var(--muted)';
-  try{
-    const d=await fetch('/api/integrations/test/airtable',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json());
-    el.style.color=d.ok?'var(--green)':'var(--red)';
-    el.textContent=d.ok?d.message:'❌ '+(d.error||'Ошибка');
-  }catch(e){el.style.color='var(--red)';el.textContent='❌ '+e.message;}
-  if(false){
-  el.style.color='var(--muted)';el.textContent='⏳ Проверяем...';
-  // Сначала сохраняем
-  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({airtable:{pat:token,token:token,base_id:base}})});
-  try{
-    const url = base
-      ? 'https://api.airtable.com/v0/' + base + '?maxRecords=1'
-      : 'https://api.airtable.com/v0/meta/bases';
-    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token}});
-    if(r.status===200||r.status===404){
-      el.style.color='var(--green)';el.textContent='✅ Токен работает';
-    } else {
-      el.style.color='var(--red)';el.textContent='❌ HTTP '+r.status+' — проверьте токен';
-    }
-  }catch(e){el.style.color='var(--red)';el.textContent='❌ '+e.message;}
-}
-
-async function syncAirtable(){
-  const el=document.getElementById('at-result');
-  const token=document.getElementById('at-token').value;
-  const base=document.getElementById('at-base').value;
-  if(!token){el.style.color='var(--red)';el.textContent='❌ Введите токен';return;}
-  el.style.color='var(--muted)';el.textContent='⏳ Синхронизируем...';
-  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({airtable:{pat:token,token:token,base_id:base}})});
-  try{
-    const r=await fetch('/api/sync/airtable',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token,base_id:base})});
-    const d=await r.json();
-    if(d.ok||d.synced){
-      el.style.color='var(--green)';
-      el.textContent='✅ Синхронизировано: '+(d.synced||d.clients_synced||0)+' клиентов';
-    }else{
-      el.style.color='var(--red)';el.textContent='❌ '+(d.error||'Ошибка');
-    }
-  }catch(e){el.style.color='var(--red)';el.textContent='❌ '+e.message;}
-}
-
-async function saveTimeManual(){
-  const token = document.getElementById('tm-session')?.value.trim();
-  const el = document.getElementById('tm-test-result');
-  if(!token){el.style.color='var(--red)';el.textContent='❌ Вставьте токен';return;}
-  el.style.color='var(--muted)';el.textContent='⏳ Проверяем...';
-  try{
-    const r = await fetch('/api/auth/time/token',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
-    const d = await r.json();
-    if(d.ok){
-      el.style.color='var(--green)';
-      el.textContent='✅ ' + (d.username||d.email||'Подключено') +
-        (d.channel_id ? ' · канал найден' : ' · канал не найден, проверьте доступ');
-    }else{
-      el.style.color='var(--red)';el.textContent='❌ '+(d.error||'Ошибка');
-    }
-  }catch(e){el.style.color='var(--red)';el.textContent='❌ '+e.message;}
-}
-
-async function disconnectTime(){
-  if(!confirm('Отключить Tbank Time? Тикеты перестанут загружаться.')) return;
-  const r = await fetch('/api/auth/time/disconnect',{method:'POST'});
-  if(r.ok) location.reload();
-}
-
-async function testTimeToken(){
-  const el = document.getElementById('tm-test-result');
-  el.style.color='var(--muted)';el.textContent='⏳ Проверяем...';
-  try{
-    const r = await fetch('/api/integrations/test/tbank');
-    const d = await r.json();
-    if(d.ok){el.style.color='var(--green)';el.textContent='✅ Токен работает';}
-    else{el.style.color='var(--red)';el.textContent='❌ '+(d.error||'Токен истёк');}
-  }catch(e){el.style.color='var(--red)';el.textContent='❌ '+e.message;}
-}
-
-async function saveSheets(){
-  const id=document.getElementById('gs-id').value;
-  const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({sheets:{spreadsheet_id:id}})});
-  const el=document.getElementById('gs-result');
-  if(r.ok){el.style.color='var(--green)';el.textContent='✅ Сохранено';}
-  else{el.style.color='var(--red)';el.textContent='❌ Ошибка';}
-}
-
-async function testMR(){
-  const el=document.getElementById('mr-test-result');
-  const login=document.getElementById('mr-login').value;
-  const pass=document.getElementById('mr-pass').value;
-  if(!login||!pass){el.textContent='❌ Введите логин и пароль';el.style.color='var(--red)';return;}
-  el.textContent='⏳ Проверяем...';el.style.color='var(--muted)';
-  // Сначала сохраняем
-  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({merchrules:{login,password:pass}})});
-  // Потом диагностируем
-  try{
-    const r=await fetch('/api/diagnostics/merchrules-auth',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({login,password:pass})});
-    const d=await r.json();
-    if(d.ok){el.textContent='✅ Подключено! ('+d.working.url+')';el.style.color='var(--green)';}
-    else{
-      const first=d.all&&d.all[0];
-      el.textContent='❌ '+(first?'HTTP '+first.status+': '+first.response?.slice(0,80):'Ошибка подключения');
-      el.style.color='var(--red)';
-    }
-  }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
-}
-
-async function syncMR(){
-  const el=document.getElementById('mr-test-result');
-  const login=document.getElementById('mr-login').value;
-  const pass=document.getElementById('mr-pass').value;
-  if(!login||!pass){el.textContent='❌ Введите логин и пароль';el.style.color='var(--red)';return;}
-  el.textContent='⏳ Синхронизируем...';el.style.color='var(--muted)';
-  // Сохраняем креды
-  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({merchrules:{login,password:pass}})});
-  try{
-    const r=await fetch('/api/sync/merchrules',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({login,password:pass})});
-    const d=await r.json();
-    if(d.ok){el.textContent='✅ '+d.message;el.style.color='var(--green)';}
-    else{el.textContent='❌ '+d.error+(d.endpoints_tried?'\n'+d.endpoints_tried.join('\n'):'');el.style.color='var(--red)';}
-  }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
-}
-
-// ── Статус интеграций ─────────────────────────────────────────────────
-const SVC_NAMES = {
-  merchrules:'🗺️ Merchrules', ktalk:'💬 Ktalk',
-  airtable:'📊 Airtable', tbank_time:'⏱ Time',
-  sheets:'📈 Sheets', telegram:'✈️ Telegram', groq_ai:'🤖 AI'
-};
-
-async function loadIntegrationsStatus() {
-  try {
-    const d = await fetch('/api/integrations/status').then(r => r.json());
-    const grid = document.getElementById('integrations-status');
-    if (!grid) return;
-    grid.innerHTML = Object.entries(d).map(([key, val]) => {
-      const ok = val.configured;
-      const name = SVC_NAMES[key] || key;
-      const sync = val.last_sync ? '<div style="font-size:.65rem;color:var(--muted);">↻ ' + val.last_sync + '</div>' : '';
-      return '<div style="background:var(--card);border:1px solid ' + (ok ? 'rgba(34,197,94,.3)' : 'var(--border)') + ';border-radius:8px;padding:8px 10px;text-align:center;">' +
-        '<div style="font-size:.75rem;font-weight:600;color:' + (ok ? 'var(--green)' : 'var(--muted)') + ';">' + name + '</div>' +
-        '<div style="font-size:.7rem;color:' + (ok ? 'var(--green)' : 'var(--red)') + ';">' + (ok ? '✅ настроен' : '❌ не настроен') + '</div>' +
-        sync + '</div>';
-    }).join('');
-  } catch(e) {}
-}
-loadIntegrationsStatus();
-
-async function checkAllIntegrations() {
-  const services = ['merchrules', 'ktalk', 'airtable', 'tbank_time', 'sheets'];
-  const results = [];
-  for (const svc of services) {
-    try {
-      const d = await fetch('/api/integrations/test/' + svc, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
-      }).then(r => r.json());
-      results.push((SVC_NAMES[svc] || svc) + ': ' + (d.ok ? d.message : '❌ ' + d.error));
-    } catch(e) {
-      results.push((SVC_NAMES[svc] || svc) + ': ❌ ' + e.message);
-    }
-  }
-  alert('Результаты проверки:\n\n' + results.join('\n'));
-  loadIntegrationsStatus();
-}
-
-async function saveKtalkChannel(){
-  const id = document.getElementById('kt-channel-id')?.value || '';
-  const r = await fetch('/api/settings/creds', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ktalk: {followup_channel_id: id}})});
-  if(r.ok){ const el=document.getElementById('kt-channel-saved'); el.style.display='inline'; setTimeout(()=>el.style.display='none',2000); }
-}
-
-async function disconnectKTalk(){
-  const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ktalk:{access_token:'',login:''}})});
-  if(r.ok) location.reload();
-}
-
-async function testTaim(){
-  const el=document.getElementById('tm-test-result');
-  el.textContent='⏳ Проверяем...';el.style.color='var(--muted)';
-  const login=document.getElementById('tm-login').value;
-  const password=document.getElementById('tm-pass').value;
-  // Сохраняем перед тестом
-  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({tbank_time:{login,password,session_cookie:document.getElementById('tm-session')?.value||''}})});
-  // Тестируем через unified endpoint
-  const td=await fetch('/api/integrations/test/tbank_time',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).catch(e=>({ok:false,error:e.message}));
-  if(td.ok){el.textContent=td.message;el.style.color='var(--green)';return;}
-  // Fallback на старый endpoint
-  if(false){
-  try{
-    const r=await fetch('/api/auth/taim/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login,password})});
-    const d=await r.json();
-    if(d.ok){el.textContent='✅ '+d.username+' · '+d.teams_count+' команд, '+d.channels_count+' каналов';el.style.color='var(--green)';}
-    else{el.textContent='❌ '+d.error;el.style.color='var(--red)';}
-  }catch(e){el.textContent='❌ '+e.message;el.style.color='var(--red)';}
-}
-
-async function saveRules(){
-  const data={
-    warning_days:parseInt(document.getElementById('rule-warning-days').value),
-    auto_create_tasks:document.getElementById('rule-auto-tasks').checked,
-    morning_plan_time:document.getElementById('rule-morning-time').value,
-    weekly_digest_day:document.getElementById('rule-digest-day').value,
-  };
-  const r=await fetch('/api/settings/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  if(r.ok) showSaved('saved-rules');
-}
-
-async function savePrefs(){
-  const data={
-    theme:document.getElementById('pref-theme').value,
-    dashboard_view:document.getElementById('pref-dashboard-view').value,
-  };
-  const r=await fetch('/api/settings/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  if(r.ok) showSaved('saved-prefs');
-}
-
-async function saveNotifs(){
-  const data={
-    notifications_email:document.getElementById('notif-email').checked,
-    notifications_tg:document.getElementById('notif-tg').checked,
-    notifications_ktalk:document.getElementById('notif-ktalk').checked,
-    notif_overdue:document.getElementById('notif-overdue').checked,
-    notif_new_tasks:document.getElementById('notif-new-tasks').checked,
-    notif_blocked:document.getElementById('notif-blocked').checked,
-    notif_morning:document.getElementById('notif-morning').checked,
-  };
-  const r=await fetch('/api/settings/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  if(r.ok) showSaved('saved-notifs');
-}
-
-}
-}
-
-</script>
-{% endblock %}
+{% block title %}Настройки — AM Hub{% endblock %}
 {% block page_title %}Настройки{% endblock %}
 
 {% block head %}
@@ -692,14 +363,6 @@ function copyHubUrl() {
   setTimeout(() => msg.style.display = 'none', 2000);
 }
 
-function toggleTheme(){
-  const h=document.documentElement;
-  const t=h.getAttribute('data-theme')==='light'?'dark':'light';
-  h.setAttribute('data-theme',t);
-  localStorage.setItem('theme',t);
-  const el=document.getElementById('pref-theme');
-  if(el) el.value=t;
-}
 const s=localStorage.getItem('theme');
 if(s){document.documentElement.setAttribute('data-theme',s);const el=document.getElementById('pref-theme');if(el)el.value=s;}
 
@@ -898,8 +561,85 @@ async function loadIntegrationsStatus() {
       return '<div style="background:var(--card);border:1px solid ' + (ok ? 'rgba(34,197,94,.3)' : 'var(--border)') + ';border-radius:8px;padding:8px 10px;text-align:center;">' +
         '<div style="font-size:.75rem;font-weight:600;color:' + (ok ? 'var(--green)' : 'var(--muted)') + ';">' + name + '</div>' +
         '<div style="font-size:.7rem;color:' + (ok ? 'var(--green)' : 'var(--red)') + ';">' + (ok ? '✅ настроен' : '❌ не настроен') + '</div>' +
-        sync + '
+        sync + '</div>';
+    }).join('');
+  } catch(e) {}
+}
+loadIntegrationsStatus();
 
-{% for script_content in [] %}
-{% endfor %}
+async function checkAllIntegrations() {
+  const services = ['merchrules', 'ktalk', 'airtable', 'tbank_time', 'sheets'];
+  const results = [];
+  for (const svc of services) {
+    try {
+      const d = await fetch('/api/integrations/test/' + svc, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+      }).then(r => r.json());
+      results.push((SVC_NAMES[svc] || svc) + ': ' + (d.ok ? d.message : '❌ ' + d.error));
+    } catch(e) {
+      results.push((SVC_NAMES[svc] || svc) + ': ❌ ' + e.message);
+    }
+  }
+  alert('Результаты проверки:\n\n' + results.join('\n'));
+  loadIntegrationsStatus();
+}
+
+async function saveKtalkChannel(){
+  const id = document.getElementById('kt-channel-id')?.value || '';
+  const r = await fetch('/api/settings/creds', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ktalk: {followup_channel_id: id}})});
+  if(r.ok){ const el=document.getElementById('kt-channel-saved'); el.style.display='inline'; setTimeout(()=>el.style.display='none',2000); }
+}
+
+async function disconnectKTalk(){
+  const r=await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ktalk:{access_token:'',login:''}})});
+  if(r.ok) location.reload();
+}
+
+async function testTaim(){
+  const el=document.getElementById('tm-test-result');
+  if(!el) return;
+  el.textContent='⏳ Проверяем...';el.style.color='var(--muted)';
+  const login=document.getElementById('tm-login').value;
+  const password=document.getElementById('tm-pass').value;
+  await fetch('/api/settings/creds',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({tbank_time:{login,password,session_cookie:document.getElementById('tm-session')?.value||''}})});
+  const td=await fetch('/api/integrations/test/tbank_time',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).catch(e=>({ok:false,error:e.message}));
+  if(td.ok){el.textContent=td.message;el.style.color='var(--green)';} else {el.textContent='❌ '+(td.error||'Ошибка');el.style.color='var(--red)';}
+}
+
+async function saveRules(){
+  const data={
+    warning_days:parseInt(document.getElementById('rule-warning-days').value),
+    auto_create_tasks:document.getElementById('rule-auto-tasks').checked,
+    morning_plan_time:document.getElementById('rule-morning-time').value,
+    weekly_digest_day:document.getElementById('rule-digest-day').value,
+  };
+  const r=await fetch('/api/settings/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-rules');
+}
+
+async function savePrefs(){
+  const data={
+    theme:document.getElementById('pref-theme').value,
+    dashboard_view:document.getElementById('pref-dashboard-view').value,
+  };
+  const r=await fetch('/api/settings/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-prefs');
+}
+
+async function saveNotifs(){
+  const data={
+    notifications_email:document.getElementById('notif-email').checked,
+    notifications_tg:document.getElementById('notif-tg').checked,
+    notifications_ktalk:document.getElementById('notif-ktalk').checked,
+    notif_overdue:document.getElementById('notif-overdue').checked,
+    notif_new_tasks:document.getElementById('notif-new-tasks').checked,
+    notif_blocked:document.getElementById('notif-blocked').checked,
+    notif_morning:document.getElementById('notif-morning').checked,
+  };
+  const r=await fetch('/api/settings/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) showSaved('saved-notifs');
+}
+</script>
 {% endblock %}

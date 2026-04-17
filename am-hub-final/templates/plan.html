@@ -78,9 +78,6 @@
 </div>
 
 <script>
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
-
 function addGoal(){
   const d=document.createElement('div');d.className='item-row';
   d.innerHTML='<input type="text" placeholder="Цель..." class="goal-input"><input type="text" placeholder="Метрика..." class="goal-target" style="max-width:150px;"><span class="remove" onclick="this.parentElement.remove()">✕</span>';

@@ -15,8 +15,36 @@ function switchTab(tab, btn) {
   if (tab === "sync") refreshSyncStatus();
 }
 
+// ── Delegated click handler (MV3 CSP запрещает inline onclick) ────────────────
+const ACTIONS = {
+  "switch-tab":    (el, arg) => switchTab(arg, el),
+  "sync-now":      () => window.syncNow(),
+  "open-hub":      () => window.openHub(),
+  "open-time":     () => window.openTime(),
+  "open-ktalk":    () => window.openKtalk(),
+  "load-cabinet":  () => window.loadCabinet(),
+  "set-qtype":     (el, arg) => window.setQType(arg, el),
+  "set-product":   (el, arg) => window.setProduct(arg, el),
+  "run-check":     () => window.runCheck(),
+  "run-cal":       () => window.runCal(),
+  "gen-pdf":       () => window.genPDF(),
+  "export-csv":    () => window.exportCSV(),
+  "save-settings": () => window.saveSettings(),
+  "test-mr":       () => window.testMR(),
+};
+
+function wireActions() {
+  document.body.addEventListener("click", e => {
+    const t = e.target.closest("[data-act]");
+    if (!t) return;
+    const fn = ACTIONS[t.dataset.act];
+    if (fn) fn(t, t.dataset.arg);
+  });
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  wireActions();
   await loadSettings();
   checkHubConnection();
   refreshSyncStatus();
@@ -151,7 +179,7 @@ window.loadCabinet = async function() {
     const labels = { sort: "🔍 Sort", autocomplete: "⌨ Auto", recommendations: "⭐ Rec" };
     const cls    = { sort: "p-sort", autocomplete: "p-auto", recommendations: "p-rec" };
     prodEl.innerHTML = products.map((p, i) =>
-      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" onclick="setProduct('${p}',this)">${labels[p]||p}</span>`
+      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" data-act="set-product" data-arg="${p}">${labels[p]||p}</span>`
     ).join("");
   }
 

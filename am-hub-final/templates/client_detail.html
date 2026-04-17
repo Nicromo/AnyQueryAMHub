@@ -788,7 +788,6 @@
 <script>
 const clientId = {{ client.id }};
 
-function toggleTheme(){const h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='light'?'dark':'light');localStorage.setItem('theme',h.getAttribute('data-theme'));}
 const _t=localStorage.getItem('theme');if(_t)document.documentElement.setAttribute('data-theme',_t);
 
 function showTab(id,btn){

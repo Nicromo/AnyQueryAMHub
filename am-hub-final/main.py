@@ -939,17 +939,17 @@ async def pwa_icon():
 
 @app.get("/manifest.json")
 async def pwa_manifest():
-    p = "static/manifest.json"
-    if _os.path.exists(p): return FileResponse(p, media_type="application/manifest+json")
+    p = BASE_DIR / "static" / "manifest.json"
+    if p.exists(): return FileResponse(str(p), media_type="application/manifest+json")
     return {"name":"AM Hub","short_name":"AM Hub","start_url":"/","display":"standalone",
             "background_color":"#07090f","theme_color":"#6474ff"}
 
 @app.get("/sw.js")
 async def service_worker():
-    p = "static/sw.js"
-    if _os.path.exists(p): return FileResponse(p, media_type="application/javascript",
+    p = BASE_DIR / "static" / "sw.js"
+    if p.exists(): return FileResponse(str(p), media_type="application/javascript",
                                                   headers={"Service-Worker-Allowed": "/"})
-    return FileResponse("/dev/null", media_type="application/javascript")
+    return JSONResponse({}, media_type="application/javascript")
 
 # ============================================================================
 # WEBSOCKET — real-time обновления

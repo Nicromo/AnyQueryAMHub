@@ -79,7 +79,6 @@
 </div>
 
 <script>
-function toggleTheme(){const h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='light'?'dark':'light');localStorage.setItem('theme',h.getAttribute('data-theme'));}
 (function(){const t=localStorage.getItem('theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
 
 const WEEKDAYS = ['вс','пн','вт','ср','чт','пт','сб'];

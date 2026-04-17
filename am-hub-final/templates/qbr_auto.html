@@ -86,7 +86,6 @@
 
 <script>
 const clientId={{ client.id }};
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 function addItem(listId){const d=document.createElement('div');d.className='item-row';d.innerHTML='<input type="text" placeholder="..."><span style="cursor:pointer;color:var(--red);" onclick="this.parentElement.remove()">✕</span>';document.getElementById(listId).appendChild(d);}
 
 async function generateQBR(){

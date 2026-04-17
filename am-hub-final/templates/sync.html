@@ -167,8 +167,6 @@ async function loadSyncStatus() {
 }
 loadSyncStatus();
 
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-
 async function loadCreds(){
   try{
     const r=await fetch('/api/sync/merchrules-creds');
@@ -365,8 +363,6 @@ async function loadSyncStatus() {
   }
 }
 loadSyncStatus();
-
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 
 async function loadCreds(){
   try{

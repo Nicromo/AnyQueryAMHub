@@ -310,9 +310,6 @@
 <div class="toast" id="toast"></div>
 
 <script>
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);
-
 const TOTAL_STEPS=7;
 let completedSteps=new Set();
 
