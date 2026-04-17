@@ -28,14 +28,62 @@ loadConfig().then(() => {
     if (data.selectorConfig) checkup.selectorConfig = data.selectorConfig;
     if (data.managerName)    checkup.managerName    = data.managerName;
   });
+  // version check in background after 5s (moved here, removed duplicate below)
 });
 
 // ── Alarms ────────────────────────────────────────────────────────────────────
-chrome.alarms.create("mr_sync", { periodInMinutes: 30 });
+chrome.alarms.create("mr_sync",       { periodInMinutes: 30 });
+chrome.alarms.create("version_check", { periodInMinutes: 360 }); // every 6h
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === "mr_sync") runMrSync(false);
+  if (alarm.name === "mr_sync")       runMrSync(false);
+  if (alarm.name === "version_check") checkForUpdate();
 });
+
+// ── Auto-update: check hub for new version ────────────────────────────────────
+const CURRENT_VERSION = chrome.runtime.getManifest().version;
+
+async function checkForUpdate() {
+  if (!CONFIG.HUB_URL) return;
+  try {
+    const resp = await fetch(`${CONFIG.HUB_URL}/api/extension/version`, {
+      headers: CONFIG.HUB_TOKEN ? { "Authorization": CONFIG.HUB_TOKEN } : {}
+    });
+    if (!resp.ok) return;
+    const info = await resp.json();
+
+    const latest = info.version || "";
+    if (!latest || latest === CURRENT_VERSION) return;
+
+    // New version available — store info + show notification
+    await chrome.storage.local.set({
+      ext_update_available: true,
+      ext_latest_version: latest,
+      ext_update_url: info.download_url || `${CONFIG.HUB_URL}/settings/extension`,
+      ext_changelog: info.changelog || "",
+    });
+
+    chrome.notifications.create("ext_update", {
+      type: "basic",
+      iconUrl: "../icons/icon48.png",
+      title: `AM Hub: версия ${latest} доступна`,
+      message: info.changelog || "Нажмите чтобы обновить расширение",
+      buttons: [{ title: "Обновить" }],
+      requireInteraction: true,
+    });
+  } catch (e) { /* silently ignore */ }
+}
+
+chrome.notifications.onButtonClicked.addListener((notifId, btnIdx) => {
+  if (notifId === "ext_update" && btnIdx === 0) {
+    chrome.storage.local.get("ext_update_url", d => {
+      chrome.tabs.create({ url: d.ext_update_url || `${CONFIG.HUB_URL}/settings/extension` });
+    });
+  }
+});
+
+// Check on startup (after config loads)
+setTimeout(checkForUpdate, 5000);
 
 // ── Message router ────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {

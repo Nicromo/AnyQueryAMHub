@@ -117,6 +117,37 @@ async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_t
 
 
 
+@router.get("/api/extension/version")
+async def api_extension_version(auth_token: Optional[str] = Cookie(None)):
+    """
+    Возвращает актуальную версию расширения.
+    Расширение опрашивает этот endpoint каждые 6 часов.
+    Если версия выше установленной — фоновый скрипт показывает уведомление.
+    """
+    # Читаем version из manifest.json расширения
+    import pathlib
+    manifest_path = pathlib.Path(__file__).resolve().parent.parent / "static" / "amhub-ext" / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        version = manifest.get("version", "1.0.0")
+    except Exception:
+        version = "1.0.0"
+
+    # Формируем URL для скачивания ZIP (расширение лежит в /static)
+    base_url = os.getenv("HUB_URL", "")
+    download_url = f"{base_url}/static/amhub-ext.zip" if base_url else "/static/amhub-ext.zip"
+
+    # Changelog можно задать через ENV или файл
+    changelog = os.getenv("EXT_CHANGELOG", "Обновлённая версия расширения AM Hub")
+
+    return {
+        "version": version,
+        "download_url": download_url,
+        "install_url": f"{base_url}/settings/extension" if base_url else "/settings/extension",
+        "changelog": changelog,
+    }
+
+
 @router.get("/settings/extension", response_class=HTMLResponse)
 async def settings_extension_page(
     request: Request,

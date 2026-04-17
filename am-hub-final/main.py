@@ -767,14 +767,32 @@ async def profile_page(request: Request, db: Session = Depends(get_db), auth_tok
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    # profile объект для шаблона (разворачиваем поля из user + settings)
+    # Load per-user creds for the profile page
+    try:
+        from creds import load_merchrules_creds, load_airtable_token, load_grok_api_key
+        _mr_url, mr_login, mr_password = load_merchrules_creds()
+        at_token = load_airtable_token(user.email)
+        gk = load_grok_api_key(user.email)
+    except Exception:
+        mr_login = mr_password = at_token = gk = None
+
+    settings = user.settings or {}
+    # profile объект для шаблона — все поля, которые нужны profile.html
     profile = {
-        "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email,
-        "email": user.email,
-        "role": user.role,
-        "telegram_id": user.telegram_id,
-        "settings": user.settings or {},
-        "created_at": user.created_at,
+        "name":            user.name,
+        "display_name":    user.name,
+        "email":           user.email,
+        "role":            user.role,
+        "telegram_id":     user.telegram_id,
+        "settings":        settings,
+        "created_at":      user.created_at,
+        # Integration credentials (pre-filled from creds file)
+        "mr_login":        mr_login or "",
+        "mr_password":     mr_password or "",
+        "airtable_token":  at_token or os.getenv("AIRTABLE_TOKEN", ""),
+        "tg_notify_chat":  settings.get("tg_notify_chat", ""),
+        "ktalk_webhook":   settings.get("ktalk_webhook", ""),
+        "groq_api_key":    gk or os.getenv("GROQ_API_KEY", ""),
     }
     return templates.TemplateResponse("profile.html", {"request": request, "user": user, "profile": profile})
 
