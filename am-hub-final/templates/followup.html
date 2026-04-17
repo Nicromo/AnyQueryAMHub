@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Followup: {{ client.name }} — AM Hub<script>
+{% block title %}Followup: {{ client.name }} — AM Hub{% endblock %}{% block scripts %}<script>
 
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
 const s=localStorage.getItem('theme');if(s)document.documentElement.setAttribute('data-theme',s);

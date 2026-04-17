@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Дашборд — AM Hub<script>
+{% block title %}Дашборд — AM Hub{% endblock %}{% block scripts %}<script>
 
 
 function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
