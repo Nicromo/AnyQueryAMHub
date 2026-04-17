@@ -2,7 +2,7 @@
  * popup.js — логика единого AM Hub popup
  */
 
-import { jsPDF } from "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+import { jsPDF } from "../lib/jspdf.umd.min.js";
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 const TABS = ["sync","checkup","settings"];
