@@ -133,6 +133,49 @@
   <div id="ktalk-test-result" style="font-size:0.8rem;margin-top:4px"></div>
 </div>
 
+<!-- Groq AI -->
+<div class="card" id="groq-card">
+  <h3 style="font-size:1rem;margin:0 0 4px">🤖 Groq AI (Prep / Followup)</h3>
+  <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px">
+    Ключ используется для генерации Prep-брифа и Followup-саммари через AI.
+    Бесплатный план Groq даёт <b>30 запросов/мин</b> — более чем достаточно для ежедневной работы.
+  </p>
+
+  <!-- Инструкция -->
+  <div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:0.8rem;line-height:1.7;">
+    <b>📋 Как получить бесплатный API-ключ:</b><br>
+    1. Открой <a href="https://console.groq.com" target="_blank" style="color:var(--accent)">console.groq.com</a> → зарегистрируйся через Google или email<br>
+    2. Перейди в <b>API Keys</b> → нажми <b>Create API Key</b><br>
+    3. Скопируй ключ (начинается с <code style="background:var(--surface-3);padding:1px 5px;border-radius:3px;">gsk_…</code>) и вставь ниже<br>
+    4. Нажми <b>Сохранить профиль</b>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+    <div class="form-group" style="flex:1;margin:0;min-width:240px">
+      <label>Groq API Key</label>
+      <div style="position:relative">
+        <input class="form-control" id="f-groq-key" type="password"
+               value="{{ profile.groq_api_key or '' }}"
+               placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxx"
+               style="padding-right:44px">
+        <button onclick="togglePass('f-groq-key', this)" aria-label="Показать ключ"
+                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem">👁</button>
+      </div>
+    </div>
+    <button onclick="testGroq()" class="btn btn-ghost btn-sm" id="groq-test-btn" style="margin-bottom:14px">
+      🔌 Проверить
+    </button>
+  </div>
+  <div id="groq-test-result" style="font-size:0.8rem;margin-top:6px"></div>
+  {% if not profile.groq_api_key %}
+  <div style="font-size:0.75rem;color:var(--yellow,#eab308);margin-top:6px;">
+    ⚠️ Без ключа AI-функции (Prep / Followup) работать не будут
+  </div>
+  {% else %}
+  <div style="font-size:0.75rem;color:var(--green,#22c55e);margin-top:6px;">✅ AI ключ сохранён</div>
+  {% endif %}
+</div>
+
 <!-- Сохранить -->
 <div style="display:flex;gap:10px;align-items:center">
   <button onclick="saveProfile()" class="btn btn-primary" id="save-btn">
@@ -327,6 +370,25 @@ async function testKTalk() {
   } finally { btn.disabled = false; }
 }
 
+async function testGroq() {
+  const key = document.getElementById('f-groq-key').value.trim();
+  const res = document.getElementById('groq-test-result');
+  const btn = document.getElementById('groq-test-btn');
+  if (!key) { res.textContent = '⚠️ Введи API ключ'; res.style.color = 'var(--yellow)'; return; }
+  btn.disabled = true;
+  res.textContent = '⏳ Проверяем...';
+  try {
+    const r = await fetch('/api/profile/test-groq', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ groq_api_key: key }),
+    });
+    const d = await r.json();
+    if (d.ok) { res.textContent = '✅ Ключ рабочий · модель: ' + (d.model || 'llama3'); res.style.color = 'var(--green)'; }
+    else       { res.textContent = '❌ ' + (d.error || 'Ошибка'); res.style.color = 'var(--red)'; }
+  } catch(e) { res.textContent = '❌ ' + e.message; res.style.color = 'var(--red)'; }
+  finally { btn.disabled = false; }
+}
+
 async function saveProfile() {
   const btn = document.getElementById('save-btn');
   const res = document.getElementById('save-result');
@@ -344,6 +406,7 @@ async function saveProfile() {
         tg_notify_chat:  document.getElementById('f-notify').value.trim(),
         airtable_token:  document.getElementById('f-at-token').value.trim(),
         ktalk_webhook:   document.getElementById('f-ktalk-webhook').value.trim(),
+        groq_api_key:    document.getElementById('f-groq-key').value.trim(),
       }),
     });
     const d = await r.json();
