@@ -4,36 +4,59 @@
   <meta charset="UTF-8">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { width:320px; font-family:'Inter',-apple-system,sans-serif; background:#0f172a; color:#e2e8f0; padding:0; }
-    .header { background:#1e293b; padding:14px 16px; border-bottom:1px solid #1e2a3a; display:flex; align-items:center; gap:10px; }
+    body { width:340px; font-family:'Inter',-apple-system,sans-serif; background:#0f172a; color:#e2e8f0; }
+    .header { background:linear-gradient(135deg,#1e1b4b,#312e81); padding:14px 16px; display:flex; align-items:center; gap:10px; }
     .header h1 { font-size:.95rem; font-weight:700; }
-    .header .sub { font-size:.72rem; color:#64748b; margin-top:2px; }
-    .logo { width:28px; height:28px; background:#6366f1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+    .header .sub { font-size:.7rem; color:#a5b4fc; margin-top:1px; }
+    .logo { width:32px; height:32px; background:#6366f1; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
     .body { padding:14px 16px; }
-    .status-row { display:flex; align-items:center; gap:8px; margin-bottom:14px; padding:10px 12px; background:#1e293b; border-radius:10px; }
-    .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-    .dot.ok { background:#22c55e; }
+
+    /* Status */
+    .status-card { display:flex; align-items:center; gap:10px; padding:10px 14px; background:#1e293b; border-radius:10px; margin-bottom:14px; border:1px solid #1e2a3a; }
+    .dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+    .dot.ok { background:#22c55e; box-shadow:0 0 6px #22c55e66; }
     .dot.error { background:#ef4444; }
     .dot.running { background:#eab308; animation:pulse .8s infinite; }
-    .dot.idle { background:#64748b; }
+    .dot.idle { background:#475569; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-    .status-text { font-size:.8rem; flex:1; }
-    .status-time { font-size:.7rem; color:#64748b; }
-    .section { margin-bottom:14px; }
-    .section label { font-size:.75rem; color:#64748b; display:block; margin-bottom:5px; font-weight:500; text-transform:uppercase; letter-spacing:.04em; }
-    input { width:100%; background:#1e293b; border:1px solid #1e2a3a; border-radius:8px; padding:8px 10px; color:#e2e8f0; font-size:.83rem; outline:none; }
+    .status-info { flex:1; }
+    .status-text { font-size:.82rem; font-weight:500; }
+    .status-sub { font-size:.7rem; color:#64748b; margin-top:1px; }
+
+    /* Sections */
+    .section { margin-bottom:12px; }
+    .section label { font-size:.7rem; color:#64748b; display:block; margin-bottom:4px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+    input { width:100%; background:#1e293b; border:1px solid #1e2a3a; border-radius:8px; padding:8px 10px; color:#e2e8f0; font-size:.84rem; outline:none; transition:border-color .15s; }
     input:focus { border-color:#6366f1; }
     input::placeholder { color:#475569; }
-    .btn { width:100%; padding:9px; border-radius:8px; border:none; cursor:pointer; font-size:.85rem; font-weight:600; margin-top:4px; }
+    input[readonly] { color:#64748b; cursor:default; }
+
+    /* Buttons */
+    .btn { width:100%; padding:9px; border-radius:8px; border:none; cursor:pointer; font-size:.84rem; font-weight:600; transition:all .15s; }
     .btn-primary { background:#6366f1; color:#fff; }
     .btn-primary:hover { background:#4f46e5; }
     .btn-primary:disabled { opacity:.5; cursor:default; }
-    .btn-secondary { background:#1e293b; color:#e2e8f0; border:1px solid #1e2a3a; margin-top:6px; }
+    .btn-secondary { background:transparent; color:#94a3b8; border:1px solid #1e2a3a; margin-top:6px; }
     .btn-secondary:hover { border-color:#6366f1; color:#818cf8; }
+    .btn-danger { background:rgba(239,68,68,.12); color:#f87171; border:1px solid rgba(239,68,68,.2); margin-top:6px; }
     .divider { height:1px; background:#1e2a3a; margin:12px 0; }
-    .error-box { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); border-radius:8px; padding:8px 10px; font-size:.75rem; color:#fca5a5; margin-top:8px; word-break:break-word; }
-    .result-box { background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.2); border-radius:8px; padding:8px 10px; font-size:.75rem; color:#86efac; margin-top:8px; }
-    .hint { font-size:.72rem; color:#475569; margin-top:5px; line-height:1.4; }
+
+    /* Notifications */
+    .msg { border-radius:8px; padding:8px 10px; font-size:.75rem; margin-top:8px; }
+    .msg.error { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); color:#fca5a5; }
+    .msg.success { background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.2); color:#86efac; }
+    .msg.info { background:rgba(99,102,241,.1); border:1px solid rgba(99,102,241,.3); color:#a5b4fc; }
+
+    /* Stats */
+    .stats-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:10px; }
+    .stat-chip { background:#1e293b; border-radius:8px; padding:8px; text-align:center; }
+    .stat-val { font-size:1.1rem; font-weight:700; color:#e2e8f0; }
+    .stat-lbl { font-size:.65rem; color:#64748b; margin-top:2px; text-transform:uppercase; }
+
+    /* Auth screen */
+    #screen-auth { display:none; }
+    #screen-main { display:none; }
+    #screen-loading { text-align:center; padding:30px; color:#64748b; font-size:.82rem; }
   </style>
 </head>
 <body>
@@ -41,136 +64,283 @@
   <div class="logo">🎛</div>
   <div>
     <h1>AM Hub Sync</h1>
-    <div class="sub">Merchrules → AM Hub</div>
+    <div class="sub" id="header-sub">anyqueryamhub-production-9654.up.railway.app</div>
   </div>
 </div>
 
 <div class="body">
-  <!-- Статус -->
-  <div class="status-row" id="statusRow">
-    <div class="dot idle" id="statusDot"></div>
-    <div class="status-text" id="statusText">Ожидание</div>
-    <div class="status-time" id="statusTime"></div>
+  <!-- Loading -->
+  <div id="screen-loading">
+    <div style="font-size:1.5rem;margin-bottom:8px;">⏳</div>
+    Загрузка...
   </div>
 
-  <!-- Merchrules -->
-  <div class="section">
-    <label>Merchrules логин</label>
-    <input type="email" id="mrLogin" placeholder="manager@company.ru">
-  </div>
-  <div class="section">
-    <label>Merchrules пароль</label>
-    <input type="password" id="mrPass" placeholder="••••••••">
-  </div>
-
-  <div class="divider"></div>
-
-  <!-- AM Hub -->
-  <div class="section">
-    <label>AM Hub URL</label>
-    <input type="url" id="hubUrl" placeholder="https://your-hub.railway.app">
-  </div>
-  <div class="section">
-    <label>AM Hub токен</label>
-    <input type="password" id="hubToken" placeholder="Токен из настроек AM Hub">
-    <div class="hint">Настройки → Персональный токен</div>
+  <!-- Auth screen -->
+  <div id="screen-auth">
+    <div class="msg info" style="margin-bottom:14px;">
+      🔐 Войдите в AM Hub — расширение получит токен автоматически
+    </div>
+    <div class="section">
+      <label>Логин (email)</label>
+      <input type="text" id="auth-login" placeholder="admin или manager@company.ru" autocomplete="username">
+    </div>
+    <div class="section">
+      <label>Пароль</label>
+      <input type="password" id="auth-pass" placeholder="••••••••" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter') login()">
+    </div>
+    <button class="btn btn-primary" onclick="login()" id="login-btn">Войти в AM Hub</button>
+    <div id="auth-msg" class="msg" style="display:none;"></div>
   </div>
 
-  <button class="btn btn-primary" id="saveBtn" onclick="save()">💾 Сохранить настройки</button>
-  <button class="btn btn-secondary" id="syncBtn" onclick="syncNow()">🔄 Синхронизировать сейчас</button>
+  <!-- Main screen (авторизован) -->
+  <div id="screen-main">
+    <!-- Status -->
+    <div class="status-card" id="statusCard">
+      <div class="dot idle" id="statusDot"></div>
+      <div class="status-info">
+        <div class="status-text" id="statusText">Ожидание</div>
+        <div class="status-sub" id="statusSub">Синхронизация каждые 30 мин</div>
+      </div>
+    </div>
 
-  <div id="errorBox" class="error-box" style="display:none"></div>
-  <div id="resultBox" class="result-box" style="display:none"></div>
+    <!-- Merchrules creds -->
+    <div class="section">
+      <label>Merchrules логин</label>
+      <input type="text" id="mrLogin" placeholder="manager@company.ru" autocomplete="username">
+    </div>
+    <div class="section">
+      <label>Merchrules пароль</label>
+      <input type="password" id="mrPass" placeholder="••••••••" autocomplete="current-password">
+    </div>
+
+    <button class="btn btn-primary" onclick="saveMR()" id="save-mr-btn">💾 Сохранить Merchrules</button>
+    <button class="btn btn-secondary" onclick="syncNow()" id="sync-btn">🔄 Синхронизировать сейчас</button>
+
+    <!-- Stats -->
+    <div class="stats-row" id="stats-row" style="display:none">
+      <div class="stat-chip"><div class="stat-val" id="stat-clients">—</div><div class="stat-lbl">Клиентов</div></div>
+      <div class="stat-chip"><div class="stat-val" id="stat-tasks">—</div><div class="stat-lbl">Задач</div></div>
+      <div class="stat-chip"><div class="stat-val" id="stat-time">—</div><div class="stat-lbl">Последний</div></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Пользователь -->
+    <div style="display:flex;align-items:center;justify-content:space-between;font-size:.78rem;color:#64748b;">
+      <span id="user-info">👤 —</span>
+      <button onclick="logout()" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:.75rem;padding:0;">Выйти</button>
+    </div>
+
+    <div id="main-msg" class="msg" style="display:none;"></div>
+  </div>
 </div>
 
 <script>
-async function loadSettings() {
-  const s = await chrome.storage.local.get(["mr_login", "mr_password", "hub_url", "hub_token"]);
-  if (s.mr_login) document.getElementById("mrLogin").value = s.mr_login;
-  if (s.mr_password) document.getElementById("mrPass").value = s.mr_password;
-  if (s.hub_url) document.getElementById("hubUrl").value = s.hub_url;
-  if (s.hub_token) document.getElementById("hubToken").value = s.hub_token;
-}
+// ── Конфиг ────────────────────────────────────────────────────────────────
+const HUB_URL = "https://anyqueryamhub-production-9654.up.railway.app";
 
-async function loadStatus() {
-  chrome.runtime.sendMessage({ action: "getStatus" }, res => {
-    if (!res) return;
-    const dot = document.getElementById("statusDot");
-    const text = document.getElementById("statusText");
-    const time = document.getElementById("statusTime");
-    const err = document.getElementById("errorBox");
-    const result = document.getElementById("resultBox");
+// ── Инициализация ─────────────────────────────────────────────────────────
+async function init() {
+  const s = await chrome.storage.local.get(["hub_token", "hub_user", "mr_login", "mr_password", "last_result"]);
 
-    dot.className = `dot ${res.status}`;
-    time.textContent = res.last_sync ? `последний: ${res.last_sync}` : "";
-
-    if (res.status === "ok") {
-      text.textContent = "Синхронизировано";
-      err.style.display = "none";
-      if (res.last_result) {
-        result.style.display = "block";
-        result.textContent = `✅ ${res.last_result.clients_synced || 0} клиентов, ${res.last_result.tasks_synced || 0} задач`;
+  if (s.hub_token) {
+    // Проверяем что токен ещё валиден
+    try {
+      const r = await fetch(`${HUB_URL}/api/auth/me`, {
+        headers: { "Cookie": `auth_token=${s.hub_token}` }
+      });
+      if (r.ok) {
+        showMain(s);
+        return;
       }
-    } else if (res.status === "error") {
-      text.textContent = "Ошибка синхронизации";
-      err.style.display = "block";
-      err.textContent = res.error || "Неизвестная ошибка";
-      result.style.display = "none";
-    } else if (res.status === "running") {
-      text.textContent = "Синхронизация...";
-    } else {
-      text.textContent = "Ожидание (авто каждые 30 мин)";
-    }
-  });
-}
-
-async function save() {
-  const login = document.getElementById("mrLogin").value.trim();
-  const pass = document.getElementById("mrPass").value;
-  const url = document.getElementById("hubUrl").value.trim().replace(/\/$/, "");
-  const token = document.getElementById("hubToken").value.trim();
-
-  if (!login || !pass || !url || !token) {
-    showError("Заполните все поля");
-    return;
+    } catch(e) {}
+    // Токен протух — чистим
+    await chrome.storage.local.remove(["hub_token", "hub_user"]);
   }
 
-  await chrome.storage.local.set({
-    mr_login: login,
-    mr_password: pass,
-    hub_url: url,
-    hub_token: token,
-  });
-
-  document.getElementById("errorBox").style.display = "none";
-  document.getElementById("resultBox").style.display = "block";
-  document.getElementById("resultBox").textContent = "✅ Настройки сохранены";
-  setTimeout(() => document.getElementById("resultBox").style.display = "none", 2000);
+  showAuth();
 }
 
+function showAuth() {
+  document.getElementById("screen-loading").style.display = "none";
+  document.getElementById("screen-auth").style.display = "block";
+  document.getElementById("screen-main").style.display = "none";
+  setTimeout(() => document.getElementById("auth-login").focus(), 100);
+}
+
+function showMain(s) {
+  document.getElementById("screen-loading").style.display = "none";
+  document.getElementById("screen-auth").style.display = "none";
+  document.getElementById("screen-main").style.display = "block";
+
+  if (s.hub_user) document.getElementById("user-info").textContent = "👤 " + s.hub_user;
+  if (s.mr_login) document.getElementById("mrLogin").value = s.mr_login;
+  if (s.mr_password) document.getElementById("mrPass").value = s.mr_password;
+
+  loadStatus();
+  if (s.last_result) showStats(s.last_result);
+}
+
+// ── Авторизация ──────────────────────────────────────────────────────────
+async function login() {
+  const login = document.getElementById("auth-login").value.trim();
+  const pass = document.getElementById("auth-pass").value;
+  const btn = document.getElementById("login-btn");
+  const msg = document.getElementById("auth-msg");
+
+  if (!login || !pass) { showMsg(msg, "error", "Введите логин и пароль"); return; }
+
+  btn.disabled = true;
+  btn.textContent = "⏳ Вхожу...";
+  msg.style.display = "none";
+
+  try {
+    const r = await fetch(`${HUB_URL}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `email=${encodeURIComponent(login)}&password=${encodeURIComponent(pass)}`,
+      redirect: "manual",
+    });
+
+    // Достаём токен из Set-Cookie
+    let token = null;
+    const cookies = r.headers.get("set-cookie") || "";
+    const m = cookies.match(/auth_token=([^;]+)/);
+    if (m) token = m[1];
+
+    // Fallback — пробуем JSON endpoint
+    if (!token) {
+      const r2 = await fetch(`${HUB_URL}/api/auth/me/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: login, password: pass }),
+      });
+      if (r2.ok) {
+        const d = await r2.json();
+        token = d.token || d.access_token;
+      }
+    }
+
+    if (!token) {
+      showMsg(msg, "error", "Неверный логин или пароль");
+      return;
+    }
+
+    await chrome.storage.local.set({ hub_token: token, hub_url: HUB_URL, hub_user: login });
+    showMain({ hub_token: token, hub_user: login });
+    // Уведомляем background worker
+    chrome.runtime.sendMessage({ action: "tokenUpdated", token, hub_url: HUB_URL });
+
+  } catch(e) {
+    showMsg(msg, "error", "Ошибка соединения: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Войти в AM Hub";
+  }
+}
+
+// ── Сохранить Merchrules ─────────────────────────────────────────────────
+async function saveMR() {
+  const login = document.getElementById("mrLogin").value.trim();
+  const pass = document.getElementById("mrPass").value;
+  const msg = document.getElementById("main-msg");
+
+  if (!login || !pass) { showMsg(msg, "error", "Введите логин и пароль Merchrules"); return; }
+
+  await chrome.storage.local.set({ mr_login: login, mr_password: pass });
+
+  // Отправляем в AM Hub settings
+  const s = await chrome.storage.local.get(["hub_token"]);
+  if (s.hub_token) {
+    try {
+      await fetch(`${HUB_URL}/api/settings/creds`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cookie": `auth_token=${s.hub_token}`,
+        },
+        body: JSON.stringify({ merchrules: { login, password: pass } }),
+      });
+    } catch(e) {}
+  }
+
+  showMsg(msg, "success", "✅ Сохранено — синхронизация запустится автоматически");
+  setTimeout(() => msg.style.display = "none", 3000);
+}
+
+// ── Синхронизация ────────────────────────────────────────────────────────
 async function syncNow() {
-  const btn = document.getElementById("syncBtn");
+  const btn = document.getElementById("sync-btn");
+  const msg = document.getElementById("main-msg");
   btn.disabled = true;
   btn.textContent = "⏳ Синхронизация...";
-  document.getElementById("errorBox").style.display = "none";
-  document.getElementById("resultBox").style.display = "none";
 
   chrome.runtime.sendMessage({ action: "sync" }, res => {
     btn.disabled = false;
     btn.textContent = "🔄 Синхронизировать сейчас";
     loadStatus();
+    if (res && res.ok) {
+      showStats(res);
+      showMsg(msg, "success", `✅ ${res.clients_synced||0} клиентов, ${res.tasks_synced||0} задач`);
+    } else if (res && res.error) {
+      showMsg(msg, "error", "❌ " + res.error);
+    }
+    setTimeout(() => msg.style.display = "none", 4000);
   });
 }
 
-function showError(msg) {
-  const box = document.getElementById("errorBox");
-  box.textContent = msg;
-  box.style.display = "block";
+// ── Статус ───────────────────────────────────────────────────────────────
+function loadStatus() {
+  chrome.runtime.sendMessage({ action: "getStatus" }, res => {
+    if (!res) return;
+    const dot = document.getElementById("statusDot");
+    const text = document.getElementById("statusText");
+    const sub = document.getElementById("statusSub");
+
+    dot.className = `dot ${res.status || "idle"}`;
+    if (res.status === "ok") {
+      text.textContent = "Синхронизировано";
+      sub.textContent = res.last_sync ? "Последний: " + res.last_sync : "";
+      if (res.last_result) showStats(res.last_result);
+    } else if (res.status === "error") {
+      text.textContent = "Ошибка";
+      sub.textContent = res.error ? res.error.substring(0, 50) : "";
+    } else if (res.status === "running") {
+      text.textContent = "Синхронизация...";
+      sub.textContent = "";
+    } else {
+      text.textContent = "Ожидание";
+      sub.textContent = "Авто каждые 30 мин";
+    }
+  });
 }
 
-loadSettings();
-loadStatus();
-setInterval(loadStatus, 3000);
+function showStats(r) {
+  const row = document.getElementById("stats-row");
+  row.style.display = "grid";
+  document.getElementById("stat-clients").textContent = r.clients_synced ?? "—";
+  document.getElementById("stat-tasks").textContent = r.tasks_synced ?? "—";
+  const t = r.timestamp ? new Date(r.timestamp).toLocaleTimeString("ru", {hour:"2-digit",minute:"2-digit"}) : "—";
+  document.getElementById("stat-time").textContent = t;
+}
+
+// ── Выход ────────────────────────────────────────────────────────────────
+async function logout() {
+  await chrome.storage.local.remove(["hub_token", "hub_user"]);
+  showAuth();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function showMsg(el, type, text) {
+  el.className = `msg ${type}`;
+  el.textContent = text;
+  el.style.display = "block";
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+init();
+setInterval(loadStatus, 5000);
 </script>
 </body>
 </html>

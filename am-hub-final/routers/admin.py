@@ -289,3 +289,148 @@ async def api_job_run(
 
 
 
+
+
+# ── User Management ───────────────────────────────────────────────────────────
+
+@router.get("/api/admin/users")
+async def list_users(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Список всех пользователей (только admin)."""
+    from deps import require_admin
+    # inline check
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403)
+
+    users = db.query(User).order_by(User.created_at).all()
+    return {"users": [
+        {
+            "id": u.id,
+            "email": u.email,
+            "first_name": u.first_name or "",
+            "last_name": u.last_name or "",
+            "role": u.role,
+            "is_active": u.is_active,
+            "telegram_id": u.telegram_id,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        }
+        for u in users
+    ]}
+
+
+@router.post("/api/admin/users")
+async def create_manager(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Создать нового менеджера (только admin).
+    Body: {email, password, first_name, last_name, role}
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token, hash_password
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    admin = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+    if not admin or admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    data = await request.json()
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip()
+    if not email or not password:
+        raise HTTPException(status_code=422, detail="email and password required")
+
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="User already exists")
+
+    new_user = User(
+        email=email,
+        first_name=data.get("first_name", ""),
+        last_name=data.get("last_name", ""),
+        role=data.get("role", "manager"),
+        is_active=True,
+        hashed_password=hash_password(password),
+        settings={"onboarding_complete": False},
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"ok": True, "id": new_user.id, "email": new_user.email}
+
+
+@router.patch("/api/admin/users/{user_id}")
+async def update_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Обновить пользователя: пароль, роль, активность."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token, hash_password
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    admin = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+    if not admin or admin.role != "admin":
+        raise HTTPException(status_code=403)
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404)
+
+    data = await request.json()
+    if "password" in data and data["password"]:
+        target.hashed_password = hash_password(data["password"])
+    if "role" in data:
+        target.role = data["role"]
+    if "is_active" in data:
+        target.is_active = bool(data["is_active"])
+    if "first_name" in data:
+        target.first_name = data["first_name"]
+    if "telegram_id" in data:
+        target.telegram_id = data["telegram_id"] or None
+
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/api/admin/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Удалить пользователя."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    admin = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+    if not admin or admin.role != "admin":
+        raise HTTPException(status_code=403)
+    if admin.id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404)
+    db.delete(target)
+    db.commit()
+    return {"ok": True}
