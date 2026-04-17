@@ -182,6 +182,116 @@ async def api_change_password(request: Request, db: Session = Depends(get_db), a
     return {"ok": True}
 
 
+# ── Profile save (from profile.html + onboarding wizard) ─────────────────────
+
+@router.post("/api/profile/save")
+async def api_profile_save(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Сохранить профиль: имя, Merchrules, Airtable, KTalk, TG, Groq."""
+    if not auth_token: raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    data = await request.json()
+    settings = dict(user.settings or {})
+
+    if "display_name" in data:
+        parts = data["display_name"].strip().split(None, 1)
+        user.first_name = parts[0] if parts else user.first_name
+        user.last_name  = parts[1] if len(parts) > 1 else (user.last_name or "")
+    if "mr_login"    in data: settings["mr_login"]    = data["mr_login"].strip()
+    if "mr_password" in data: settings["mr_password"] = data["mr_password"].strip()
+    if "tg_notify_chat"  in data: settings["tg_notify_chat"]  = data["tg_notify_chat"].strip()
+    if "airtable_token"  in data: settings["airtable_token"]  = data["airtable_token"].strip()
+    if "ktalk_webhook"   in data: settings["ktalk_webhook"]   = data["ktalk_webhook"].strip()
+    if "groq_api_key"    in data: settings["groq_api_key"]    = data["groq_api_key"].strip()
+
+    from sqlalchemy.orm.attributes import flag_modified
+    user.settings = settings
+    flag_modified(user, "settings")
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/profile/test-mr")
+async def api_profile_test_mr(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Проверить Merchrules credentials."""
+    if not auth_token: return {"ok": False, "error": "Не авторизован"}
+    data = await request.json()
+    login = data.get("login", "").strip()
+    password = data.get("password", "").strip()
+    if not login or not password:
+        return {"ok": False, "error": "Введи логин и пароль"}
+    try:
+        import urllib.request, json as _json
+        payload = _json.dumps({"login": login, "password": password}).encode()
+        for base_url in ["https://merchrules.any-platform.ru", "https://qa.merchrules.any-platform.ru"]:
+            try:
+                req = urllib.request.Request(
+                    f"{base_url}/api/v1/auth/login",
+                    data=payload, method="POST",
+                    headers={"Content-Type": "application/json", "User-Agent": "AMHub/1.0"}
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    d = _json.loads(resp.read())
+                    return {"ok": True, "email": d.get("email") or login}
+            except Exception:
+                continue
+        return {"ok": False, "error": "Недоступен. Проверь логин/пароль или используй расширение Chrome"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:120]}
+
+
+@router.post("/api/profile/test-ktalk")
+async def api_profile_test_ktalk(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """Проверить KTalk webhook."""
+    if not auth_token: return {"ok": False, "error": "Не авторизован"}
+    data = await request.json()
+    url = data.get("webhook_url", "").strip()
+    if not url: return {"ok": False, "error": "URL не указан"}
+    try:
+        import urllib.request, json as _json
+        body = _json.dumps({"text": "✅ AM Hub: тест подключения"}).encode()
+        req = urllib.request.Request(url, data=body, method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:120]}
+
+
+@router.post("/api/profile/test-groq")
+async def api_profile_test_groq(request: Request, auth_token: Optional[str] = Cookie(None)):
+    """Проверить Groq API ключ."""
+    if not auth_token: return {"ok": False, "error": "Не авторизован"}
+    data = await request.json()
+    key = data.get("groq_api_key", "").strip()
+    if not key: return {"ok": False, "error": "Ключ не указан"}
+    try:
+        import urllib.request, json as _json
+        body = _json.dumps({
+            "model": "llama3-8b-8192",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 5,
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/chat/completions",
+            data=body, method="POST",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            d = _json.loads(resp.read())
+            model = d.get("model", "llama3")
+            return {"ok": True, "model": model}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        if e.code == 401: return {"ok": False, "error": "Неверный API ключ"}
+        return {"ok": False, "error": f"HTTP {e.code}: {body[:80]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:120]}
+
+
 
 
 @router.post("/api/import/tasks-csv")

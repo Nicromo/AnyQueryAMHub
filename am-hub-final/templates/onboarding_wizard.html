@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Добро пожаловать — AM Hub{% endblock %}
+{% block content %}
+
+<style>
+.wizard { max-width: 680px; margin: 0 auto; padding: 24px 16px 60px; }
+.step-bar { display: flex; gap: 0; margin-bottom: 36px; }
+.step-bar .step { flex: 1; text-align: center; padding: 8px 4px; font-size: .72rem; font-weight: 600; color: var(--muted); border-bottom: 2px solid var(--border); transition: all .2s; cursor: pointer; }
+.step-bar .step.active { color: var(--accent); border-color: var(--accent); }
+.step-bar .step.done { color: var(--green); border-color: var(--green); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 28px 26px; margin-bottom: 20px; }
+.card h2 { font-size: 1.15rem; margin: 0 0 8px; }
+.card p { color: var(--muted); font-size: .86rem; line-height: 1.6; margin: 0 0 20px; }
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: .8rem; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+.field input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 13px; color: var(--text); font-size: .85rem; outline: none; box-sizing: border-box; }
+.field input:focus { border-color: var(--accent); }
+.field .hint { font-size: .73rem; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+.field .hint a { color: var(--accent); }
+.btn { padding: 9px 20px; border-radius: 9px; font-size: .82rem; font-weight: 600; cursor: pointer; border: none; transition: all .15s; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { opacity: .88; }
+.btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+.step-content { display: none; }
+.step-content.active { display: block; }
+.instruction-box { background: rgba(99,102,241,.07); border: 1px solid rgba(99,102,241,.2); border-radius: 9px; padding: 14px 16px; font-size: .8rem; line-height: 1.8; margin-bottom: 18px; }
+.instruction-box code { background: rgba(255,255,255,.06); padding: 1px 6px; border-radius: 4px; font-size: .78rem; }
+.success-badge { background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.3); border-radius: 8px; padding: 8px 14px; font-size: .8rem; color: var(--green); display: none; margin-top: 10px; }
+.nav-row { display: flex; justify-content: space-between; align-items: center; margin-top: 22px; }
+</style>
+
+<div class="wizard">
+  <div style="text-align:center;margin-bottom:32px;">
+    <div style="font-size:2.4rem;margin-bottom:8px;">👋</div>
+    <h1 style="font-size:1.4rem;margin:0 0 6px;">Привет, {{ user.first_name or user.name }}!</h1>
+    <p style="color:var(--muted);font-size:.88rem;margin:0;">Настроим AM Hub за 3 минуты — и ты готов к работе</p>
+  </div>
+
+  <!-- Шаги -->
+  <div class="step-bar">
+    <div class="step active" id="bar-1" onclick="goStep(1)">1 · Профиль</div>
+    <div class="step"        id="bar-2" onclick="goStep(2)">2 · Groq AI</div>
+    <div class="step"        id="bar-3" onclick="goStep(3)">3 · Telegram</div>
+    <div class="step"        id="bar-4" onclick="goStep(4)">4 · Готово 🎉</div>
+  </div>
+
+  <!-- ─── Шаг 1: Профиль ─── -->
+  <div id="step-1" class="step-content active">
+    <div class="card">
+      <h2>👤 Твой профиль</h2>
+      <p>Имя используется в уведомлениях, комментариях к встречам и AI-сводках.</p>
+      <div class="field">
+        <label>Имя для отображения</label>
+        <input id="w-name" type="text" value="{{ user.first_name or '' }}" placeholder="Как тебя называть">
+      </div>
+      <div class="field">
+        <label>Логин Merchrules</label>
+        <input id="w-mr-login" type="email" placeholder="your@email.com">
+        <div class="hint">Тот же email, что и для входа на <a href="https://merchrules.any-platform.ru" target="_blank">merchrules.any-platform.ru</a></div>
+      </div>
+      <div class="field">
+        <label>Пароль Merchrules</label>
+        <input id="w-mr-pass" type="password" placeholder="••••••••">
+      </div>
+      <div id="step1-result" class="success-badge">✅ Профиль сохранён</div>
+    </div>
+    <div class="nav-row">
+      <a href="/dashboard" class="btn btn-ghost" style="text-decoration:none;font-size:.8rem;">Пропустить всё →</a>
+      <button class="btn btn-primary" onclick="saveStep1()">Далее →</button>
+    </div>
+  </div>
+
+  <!-- ─── Шаг 2: Groq AI ─── -->
+  <div id="step-2" class="step-content">
+    <div class="card">
+      <h2>🤖 Groq AI — генерация Prep и Followup</h2>
+      <p>Groq даёт бесплатный доступ к быстрым AI-моделям. Ключ нужен для автогенерации брифа перед встречей и followup-письма после.</p>
+      <div class="instruction-box">
+        <b>📋 Как получить за 1 минуту:</b><br>
+        1. Открой <a href="https://console.groq.com" target="_blank" style="color:var(--accent)"><b>console.groq.com</b></a><br>
+        2. Войди через Google или зарегистрируйся<br>
+        3. Слева: <b>API Keys</b> → кнопка <b>"Create API Key"</b><br>
+        4. Скопируй ключ (начинается с <code>gsk_…</code>)
+      </div>
+      <div class="field">
+        <label>Groq API Key</label>
+        <input id="w-groq" type="password" placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxx">
+        <div class="hint">Бесплатный план: 30 запросов/мин · 14 400 запросов/день — хватает на весь рабочий день</div>
+      </div>
+      <button onclick="testGroqWizard()" class="btn btn-ghost btn-sm" id="groq-test-btn" style="font-size:.78rem;padding:6px 14px;">🔌 Проверить ключ</button>
+      <div id="groq-wiz-result" style="font-size:.8rem;margin-top:8px;"></div>
+      <div id="step2-result" class="success-badge">✅ Ключ сохранён</div>
+    </div>
+    <div class="nav-row">
+      <button class="btn btn-ghost" onclick="goStep(1)">← Назад</button>
+      <button class="btn btn-primary" onclick="saveStep2()">Далее →</button>
+    </div>
+  </div>
+
+  <!-- ─── Шаг 3: Telegram ─── -->
+  <div id="step-3" class="step-content">
+    <div class="card">
+      <h2>✈️ Telegram-уведомления</h2>
+      <p>AM Hub будет присылать тебе утренний план, напоминания о чекапах и уведомления о встречах прямо в Telegram.</p>
+      <div class="instruction-box">
+        <b>📋 Как узнать свой Chat ID:</b><br>
+        1. Открой Telegram и найди <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent)"><b>@userinfobot</b></a><br>
+        2. Нажми <b>Start</b> — бот пришлёт твой ID<br>
+        3. Скопируй число и вставь ниже
+      </div>
+      <div class="field">
+        <label>Мой Telegram Chat ID</label>
+        <input id="w-tg-chat" type="text" placeholder="123456789">
+        <div class="hint">Число из @userinfobot · <b>Не</b> username типа @Vasya — именно числовой ID</div>
+      </div>
+      <div id="step3-result" class="success-badge">✅ Chat ID сохранён</div>
+    </div>
+    <div class="nav-row">
+      <button class="btn btn-ghost" onclick="goStep(2)">← Назад</button>
+      <button class="btn btn-primary" onclick="saveStep3()">Далее →</button>
+    </div>
+  </div>
+
+  <!-- ─── Шаг 4: Готово ─── -->
+  <div id="step-4" class="step-content">
+    <div class="card" style="text-align:center;padding:40px 28px;">
+      <div style="font-size:3rem;margin-bottom:14px;">🎉</div>
+      <h2 style="font-size:1.3rem;margin-bottom:10px;">Всё готово!</h2>
+      <p style="margin-bottom:28px;">Профиль настроен. Теперь открой дашборд и посмотри своих клиентов.</p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+        <a href="/dashboard" class="btn btn-primary" style="text-decoration:none;">📊 Открыть дашборд</a>
+        <a href="/clients"   class="btn btn-ghost"   style="text-decoration:none;">👥 Мои клиенты</a>
+        <a href="/profile"   class="btn btn-ghost"   style="text-decoration:none;">⚙️ Полные настройки</a>
+      </div>
+    </div>
+
+    <!-- Расширение Chrome -->
+    <div class="card" style="border-color:rgba(99,102,241,.3);">
+      <h2 style="font-size:1rem;">🧩 Chrome-расширение AM Hub</h2>
+      <p>Расширение позволяет синхронизировать задачи из Merchrules одним кликом прямо из браузера.</p>
+      <a href="/settings/extension" class="btn btn-primary" style="text-decoration:none;font-size:.82rem;">
+        📦 Установить расширение
+      </a>
+    </div>
+  </div>
+</div>
+
+{% block scripts %}<script>
+let currentStep = 1;
+
+function goStep(n) {
+  document.querySelectorAll('.step-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.step-bar .step').forEach((el, i) => {
+    el.classList.remove('active');
+    if (i + 1 < n) el.classList.add('done');
+  });
+  document.getElementById('step-' + n).classList.add('active');
+  document.getElementById('bar-' + n).classList.add('active');
+  currentStep = n;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function saveStep1() {
+  const name    = document.getElementById('w-name').value.trim();
+  const login   = document.getElementById('w-mr-login').value.trim();
+  const pass    = document.getElementById('w-mr-pass').value.trim();
+  try {
+    await fetch('/api/profile/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ display_name: name, mr_login: login, mr_password: pass }),
+    });
+    const badge = document.getElementById('step1-result');
+    badge.style.display = 'block';
+    setTimeout(() => goStep(2), 600);
+  } catch(e) { alert('Ошибка: ' + e.message); }
+}
+
+async function testGroqWizard() {
+  const key = document.getElementById('w-groq').value.trim();
+  const res = document.getElementById('groq-wiz-result');
+  const btn = document.getElementById('groq-test-btn');
+  if (!key) { res.textContent = '⚠️ Введи ключ'; res.style.color = 'var(--yellow)'; return; }
+  btn.disabled = true;
+  res.textContent = '⏳ Проверяем...';
+  try {
+    const r = await fetch('/api/profile/test-groq', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ groq_api_key: key }),
+    });
+    const d = await r.json();
+    if (d.ok) { res.textContent = '✅ Ключ рабочий'; res.style.color = 'var(--green)'; }
+    else       { res.textContent = '❌ ' + (d.error || 'Ошибка'); res.style.color = 'var(--red)'; }
+  } catch(e) { res.textContent = '❌ ' + e.message; res.style.color = 'var(--red)'; }
+  finally { btn.disabled = false; }
+}
+
+async function saveStep2() {
+  const key = document.getElementById('w-groq').value.trim();
+  if (key) {
+    await fetch('/api/profile/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ groq_api_key: key }),
+    });
+    document.getElementById('step2-result').style.display = 'block';
+  }
+  setTimeout(() => goStep(3), key ? 600 : 0);
+}
+
+async function saveStep3() {
+  const chatId = document.getElementById('w-tg-chat').value.trim();
+  if (chatId) {
+    await fetch('/api/profile/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ tg_notify_chat: chatId }),
+    });
+    document.getElementById('step3-result').style.display = 'block';
+  }
+  setTimeout(() => goStep(4), chatId ? 600 : 0);
+}
+</script>{% endblock %}
+
+{% endblock %}
