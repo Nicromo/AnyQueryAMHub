@@ -1,9 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Дашборд — AM Hub<script>
-
-
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+{% block title %}Дашборд — AM Hub
 {% if clients %}
 // ── Health doughnut ──
 new Chart(document.getElementById('stChart'), {
@@ -280,31 +276,31 @@ window.addEventListener('load',()=>{
 <style>
 
     /* styles from /static/css/style.css */
-    [data-theme="light"] { --bg:#f1f5f9; --bg2:#ffffff; --card:#ffffff; --card-h:#f8fafc; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; --accent-glow:rgba(99,102,241,.08); }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background .3s,color .3s; }
-    a { color:var(--accent); text-decoration:none; }
-    a:hover { text-decoration:underline; }
-    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; overflow-y:auto; }
-    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); margin-bottom:12px; }
-    .sidebar-logo h1 { font-size:1.1rem; font-weight:700; }
-    .sidebar-logo span { font-size:.68rem; color:var(--accent); text-transform:uppercase; letter-spacing:1px; }
-    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
-    .nav-item:hover { color:var(--text); background:rgba(255,255,255,.03); text-decoration:none; }
-    .nav-item.active { color:var(--accent); background:var(--accent-glow); border-left-color:var(--accent); }
-    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
-    .theme-btn { width:100%; margin-top:10px; padding:6px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; font-size:.78rem; transition:all .15s; }
-    .theme-btn:hover { border-color:var(--accent); color:var(--text); }
-    .main { margin-left:240px; padding:24px 28px; }
-    .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
-    .topbar h2 { font-size:1.4rem; font-weight:700; }
-    .topbar-sub { color:var(--muted); font-size:.82rem; margin-top:2px; }
-    .topbar-actions { display:flex; gap:8px; }
-    .btn { padding:8px 16px; border-radius:10px; font-size:.8rem; font-weight:500; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); transition:all .15s; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
-    .btn:hover { border-color:var(--accent); text-decoration:none; }
-    .btn-p { background:var(--accent); border-color:var(--accent); color:#fff; }
-    .btn-p:hover { filter:brightness(1.15); color:#fff; }
-    .btn-sm { padding:6px 12px; font-size:.75rem; }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:24px; }
     .kpi { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; position:relative; overflow:hidden; }
     .kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
@@ -327,7 +323,7 @@ window.addEventListener('load',()=>{
     .today-card:hover { border-color:var(--accent); }
     .tc-client { font-weight:600; font-size:.85rem; margin-bottom:4px; }
     .tc-title { font-size:.82rem; color:var(--muted); margin-bottom:6px; }
-    .tc-meta { font-size:.72rem; color:var(--muted); display:flex; gap:12px; }
+    .tc-met
     .filter-bar { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
     .fbtn { padding:5px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
     .fbtn:hover { border-color:var(--accent); color:var(--text); }
