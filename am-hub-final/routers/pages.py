@@ -102,8 +102,13 @@ async def dashboard(request: Request, db: Session = Depends(get_db), auth_token:
         return _login_redirect()
 
     settings = user.settings or {}
+    # Не перенаправляем на онбординг если у менеджера уже есть клиенты
     if not settings.get("onboarding_complete"):
-        return RedirectResponse(url="/onboarding", status_code=303)
+        has_clients = db.query(Client).filter(
+            Client.manager_email == user.email
+        ).count() > 0
+        if not has_clients and user.role != "admin":
+            return RedirectResponse(url="/onboarding", status_code=303)
 
     query = db.query(Client)
     if user.role == "manager":

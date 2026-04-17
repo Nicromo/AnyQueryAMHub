@@ -52,12 +52,24 @@ async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_t
     data = await request.json()
     settings = user.settings or {}
 
-    # Сохраняем все сервисы: merchrules, telegram, ktalk, tbank_time, airtable, sheets, groq
-    for service in ["merchrules", "telegram", "ktalk", "tbank_time", "airtable", "sheets", "groq"]:
+    # Менеджер может менять только свои интеграции
+    # airtable и sheets — глобальные, задаются через env переменные администратором
+    MANAGER_ALLOWED = ["merchrules", "ktalk", "tbank_time", "groq", "telegram"]
+    ADMIN_ONLY = ["airtable", "sheets"]
+
+    for service in MANAGER_ALLOWED:
         if service in data:
             if service not in settings:
                 settings[service] = {}
             settings[service].update(data[service])
+
+    # airtable/sheets — только для admin
+    if user.role == "admin":
+        for service in ADMIN_ONLY:
+            if service in data:
+                if service not in settings:
+                    settings[service] = {}
+                settings[service].update(data[service])
 
     user.settings = dict(settings)
     from sqlalchemy.orm.attributes import flag_modified

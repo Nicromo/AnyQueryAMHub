@@ -484,43 +484,17 @@ async function saveNotifs(){
       </div>
     </div>
     <div class="section">
-      {% set at = user_settings.get('airtable', {}) %}
       <h3>📊 Airtable</h3>
-      <p class="help" style="margin-bottom:10px;">Personal Access Token для синхронизации клиентов из вашей базы Airtable.</p>
-      <div class="field">
-        <label>Personal Access Token</label>
-        <input id="at-token" type="password" value="{{ at.get('pat') or at.get('token', '') }}" placeholder="patXXXXXXXXXXXX.xxxxx">
-        <div class="help">airtable.com/create/tokens → Create new token → scope: data.records:read, data.records:write</div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Base ID</label>
-          <input id="at-base" value="{{ at.get('base_id', '') }}" placeholder="appXXXXXXXXXXXXXX">
-        </div>
-        <div class="field">
-          <label>Table ID (клиенты)</label>
-          <input id="at-table" value="{{ at.get('table_id', '') }}" placeholder="tblXXXXXXXXXXXXXX">
-        </div>
-      </div>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <button class="btn btn-sm" onclick="testAirtable()">🔗 Проверить</button>
-        <button class="btn btn-sm" style="background:var(--accent)" onclick="syncAirtable()">🔄 Синхронизировать</button>
+      <p class="help" style="margin-bottom:10px;">База данных клиентов синхронизируется автоматически. Настройка выполнена администратором.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-sm" onclick="syncAirtable()">🔄 Синхронизировать сейчас</button>
         <span id="at-result" style="font-size:.82rem;"></span>
       </div>
     </div>
 
     <div class="section">
-      {% set gs = user_settings.get('sheets', {}) %}
       <h3>📈 Google Sheets (Top-50)</h3>
-      <p class="help" style="margin-bottom:10px;">Ссылка на таблицу Top-50 клиентов.</p>
-      <div class="field">
-        <label>Spreadsheet URL или ID</label>
-        <input id="gs-id" value="{{ gs.get('spreadsheet_id', '') }}" placeholder="https://docs.google.com/spreadsheets/d/...">
-      </div>
-      <div style="margin-top:8px;">
-        <button class="btn btn-sm" onclick="saveSheets()">💾 Сохранить</button>
-        <span id="gs-result" style="font-size:.82rem;margin-left:8px;"></span>
-      </div>
+      <p class="help" style="margin-bottom:10px;">Таблица Top-50 настроена администратором и обновляется автоматически.</p>
     </div>
 
     <div style="display:flex;gap:10px;align-items:center;">
