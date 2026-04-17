@@ -1,0 +1,615 @@
+{% extends "base.html" %}
+{% block title %}Дашборд — AM Hub{% endblock %}{% block scripts %}<script>
+
+
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+{% if clients %}
+// ── Health doughnut ──
+new Chart(document.getElementById('stChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Здоровые','Внимание','Критичные'],
+    datasets: [{
+      data: [{{ healthy_count }}, {{ warning_count }}, {{ overdue_count }}],
+      backgroundColor: ['rgba(34,197,94,.75)','rgba(245,158,11,.75)','rgba(239,68,68,.75)'],
+      borderWidth: 0, spacing: 3,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, cutout: '68%',
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + ctx.raw } }
+    }
+  }
+});
+
+// ── Segments bar ──
+new Chart(document.getElementById('segChart'), {
+  type: 'bar',
+  data: {
+    labels: ['ENT','SME+','SME','SMB','SS'],
+    datasets: [{
+      data: [{{ counts['ENT'] or 0 }},{{ counts['SME+'] or 0 }},{{ counts['SME'] or 0 }},{{ counts['SMB'] or 0 }},{{ counts['SS'] or 0 }}],
+      backgroundColor: ['rgba(99,102,241,.7)','rgba(168,85,247,.7)','rgba(59,130,246,.7)','rgba(34,197,94,.7)','rgba(249,115,22,.7)'],
+      borderRadius: 6, borderSkipped: false,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero: true, ticks: { color: '#64748b', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.05)' } },
+      x: { ticks: { color: '#64748b' }, grid: { display: false } }
+    }
+  }
+});
+
+// ── Tasks by status ──
+new Chart(document.getElementById('tasksChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Plan','In Progress','Review','Done','Blocked'],
+    datasets: [{
+      label: 'Задачи',
+      data: [
+        {{ clients | selectattr('open_tasks') | sum(attribute='open_tasks') | default(0) }},
+        0, 0,
+        {{ total_tasks - total_open_tasks if total_tasks > total_open_tasks else 0 }},
+        0
+      ],
+      backgroundColor: ['rgba(99,102,241,.6)','rgba(6,182,212,.6)','rgba(168,85,247,.6)','rgba(34,197,94,.6)','rgba(239,68,68,.6)'],
+      borderRadius: 5, borderSkipped: false,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { beginAtZero: true, ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,.05)' } },
+      y: { ticks: { color: '#64748b' }, grid: { display: false } }
+    }
+  }
+});
+{% endif %}
+
+// ── MRR portfolio (async) ──
+(async function loadPortfolioMRR() {
+  try {
+    const r = await fetch('/api/portfolio');
+    const d = await r.json();
+    const total = d.summary?.total_mrr || 0;
+    const el = document.getElementById('portfolio-mrr-total');
+    if (el) el.textContent = total >= 1e6 ? (total/1e6).toFixed(1)+'M ₽' : total >= 1e3 ? (total/1e3).toFixed(0)+'K ₽' : total.toLocaleString('ru-RU')+' ₽';
+
+    // Строим мини-бар по сегментам из MRR
+    const bySegment = {};
+    (d.clients || []).forEach(c => {
+      bySegment[c.segment] = (bySegment[c.segment] || 0) + (c.mrr || 0);
+    });
+    const segs = Object.keys(bySegment).filter(s => bySegment[s] > 0);
+    const segColors = {ENT:'rgba(99,102,241,.7)', 'SME+':'rgba(168,85,247,.7)', SME:'rgba(59,130,246,.7)', SMB:'rgba(34,197,94,.7)', SS:'rgba(249,115,22,.7)'};
+
+    const ctx = document.getElementById('mrrPortfolioChart');
+    if (ctx && segs.length > 0) {
+      new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: segs,
+          datasets: [{
+            data: segs.map(s => bySegment[s]),
+            backgroundColor: segs.map(s => segColors[s] || 'rgba(100,116,139,.5)'),
+            borderWidth: 0, spacing: 2,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: '60%',
+          plugins: {
+            legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 8, font: { size: 10 } } },
+            tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + (ctx.raw/1e3).toFixed(0) + 'K ₽' } }
+          }
+        }
+      });
+    } else if (ctx) {
+      ctx.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:.8rem;">Нет данных MRR</div>';
+    }
+
+    // Risk list
+    const riskEl = document.getElementById('risk-clients-list');
+    if (riskEl) {
+      const critical = (d.clients || []).filter(c => c.risk === 'critical' || c.risk === 'warning').slice(0, 8);
+      if (!critical.length) {
+        riskEl.innerHTML = '<div style="color:var(--muted);font-size:.78rem;padding:8px 0;text-align:center;">🟢 Все клиенты в норме</div>';
+      } else {
+        riskEl.innerHTML = critical.map(c => {
+          const rc = c.risk === 'critical' ? '#ef4444' : '#f59e0b';
+          return `<a href="/client/${c.id}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);text-decoration:none;color:var(--text);">
+            <div style="width:6px;height:6px;border-radius:50%;background:${rc};flex-shrink:0;"></div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:.8rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>
+              <div style="font-size:.69rem;color:var(--muted);">${c.segment} · ${c.health}% health${c.days_silent ? ' · ' + c.days_silent + 'д' : ''}</div>
+            </div>
+          </a>`;
+        }).join('');
+      }
+    }
+  } catch(e) { console.error('Portfolio MRR load error', e); }
+})();
+function filterSeg(seg){document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=(!seg||tr.dataset.seg===seg)?'':'none';});}
+function filterTbl(q){q=q.toLowerCase();document.querySelectorAll('#tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+
+// Статус синка
+async function loadSyncStatus() {
+  try {
+    const r = await fetch('/api/sync/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    const bar = document.getElementById('sync-status-bar');
+    if (!bar) return;
+    const parts = [];
+    const icons = {merchrules: '🗺️', airtable: '📊', meetings_slots: '📅', system: '⚙️'};
+    const labels = {merchrules: 'Merchrules', airtable: 'Airtable', meetings_slots: 'Слоты', system: 'Система'};
+    for (const [key, val] of Object.entries(d)) {
+      if (!val) continue;
+      const ok = val.status === 'success';
+      parts.push('<span style="font-size:.72rem;color:' + (ok ? 'var(--green)' : 'var(--red)') + ';margin-right:12px;">' +
+        (icons[key]||'🔄') + ' ' + (labels[key]||key) + ': ' + (val.ago || '—') + '</span>');
+    }
+    if (parts.length) {
+      bar.innerHTML = '<span style="font-size:.72rem;color:var(--muted);margin-right:8px;">Синк:</span>' + parts.join('');
+      bar.style.display = 'flex';
+    }
+  } catch(e) {}
+}
+loadSyncStatus();
+
+// Load action cards
+async function loadActions(){
+  try{
+    const r=await fetch('/api/dashboard/actions');
+    if(!r.ok) return;
+    const d=await r.json();
+    const grid=document.getElementById('actions-grid');
+    if(!d.actions||!d.actions.length){grid.innerHTML='<div style="color:var(--muted);font-size:.82rem;">Нет действий</div>';return;}
+    grid.innerHTML=d.actions.map(a=>{
+      let icon='',title='',desc='',btn='',color='';
+      if(a.type==='followup'){
+        icon='✍️';title='Фолоуап: '+a.client_name;desc=a.meeting_title+' · '+a.days_ago+' дн. назад';
+        btn='<a href="/followup/'+a.meeting_id+'" class="btn btn-sm btn-p" style="margin-top:8px;">Заполнить</a>';
+        color='var(--accent)';
+      }else if(a.type==='prep'){
+        icon='📋';title='Подготовка: '+a.client_name;desc=a.meeting_title+' · через '+a.hours_until+' ч.';
+        btn='<a href="/prep/'+a.meeting_id+'" class="btn btn-sm btn-p" style="margin-top:8px;">Подготовиться</a>';
+        color='var(--yellow)';
+      }else if(a.type==='checkup'){
+        icon='📅';title='Чекап: '+a.client_name;desc=a.checkup_type+' · просрочен';
+        btn='<a href="/client/'+a.checkup_id+'" class="btn btn-sm btn-p" style="margin-top:8px;">Запланировать</a>';
+        color='var(--red)';
+      }else if(a.type==='qbr'){
+        icon='📊';title='QBR: '+a.client_name;desc='Просрочен';
+        btn='<a href="/client/'+a.client_id+'/qbr" class="btn btn-sm btn-p" style="margin-top:8px;">Провести</a>';
+        color='var(--red)';
+      }
+      return '<div style="background:var(--card);border:1px solid '+color+'33;border-radius:12px;padding:14px 16px;">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:1.2rem;">'+icon+'</span>'+
+        '<span style="font-weight:600;font-size:.85rem;">'+title+'</span></div>'+
+        '<div style="font-size:.78rem;color:var(--muted);margin-bottom:4px;">'+desc+'</div>'+btn+'</div>';
+    }).join('');
+  }catch(e){console.error(e);}
+}
+loadActions();
+
+// ── Global Search ──
+let searchTimeout=null;
+function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').value='';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';}
+function closeSearch(){document.getElementById('searchModal').style.display='none';}
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')closeSearch();});
+document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))closeSearch();});
+
+document.getElementById('searchInput').addEventListener('input',e=>{
+  clearTimeout(searchTimeout);
+  const q=e.target.value.trim();
+  if(!q){document.getElementById('searchResults').innerHTML='';document.getElementById('searchEmpty').style.display='block';return;}
+  document.getElementById('searchEmpty').style.display='none';
+  searchTimeout=setTimeout(async()=>{
+    try{
+      const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');
+      if(!r.ok)return;
+      const d=await r.json();
+      let html='';
+      if(d.clients.length){
+        html+='<div class="search-cat">👥 Клиенты ('+d.clients.length+')</div>';
+        d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'"><span class="s-icon">👤</span><div class="s-text"><div class="s-title">'+c.name+'</div><div class="s-sub">'+(c.segment||'')+'</div></div><span class="s-badge">клиент</span></div>';});
+      }
+      if(d.tasks.length){
+        html+='<div class="search-cat">📋 Задачи ('+d.tasks.length+')</div>';
+        d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'"><span class="s-icon">📋</span><div class="s-text"><div class="s-title">'+t.title+'</div><div class="s-sub">'+t.client_name+' · '+t.status+'</div></div><span class="s-badge">задача</span></div>';});
+      }
+      if(d.meetings.length){
+        html+='<div class="search-cat">📅 Встречи ('+d.meetings.length+')</div>';
+        d.meetings.forEach(m=>{html+='<div class="search-item" onclick="location.href=\''+m.url+'\'"><span class="s-icon">📅</span><div class="s-text"><div class="s-title">'+(m.title||'—')+'</div><div class="s-sub">'+m.client_name+(m.date?' · '+m.date.slice(0,10):'')+'</div></div><span class="s-badge">встреча</span></div>';});
+      }
+      if(d.notes.length){
+        html+='<div class="search-cat">📝 Заметки ('+d.notes.length+')</div>';
+        d.notes.forEach(n=>{html+='<div class="search-item" onclick="location.href=\''+n.url+'\'"><span class="s-icon">'+(n.pinned?'📌':'📝')+'</span><div class="s-text"><div class="s-title">'+n.content+'</div><div class="s-sub">'+n.client_name+'</div></div><span class="s-badge">заметка</span></div>';});
+      }
+      if(!html) html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';
+      document.getElementById('searchResults').innerHTML=html;
+    }catch(e){console.error(e);}
+  },300);
+});
+
+// ── PWA Registration ──
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
+if('BeforeInstallPromptEvent' in window){window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window._pwaPrompt=e;});}
+
+// ── Notification Badge ──
+async function updateNotifBadge(){
+  try{
+    const r=await fetch('/api/notifications');
+    const d=await r.json();
+    const bell=document.getElementById('notifBell');
+    if(d.notifications&&d.notifications.length>0){
+      bell.textContent='🔔('+d.notifications.length+')';
+      bell.style.background='rgba(239,68,68,.2)';bell.style.borderRadius='12px';bell.style.padding='4px 8px';
+    }
+  }catch(e){}
+}
+updateNotifBadge();
+setInterval(updateNotifBadge, 60000);
+
+// ── Offline Draft Saving ──
+window.addEventListener('beforeunload',()=>{
+  const forms=document.querySelectorAll('textarea,input[type="text"]');
+  forms.forEach(f=>{if(f.value)localStorage.setItem('draft_'+f.id,f.value);});
+});
+window.addEventListener('load',()=>{
+  document.querySelectorAll('textarea,input[type="text"]').forEach(f=>{
+    const saved=localStorage.getItem('draft_'+f.id);
+    if(saved&&!f.value)f.value=saved;
+  });
+});
+
+</script>
+{% endblock %}
+{% block page_title %}Дашборд{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+  .topbar h2 { font-size:1.4rem; font-weight:700; }
+  .topbar-sub { color:var(--muted); font-size:.82rem; margin-top:2px; }
+  .topbar-actions { display:flex; gap:8px; }
+  .btn-p { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn-p:hover { filter:brightness(1.15); color:#fff; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:24px; }
+  .kpi { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; position:relative; overflow:hidden; }
+  .kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+  .kpi.c-blue::before { background:linear-gradient(90deg,var(--accent),var(--cyan)); }
+  .kpi.c-green::before { background:linear-gradient(90deg,var(--green),var(--cyan)); }
+  .kpi.c-yellow::before { background:linear-gradient(90deg,var(--yellow),var(--orange)); }
+  .kpi.c-red::before { background:linear-gradient(90deg,var(--red),var(--orange)); }
+  .kpi-l { font-size:.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+  .kpi-v { font-size:1.7rem; font-weight:700; }
+  .kpi-s { font-size:.75rem; color:var(--muted); margin-top:2px; }
+  .charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; margin-bottom:24px; }
+  @media(max-width:900px){ .charts{grid-template-columns:1fr;} }
+  .chart-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; }
+  .chart-title { font-size:.85rem; font-weight:600; margin-bottom:14px; }
+  .chart-wrap { position:relative; height:240px; }
+  .today-section { margin-bottom:24px; }
+  .section-title { font-size:.9rem; font-weight:600; margin-bottom:12px; }
+  .today-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+  .today-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; transition:border .15s; }
+  .today-card:hover { border-color:var(--accent); }
+  .tc-client { font-weight:600; font-size:.85rem; margin-bottom:4px; }
+  .tc-title { font-size:.82rem; color:var(--muted); margin-bottom:6px; }
+  .tc-meta { font-size:.72rem; color:var(--muted); display:flex; gap:12px; }
+  .filter-bar { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+  .fbtn { padding:5px 12px; border-radius:8px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
+  .fbtn:hover { border-color:var(--accent); color:var(--text); }
+  .fbtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .tbl-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .tbl-head { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  .tbl-head h3 { font-size:.9rem; font-weight:600; }
+  .search { padding:7px 12px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text); font-size:.8rem; outline:none; width:200px; }
+  .search:focus { border-color:var(--accent); }
+  .tbl-wrap { overflow-x:auto; }
+  .c-name { font-weight:600; }
+  .badge-ENT { background:rgba(59,130,246,.15); color:#60a5fa; }
+  .badge-SME-plus { background:rgba(168,85,247,.15); color:#c084fc; }
+  .badge-SME-minus { background:rgba(168,85,247,.15); color:#a78bfa; }
+  .badge-SMB { background:rgba(34,197,94,.15); color:#4ade80; }
+  .badge-SS { background:rgba(249,115,22,.15); color:#fb923c; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+  .dot-g { background:var(--green); }
+  .dot-y { background:var(--yellow); }
+  .dot-r { background:var(--red); }
+  .mbar { width:50px; height:5px; background:var(--border); border-radius:3px; display:inline-block; vertical-align:middle; margin-left:6px; overflow:hidden; }
+  .mbar-f { height:100%; border-radius:3px; }
+  .bar-green { background:var(--green); }
+  .bar-yellow { background:var(--yellow); }
+  .bar-red { background:var(--red); }
+  .empty { text-align:center; padding:60px 20px; color:var(--muted); }
+  .empty .ico { font-size:2.5rem; margin-bottom:10px; opacity:.4; }
+  .empty h3 { color:var(--text); margin-bottom:6px; }
+  .search-cat { padding:6px 16px 4px; font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
+  .search-item { padding:8px 16px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background .1s; }
+  .search-item:hover { background:rgba(255,255,255,.04); }
+  .search-item .s-icon { font-size:1rem; flex-shrink:0; width:20px; text-align:center; }
+  .search-item .s-text { flex:1; min-width:0; }
+  .search-item .s-title { font-size:.85rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .search-item .s-sub { font-size:.72rem; color:var(--muted); }
+  .search-item .s-badge { font-size:.65rem; padding:2px 6px; border-radius:4px; background:rgba(129,140,248,.15); color:var(--accent); font-weight:600; flex-shrink:0; }
+
+  /* ═══ STREAMS KANBAN ═══ */
+  .streams-wrap { margin-top:8px; }
+  .streams-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
+  .streams-head h3 { font-size:.95rem; font-weight:600; }
+  .streams-head .sub { font-size:.75rem; color:var(--muted); }
+  .streams-grid {
+    display:grid;
+    grid-template-columns:repeat(5, minmax(0, 1fr));
+    gap:14px;
+    align-items:start;
+  }
+  .stream-col {
+    background:var(--surface, var(--card));
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:12px;
+    min-height:220px;
+    max-height:72vh;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .stream-col-head {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:4px 4px 10px; margin-bottom:6px;
+    border-bottom:1px solid var(--border);
+    position:sticky; top:0;
+    background:var(--surface, var(--card));
+    z-index:1;
+  }
+  .stream-title { font-size:.82rem; font-weight:600; display:flex; align-items:center; gap:6px; }
+  .stream-count {
+    font-size:.7rem; font-weight:700;
+    padding:2px 8px; border-radius:10px;
+    background:rgba(129,140,248,.15);
+    color:var(--accent);
+  }
+  .stream-col[data-stream="checkup"]  .stream-count { background:rgba(59,130,246,.15);  color:#60a5fa; }
+  .stream-col[data-stream="prep"]     .stream-count { background:rgba(234,179,8,.15);   color:#facc15; }
+  .stream-col[data-stream="meeting"]  .stream-count { background:rgba(168,85,247,.15);  color:#c084fc; }
+  .stream-col[data-stream="followup"] .stream-count { background:rgba(6,182,212,.15);   color:#22d3ee; }
+  .stream-col[data-stream="changes"]  .stream-count { background:rgba(34,197,94,.15);   color:#4ade80; }
+  .stream-body {
+    overflow-y:auto; flex:1;
+    display:flex; flex-direction:column; gap:8px;
+    padding-right:2px;
+  }
+  .stream-card {
+    display:block;
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px 12px;
+    text-decoration:none;
+    color:inherit;
+    transition:transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+  }
+  .stream-card:hover {
+    transform:translateY(-2px);
+    border-color:var(--accent);
+    box-shadow:0 6px 14px rgba(0,0,0,.18);
+  }
+  .sc-name { font-weight:600; font-size:.84rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:4px; }
+  .sc-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .sc-seg {
+    font-size:.62rem; font-weight:700; letter-spacing:.3px;
+    padding:2px 6px; border-radius:4px;
+    background:rgba(129,140,248,.15); color:var(--accent);
+  }
+  .sc-hint { font-size:.7rem; color:var(--muted); }
+  .sc-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .sc-dot.g { background:var(--green); }
+  .sc-dot.y { background:var(--yellow); }
+  .sc-dot.r { background:var(--red); }
+  .stream-empty {
+    font-size:.72rem; color:var(--muted);
+    text-align:center; padding:14px 6px;
+    border:1px dashed var(--border); border-radius:8px;
+    margin-top:6px;
+  }
+
+  @media (max-width: 1200px) {
+    .streams-grid {
+      grid-template-columns:repeat(5, minmax(240px, 1fr));
+      overflow-x:auto;
+      padding-bottom:8px;
+    }
+    .stream-col { min-width:240px; }
+  }
+  @media (max-width: 768px) {
+    .streams-grid {
+      display:flex; flex-direction:column; overflow-x:visible;
+    }
+    .stream-col { max-height:none; min-width:0; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div>
+  <div class="topbar">
+    <div>
+      <h2>📊 Дашборд</h2>
+      <div class="topbar-sub">{{ now.strftime('%d %B %Y') }}</div>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-sm" onclick="openSearch()" title="Поиск (Ctrl+K)" aria-label="Открыть поиск">🔍</button>
+      <button class="btn btn-sm" id="notifBell" onclick="location.href='/inbox'" title="Уведомления" aria-label="Уведомления">🔔</button>
+      <button class="btn btn-sm" onclick="location.reload()" aria-label="Обновить страницу">🔄</button>
+      <a class="btn btn-sm btn-p" href="/sync">Sync</a>
+    </div>
+  </div>
+
+  <!-- Search Modal -->
+  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+        <span style="font-size:1.1rem;">🔍</span>
+        <input id="searchInput" type="text" placeholder="Поиск клиентов, задач, встреч, заметок..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;" autocomplete="off">
+        <kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd>
+      </div>
+      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
+      <div id="searchEmpty" style="padding:30px;text-align:center;color:var(--muted);font-size:.85rem;display:none;">Начните вводить для поиска</div>
+    </div>
+  </div>
+
+  <!-- Action Cards -->
+  <div id="sync-status-bar" style="display:none;align-items:center;flex-wrap:wrap;padding:6px 0;margin-bottom:12px;"></div>
+  <div id="action-cards" style="margin-bottom:24px;">
+    <div class="section-title" style="margin-bottom:10px;">⚡ Действия</div>
+    <div id="actions-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;"></div>
+  </div>
+
+  {% if clients %}
+  <div class="kpi-grid">
+    <div class="kpi c-blue"><div class="kpi-l">Клиентов</div><div class="kpi-v">{{ clients|length }}</div><div class="kpi-s">Активных</div></div>
+    <div class="kpi c-green"><div class="kpi-l">Здоровые</div><div class="kpi-v" style="color:var(--green)">{{ healthy_count }}</div><div class="kpi-s">Зелёный</div></div>
+    <div class="kpi c-yellow"><div class="kpi-l">Внимание</div><div class="kpi-v" style="color:var(--yellow)">{{ warning_count }}</div><div class="kpi-s">Жёлтый</div></div>
+    <div class="kpi c-red"><div class="kpi-l">Критичные</div><div class="kpi-v" style="color:var(--red)">{{ overdue_count }}</div><div class="kpi-s">Красный</div></div>
+    <div class="kpi c-blue"><div class="kpi-l">Задач</div><div class="kpi-v">{{ total_tasks }}</div><div class="kpi-s">{{ total_open_tasks }} открытых</div></div>
+  </div>
+
+  {% if today_meetings or today_tasks %}
+  <div class="today-section">
+    <div class="section-title">📅 Сегодня</div>
+    <div class="today-grid">
+      {% for m in today_meetings %}
+      <a href="/client/{{ m.client_id }}" class="today-card" style="text-decoration:none;color:inherit;">
+        <div class="tc-client">📅 {{ m.client.name if m.client else '—' }}</div>
+        <div class="tc-title">{{ m.title or m.type }}</div>
+        <div class="tc-meta"><span>{{ m.date.strftime('%H:%M') if m.date else '' }}</span><span>{{ m.type }}</span></div>
+      </a>
+      {% endfor %}
+      {% for t in today_tasks %}
+      <a href="/client/{{ t.client_id }}" class="today-card" style="text-decoration:none;color:inherit;">
+        <div class="tc-client">📋 {{ t.client.name if t.client else '—' }}</div>
+        <div class="tc-title">{{ t.title }}</div>
+        <div class="tc-meta"><span>{{ t.status }}</span><span>{{ t.priority }}</span></div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ══ Информационные панели ══ -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:20px;" class="charts-row">
+    <!-- Health distribution -->
+    <div class="chart-card">
+      <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>❤️ Здоровье портфеля</span>
+        <a href="/portfolio" style="font-size:.72rem;color:var(--accent);">Подробнее →</a>
+      </div>
+      <div class="chart-wrap" style="height:180px;"><canvas id="stChart"></canvas></div>
+      <div style="display:flex;justify-content:center;gap:14px;margin-top:8px;">
+        <span style="font-size:.72rem;color:#4ade80;">🟢 {{ healthy_count }}</span>
+        <span style="font-size:.72rem;color:#fbbf24;">🟡 {{ warning_count }}</span>
+        <span style="font-size:.72rem;color:#f87171;">🔴 {{ overdue_count }}</span>
+      </div>
+    </div>
+
+    <!-- Segments -->
+    <div class="chart-card">
+      <div class="chart-title">📊 По сегментам</div>
+      <div class="chart-wrap" style="height:180px;"><canvas id="segChart"></canvas></div>
+    </div>
+
+    <!-- MRR portfolio trend -->
+    <div class="chart-card">
+      <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>💰 MRR портфеля</span>
+        <span id="portfolio-mrr-total" style="font-size:.8rem;font-weight:700;color:var(--accent);">—</span>
+      </div>
+      <div class="chart-wrap" style="height:180px;"><canvas id="mrrPortfolioChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ══ Вторая строка: Активность + Риски ══ -->
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:20px;" class="charts-row-2">
+    <!-- Activity timeline (задачи по неделям) -->
+    <div class="chart-card">
+      <div class="chart-title">📋 Задачи по статусам</div>
+      <div class="chart-wrap" style="height:160px;"><canvas id="tasksChart"></canvas></div>
+    </div>
+
+    <!-- Risk clients list -->
+    <div class="chart-card" style="overflow:hidden;">
+      <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>🔴 Требуют внимания</span>
+        <a href="/portfolio?filter=critical" style="font-size:.72rem;color:var(--accent);">Все →</a>
+      </div>
+      <div id="risk-clients-list" style="overflow-y:auto;max-height:160px;">
+        <div style="color:var(--muted);font-size:.78rem;padding:8px 0;">Загрузка...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 5 STREAMS KANBAN ═══ -->
+  <div class="streams-wrap">
+    <div class="streams-head">
+      <div>
+        <h3>🌊 Стримы CSM-процесса</h3>
+        <div class="sub">Портфель клиентов распределён по 5 этапам ежедневного цикла</div>
+      </div>
+      <div class="sub">Всего: {{ clients|length }}</div>
+    </div>
+
+    {% set stream_defs = [
+      ('checkup',  '🔍', 'Чек-ап'),
+      ('prep',     '📋', 'Подготовка'),
+      ('meeting',  '🎥', 'Встреча'),
+      ('followup', '✉️', 'Фолоуап'),
+      ('changes',  '✅', 'Изменения'),
+    ] %}
+
+    <div class="streams-grid">
+      {% for key, icon, label in stream_defs %}
+      {% set col_clients = streams[key] if streams else [] %}
+      <div class="stream-col" data-stream="{{ key }}">
+        <div class="stream-col-head">
+          <div class="stream-title"><span>{{ icon }}</span><span>{{ label }}</span></div>
+          <div class="stream-count">{{ col_clients|length }}</div>
+        </div>
+        <div class="stream-body">
+          {% if col_clients %}
+            {% for c in col_clients %}
+            {% set color = 'g' if c.status.color == 'green' else 'y' if c.status.color == 'yellow' else 'r' %}
+            <a href="/client/{{ c.id }}" class="stream-card" title="{{ c.name }}">
+              <div class="sc-name">
+                <span class="sc-dot {{ color }}" style="display:inline-block;margin-right:6px;"></span>{{ c.name }}
+              </div>
+              <div class="sc-meta">
+                <span class="sc-seg">{{ c.segment or '—' }}</span>
+                <span class="sc-hint">{{ c.stream_hint or '' }}</span>
+              </div>
+            </a>
+            {% endfor %}
+          {% else %}
+            <div class="stream-empty">Нет клиентов на этом этапе</div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="empty"><div class="ico">📋</div><h3>Нет данных</h3><p>Синхронизируйте данные из Merchrules</p><a href="/sync" class="btn btn-p" style="margin-top:14px;">🔄 Sync</a></div>
+  {% endif %}
+</div>
+{% endblock %}

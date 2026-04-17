@@ -166,35 +166,3 @@ def create_tasks_bulk(meeting_id: int, client_id: int, tasks: list[dict]):
 def update_task_status(task_id: int, status: str):
     with get_conn() as conn:
         conn.execute("UPDATE tasks SET status=? WHERE id=?", (status, task_id))
-
-
-# ── Seed data — твои клиенты ─────────────────────────────────────────────────
-
-SEED_CLIENTS = [
-    # ENT
-    ("cdek.shopping", "ENT"), ("shoppinglive.ru", "ENT"), ("beeline.ru", "ENT"),
-    ("lazurit.com", "ENT"), ("m-market.kg", "ENT"), ("tts.ru", "ENT"),
-    ("electrogor.ru", "ENT"), ("mechta.kz", "ENT"), ("vamsvet", "ENT"),
-    ("kuvalda.ru", "ENT"), ("yves-rocher", "ENT"), ("водолей.рф", "ENT"),
-    ("tvoydom.ru", "ENT"), ("ogo1.ru", "ENT"), ("mila.by", "ENT"), ("etm.ru", "ENT"),
-    # SME
-    ("dogeat.ru", "SME"), ("online-samsung.ru", "SME"), ("prezident.ru", "SME"),
-    ("teremonline.ru", "SME"), ("ya-magazin", "SME"), ("monamiprofessional", "SME"),
-    ("vodovoz.ru", "SME"),
-    # SMB
-    ("krasotkapro.ru", "SMB"), ("Semicvetic", "SMB"), ("postmeridiem", "SMB"),
-    ("3259404.ru", "SMB"), ("fabrika-stil.ru", "SMB"), ("urbantiger", "SMB"),
-    ("uyutstroy.su", "SMB"), ("divanboss.ru", "SMB"), ("Neverlate-shop", "SMB"),
-    ("stout.ru", "SMB"), ("rommer.ru", "SMB"),
-    # SS
-    ("swankystamping", "SS"), ("teremopt", "SS"),
-]
-
-
-def seed_clients():
-    """Заполнить БД клиентами если пусто."""
-    with get_conn() as conn:
-        count = conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
-    if count == 0:
-        for name, segment in SEED_CLIENTS:
-            upsert_client(name, segment)

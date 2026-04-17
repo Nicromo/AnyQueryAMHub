@@ -598,13 +598,7 @@ INDEX_HTML = """<!DOCTYPE html>
     var DEFAULT_MEETING_PROMPT = {{ default_meeting_prompt | tojson }};
     var DEFAULT_TRANSCRIPTION_PROMPT = {{ default_transcription_prompt | tojson }};
     document.addEventListener('DOMContentLoaded', function() {
-    if (window.location.search.indexOf('demo=1') !== -1) {
-      var ms = document.getElementById('meetingSummary');
-      var sid = document.getElementById('kvenSiteIdsInput');
-      if (ms) ms.value = 'Обсудили ранжирование поиска. Партнёр подготовит список брендов к следующей неделе. Мы проверим трекинг событий.';
-      if (sid) sid.value = '221';
-    }
-    document.getElementById('siteIdsFile')?.addEventListener('change', function() {
+document.getElementById('siteIdsFile')?.addEventListener('change', function() {
       var dz = document.getElementById('dropZone');
       if (dz) dz.classList.toggle('has-files', this.files && this.files.length > 0);
     });

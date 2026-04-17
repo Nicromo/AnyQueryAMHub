@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}Помощь · AM Hub{% endblock %}
+{% block page_title %}Помощь{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Подсказки, ссылки и поддержка</div>{% endblock %}
+
+{% block content %}
+<style>
+  .help-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .help-card {
+    background: var(--surface, var(--card, #111827));
+    border: 1px solid var(--border, #1e2a3a);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .help-card h3 {
+    margin: 0 0 12px 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text, #e6e8ef);
+  }
+  .help-quick-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .help-quick-links a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: var(--accent, #6474ff);
+    color: #fff;
+    text-decoration: none;
+    font-size: .85rem;
+    font-weight: 500;
+    transition: opacity .15s;
+  }
+  .help-quick-links a:hover { opacity: .88; }
+
+  .help-support label {
+    display: block;
+    font-size: .8rem;
+    color: var(--text-muted, #8892b0);
+    margin-bottom: 4px;
+    margin-top: 10px;
+  }
+  .help-support select,
+  .help-support textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #1e2a3a);
+    background: var(--bg, #0a0e1a);
+    color: var(--text, #e6e8ef);
+    font-family: inherit;
+    font-size: .88rem;
+    box-sizing: border-box;
+  }
+  .help-support textarea {
+    min-height: 110px;
+    resize: vertical;
+  }
+  .help-support button {
+    margin-top: 12px;
+    padding: 9px 18px;
+    border-radius: 8px;
+    background: var(--accent, #6474ff);
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    font-size: .85rem;
+    font-weight: 500;
+    transition: opacity .15s;
+  }
+  .help-support button:disabled {
+    opacity: .55; cursor: not-allowed;
+  }
+  .help-support-meta {
+    margin-top: 10px;
+    font-size: .75rem;
+    color: var(--text-muted, #8892b0);
+  }
+
+  .faq details {
+    margin-bottom: 8px;
+    background: var(--bg, #0a0e1a);
+    border: 1px solid var(--border, #1e2a3a);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .faq summary {
+    cursor: pointer;
+    font-weight: 500;
+    font-size: .92rem;
+    color: var(--text, #e6e8ef);
+    list-style: none;
+    padding: 4px 0;
+  }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::before { content: '▸ '; color: var(--accent, #6474ff); }
+  .faq details[open] summary::before { content: '▾ '; }
+  .faq details > *:not(summary) {
+    margin-top: 10px;
+    color: var(--text-muted, #8892b0);
+    font-size: .88rem;
+    line-height: 1.5;
+  }
+  .faq a {
+    color: var(--accent, #6474ff);
+    text-decoration: none;
+  }
+  .faq a:hover { text-decoration: underline; }
+
+  /* Toast */
+  .help-toast {
+    position: fixed; bottom: 20px; right: 20px;
+    padding: 12px 16px; border-radius: 10px;
+    font-size: .88rem;
+    border: 1px solid;
+    background: var(--surface, #111827);
+    color: var(--text, #e6e8ef);
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .2s, transform .2s;
+    pointer-events: none;
+    z-index: 9999;
+    max-width: 360px;
+  }
+  .help-toast.show { opacity: 1; transform: translateY(0); }
+  .help-toast.ok    { border-color: rgba(35,209,139,.55); background: rgba(35,209,139,.12); }
+  .help-toast.err   { border-color: rgba(240,85,106,.55); background: rgba(240,85,106,.12); }
+</style>
+
+<div class="help-grid">
+  <!-- Быстрые ссылки -->
+  <div class="help-card">
+    <h3>🚀 Быстрые ссылки</h3>
+    <div class="help-quick-links">
+      <a href="/settings/extension">🧩 Подключить расширение</a>
+      <a href="/settings/sidebar">⚙️ Настроить sidebar</a>
+      <a href="/onboarding">🎓 Пройти онбординг заново</a>
+    </div>
+  </div>
+
+  <!-- Поддержка -->
+  <div class="help-card help-support">
+    <h3>💬 Написать в поддержку</h3>
+
+    <label for="help-cat">Категория</label>
+    <select id="help-cat">
+      <option value="technical">Техническая проблема</option>
+      <option value="question">Вопрос</option>
+      <option value="bug">Баг</option>
+      <option value="feature">Предложение</option>
+    </select>
+
+    <label for="help-msg">Сообщение</label>
+    <textarea id="help-msg" placeholder="Опишите вашу проблему или вопрос подробно..."></textarea>
+
+    <button id="help-send-btn" type="button" onclick="sendHelpMsg()">Отправить</button>
+    <div class="help-support-meta">
+      Ответ придёт в Telegram <a href="https://t.me/anyquery_am_bot" target="_blank">@anyquery_am_bot</a>
+      в течение 2 часов.
+    </div>
+  </div>
+</div>
+
+<!-- FAQ -->
+<div class="help-card">
+  <h3>❓ Частые вопросы (FAQ)</h3>
+  <div class="faq">
+    <details>
+      <summary>Как установить расширение?</summary>
+      <div>
+        Перейдите на страницу <a href="/settings/extension">Расширение</a> и следуйте пошаговой инструкции. Там же можно скачать последнюю версию и проверить совместимость с браузером.
+      </div>
+    </details>
+
+    <details>
+      <summary>Почему я не вижу всех клиентов?</summary>
+      <div>
+        По умолчанию вы видите только клиентов из своего портфеля (где ваш email указан в поле manager_email). Если нужен доступ к чужим клиентам — попросите админа расширить права или передать клиента в ваш портфель.
+      </div>
+    </details>
+
+    <details>
+      <summary>Как создать чек-ап?</summary>
+      <div>
+        1. Откройте карточку клиента.<br>
+        2. Нажмите на вкладку «Чек-апы» или кнопку «Новый чек-ап».<br>
+        3. Заполните обязательные поля (дата, итоги, next steps).<br>
+        4. Сохраните — система автоматически обновит статус клиента и пошлёт уведомления.
+      </div>
+    </details>
+
+    <details>
+      <summary>Куда писать если что-то сломалось?</summary>
+      <div>
+        Пишите в Telegram-бот: <a href="https://t.me/anyquery_am_bot" target="_blank">@anyquery_am_bot</a>. Опишите проблему, приложите скриншот если есть — команда разработки посмотрит и ответит.
+      </div>
+    </details>
+
+    <details>
+      <summary>Как кастомизировать sidebar?</summary>
+      <div>
+        Перейдите в <a href="/settings/sidebar">настройки sidebar</a>: можно скрыть ненужные разделы и собрать до 5 своих категорий с избранными вкладками.
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="help-toast" id="help-toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  var toastEl = document.getElementById('help-toast');
+  var toastTimer = null;
+  function showToast(msg, type){
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.remove('ok','err');
+    if (type === 'ok')  toastEl.classList.add('ok');
+    if (type === 'err') toastEl.classList.add('err');
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 3800);
+  }
+
+  function saveFallback(payload){
+    try {
+      var key = 'amhub_help_pending';
+      var arr = JSON.parse(localStorage.getItem(key) || '[]');
+      arr.push(Object.assign({ts: new Date().toISOString()}, payload));
+      localStorage.setItem(key, JSON.stringify(arr).slice(0, 50000));
+    } catch(e) { /* quota / disabled — ignore */ }
+  }
+
+  window.sendHelpMsg = async function(){
+    var btn  = document.getElementById('help-send-btn');
+    var cat  = document.getElementById('help-cat').value;
+    var msg  = document.getElementById('help-msg').value.trim();
+    if (!msg) {
+      showToast('Сначала опишите вопрос в поле выше.', 'err');
+      return;
+    }
+    var payload = {
+      category: cat,
+      message: msg,
+      url_context: 'from ' + (document.referrer ? (new URL(document.referrer)).pathname : window.location.pathname)
+    };
+    btn.disabled = true;
+    var oldText = btn.textContent;
+    btn.textContent = 'Отправка…';
+    try {
+      var r = await fetch('/api/help/send', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      });
+      var d = null;
+      try { d = await r.json(); } catch(e){}
+      if (r.ok && d && d.ok) {
+        showToast('Обращение отправлено. Мы ответим в Telegram в течение 2 часов.', 'ok');
+        document.getElementById('help-msg').value = '';
+      } else {
+        saveFallback(payload);
+        var why = (d && d.error) ? (': ' + d.error) : '';
+        showToast('Не удалось отправить' + why + '. Сохранили локально, попробуйте позже.', 'err');
+      }
+    } catch(err) {
+      saveFallback(payload);
+      showToast('Сеть недоступна. Сохранили локально, попробуйте позже.', 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  };
+})();
+</script>
+{% endblock %}

@@ -1,89 +1,214 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}AM Hub{% endblock %}</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%236474ff'/><text x='16' y='22' text-anchor='middle' font-size='16' font-family='sans-serif' font-weight='700' fill='white'>A</text></svg>">
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link href="https://fonts.bunny.net/css?family=geist:300,400,500,600,700|geist-mono:400,500" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#818cf8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AM Hub">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  {% block head %}{% endblock %}
+  <script>
+    // Client-side onboarding guard — новый пользователь попадает на /onboarding
+    // (серверный guard тоже есть в pages.py через user.settings.onboarding_complete)
+    (function () {
+      var p = window.location.pathname;
+      var isOnboardingPage = (p === '/onboarding');
+      var isLogin         = (p === '/login' || p.indexOf('/auth/') === 0);
+      var isStatic        = (p.indexOf('/static/') === 0);
+      if (!isOnboardingPage && !isLogin && !isStatic) {
+        var done = localStorage.getItem('amhub_onboarded');
+        if (!done) {
+          // Мягкий переход: даём странице прогрузиться, но сразу переводим фокус
+          // (убирает flash непрогруженного UI)
+          window.location.replace('/onboarding');
+        }
+      }
+    })();
+  </script>
 </head>
 <body>
 {% block body %}
 <div class="layout">
-  <nav class="sidebar">
-    <div class="sidebar-logo">AM <span>Hub</span></div>
 
-    <!-- Быстрый поиск -->
+  <!-- ── SIDEBAR ────────────────────────────────────────────── -->
+  <nav class="sidebar" id="sidebar">
+
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">A</div>
+      <span class="sidebar-logo-text">AM Hub</span>
+      <span class="sidebar-logo-badge">Beta</span>
+    </div>
+
     <div class="search-wrap">
-      <input type="text" id="sidebar-search" placeholder="Найти клиента…"
+      <input type="text" id="sidebar-search" placeholder="Поиск клиента…"
              autocomplete="off" oninput="sidebarSearch(this.value)">
       <div id="search-results" class="search-dropdown" style="display:none"></div>
     </div>
 
-    <a class="nav-link {% if request.url.path == '/hub' %}active{% endif %}" href="/hub"
-       style="background:var(--accent-glow,rgba(59,130,246,.08));border-left:2px solid var(--accent,#3b82f6);margin-bottom:6px">
-      <span class="icon">🎛️</span> Командный центр
-    </a>
+    <div class="sidebar-scroll">
 
-    <div class="nav-section-label">Ежедневное</div>
-    <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today">
-      <span class="icon">☀️</span> Сегодня
-    </a>
-    <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
-      <span class="icon">📊</span> Все клиенты
-    </a>
-    <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50">
-      <span class="icon">🏆</span> Top-50
-    </a>
-    <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks">
-      <span class="icon">✅</span> Задачи
-      <span id="nav-tasks-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:0.7rem;font-weight:600"></span>
-    </a>
+      <!-- Командный центр -->
+      <a class="nav-link {% if request.url.path == '/hub' %}active{% endif %}" href="/hub" data-nav-id="dashboard">
+        <span class="icon">🎛️</span> Командный центр
+      </a>
 
-    <div class="nav-section-label">Анализ</div>
-    <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics">
-      <span class="icon">📈</span> Аналитика
-    </a>
-    <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar">
-      <span class="icon">📆</span> QBR Календарь
-    </a>
-    <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks">
-      <span class="icon">🔒</span> Внутренние задачи
-    </a>
+      <div class="nav-section-label" data-nav-section="daily">Ежедневное</div>
+      <a class="nav-link {% if request.url.path == '/today' %}active{% endif %}" href="/today" data-nav-id="today">
+        <span class="icon">☀️</span> Сегодня
+      </a>
+      <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/" data-nav-id="clients">
+        <span class="icon">👥</span> Все клиенты
+      </a>
+      <a class="nav-link {% if '/top50' in request.url.path %}active{% endif %}" href="/top50" data-nav-id="top50">
+        <span class="icon">🏆</span> Top-50
+      </a>
+      <a class="nav-link {% if request.url.path == '/tasks' %}active{% endif %}" href="/tasks" data-nav-id="tasks">
+        <span class="icon">✅</span> Задачи
+        <span id="nav-tasks-badge" class="badge" style="display:none;margin-left:auto"></span>
+      </a>
+      <a class="nav-link {% if request.url.path == '/meetings' %}active{% endif %}" href="/meetings" data-nav-id="meetings">
+        <span class="icon">📅</span> Встречи
+      </a>
 
-    <div class="nav-section-label">Инструменты</div>
-    <a class="nav-link {% if request.url.path == '/settings/my-clients' %}active{% endif %}" href="/settings/my-clients">
-      <span class="icon">👤</span> Мои клиенты
-    </a>
-    <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap">
-      <span class="icon">🗺️</span> Роадмап
-    </a>
-    <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank">
-      <span class="icon">📹</span> ktalk <span style="font-size:0.7rem;opacity:.5">↗</span>
-    </a>
-    <a class="nav-link" href="https://merchrules.any-platform.ru" target="_blank">
-      <span class="icon">🔗</span> Merchrules <span style="font-size:0.7rem;opacity:.5">↗</span>
-    </a>
+      <a class="nav-link {% if request.url.path == '/portfolio' %}active{% endif %}" href="/portfolio" data-nav-id="portfolio">
+        <span class="icon">🗂️</span> Портфель
+      </a>
 
-    <!-- Статистика -->
-    <div id="sidebar-stats" class="sidebar-stats" style="display:none">
-      <div class="stat-item red"    id="stat-overdue">—</div>
-      <div class="stat-item yellow" id="stat-warning">—</div>
-      <div class="stat-item"        id="stat-tasks">—</div>
-    </div>
+      <div class="nav-section-label" data-nav-section="analytics">Аналитика</div>
+      <a class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}" href="/analytics" data-nav-id="analytics">
+        <span class="icon">📈</span> Аналитика
+      </a>
+      <a class="nav-link {% if request.url.path == '/ai-chat' %}active{% endif %}" href="/ai-chat" data-nav-id="ai_chat">
+        <span class="icon">🤖</span> AI-ассистент
+      </a>
+      <a class="nav-link {% if request.url.path == '/team' %}active{% endif %}" href="/team" id="team-link" data-nav-id="team" style="display:none">
+        <span class="icon">👥</span> Команда
+      </a>
+      <a class="nav-link {% if request.url.path == '/kanban' %}active{% endif %}" href="/kanban" data-nav-id="kanban">
+        <span class="icon">📋</span> Канбан
+      </a>
+      <a class="nav-link {% if request.url.path == '/kpi' %}active{% endif %}" href="/kpi" data-nav-id="kpi">
+        <span class="icon">🎯</span> Мой KPI
+      </a>
+      <a class="nav-link {% if request.url.path == '/qbr-calendar' %}active{% endif %}" href="/qbr-calendar" data-nav-id="qbr_calendar">
+        <span class="icon">📆</span> QBR Календарь
+      </a>
+
+      <div class="nav-section-label" data-nav-section="tools">Инструменты</div>
+      <a class="nav-link {% if request.url.path == '/cabinet' %}active{% endif %}" href="/cabinet" data-nav-id="cabinet">
+        <span class="icon">🗂️</span> Мой кабинет
+      </a>
+      <a class="nav-link {% if request.url.path == '/followup-templates' %}active{% endif %}" href="/followup-templates" data-nav-id="followup_templates">
+        <span class="icon">📝</span> Шаблоны
+      </a>
+      <a class="nav-link {% if request.url.path == '/auto-tasks' %}active{% endif %}" href="/auto-tasks" data-nav-id="auto_tasks">
+        <span class="icon">🤖</span> Автозадачи
+      </a>
+      <a class="nav-link {% if request.url.path == '/roadmap' %}active{% endif %}" href="/roadmap" data-nav-id="roadmap">
+        <span class="icon">🗺️</span> Роадмап
+      </a>
+      <a class="nav-link {% if '/internal-tasks' in request.url.path %}active{% endif %}" href="/internal-tasks" data-nav-id="internal_tasks">
+        <span class="icon">🔒</span> Внутренние задачи
+      </a>
+      {% if user and user.role == 'admin' %}
+      <a class="nav-link {% if request.url.path == '/admin/users' %}active{% endif %}" href="/admin/users" data-nav-id="admin_users">
+        <span class="icon">👥</span> Пользователи
+      </a>
+      {% endif %}
+
+      <div class="nav-section-label" data-nav-section="integrations">Интеграции</div>
+      <a class="nav-link" href="https://tbank.ktalk.ru/" target="_blank" data-nav-id="ktalk">
+        <span class="icon">💬</span> KTalk
+        <span style="margin-left:auto;font-size:.65rem;color:var(--text-muted)">↗</span>
+      </a>
+      <a class="nav-link" href="https://merchrules.any-platform.ru" target="_blank" data-nav-id="merchrules">
+        <span class="icon">🔗</span> Merchrules
+        <span style="margin-left:auto;font-size:.65rem;color:var(--text-muted)">↗</span>
+      </a>
+      <a class="nav-link {% if request.url.path == '/settings/extension' %}active{% endif %}" href="/settings/extension" data-nav-id="extension">
+        <span class="icon">🧩</span> Расширение
+      </a>
+      <a class="nav-link {% if request.url.path == '/help' %}active{% endif %}" href="/help" data-nav-id="help">
+        <span class="icon">❓</span> Помощь
+      </a>
+
+      <!-- Статистика -->
+      <div id="sidebar-stats" class="sidebar-stats">
+        <div class="stat-item red"    id="stat-overdue">—</div>
+        <div class="stat-item yellow" id="stat-warning">—</div>
+        <div class="stat-item"        id="stat-tasks">—</div>
+      </div>
+
+      <!-- Уведомления -->
+      <a class="nav-link {% if request.url.path == '/admin' %}active{% endif %}"
+         href="/admin" id="admin-link" style="display:none">
+        <span class="icon">🛡️</span> Администратор
+      </a>
+
+      <div class="notif-bell" id="notifBell" onclick="toggleNotifPanel()">
+        🔔 Уведомления
+        <span id="notifBadge" class="notif-badge" style="display:none">0</span>
+      </div>
+
+    </div><!-- /sidebar-scroll -->
 
     <div class="sidebar-bottom">
       {% if user %}
-        <a href="/profile" style="font-weight:500;color:var(--text)">👤 {{ user.name }}</a>
-        <a href="/logout">Выйти</a>
+        <a href="/profile" style="font-weight:500">👤 {{ user.name }}</a>
+        <a href="/settings" style="color:var(--text-muted)">⚙️</a>
+        <a href="/logout" style="color:var(--text-muted)">Выйти</a>
       {% endif %}
     </div>
+
   </nav>
 
+  <!-- Notif panel -->
+  <div id="notifPanel" class="notif-panel" style="display:none">
+    <div class="notif-header">
+      <span>🔔 Уведомления</span>
+      <button onclick="markAllRead()">Всё прочитано</button>
+    </div>
+    <div id="notifList" class="notif-list">
+      <div class="notif-empty">Загрузка...</div>
+    </div>
+  </div>
+  <div id="notifOverlay" class="notif-overlay" style="display:none" onclick="toggleNotifPanel()"></div>
+
+  <!-- ── MAIN ───────────────────────────────────────────────── -->
   <main class="main">
-    {% block content %}{% endblock %}
+
+    <!-- Sticky top bar -->
+    <div class="page-header">
+      <div>
+        <div class="page-title">{% block page_title %}AM Hub{% endblock %}</div>
+        {% block page_subtitle %}{% endblock %}
+      </div>
+      <div class="page-actions">
+        {% block page_actions %}{% endblock %}
+        <!-- Theme toggle -->
+        <button class="btn btn-ghost btn-icon" onclick="toggleTheme()" title="Сменить тему" aria-label="Переключить тему" style="font-size:.9rem">
+          <span id="theme-icon">🌙</span>
+        </button>
+        <!-- Mobile menu -->
+        <button class="btn btn-ghost btn-icon" onclick="toggleMobileMenu()" id="menu-btn"
+                aria-label="Открыть меню"
+                style="display:none;font-size:1.1rem">☰</button>
+      </div>
+    </div>
+
+    <div class="page-body">
+      {% block content %}{% endblock %}
+    </div>
+
   </main>
 </div>
 {% endblock %}
@@ -91,15 +216,53 @@
 <!-- Toast -->
 {% if request.query_params.get('saved') %}
 <div class="toast success" id="toast">
-  ✅ Фолоуап сохранён
-  {% if request.query_params.get('tg') == 'ok' %} · отправлен в TG{% endif %}
-  {% if request.query_params.get('mr') == 'ok' %} · синхронизирован с Merchrules{% endif %}
+  ✅ Сохранено
+  {% if request.query_params.get('tg') == 'ok' %} · отправлено в TG{% endif %}
+  {% if request.query_params.get('mr') == 'ok' %} · синхронизировано{% endif %}
 </div>
 <script>setTimeout(()=>document.getElementById('toast')?.remove(), 4000)</script>
 {% endif %}
 
 <script>
-// ── Быстрый поиск ─────────────────────────────────────────────────────────
+// ── Show admin link if admin ─────────────────────────────────────────────
+(async function checkAdmin() {
+  try {
+    const r = await fetch('/api/auth/me').then(r => r.json()).catch(() => ({}));
+    if (r.role === 'admin') {
+      const el = document.getElementById('admin-link');
+      if (el) el.style.display = 'flex';
+      const tl = document.getElementById('team-link');
+      if (tl) tl.style.display = 'flex';
+    }
+  } catch(e) {}
+})();
+
+// ── Theme ───────────────────────────────────────────────────
+const THEME_KEY = 'amhub_theme';
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-icon').textContent = t === 'light' ? '☀️' : '🌙';
+}
+(function() {
+  const saved = localStorage.getItem(THEME_KEY) || 'dark';
+  applyTheme(saved);
+})();
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'light' ? 'dark' : 'light';
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+}
+
+// ── Mobile menu ─────────────────────────────────────────────
+function toggleMobileMenu() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+if (window.innerWidth <= 768) {
+  document.getElementById('menu-btn').style.display = 'flex';
+}
+
+// ── Search ──────────────────────────────────────────────────
 let _searchTimer = null;
 function sidebarSearch(q) {
   clearTimeout(_searchTimer);
@@ -111,35 +274,460 @@ function sidebarSearch(q) {
       const data = await res.json();
       if (!data.length) { drop.style.display = 'none'; return; }
       drop.innerHTML = data.map(c =>
-        `<a href="/prep/${c.id}" class="search-item">
-          <span class="badge badge-${c.segment.toLowerCase().replace('+','-plus').replace('-','-minus')}">${c.segment}</span>
+        `<a href="/client/${c.id}" class="search-item">
+          <span class="badge badge-${(c.segment||'').toLowerCase().replace('+','-plus')}">${c.segment||'?'}</span>
           ${c.name}
         </a>`
       ).join('');
       drop.style.display = 'block';
     } catch(e) { drop.style.display = 'none'; }
-  }, 200);
+  }, 180);
 }
 document.addEventListener('click', e => {
   if (!e.target.closest('.search-wrap'))
     document.getElementById('search-results').style.display = 'none';
 });
 
-// ── Статистика ────────────────────────────────────────────────────────────
+// ── Stats ───────────────────────────────────────────────────
 (async function loadStats() {
   try {
     const s = await fetch('/api/stats').then(r => r.json());
-    const box = document.getElementById('sidebar-stats');
     document.getElementById('stat-overdue').textContent = `🔴 ${s.overdue} просроч.`;
     document.getElementById('stat-warning').textContent = `🟡 ${s.warning} скоро`;
     document.getElementById('stat-tasks').textContent   = `📋 ${s.open_tasks} задач`;
-    box.style.display = 'flex';
+    document.getElementById('sidebar-stats').style.display = 'flex';
     if (s.open_tasks > 0) {
-      const badge = document.getElementById('nav-tasks-badge');
-      if (badge) { badge.textContent = s.open_tasks; badge.style.display = 'inline'; }
+      const b = document.getElementById('nav-tasks-badge');
+      if (b) { b.textContent = s.open_tasks; b.style.display = 'inline'; }
     }
   } catch(e) {}
 })();
+
+// ── Notifications ───────────────────────────────────────────
+const NOTIF_COLORS = {
+  high:'#f0556a', medium:'#f5a623', low:'#4c567a',
+  overdue_checkup:'#f0556a', checkup_soon:'#f5a623',
+  blocked_task:'#f0556a', info:'#6474ff', success:'#23d18b',
+  warning:'#f5a623', alert:'#f0556a'
+};
+let notifOpen = false;
+
+function toggleNotifPanel() {
+  notifOpen = !notifOpen;
+  document.getElementById('notifPanel').style.display = notifOpen ? 'flex' : 'none';
+  document.getElementById('notifOverlay').style.display = notifOpen ? 'block' : 'none';
+  if (notifOpen) loadNotifications();
+}
+
+async function loadNotifications() {
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch('/api/notifications').then(r => r.json()),
+      fetch('/api/inbox/items').then(r => r.json()).catch(() => ({items:[]}))
+    ]);
+    const notifs = r1.notifications || [];
+    const inbox  = (r2.items || []).filter(i => i.type === 'notification');
+    const all    = [...notifs.map(n=>({...n,_src:'notif'})), ...inbox.map(i=>({...i,_src:'inbox'}))];
+    const list   = document.getElementById('notifList');
+    if (!all.length) {
+      list.innerHTML = '<div class="notif-empty">✅ Всё под контролем</div>'; return;
+    }
+    list.innerHTML = all.map(n => {
+      const color = NOTIF_COLORS[n.priority] || NOTIF_COLORS[n.type] || '#4c567a';
+      const link  = n.client_id ? `/client/${n.client_id}` : '#';
+      return `<a href="${link}" class="notif-item" style="border-left-color:${color}">
+        <div class="notif-item-title">${n.title||n.message||''}</div>
+        ${n.message&&n.title?`<div class="notif-item-msg">${n.message}</div>`:''}
+        ${n.date?`<div class="notif-item-date">${n.date}</div>`:''}
+      </a>`;
+    }).join('');
+    updateBadge(all.length);
+  } catch(e) {}
+}
+
+function updateBadge(count) {
+  const b = document.getElementById('notifBadge');
+  if (!b) return;
+  if (count > 0) { b.textContent = count > 99 ? '99+' : count; b.style.display = 'inline-flex'; }
+  else { b.style.display = 'none'; }
+}
+
+async function markAllRead() {
+  try {
+    await fetch('/api/inbox/mark-read', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    document.getElementById('notifList').innerHTML = '<div class="notif-empty">✅ Всё прочитано</div>';
+    updateBadge(0);
+  } catch(e) {}
+}
+
+(async function pollNotifications() {
+  try {
+    const r = await fetch('/api/notifications').then(r => r.json());
+    const count = (r.notifications||[]).filter(n=>n.priority==='high').length;
+    updateBadge(count);
+  } catch(e) {}
+  setTimeout(pollNotifications, 60000);
+})();
+
+// ── WebSocket Real-Time ─────────────────────────────────────────────────────
+(function initWebSocket() {
+  var token = document.cookie.split(';')
+    .map(function(c) { return c.trim(); })
+    .find(function(c) { return c.startsWith('auth_token='); });
+  if (!token) return;
+  var tokenValue = token.split('=').slice(1).join('=');
+  if (!tokenValue) return;
+
+  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var wsUrl = protocol + '//' + window.location.host + '/ws?token=' + encodeURIComponent(tokenValue);
+
+  var ws = null;
+  var reconnectDelay = 1000;
+  var pingTimer = null;
+
+  function connect() {
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch(e) { return; }
+
+    ws.onopen = function() {
+      reconnectDelay = 1000;
+      pingTimer = setInterval(function() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({type: 'ping'}));
+        }
+      }, 25000);
+    };
+
+    ws.onmessage = function(e) {
+      try {
+        var msg = JSON.parse(e.data);
+        handleWsMessage(msg);
+      } catch(err) {}
+    };
+
+    ws.onclose = function() {
+      clearInterval(pingTimer);
+      // Автоматический реконнект
+      setTimeout(connect, Math.min(reconnectDelay, 30000));
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+
+    ws.onerror = function() { ws.close(); };
+  }
+
+  function handleWsMessage(msg) {
+    switch(msg.type) {
+      case 'stats':
+        // Обновляем sidebar stats без запроса к серверу
+        var ov = document.getElementById('stat-overdue');
+        var wn = document.getElementById('stat-warning');
+        var tk = document.getElementById('stat-tasks');
+        var nb = document.getElementById('nav-tasks-badge');
+        var sb = document.getElementById('sidebar-stats');
+        if (ov) ov.textContent = '🔴 ' + msg.overdue + ' просроч.';
+        if (wn) wn.textContent = '🟡 ' + msg.warning + ' скоро';
+        if (tk) tk.textContent = '📋 ' + msg.open_tasks + ' задач';
+        if (sb) sb.style.display = 'flex';
+        if (nb) {
+          if (msg.open_tasks > 0) { nb.textContent = msg.open_tasks; nb.style.display = 'inline'; }
+          else nb.style.display = 'none';
+        }
+        updateBadge(msg.overdue + msg.warning);
+        break;
+
+      case 'notification':
+        // Показываем toast и обновляем бейдж
+        showToastWs(msg.title || msg.message || 'Новое уведомление', msg.priority);
+        var current = parseInt(document.getElementById('notifBadge')?.textContent || '0');
+        updateBadge(current + 1);
+        break;
+
+      case 'task_update':
+        // Если мы на странице с задачами — перезагружаем их
+        if (typeof pollTasks === 'function') pollTasks();
+        if (typeof loadCheckups === 'function') loadCheckups();
+        break;
+
+      case 'client_update':
+        // Если мы на странице клиента — обновляем данные
+        if (typeof renderTasks === 'function' && window.location.pathname.startsWith('/client/')) {
+          if (typeof pollTasks === 'function') pollTasks();
+        }
+        break;
+
+      case 'pong': break;
+      case 'ping':
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({type: 'pong'}));
+        }
+        break;
+    }
+  }
+
+  function showToastWs(msg, priority) {
+    var el = document.createElement('div');
+    el.className = 'toast ' + (priority === 'high' ? 'error' : 'success');
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function() { el.remove(); }, 5000);
+  }
+
+  // Экспортируем для других скриптов
+  window._ws = { send: function(data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); } };
+
+  connect();
+})();
+
 </script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function() {
+    navigator.serviceWorker.register("/sw.js").catch(function() {});
+  });
+}
+</script>
+
+  <!-- ── Плавающий AI-чат ── -->
+  <div id="ai-chat-widget" style="
+    position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  ">
+    <!-- Окно чата -->
+    <div id="ai-chat-window" style="
+      display: none;
+      width: 360px; height: 480px;
+      background: var(--card, #111827);
+      border: 1px solid var(--border, #1e2a3a);
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    ">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span>🤖</span>
+          <span style="font-size:.85rem;font-weight:600;">AI-ассистент</span>
+        </div>
+        <button onclick="toggleAIChat()" aria-label="Закрыть" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
+      </div>
+      <div id="ai-chat-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;"></div>
+      <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;">
+        <input id="ai-chat-input" placeholder="Спросите что-нибудь..." style="
+          flex:1;padding:8px 12px;border-radius:8px;
+          border:1px solid var(--border);background:var(--bg,#0a0e1a);
+          color:var(--text);font-size:.82rem;outline:none;
+        " onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMsg();}">
+        <button onclick="sendAIMsg()" style="
+          padding:8px 14px;border-radius:8px;background:#6366f1;
+          border:none;color:#fff;cursor:pointer;font-size:.82rem;
+        ">↑</button>
+      </div>
+    </div>
+    <!-- Кнопка -->
+    <button onclick="toggleAIChat()" aria-label="Открыть AI-ассистента" style="
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+      border: none; cursor: pointer;
+      font-size: 1.3rem;
+      box-shadow: 0 4px 20px rgba(99,102,241,.4);
+      transition: transform .15s;
+      display: flex; align-items: center; justify-content: center;
+    " onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">🤖</button>
+  </div>
+
+  <script>
+  function toggleAIChat() {
+    const w = document.getElementById('ai-chat-window');
+    const showing = w.style.display === 'flex';
+    w.style.display = showing ? 'none' : 'flex';
+    w.style.flexDirection = 'column';
+    if (!showing) document.getElementById('ai-chat-input').focus();
+  }
+
+  async function sendAIMsg() {
+    const input = document.getElementById('ai-chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    input.value = '';
+
+    const msgs = document.getElementById('ai-chat-msgs');
+    msgs.innerHTML += `<div style="align-self:flex-end;background:#6366f1;color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;font-size:.82rem;max-width:80%;">${msg}</div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+
+    const loading = document.createElement('div');
+    loading.style.cssText = 'align-self:flex-start;background:var(--card-h,#1a2235);color:var(--muted);padding:8px 12px;border-radius:12px 12px 12px 2px;font-size:.82rem;';
+    loading.textContent = '...';
+    msgs.appendChild(loading);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    try {
+      const r = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg, client_id: window.__clientId || null})
+      });
+      const d = await r.json();
+      loading.style.color = 'var(--text)';
+      loading.textContent = d.reply || d.response || d.content || JSON.stringify(d);
+    } catch(e) {
+      loading.style.color = 'var(--red, #ef4444)';
+      loading.textContent = '❌ Ошибка: ' + e.message;
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+  </script>
+
+  <!-- ── Sidebar prefs (БД + localStorage-кэш для быстрого старта) ── -->
+  <script>
+  (function sidebarPrefsBoot() {
+    var PREFS_KEY = 'amhub_sidebar_prefs';
+    var API_URL = '/api/settings/sidebar';
+    var appliedState = null; // какие prefs применены сейчас
+
+    function resetSidebarToOriginal() {
+      // показать все ссылки
+      document.querySelectorAll('.nav-link[data-nav-id]').forEach(function(el) {
+        el.style.display = '';
+      });
+      // удалить клоны из кастомных категорий
+      document.querySelectorAll('.sidebar-scroll [data-nav-clone="true"], .sidebar-scroll [data-custom-cat-label="true"]').forEach(function(el) {
+        el.parentNode && el.parentNode.removeChild(el);
+      });
+      // восстановить collapsed-состояние
+      document.querySelectorAll('.nav-section-label.nav-section-collapsed').forEach(function(el) {
+        el.classList.remove('nav-section-collapsed');
+      });
+    }
+
+    function applyOrder(order) {
+      if (!order || !order.length) return;
+      // Перемещаем nav-link-элементы в указанный порядок внутри их текущих родителей.
+      // Простейшая стратегия: собираем по data-nav-id, двигаем в конец родителя в нужной последовательности.
+      // Чтобы не ломать section-label, двигаем в рамках каждого родителя отдельно.
+      var byParent = {};
+      order.forEach(function(id) {
+        var el = document.querySelector('.nav-link[data-nav-id="' + id + '"]:not([data-nav-clone])');
+        if (!el) return;
+        var pid = el.parentNode;
+        if (!pid) return;
+        var key = pid.getAttribute('data-sb-parent-key');
+        if (!key) {
+          key = 'p' + Math.random().toString(36).slice(2, 9);
+          pid.setAttribute('data-sb-parent-key', key);
+          byParent[key] = {parent: pid, items: []};
+        }
+        if (!byParent[key]) byParent[key] = {parent: pid, items: []};
+        byParent[key].items.push(el);
+      });
+      Object.keys(byParent).forEach(function(k) {
+        var g = byParent[k];
+        g.items.forEach(function(el) { g.parent.appendChild(el); });
+      });
+    }
+
+    function applyPrefs(prefs) {
+      try {
+        resetSidebarToOriginal();
+        prefs = prefs || {};
+        var hidden = prefs.hidden || [];
+        var collapsed = prefs.collapsed || [];
+        var customCats = prefs.custom_categories || [];
+        var order = prefs.order || null;
+
+        // Порядок разделов
+        if (order && order.length) applyOrder(order);
+
+        // Скрыть вкладки
+        hidden.forEach(function(id) {
+          document.querySelectorAll('.nav-link[data-nav-id="' + id + '"]').forEach(function(el) {
+            el.style.display = 'none';
+          });
+        });
+
+        // Свернутые секции
+        collapsed.forEach(function(section) {
+          var label = document.querySelector('.nav-section-label[data-nav-section="' + section + '"]');
+          if (!label) return;
+          label.classList.add('nav-section-collapsed');
+          var node = label.nextElementSibling;
+          while (node && !node.classList.contains('nav-section-label')) {
+            var next = node.nextElementSibling;
+            if (node.classList && node.classList.contains('nav-link')) {
+              node.style.display = 'none';
+            }
+            node = next;
+          }
+        });
+
+        // Кастомные категории
+        if (customCats.length && customCats.length <= 5) {
+          var scroll = document.querySelector('.sidebar-scroll');
+          if (scroll) {
+            customCats.slice(0, 5).forEach(function(cat) {
+              if (!cat || !cat.name || !cat.items || !cat.items.length) return;
+              var label = document.createElement('div');
+              label.className = 'nav-section-label';
+              label.setAttribute('data-custom-cat-label', 'true');
+              label.textContent = cat.name;
+              scroll.insertBefore(label, scroll.firstChild.nextSibling);
+              var insertAfter = label;
+              cat.items.forEach(function(id) {
+                var orig = document.querySelector('.nav-link[data-nav-id="' + id + '"]:not([data-nav-clone])');
+                if (!orig) return;
+                var clone = orig.cloneNode(true);
+                clone.removeAttribute('id');
+                clone.setAttribute('data-nav-clone', 'true');
+                clone.style.display = '';
+                insertAfter.parentNode.insertBefore(clone, insertAfter.nextSibling);
+                insertAfter = clone;
+              });
+            });
+          }
+        }
+        appliedState = prefs;
+      } catch(e) { console.warn('sidebar prefs apply error', e); }
+    }
+
+    // 1) Мгновенно применяем из localStorage (избегаем flash)
+    try {
+      var raw = localStorage.getItem(PREFS_KEY);
+      if (raw) {
+        var local = JSON.parse(raw) || {};
+        applyPrefs(local);
+      }
+    } catch(e) { console.warn('sidebar prefs localStorage error', e); }
+
+    // 2) Тянем с сервера и переприменяем
+    function fetchServerPrefs() {
+      try {
+        fetch(API_URL, {credentials: 'same-origin'})
+          .then(function(res) {
+            if (res.status === 401) return null; // fallback на localStorage уже применён
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+          })
+          .then(function(server) {
+            if (!server) return;
+            applyPrefs(server);
+            try { localStorage.setItem(PREFS_KEY, JSON.stringify(server)); } catch(e) {}
+          })
+          .catch(function(err) {
+            console.warn('sidebar prefs fetch failed, keeping localStorage state', err);
+          });
+      } catch(e) { console.warn('sidebar prefs fetch error', e); }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fetchServerPrefs);
+    } else {
+      fetchServerPrefs();
+    }
+  })();
+  </script>
+
+{% block scripts %}{% endblock %}
 </body>
 </html>

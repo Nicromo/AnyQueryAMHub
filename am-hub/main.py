@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
 from database import (
-    init_db, seed_clients, get_all_clients, get_client,
+    init_db, get_all_clients, get_client,
     get_client_meetings, get_client_tasks, create_meeting,
     create_tasks_bulk, update_task_status, mark_meeting_tg_sent,
     upsert_client, CHECKUP_DAYS, get_meeting
@@ -34,7 +34,6 @@ session_mgr = SessionManager(SECRET_KEY)
 
 # Инициализация БД при старте
 init_db()
-seed_clients()
 
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────

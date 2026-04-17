@@ -2,35 +2,213 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>AM Hub — Вход</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход — AM Hub</title>
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link href="https://fonts.bunny.net/css?family=geist:300,400,500,600,700" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(ellipse 70% 60% at 50% 40%, rgba(129,140,248,.09) 0%, transparent 65%),
+        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(74,222,128,.04) 0%, transparent 50%),
+        var(--bg);
+    }
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 44px 40px;
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05);
+    }
+    .login-logo {
+      width: 52px; height: 52px;
+      margin: 0 auto 14px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), #ec4899);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(129,140,248,.35);
+    }
+    h1 {
+      font-size: 1.55rem;
+      font-weight: 700;
+      letter-spacing: -.4px;
+      margin-bottom: 4px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: .88rem;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+    .tg-wrap {
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 18px 0 8px;
+    }
+    .tg-info {
+      font-size: .78rem;
+      color: var(--text-dim);
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+    .tg-info a { color: var(--accent); }
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 24px 0;
+      color: var(--text-dim);
+      font-size: .75rem;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+    .fallback-toggle {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .8rem;
+      font-family: inherit;
+      padding: 6px 10px;
+      border-radius: 6px;
+      transition: background .15s, color .15s;
+    }
+    .fallback-toggle:hover { color: var(--text); background: rgba(255,255,255,.04); }
+    .fallback-form { display: none; margin-top: 14px; text-align: left; }
+    .fallback-form.show { display: block; }
+    .fallback-form label {
+      display: block;
+      font-size: .78rem;
+      color: var(--muted);
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    .fallback-form input {
+      width: 100%;
+      padding: 10px 13px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      font-size: .9rem;
+      outline: none;
+      margin-bottom: 14px;
+      transition: border .15s;
+      font-family: inherit;
+    }
+    .fallback-form input:focus { border-color: var(--accent); }
+    .fallback-form button {
+      width: 100%;
+      padding: 11px;
+      border: none;
+      border-radius: 9px;
+      background: linear-gradient(135deg, var(--accent-d, #6366f1), var(--accent));
+      color: #fff;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .fallback-form button:hover { filter: brightness(1.08); }
+    .err {
+      background: rgba(248,113,113,.12);
+      border: 1px solid rgba(248,113,113,.3);
+      border-radius: 9px;
+      padding: 10px 14px;
+      font-size: .85rem;
+      color: var(--red);
+      margin-bottom: 16px;
+    }
+    .spinner {
+      display: inline-block;
+      width: 22px; height: 22px;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
-<div class="login-wrap">
   <div class="login-card">
-    <h1>AM <span style="color:var(--accent)">Hub</span></h1>
-    <p>Рабочий центр аккаунт-менеджера<br>anyquery</p>
+    <div class="login-logo">AQ</div>
+    <h1>AM Hub</h1>
+    <p class="sub">Рабочий центр аккаунт-менеджера</p>
 
-    {% if bot_username %}
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
     <!-- Telegram Login Widget -->
-    <script async src="https://telegram.org/js/telegram-widget.js?22"
-            data-telegram-login="{{ bot_username }}"
-            data-size="large"
-            data-auth-url="/auth/telegram"
-            data-request-access="write">
-    </script>
-    {% else %}
-    <!-- Dev mode без бота — прямой вход -->
-    <a href="/auth/telegram?id=0&first_name=Dev&auth_date=9999999999&hash=dev" class="btn btn-primary" style="margin-top:16px">
-      🚀 Войти (dev mode)
-    </a>
-    <p style="margin-top:12px;font-size:0.8rem;color:var(--text-muted)">
-      Задай TG_BOT_USERNAME в .env для полной авторизации
+    <div class="tg-wrap" id="tg-login">
+      {% if bot_username %}
+      <script async src="https://telegram.org/js/telegram-widget.js?23"
+              data-telegram-login="{{ bot_username }}"
+              data-size="large"
+              data-onauth="onTelegramAuth(user)"
+              data-request-access="write"></script>
+      {% else %}
+      <div style="color: var(--muted); font-size: .85rem">
+        ⚠ TG_BOT_USERNAME не задан в .env
+      </div>
+      {% endif %}
+    </div>
+
+    <p class="tg-info">
+      Войдите через Telegram — используется бот <b>@{{ bot_username or 'anyquery_am_bot' }}</b>.<br>
+      Нужен доступ? Напишите админу команды.
     </p>
-    {% endif %}
+
+    <!-- Fallback email/password (скрыт до клика) -->
+    <div class="divider">или</div>
+
+    <button type="button" class="fallback-toggle" onclick="toggleFallback()">
+      Войти по email и паролю (admin / dev)
+    </button>
+
+    <form class="fallback-form" id="fallback-form" method="POST">
+      <label>Email</label>
+      <input type="email" name="email" placeholder="you@company.ru" autocomplete="email">
+      <label>Пароль</label>
+      <input type="password" name="password" placeholder="••••••••" autocomplete="current-password">
+      <button type="submit">Войти</button>
+    </form>
   </div>
-</div>
+
+  <script>
+    // Telegram Login callback — серверный endpoint /auth/telegram валидирует подпись
+    function onTelegramAuth(user) {
+      const tgWrap = document.getElementById('tg-login');
+      tgWrap.innerHTML = '<div class="spinner"></div>';
+
+      const params = new URLSearchParams(user).toString();
+      // Отправляем на сервер для HMAC-верификации + установки cookie
+      window.location.href = '/auth/telegram?' + params;
+    }
+
+    function toggleFallback() {
+      document.getElementById('fallback-form').classList.toggle('show');
+    }
+  </script>
 </body>
 </html>

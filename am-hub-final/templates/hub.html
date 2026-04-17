@@ -11,25 +11,25 @@
 
 <!-- ── Метрики верхнего уровня ─────────────────────────────────────────────── -->
 <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px">
-  <div class="hub-kpi">
-    <div class="hub-kpi-val">{{ total_clients }}</div>
-    <div class="hub-kpi-label">Клиентов</div>
+  <div class="kpi-card">
+    <div class="kpi-value" style="color:var(--accent)">{{ total_clients }}</div>
+    <div class="kpi-label">Клиентов</div>
   </div>
-  <div class="hub-kpi hub-kpi-red">
-    <div class="hub-kpi-val">{{ overdue }}</div>
-    <div class="hub-kpi-label">🔴 Просрочено</div>
+  <div class="kpi-card c-red">
+    <div class="kpi-value" style="color:var(--red)">{{ overdue }}</div>
+    <div class="kpi-label">🔴 Просрочено</div>
   </div>
-  <div class="hub-kpi hub-kpi-yellow">
-    <div class="hub-kpi-val">{{ warning }}</div>
-    <div class="hub-kpi-label">🟡 Скоро чекап</div>
+  <div class="kpi-card c-yellow">
+    <div class="kpi-value" style="color:var(--yellow)">{{ warning }}</div>
+    <div class="kpi-label">🟡 Скоро чекап</div>
   </div>
-  <div class="hub-kpi">
-    <div class="hub-kpi-val">{{ open_tasks }}</div>
-    <div class="hub-kpi-label">📋 Открытых задач</div>
+  <div class="kpi-card">
+    <div class="kpi-value" style="color:var(--accent)">{{ open_tasks }}</div>
+    <div class="kpi-label">📋 Открытых задач</div>
   </div>
-  <div class="hub-kpi">
-    <div class="hub-kpi-val">{{ managers_count }}</div>
-    <div class="hub-kpi-label">👥 Менеджеров</div>
+  <div class="kpi-card">
+    <div class="kpi-value" style="color:var(--accent)">{{ managers_count }}</div>
+    <div class="kpi-label">👥 Менеджеров</div>
   </div>
 </div>
 
@@ -209,20 +209,6 @@
 
 </div>
 </div>
-
-<style>
-.hub-kpi {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 16px;
-  text-align: center;
-}
-.hub-kpi-red  { border-top: 3px solid var(--red); }
-.hub-kpi-yellow { border-top: 3px solid var(--yellow); }
-.hub-kpi-val  { font-size: 2rem; font-weight: 700; line-height: 1; }
-.hub-kpi-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
-</style>
 
 <script>
 // Webhook URL

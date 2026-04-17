@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "AM Hub",
+  "version": "3.0.0",
+  "description": "Единое расширение для менеджеров AM Hub: синк Merchrules, чекап поиска, перехват токенов.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "tabs",
+    "activeTab",
+    "scripting",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://time.tbank.ru/*"],
+      "js": ["content/token_capture.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://tbank.ktalk.ru/*"],
+      "js": ["content/token_capture.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*/*"],
+      "js": ["content/detector.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -2,6 +2,50 @@
 AM Hub — Enterprise Account Manager Dashboard
 Реальные данные из Merchrules · Персональные дашборды · AI-ассистент
 """
+# ─── Jinja2 × Python 3.14 + Starlette 1.0 compat patches ───
+# Applied before any router imports so all Jinja2Templates instances get them.
+try:
+    from pathlib import Path as _P
+    _BASE = _P(__file__).resolve().parent
+
+    from fastapi.templating import Jinja2Templates as _J2T
+    _orig_init = _J2T.__init__
+    _orig_tpl  = _J2T.TemplateResponse
+
+    def _patched_init(self, *a, **kw):
+        # Rewrite bare relative "templates"/"static" → absolute under am-hub-final/
+        if a and isinstance(a[0], str) and not _P(a[0]).is_absolute():
+            a = (str(_BASE / a[0]),) + a[1:]
+        if "directory" in kw and isinstance(kw["directory"], str) and not _P(kw["directory"]).is_absolute():
+            kw["directory"] = str(_BASE / kw["directory"])
+        _orig_init(self, *a, **kw)
+        self.env.cache = None  # fix Py3.14 LRU-cache dict-key bug
+
+    def _patched_tpl(self, *args, **kwargs):
+        # Support old signature: TemplateResponse(name, {"request": req, ...})
+        if args and isinstance(args[0], str):
+            name = args[0]
+            ctx = args[1] if len(args) > 1 else kwargs.pop("context", {})
+            req = (ctx or {}).get("request")
+            rest = list(args[2:])
+            if req is not None:
+                return _orig_tpl(self, req, name, ctx, *rest, **kwargs)
+        return _orig_tpl(self, *args, **kwargs)
+
+    _J2T.__init__ = _patched_init
+    _J2T.TemplateResponse = _patched_tpl
+
+    # Also patch StaticFiles for the same reason
+    from fastapi.staticfiles import StaticFiles as _SF
+    _orig_sf_init = _SF.__init__
+    def _patched_sf_init(self, *a, **kw):
+        if "directory" in kw and isinstance(kw["directory"], str) and not _P(kw["directory"]).is_absolute():
+            kw["directory"] = str(_BASE / kw["directory"])
+        _orig_sf_init(self, *a, **kw)
+    _SF.__init__ = _patched_sf_init
+except Exception as _e:
+    print(f"[compat] patch skipped: {_e}")
+
 import os
 import json
 import logging
@@ -126,7 +170,14 @@ class Env:
 
 env = Env()
 
-templates = Jinja2Templates(directory="templates")
+# Absolute path so server works regardless of CWD
+from pathlib import Path as _Path
+BASE_DIR = _Path(__file__).resolve().parent
+
+# cache_size=0 — workaround для Python 3.14 × Jinja2 LRU cache bug
+# (tuple с dict в ключе делает его unhashable)
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.cache = None  # disable template cache entirely
 
 MSK = tz(timedelta(hours=3))  # Moscow timezone
 
@@ -284,6 +335,10 @@ app.include_router(account_dashboard.router, tags=["account-dashboard"])
 from routers import pages as pages_router
 app.include_router(pages_router.router, tags=["pages"])
 
+# ── SSE (real-time notifications) ────────────────────────────────────────────
+from sse import router as sse_router
+app.include_router(sse_router, tags=["sse"])
+
 
 # ── Rate limiting ────────────────────────────────────────────────────────────
 try:
@@ -351,7 +406,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+from pathlib import Path as _P
+_EXT_DIR = _P(__file__).resolve().parent.parent / "extension"
+if _EXT_DIR.exists():
+    app.mount("/extension", StaticFiles(directory=str(_EXT_DIR)), name="extension")
 
 
 # ============================================================================
@@ -513,7 +573,24 @@ async def top50_page(request: Request, db: Session = Depends(get_db), auth_token
     if not payload: return RedirectResponse(url="/login", status_code=303)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user: return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("top50.html", {"request": request, "user": user})
+    # Загружаем данные Top-50
+    try:
+        from sheets import get_top50_data
+        mode = request.query_params.get("mode", "weekly")
+        top50_data = await get_top50_data(user_email=user.email)
+        data = top50_data if top50_data and not top50_data.get("error") else None
+    except Exception:
+        data = None
+        mode = "weekly"
+    sheets_id = os.environ.get("SHEETS_SPREADSHEET_ID", "")
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheets_id}" if sheets_id else ""
+    return templates.TemplateResponse("top50.html", {
+        "request": request, "user": user,
+        "data": data or {"rows": [], "headers": [], "fetched_at": ""},
+        "mode": mode,
+        "sheet_url": sheet_url,
+        "month_name": datetime.now().strftime("%B %Y"),
+    })
 
 @app.get("/roadmap", response_class=HTMLResponse)
 async def roadmap_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
@@ -690,7 +767,7 @@ async def profile_page(request: Request, db: Session = Depends(get_db), auth_tok
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    # Load per-user creds for profile template
+    # Load per-user creds for the profile page
     try:
         from creds import load_merchrules_creds, load_airtable_token, load_grok_api_key
         _mr_url, mr_login, mr_password = load_merchrules_creds()
@@ -698,22 +775,24 @@ async def profile_page(request: Request, db: Session = Depends(get_db), auth_tok
         gk = load_grok_api_key(user.email)
     except Exception:
         mr_login = mr_password = at_token = gk = None
+
     settings = user.settings or {}
-    full_name = " ".join(filter(None, [user.first_name, user.last_name])).strip() or user.email
+    # profile объект для шаблона — все поля, которые нужны profile.html
     profile = {
-        "name":           full_name,
-        "display_name":   full_name,
-        "email":          user.email,
-        "role":           user.role,
-        "telegram_id":    user.telegram_id,
-        "settings":       settings,
-        "created_at":     user.created_at,
-        "mr_login":       mr_login or "",
-        "mr_password":    mr_password or "",
-        "airtable_token": at_token or os.getenv("AIRTABLE_TOKEN", ""),
-        "tg_notify_chat": settings.get("tg_notify_chat", ""),
-        "ktalk_webhook":  settings.get("ktalk_webhook", ""),
-        "groq_api_key":   gk or os.getenv("GROQ_API_KEY", ""),
+        "name":            user.name,
+        "display_name":    user.name,
+        "email":           user.email,
+        "role":            user.role,
+        "telegram_id":     user.telegram_id,
+        "settings":        settings,
+        "created_at":      user.created_at,
+        # Integration credentials (pre-filled from creds file)
+        "mr_login":        mr_login or "",
+        "mr_password":     mr_password or "",
+        "airtable_token":  at_token or os.getenv("AIRTABLE_TOKEN", ""),
+        "tg_notify_chat":  settings.get("tg_notify_chat", ""),
+        "ktalk_webhook":   settings.get("ktalk_webhook", ""),
+        "groq_api_key":    gk or os.getenv("GROQ_API_KEY", ""),
     }
     return templates.TemplateResponse("profile.html", {"request": request, "user": user, "profile": profile})
 

@@ -1,131 +1,386 @@
 {% extends "base.html" %}
-{% block title %}Сегодня — AM Hub{% endblock %}
+{% block title %}Мой день — AM Hub{% endblock %}{% block scripts %}<script>
+
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+// Search
+let searchTimeout=null;
+function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';}
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')document.getElementById('searchModal').style.display='none';});
+document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))e.target.style.display='none';});
+document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';return;}searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'">'+c.name+'</div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'">'+t.title+'</div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){}},300);});
+
+// My Day Schedule (drag-and-drop)
+let myDayTasks=[];
+async function loadMyDaySchedule(){try{const r=await fetch('/api/my-day/schedule');const d=await r.json();myDayTasks=d.schedule||[];renderSchedule();}catch(e){}}
+function renderSchedule(){const el=document.getElementById('schedule-list');if(!myDayTasks.length){el.innerHTML='<div style="color:var(--muted);padding:10px;font-size:.82rem;">Перетащите задачи сюда или добавьте вручную</div>';return;}el.innerHTML=myDayTasks.map((t,i)=>'<div class="note-item" draggable="true" ondragstart="dragTask(event,'+i+')" ondragover="event.preventDefault()" ondrop="dropTask(event,'+i+')"><div style="display:flex;align-items:center;gap:8px;"><span style="cursor:grab;">⠿</span><div style="flex:1;"><b>'+t.time+'</b> — '+t.title+'</div><span style="font-size:.72rem;color:var(--muted);">'+(t.client||'')+'</span><button style="background:none;border:none;color:var(--red);cursor:pointer;" onclick="removeMyDayTask('+i+')" aria-label="Убрать задачу из расписания">✕</button></div></div>').join('');}
+function dragTask(e,i){e.dataTransfer.setData('text/plain',i);}
+function dropTask(e,idx){const from=parseInt(e.dataTransfer.getData('text/plain'));if(isNaN(from)||from===idx)return;const item=myDayTasks.splice(from,1)[0];myDayTasks.splice(idx,0,item);renderSchedule();}
+function removeMyDayTask(i){myDayTasks.splice(i,1);renderSchedule();}
+async function saveMyDaySchedule(){const r=await fetch('/api/my-day/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule:myDayTasks,date:new Date().toISOString().slice(0,10)})});if(r.ok)alert('✅ Сохранено!');}
+loadMyDaySchedule();
+
+// ── Быстрая задача ──────────────────────────────────────────────────────
+async function loadClientsForQuick() {
+  try {
+    const r = await fetch('/api/clients');
+    const d = await r.json();
+    const sel = document.getElementById('quick-task-client');
+    (d.clients || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name + (c.segment ? ' [' + c.segment + ']' : '');
+      sel.appendChild(opt);
+    });
+  } catch(e) {}
+}
+loadClientsForQuick();
+
+// Ctrl+Enter в поле задачи
+document.getElementById('quick-task-title').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); quickCreateTask(); }
+});
+
+async function quickCreateTask() {
+  const title = document.getElementById('quick-task-title').value.trim();
+  const clientId = document.getElementById('quick-task-client').value;
+  const priority = document.getElementById('quick-task-priority').value;
+  const res = document.getElementById('quick-task-result');
+  if (!title) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ Введите название задачи';
+    return;
+  }
+  try {
+    const r = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title, priority,
+        client_id: clientId ? parseInt(clientId) : null,
+        due_date: new Date().toISOString().slice(0, 10),
+        status: 'plan', source: 'manual'
+      })
+    });
+    const d = await r.json();
+    if (d.id || d.ok) {
+      res.style.display = 'block';
+      res.style.color = 'var(--green)';
+      res.textContent = '✅ Задача создана';
+      document.getElementById('quick-task-title').value = '';
+      setTimeout(() => { res.style.display = 'none'; location.reload(); }, 1200);
+    } else {
+      res.style.display = 'block';
+      res.style.color = 'var(--red)';
+      res.textContent = '❌ ' + (d.error || 'Ошибка');
+    }
+  } catch(e) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ ' + e.message;
+  }
+}
+
+// ── Слоты дня ──────────────────────────────────────────────────────────
+async function loadDaySlots() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await fetch('/api/meetings/slots?date=' + today);
+    const d = await r.json();
+    const slots = d.slots || [];
+    if (!slots.length) return;
+    const section = document.getElementById('slots-section');
+    section.style.display = 'block';
+    const SLOT_COLORS = {meeting: '#6366f1', prep: '#eab308', followup: '#8b5cf6', extra: '#06b6d4'};
+    const SLOT_ICONS  = {meeting: '📅', prep: '📋', followup: '✍️', extra: '📌'};
+    document.getElementById('slots-list').innerHTML = slots.map(s => {
+      const type = s.type === 'meeting' ? 'meeting' : (s.slot_type || 'prep');
+      const color = SLOT_COLORS[type] || '#64748b';
+      const icon  = SLOT_ICONS[type] || '📌';
+      const done  = s.status === 'done' || s.followup_status === 'sent';
+      return '<a href="' + (s.url || '#') + '" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;border:1px solid var(--border);margin-bottom:6px;text-decoration:none;color:inherit;border-left:3px solid ' + color + ';opacity:' + (done ? '.5' : '1') + ';">' +
+        '<span style="font-size:.9rem;">' + icon + '</span>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:.83rem;font-weight:500;">' + (done ? '<s>' : '') + s.title + (done ? '</s>' : '') + '</div>' +
+          '<div style="font-size:.72rem;color:var(--muted);">до ' + s.time + (s.client_name ? ' · ' + s.client_name : '') + '</div>' +
+        '</div>' +
+        (done ? '<span style="font-size:.75rem;color:var(--green);">✅</span>' : '') +
+      '</a>';
+    }).join('');
+  } catch(e) {}
+}
+loadDaySlots();
+
+// ── KPI синка ──────────────────────────────────────────────────────────
+async function loadSyncKpi() {
+  try {
+    const [cs, ss] = await Promise.all([
+      fetch('/api/clients').then(r => r.json()),
+      fetch('/api/sync/status').then(r => r.json())
+    ]);
+    const count = (cs.clients || []).length;
+    const mr = ss.merchrules;
+    const ago = mr ? mr.ago : '—';
+    const ok = mr && mr.status === 'success';
+    const el = document.getElementById('kpi-sync-clients');
+    if (el) {
+      el.innerHTML = count + ' <span style="font-size:.65rem;color:' + (ok?'var(--green)':'var(--muted)') + ';">(' + ago + ')</span>';
+    }
+  } catch(e) {}
+}
+loadSyncKpi();
+
+
+</script>
+{% endblock %}
+{% block page_title %}Мой день{% endblock %}
+
+{% block head %}
+<style>
+  h1 { font-size:1.4rem; margin-bottom:4px; }
+  .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+  .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+  .section h2 { font-size:.95rem; font-weight:600; margin-bottom:12px; }
+  .kpi-row { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+  .kpi { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 18px; min-width:140px; }
+  .kpi .v { font-size:1.5rem; font-weight:700; }
+  .kpi .l { font-size:.7rem; color:var(--muted); text-transform:uppercase; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin-bottom:6px; transition:border .15s; }
+  .card:hover { border-color:var(--accent); }
+  .card.overdue { border-color:rgba(240,85,106,.4); background:rgba(240,85,106,.04); }
+  .tc-client { font-weight:600; font-size:.85rem; margin-bottom:2px; }
+  .tc-title { font-size:.82rem; color:var(--muted); margin-bottom:4px; }
+  .tc-meta { font-size:.72rem; color:var(--muted); display:flex; gap:10px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; background:rgba(129,140,248,.15); color:var(--accent); }
+  .badge-red { background:rgba(240,85,106,.15); color:var(--red); }
+  .empty { text-align:center; padding:40px; color:var(--muted); }
+  .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+  .note-item { background:var(--bg); border-radius:8px; padding:10px 12px; margin-bottom:6px; }
+  .search-cat { padding:6px 16px 4px; font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
+  .search-item { padding:8px 16px; cursor:pointer; display:flex; align-items:center; gap:10px; }
+  .search-item:hover { background:rgba(255,255,255,.04); }
+</style>
+{% endblock %}
+
 {% block content %}
-
-<div class="page-header">
-  <h1>☀️ {{ weekday }}, {{ today }}</h1>
-  <p style="color:var(--text-muted)">Ежедневный план CSM</p>
-</div>
-
-<!-- Статус дня -->
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
-  <div class="card" style="padding:16px;text-align:center;border-color:{% if overdue %}var(--red){% else %}var(--border){% endif %}">
-    <div style="font-size:2rem;margin-bottom:4px">🔴</div>
-    <div style="font-size:1.6rem;font-weight:700;color:{% if overdue %}var(--red){% else %}var(--text-muted){% endif %}">{{ overdue|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Просроченных чекапов</div>
+>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
+    <div>
+      <h1>📅 Мой день</h1>
+      <div class="sub">{{ now.strftime('%A, %d %B %Y') }}</div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm" onclick="openSearch()" aria-label="Открыть поиск">🔍</button>
+    </div>
   </div>
-  <div class="card" style="padding:16px;text-align:center;border-color:{% if warning %}var(--yellow){% else %}var(--border){% endif %}">
-    <div style="font-size:2rem;margin-bottom:4px">🟡</div>
-    <div style="font-size:1.6rem;font-weight:700;color:{% if warning %}var(--yellow){% else %}var(--text-muted){% endif %}">{{ warning|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Скоро просрочится</div>
-  </div>
-  <div class="card" style="padding:16px;text-align:center;border-color:{% if urgent_tasks %}var(--red){% else %}var(--border){% endif %}">
-    <div style="font-size:2rem;margin-bottom:4px">📋</div>
-    <div style="font-size:1.6rem;font-weight:700;color:{% if urgent_tasks %}var(--red){% else %}var(--text-muted){% endif %}">{{ urgent_tasks|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Задач просрочено/сегодня</div>
-  </div>
-  <div class="card" style="padding:16px;text-align:center">
-    <div style="font-size:2rem;margin-bottom:4px">📅</div>
-    <div style="font-size:1.6rem;font-weight:700;color:var(--accent)">{{ week_tasks|length }}</div>
-    <div style="font-size:0.82rem;color:var(--text-muted)">Задач на этой неделе</div>
-  </div>
-</div>
 
-<!-- Просроченные чекапы -->
-{% if overdue %}
-<div class="card" style="border-color:var(--red);margin-bottom:16px">
-  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--red)">🔴 Требуют чекапа прямо сейчас ({{ overdue|length }})</h2>
-  <table class="table">
-    <thead><tr><th>Клиент</th><th>Сегмент</th><th>Статус</th><th>Действие</th></tr></thead>
-    <tbody>
-    {% for c in overdue %}
-    <tr>
-      <td class="client-name">{{ c.name }}</td>
-      <td><span class="badge badge-{{ c.segment|lower }}">{{ c.segment }}</span></td>
-      <td style="color:var(--red)">{{ c.status.label }}</td>
-      <td style="white-space:nowrap">
-        <a href="/prep/{{ c.id }}" class="btn btn-ghost btn-sm">📋 Подготовка</a>
-        <a href="/followup/{{ c.id }}" class="btn btn-primary btn-sm" style="margin-left:4px">✍️ Фолоуап</a>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+  <!-- Search Modal -->
+  <div id="searchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:200;align-items:flex-start;justify-content:center;padding-top:12vh;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;width:90%;max-width:600px;max-height:60vh;overflow:hidden;display:flex;flex-direction:column;">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;"><span>🔍</span><input id="searchInput" type="text" placeholder="Поиск..." style="flex:1;background:transparent;border:none;color:var(--text);font-size:.95rem;outline:none;"><kbd style="padding:2px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);font-size:.68rem;color:var(--muted);">ESC</kbd></div>
+      <div id="searchResults" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
+    </div>
+  </div>
 
-<!-- Скоро -->
-{% if warning %}
-<div class="card" style="border-color:var(--yellow);margin-bottom:16px">
-  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--yellow)">🟡 Скоро истекает ({{ warning|length }})</h2>
-  <div style="display:flex;flex-wrap:wrap;gap:8px">
-    {% for c in warning %}
-    <a href="/prep/{{ c.id }}" style="text-decoration:none">
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:0.85rem">
-        <b>{{ c.name }}</b>
-        <span class="badge badge-{{ c.segment|lower }}" style="margin-left:6px">{{ c.segment }}</span>
-        <div style="color:var(--yellow);font-size:0.78rem;margin-top:2px">{{ c.status.label }}</div>
-      </div>
+  <!-- KPI -->
+  <div class="kpi-row">
+    <div class="kpi"><div class="v" style="color:var(--yellow)">{{ today_tasks|length }}</div><div class="l">Задач сегодня</div></div>
+    <div class="kpi"><div class="v">{{ today_meetings|length }}</div><div class="l">Встреч</div></div>
+    <div class="kpi"><div class="v" style="color:var(--red)">{{ overdue_tasks|length }}</div><div class="l">Просрочено</div></div>
+    <div class="kpi"><div class="v">{{ total_open }}</div><div class="l">Открытых всего</div></div>
+    <div class="kpi" id="kpi-sync" style="min-width:160px;">
+      <div class="v" style="font-size:.9rem;color:var(--muted)" id="kpi-sync-clients">—</div>
+      <div class="l">Клиентов / Синк</div>
+    </div>
+  </div>
+
+  <!-- Быстрое создание задачи -->
+  <div class="section">
+    <h2>⚡ Быстрая задача</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input id="quick-task-title" placeholder="Название задачи..." style="flex:1;min-width:200px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;">
+      <select id="quick-task-client" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;min-width:160px;">
+        <option value="">— Клиент —</option>
+      </select>
+      <select id="quick-task-priority" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
+        <option value="medium">Средний</option>
+        <option value="high">Высокий</option>
+        <option value="low">Низкий</option>
+      </select>
+      <button class="btn btn-sm" onclick="quickCreateTask()">➕ Создать</button>
+    </div>
+    <div id="quick-task-result" style="margin-top:6px;font-size:.8rem;display:none;"></div>
+  </div>
+
+  <!-- Слоты дня (prep/followup) -->
+  <div class="section" id="slots-section" style="display:none;">
+    <h2>⏰ Слоты дня</h2>
+    <div id="slots-list"></div>
+  </div>
+
+  <!-- Schedule -->
+  <div class="section">
+    <h2>📋 Расписание на день</h2>
+    <div id="schedule-list" style="min-height:40px;"></div>
+    <div style="margin-top:8px;display:flex;gap:8px;">
+      <button class="btn btn-sm" onclick="loadMyDaySchedule()">🔄 Загрузить</button>
+      <button class="btn btn-sm btn-outline" onclick="saveMyDaySchedule()">💾 Сохранить</button>
+    </div>
+  </div>
+
+  {% if overdue_tasks %}
+  <div class="section">
+    <h2>🔴 Просроченные</h2>
+    {% for t in overdue_tasks %}
+    <a href="/client/{{ t.client_id }}" class="card overdue" style="display:block;text-decoration:none;color:inherit;">
+      <div class="tc-client">{{ t.client.name if t.client else '—' }}</div>
+      <div class="tc-title">{{ t.title }}</div>
+      <div class="tc-meta"><span class="badge badge-red">{{ t.status }}</span><span>{{ t.priority }}</span>{% if t.due_date %}<span>Был: {{ t.due_date.strftime('%d.%m') }}</span>{% endif %}</div>
     </a>
     {% endfor %}
   </div>
-</div>
-{% endif %}
+  {% endif %}
 
-<!-- Задачи просрочены/сегодня -->
-{% if urgent_tasks %}
-<div class="card" style="margin-bottom:16px">
-  <h2 style="font-size:1rem;margin-bottom:14px">📋 Задачи — просрочены или дедлайн сегодня</h2>
-  <table class="table">
-    <thead><tr><th>Клиент</th><th>Задача</th><th>Кто</th><th>Дедлайн</th><th></th></tr></thead>
-    <tbody>
-    {% for t in urgent_tasks %}
-    <tr>
-      <td><a href="/prep/{{ t.client_id }}">{{ t.client_name }}</a>
-        <span class="badge badge-{{ t.segment|lower }}" style="margin-left:4px;font-size:0.7rem">{{ t.segment }}</span>
-      </td>
-      <td>{{ t.text }}</td>
-      <td><span style="color:{% if t.owner == 'anyquery' %}var(--accent){% else %}var(--yellow){% endif %}">
-        {{ 'AnyQuery' if t.owner == 'anyquery' else 'Партнёр' }}</span></td>
-      <td style="color:var(--red)">{{ t.due_date or '—' }}</td>
-      <td>
-        <form method="post" action="/api/task/{{ t.id }}/done" style="display:inline">
-          <button type="submit" class="btn btn-ghost btn-sm">✓ Готово</button>
-        </form>
-      </td>
-    </tr>
+  {% if today_meetings %}
+  <div class="section">
+    <h2>📅 Встречи</h2>
+    {% for m in today_meetings %}
+    <a href="/client/{{ m.client_id }}" class="card" style="display:block;text-decoration:none;color:inherit;">
+      <div class="tc-client">{{ m.client.name if m.client else '—' }}</div>
+      <div class="tc-title">{{ m.title or m.type }}</div>
+      <div class="tc-meta"><span>{{ m.date.strftime('%H:%M') if m.date else '' }}</span><span class="badge">{{ m.type }}</span></div>
+    </a>
     {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+  </div>
+  {% endif %}
 
-<!-- Задачи на неделю -->
-{% if week_tasks %}
-<div class="card">
-  <h2 style="font-size:1rem;margin-bottom:14px;color:var(--text-muted)">📅 На этой неделе</h2>
-  <table class="table">
-    <thead><tr><th>Клиент</th><th>Задача</th><th>Кто</th><th>Дедлайн</th></tr></thead>
-    <tbody>
-    {% for t in week_tasks %}
-    <tr>
-      <td><a href="/prep/{{ t.client_id }}">{{ t.client_name }}</a></td>
-      <td>{{ t.text }}</td>
-      <td style="color:{% if t.owner == 'anyquery' %}var(--accent){% else %}var(--yellow){% endif %}">
-        {{ 'AQ' if t.owner == 'anyquery' else 'Партнёр' }}</td>
-      <td>{{ t.due_date or '—' }}</td>
-    </tr>
+  {% if today_tasks %}
+  <div class="section">
+    <h2>📋 Задачи на сегодня</h2>
+    {% for t in today_tasks %}
+    <a href="/client/{{ t.client_id }}" class="card" style="display:block;text-decoration:none;color:inherit;">
+      <div class="tc-client">{{ t.client.name if t.client else '—' }}</div>
+      <div class="tc-title">{{ t.title }}</div>
+      <div class="tc-meta"><span class="badge">{{ t.status }}</span><span>{{ t.priority }}</span></div>
+    </a>
     {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+  </div>
+  {% endif %}
 
-{% if not overdue and not urgent_tasks and not week_tasks %}
-<div class="card" style="text-align:center;padding:40px;color:var(--text-muted)">
-  <div style="font-size:3rem;margin-bottom:12px">✅</div>
-  <p style="font-size:1.1rem">Всё под контролем — просроченных задач и чекапов нет!</p>
+  {% if not overdue_tasks and not today_meetings and not today_tasks %}
+  <div class="empty"><div style="font-size:2.5rem;margin-bottom:10px;">✅</div><p>На сегодня нет задач и встреч. Отличный день!</p></div>
+  {% endif %}
 </div>
-{% endif %}
 
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+// Search
+let searchTimeout=null;
+function openSearch(){const m=document.getElementById('searchModal');m.style.display='flex';document.getElementById('searchInput').focus();document.getElementById('searchResults').innerHTML='';}
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openSearch();}if(e.key==='Escape')document.getElementById('searchModal').style.display='none';});
+document.getElementById('searchModal').addEventListener('click',e=>{if(e.target===document.getElementById('searchModal'))e.target.style.display='none';});
+document.getElementById('searchInput').addEventListener('input',e=>{clearTimeout(searchTimeout);const q=e.target.value.trim();if(!q){document.getElementById('searchResults').innerHTML='';return;}searchTimeout=setTimeout(async()=>{try{const r=await fetch('/api/search?q='+encodeURIComponent(q)+'&limit=15');if(!r.ok)return;const d=await r.json();let html='';if(d.clients.length){html+='<div class="search-cat">👥 Клиенты</div>';d.clients.forEach(c=>{html+='<div class="search-item" onclick="location.href=\''+c.url+'\'">'+c.name+'</div>';});}if(d.tasks.length){html+='<div class="search-cat">📋 Задачи</div>';d.tasks.forEach(t=>{html+='<div class="search-item" onclick="location.href=\''+t.url+'\'">'+t.title+'</div>';});}if(!html)html='<div style="padding:20px;text-align:center;color:var(--muted);">Ничего не найдено</div>';document.getElementById('searchResults').innerHTML=html;}catch(e){}},300);});
+
+// My Day Schedule (drag-and-drop)
+let myDayTasks=[];
+async function loadMyDaySchedule(){try{const r=await fetch('/api/my-day/schedule');const d=await r.json();myDayTasks=d.schedule||[];renderSchedule();}catch(e){}}
+function renderSchedule(){const el=document.getElementById('schedule-list');if(!myDayTasks.length){el.innerHTML='<div style="color:var(--muted);padding:10px;font-size:.82rem;">Перетащите задачи сюда или добавьте вручную</div>';return;}el.innerHTML=myDayTasks.map((t,i)=>'<div class="note-item" draggable="true" ondragstart="dragTask(event,'+i+')" ondragover="event.preventDefault()" ondrop="dropTask(event,'+i+')"><div style="display:flex;align-items:center;gap:8px;"><span style="cursor:grab;">⠿</span><div style="flex:1;"><b>'+t.time+'</b> — '+t.title+'</div><span style="font-size:.72rem;color:var(--muted);">'+(t.client||'')+'</span><button style="background:none;border:none;color:var(--red);cursor:pointer;" onclick="removeMyDayTask('+i+')" aria-label="Убрать задачу из расписания">✕</button></div></div>').join('');}
+function dragTask(e,i){e.dataTransfer.setData('text/plain',i);}
+function dropTask(e,idx){const from=parseInt(e.dataTransfer.getData('text/plain'));if(isNaN(from)||from===idx)return;const item=myDayTasks.splice(from,1)[0];myDayTasks.splice(idx,0,item);renderSchedule();}
+function removeMyDayTask(i){myDayTasks.splice(i,1);renderSchedule();}
+async function saveMyDaySchedule(){const r=await fetch('/api/my-day/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule:myDayTasks,date:new Date().toISOString().slice(0,10)})});if(r.ok)alert('✅ Сохранено!');}
+loadMyDaySchedule();
+
+// ── Быстрая задача ──────────────────────────────────────────────────────
+async function loadClientsForQuick() {
+  try {
+    const r = await fetch('/api/clients');
+    const d = await r.json();
+    const sel = document.getElementById('quick-task-client');
+    (d.clients || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name + (c.segment ? ' [' + c.segment + ']' : '');
+      sel.appendChild(opt);
+    });
+  } catch(e) {}
+}
+loadClientsForQuick();
+
+// Ctrl+Enter в поле задачи
+document.getElementById('quick-task-title').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); quickCreateTask(); }
+});
+
+async function quickCreateTask() {
+  const title = document.getElementById('quick-task-title').value.trim();
+  const clientId = document.getElementById('quick-task-client').value;
+  const priority = document.getElementById('quick-task-priority').value;
+  const res = document.getElementById('quick-task-result');
+  if (!title) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ Введите название задачи';
+    return;
+  }
+  try {
+    const r = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title, priority,
+        client_id: clientId ? parseInt(clientId) : null,
+        due_date: new Date().toISOString().slice(0, 10),
+        status: 'plan', source: 'manual'
+      })
+    });
+    const d = await r.json();
+    if (d.id || d.ok) {
+      res.style.display = 'block';
+      res.style.color = 'var(--green)';
+      res.textContent = '✅ Задача создана';
+      document.getElementById('quick-task-title').value = '';
+      setTimeout(() => { res.style.display = 'none'; location.reload(); }, 1200);
+    } else {
+      res.style.display = 'block';
+      res.style.color = 'var(--red)';
+      res.textContent = '❌ ' + (d.error || 'Ошибка');
+    }
+  } catch(e) {
+    res.style.display = 'block';
+    res.style.color = 'var(--red)';
+    res.textContent = '❌ ' + e.message;
+  }
+}
+
+// ── Слоты дня ──────────────────────────────────────────────────────────
+async function loadDaySlots() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await fetch('/api/meetings/slots?date=' + today);
+    const d = await r.json();
+    const slots = d.slots || [];
+    if (!slots.length) return;
+    const section = document.getElementById('slots-section');
+    section.style.display = 'block';
+    const SLOT_COLORS = {meeting: '#6366f1', prep: '#eab308', followup: '#8b5cf6', extra: '#06b6d4'};
+    const SLOT_ICONS  = {meeting: '📅', prep: '📋', followup: '✍️', extra: '📌'};
+    document.getElementById('slots-list').innerHTML = slots.map(s => {
+      const type = s.type === 'meeting' ? 'meeting' : (s.slot_type || 'prep');
+      const color = SLOT_COLORS[type] || '#64748b';
+      const icon  = SLOT_ICONS[type] || '📌';
+      const done  = s.status === 'done' || s.followup_status === 'sent';
+      return '<a href="' + (s.url || '#') + '" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;border:1px solid var(--border);margin-bottom:6px;text-decoration:none;color:inherit;border-left:3px solid ' + color + ';opacity:' + (done ? '.5' : '1') + ';">' +
+        '<span style="font-size:.9rem;">' + icon + '</span>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:.83rem;font-weight:500;">' + (done ? '<s>' : '') + s.title + (done ? '</s>' : '') + '</div>' +
+          '<div style="font-size:.72rem;color:var(--muted);">до ' + s.time + (s.client_name ? ' · ' + s.client_name : '') + '</div>' +
+        '
+
+{% for script_content in [] %}
+{% endfor %}
 {% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Дашборд команды — AM Hub{% endblock %}
+{% block page_title %}Команда{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Обзор всех менеджеров · только для admin</div>{% endblock %}
+{% block page_actions %}
+<select id="period-sel" class="form-control" style="width:120px;font-size:.8rem" onchange="loadAll()">
+  <option value="7">7 дней</option><option value="30" selected>30 дней</option><option value="90">90 дней</option>
+</select>
+<button class="btn btn-sm" onclick="exportTeamCSV()">⬇ CSV</button>
+{% endblock %}
+
+{% block content %}
+<style>
+.mgr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:20px}
+.mgr-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;transition:border-color var(--t),box-shadow var(--t)}
+.mgr-card:hover{border-color:var(--border-s);box-shadow:var(--shadow-s)}
+.mgr-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.mgr-av{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--accent-dim),var(--purple-bg));border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent);flex-shrink:0}
+.mgr-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
+.mgr-stat{background:var(--surface-2);border-radius:6px;padding:6px 8px;text-align:center}
+.mgr-stat-v{font-size:.9rem;font-weight:700;font-family:var(--font-mono)}
+.mgr-stat-l{font-size:.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em}
+.rank-num{font-family:var(--font-mono);font-size:.75rem;color:var(--text-muted);min-width:20px}
+</style>
+
+<!-- Team KPIs -->
+<div class="kpi-row" style="margin-bottom:20px" id="team-kpi">
+  <div class="kpi-card c-accent"><div class="kpi-label">Менеджеров</div><div class="kpi-value" id="t-managers">—</div></div>
+  <div class="kpi-card c-blue"><div class="kpi-label">Всего клиентов</div><div class="kpi-value" id="t-clients">—</div></div>
+  <div class="kpi-card c-green"><div class="kpi-label">Avg Health</div><div class="kpi-value" id="t-health">—</div><div class="kpi-sub">%</div></div>
+  <div class="kpi-card c-red"><div class="kpi-label">Просроченных чекапов</div><div class="kpi-value" id="t-overdue">—</div></div>
+  <div class="kpi-card c-yellow"><div class="kpi-label">Открытых задач</div><div class="kpi-value" id="t-tasks">—</div></div>
+</div>
+
+<!-- Manager cards -->
+<div class="section" style="margin-bottom:16px">
+  <h3>👥 Менеджеры</h3>
+  <div id="mgr-grid" class="mgr-grid">
+    <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
+  </div>
+</div>
+
+<!-- Risk clients across team -->
+<div class="section">
+  <h3>🔴 Клиенты в зоне риска (все менеджеры)</h3>
+  <div id="team-risk" class="table-wrap">
+    <table><thead><tr><th>#</th><th>Клиент</th><th>Health</th><th>Менеджер</th><th>Сегмент</th><th>Последний контакт</th></tr></thead>
+    <tbody id="risk-tbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted)">⏳</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+async function loadAll() {
+  var days = parseInt(document.getElementById('period-sel').value);
+  var d = await fetch('/api/team/stats?days='+days).then(r=>r.json()).catch(()=>({}));
+
+  document.getElementById('t-managers').textContent = d.managers_count||'—';
+  document.getElementById('t-clients').textContent  = d.total_clients||'—';
+  document.getElementById('t-health').textContent   = d.avg_health!=null?d.avg_health.toFixed(0):'—';
+  document.getElementById('t-overdue').textContent  = d.overdue_checkups||'—';
+  document.getElementById('t-tasks').textContent    = d.open_tasks||'—';
+
+  var grid = document.getElementById('mgr-grid');
+  var mgrs = d.managers || [];
+  if (!mgrs.length) { grid.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-text">Нет менеджеров</div></div>'; }
+  else grid.innerHTML = mgrs.map(function(m) {
+    var h = m.avg_health!=null?m.avg_health.toFixed(0):'—';
+    var hcol = (m.avg_health||0)>=70?'var(--green)':(m.avg_health||0)>=40?'var(--yellow)':'var(--red)';
+    return '<div class="mgr-card">'
+      +'<div class="mgr-top">'
+      +'  <div class="mgr-av">'+(m.name||'?')[0].toUpperCase()+'</div>'
+      +'  <div><div style="font-size:.86rem;font-weight:600">'+m.name+'</div>'
+      +'  <div style="font-size:.72rem;color:var(--text-muted)">'+m.email+'</div></div>'
+      +'</div>'
+      +'<div class="mgr-stats">'
+      +'  <div class="mgr-stat"><div class="mgr-stat-v">'+m.clients_count+'</div><div class="mgr-stat-l">Клиентов</div></div>'
+      +'  <div class="mgr-stat"><div class="mgr-stat-v" style="color:'+hcol+'">'+h+'%</div><div class="mgr-stat-l">Health</div></div>'
+      +'  <div class="mgr-stat"><div class="mgr-stat-v" style="color:var(--red)">'+m.overdue+'</div><div class="mgr-stat-l">Просроч.</div></div>'
+      +'</div>'
+      +'<div style="margin-top:8px">'
+      +'  <div style="height:4px;background:var(--surface-3);border-radius:2px;overflow:hidden">'
+      +'    <div style="height:100%;background:'+hcol+';width:'+Math.min(100,m.avg_health||0)+'%;transition:width .6s;border-radius:2px"></div>'
+      +'  </div>'
+      +'</div>'
+      +'</div>';
+  }).join('');
+
+  var risk = d.risk_clients || [];
+  document.getElementById('risk-tbody').innerHTML = risk.length
+    ? risk.map(function(c,i) {
+        var h = c.health_score!=null?c.health_score.toFixed(0)+'%':'—';
+        var hcol=(c.health_score||0)<40?'var(--red)':'var(--yellow)';
+        var last = c.last_contact ? new Date(c.last_contact).toLocaleDateString('ru-RU',{day:'numeric',month:'short'}) : '—';
+        return '<tr><td class="rank-num">'+(i+1)+'</td>'
+          +'<td class="td-accent"><a href="/client/'+c.id+'">'+c.name+'</a></td>'
+          +'<td style="font-family:var(--font-mono);font-size:.78rem;color:'+hcol+'">'+h+'</td>'
+          +'<td style="font-size:.78rem;color:var(--text-dim)">'+c.manager_name+'</td>'
+          +'<td><span class="badge badge-neutral" style="font-size:.63rem">'+c.segment+'</span></td>'
+          +'<td style="font-size:.76rem;color:var(--text-muted)">'+last+'</td></tr>';
+      }).join('')
+    : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">Нет клиентов в зоне риска</td></tr>';
+}
+
+function exportTeamCSV() { window.location.href='/api/team/export?days='+document.getElementById('period-sel').value; }
+
+loadAll();
+</script>
+{% endblock %}

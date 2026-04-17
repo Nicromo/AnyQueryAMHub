@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Авто-QBR: {{ client.name }} — AM Hub</title>
+  <style>
+    :root { --bg:#07090f; --card:#0d1117; --border:rgba(255,255,255,.055); --text:#e8ecf4; --muted:#7d8aaa; --accent:#818cf8; --accent-l:#8b97ff; --green:#23d18b; --yellow:#eab308; --red:#f0556a; }
+    [data-theme="light"] { --bg:#f3f5f9; --card:#fff; --border:rgba(0,0,0,.07); --text:#101828; --muted:#4b5563; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:var(--bg); color:var(--text); min-height:100vh; }
+    .main { margin-left:240px; padding:24px 28px; max-width:900px; }
+    .sidebar { position:fixed; left:0; top:0; bottom:0; width:240px; background:var(--card); border-right:1px solid var(--border); padding:20px 0; z-index:100; }
+    .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); }
+    .sidebar-logo h1 { font-size:1.1rem; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:9px 20px; color:var(--muted); font-size:.85rem; text-decoration:none; border-left:3px solid transparent; }
+    .nav-item:hover { color:var(--text); text-decoration:none; background:rgba(255,255,255,.03); }
+    .sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:16px 20px; border-top:1px solid var(--border); }
+    a { color:var(--accent); text-decoration:none; }
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    h1 { font-size:1.3rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+    .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; }
+    .field textarea { width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; min-height:80px; resize:vertical; outline:none; }
+    .btn { padding:10px 20px; border-radius:10px; font-size:.85rem; font-weight:600; cursor:pointer; border:none; background:var(--accent); color:#fff; }
+    .btn:hover { filter:brightness(1.15); }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .item-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .item-row input { flex:1; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.82rem; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+  </style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()">🌓</button>
+<div class="sidebar">
+  <div class="sidebar-logo"><h1>🎛️ AM Hub</h1></div>
+  <a class="nav-item" href="/dashboard"><span>📊</span> Дашборд</a>
+  <a class="nav-item" href="/today"><span>📅</span> Мой день</a>
+  <a class="nav-item" href="/clients"><span>👥</span> Клиенты</a>
+  <a class="nav-item" href="/kanban"><span>📋</span> Канбан</a>
+  <a class="nav-item" href="/checkups"><span>📅</span> Чекапы</a>
+  <a class="nav-item" href="/calendar"><span>📅</span> Календарь</a>
+  <a class="nav-item" href="/analytics"><span>📈</span> Аналитика</a>
+  <a class="nav-item" href="/inbox"><span>📬</span> Inbox</a>
+  <a class="nav-item" href="/tasks"><span>📋</span> Задачи</a>
+  <a class="nav-item" href="/sync"><span>🔄</span> Sync</a>
+  <a class="nav-item" href="/integrations"><span>🔌</span> Интеграции</a>
+  <a class="nav-item" href="/settings"><span>⚙️</span> Настройки</a>
+  <div class="sidebar-footer"><a href="/logout" style="color:var(--muted);font-size:.78rem;">→ Выйти</a></div>
+</div>
+
+<div class="main">
+  <a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+  <h1>🤖 Авто-QBR</h1>
+  <p class="sub">AI-генерация черновика QBR из данных клиента</p>
+
+  <div class="section">
+    <button class="btn" id="genBtn" onclick="generateQBR()">🤖 Сгенерировать AI-черновик</button>
+    <span id="status" style="margin-left:12px;font-size:.82rem;color:var(--muted);"></span>
+  </div>
+
+  <div id="qbr-form" style="display:none;">
+    <div class="section">
+      <h3>🏆 Достижения</h3>
+      <div id="achievements-list"></div>
+      <button class="btn btn-outline" style="margin-top:8px;" onclick="addItem('achievements-list')">+ Добавить</button>
+    </div>
+    <div class="section">
+      <h3>⚠️ Проблемы</h3>
+      <div id="issues-list"></div>
+      <button class="btn btn-outline" style="margin-top:8px;" onclick="addItem('issues-list')">+ Добавить</button>
+    </div>
+    <div class="section">
+      <h3>🎯 Цели на квартал</h3>
+      <div id="goals-list"></div>
+      <button class="btn btn-outline" style="margin-top:8px;" onclick="addItem('goals-list')">+ Добавить</button>
+    </div>
+    <div class="section">
+      <h3>📝 Итоги</h3>
+      <div class="field"><textarea id="summary"></textarea></div>
+    </div>
+    <button class="btn" onclick="saveQBR()">💾 Сохранить QBR</button>
+  </div>
+</div>
+
+<script>
+const clientId={{ client.id }};
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+function addItem(listId){const d=document.createElement('div');d.className='item-row';d.innerHTML='<input type="text" placeholder="..."><span style="cursor:pointer;color:var(--red);" onclick="this.parentElement.remove()">✕</span>';document.getElementById(listId).appendChild(d);}
+
+async function generateQBR(){
+  const btn=document.getElementById('genBtn');btn.disabled=true;btn.textContent='⏳ Генерация...';
+  document.getElementById('status').textContent='AI анализирует данные клиента...';
+  try{
+    const r=await fetch('/api/ai/auto-qbr/'+clientId,{method:'POST'});
+    const d=await r.json();
+    document.getElementById('qbr-form').style.display='block';
+    if(d.achievements)d.achievements.forEach(a=>{const div=document.createElement('div');div.className='item-row';div.innerHTML='<input type="text" value="'+a+'"><span style="cursor:pointer;color:var(--red);" onclick="this.parentElement.remove()">✕</span>';document.getElementById('achievements-list').appendChild(div);});
+    if(d.issues)d.issues.forEach(a=>{const div=document.createElement('div');div.className='item-row';div.innerHTML='<input type="text" value="'+a+'"><span style="cursor:pointer;color:var(--red);" onclick="this.parentElement.remove()">✕</span>';document.getElementById('issues-list').appendChild(div);});
+    if(d.next_quarter_goals)d.next_quarter_goals.forEach(a=>{const div=document.createElement('div');div.className='item-row';div.innerHTML='<input type="text" value="'+a+'"><span style="cursor:pointer;color:var(--red);" onclick="this.parentElement.remove()">✕</span>';document.getElementById('goals-list').appendChild(div);});
+    document.getElementById('summary').value=d.summary||'';
+    document.getElementById('status').textContent='✅ Черновик готов — отредактируйте и сохраните';
+  }catch(e){document.getElementById('status').textContent='❌ Ошибка: '+e.message;}
+  btn.disabled=false;btn.textContent='🤖 Перегенерировать';
+}
+
+function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
+
+async function saveQBR(){
+  const data={
+    achievements:getListValues('achievements-list'),
+    issues:getListValues('issues-list'),
+    next_quarter_goals:getListValues('goals-list'),
+    summary:document.getElementById('summary').value,
+    status:'draft',
+    date:new Date().toISOString()
+  };
+  const r=await fetch('/api/clients/'+clientId+'/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok) { alert('✅ QBR сохранён!'); location.href='/client/'+clientId; }
+}
+</script>
+</body>
+</html>

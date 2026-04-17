@@ -1,157 +1,258 @@
 {% extends "base.html" %}
-{% block title %}QBR — {{ client.name }}{% endblock %}
+{% block title %}QBR: {{ client.name }} — AM Hub{% endblock %}
+{% block page_title %}QBR: {{ client.name }}{% endblock %}
+{% block head %}
+<style>
+    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
+    .back:hover { color:var(--text); }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+    .section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+    .section h3 { font-size:.95rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .field { margin-bottom:12px; }
+    .field label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:4px; }
+    .field input, .field textarea { width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; outline:none; }
+    .field textarea { min-height:80px; resize:vertical; }
+    .field input:focus, .field textarea:focus { border-color:var(--accent); }
+    .item-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .item-row input { flex:1; }
+    .item-row .remove { cursor:pointer; color:var(--red); font-size:1.1rem; }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .saved-msg { font-size:.78rem; color:var(--green); margin-top:8px; display:none; }
+    .saved-msg.show { display:block; }
+    .badge-draft { background:rgba(129,140,248,.15); color:var(--accent); }
+    .badge-completed { background:rgba(35,209,139,.15); color:var(--green); }
+    /* Modal */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); backdrop-filter:blur(4px); z-index:200; align-items:center; justify-content:center; }
+    .modal-overlay.visible { display:flex; }
+    .modal { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:28px; max-width:600px; width:90%; max-height:85vh; overflow-y:auto; }
+    .modal h3 { margin-bottom:16px; font-size:1.1rem; }
+    .modal-close { float:right; cursor:pointer; font-size:1.2rem; color:var(--muted); background:none; border:none; }
+    .modal-close:hover { color:var(--text); }
+  </style>
+{% endblock %}
+
 {% block content %}
+<a href="/client/{{ client.id }}" class="back">← {{ client.name }}</a>
+  <h1>📊 QBR: {{ client.name }}</h1>
+  <p class="sub">{{ client.segment or '' }} · {% if qbr %}{{ qbr.quarter }}{% else %}Новый QBR{% endif %}
+    {% if qbr %}<span class="badge badge-{{ qbr.status }}">{{ qbr.status }}</span>{% endif %}
+  </p>
 
-<div class="page-header">
-  <p><a href="/prep/{{ client.id }}">← {{ client.name }}</a></p>
-  <h1 style="margin-top:8px">📊 QBR — {{ client.name }}</h1>
-  <p>{{ quarter }} · Квартальный обзор</p>
-</div>
-
-<form method="post" action="/followup/{{ client.id }}">
-  <!-- Скрытые поля — QBR сохраняется как встреча типа qbr -->
-  <input type="hidden" name="meeting_type" value="qbr">
-  <input type="hidden" name="meeting_date" value="{{ today }}">
-
-<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
-<div>
-
-  <!-- Итоги квартала -->
-  <div class="card">
-    <div class="qbr-section">
-      <h3>1. Итоги квартала</h3>
-      <div class="form-group">
-        <label>Что было сделано за квартал</label>
-        <textarea name="summary" class="form-control" rows="6"
-          placeholder="— Подключили автоапдейт поиска&#10;— Настроили ранжирование по конверсии&#10;— Провели 3 чекапа..."></textarea>
-      </div>
-    </div>
-
-    <div class="qbr-section">
-      <h3>2. Метрики и результаты</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="form-group" style="margin:0">
-          <label>CTR поиска</label>
-          <input type="text" class="form-control" placeholder="3.2% → 4.1%">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label>Конверсия из поиска</label>
-          <input type="text" class="form-control" placeholder="1.8% → 2.3%">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label>Nullrate</label>
-          <input type="text" class="form-control" placeholder="12% → 8%">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label>Другое</label>
-          <input type="text" class="form-control" placeholder="...">
-        </div>
-      </div>
-    </div>
-
-    <div class="qbr-section">
-      <h3>3. Планы на следующий квартал</h3>
-      <div id="aq-tasks">
-        <div class="task-row">
-          <input type="text" name="aq_task_text" class="form-control" placeholder="Задача / инициатива...">
-          <input type="date" name="aq_task_due" class="form-control">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('.task-row').remove()">✕</button>
-        </div>
-      </div>
-      <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px"
-        onclick="addQbrTask()">+ Добавить</button>
-    </div>
-
-    <div class="qbr-section">
-      <h3>4. Риски и вопросы</h3>
-      <textarea class="form-control" name="risks" rows="3"
-        placeholder="— Риск задержки интеграции&#10;— Вопрос по ценообразованию..."></textarea>
+  <div class="section">
+    <h3>📅 Дата проведения</h3>
+    <div class="field">
+      <input type="date" id="qbr-date" value="{{ qbr.date.strftime('%Y-%m-%d') if qbr and qbr.date else '' }}">
     </div>
   </div>
 
-</div>
-
-<!-- Правая колонка -->
-<div>
-  <div class="card" style="position:sticky;top:24px">
-    <h3 style="margin-bottom:14px;font-size:1rem">📤 Сохранить QBR</h3>
-
-    <div class="form-group">
-      <label>Настроение встречи</label>
-      <div class="mood-selector">
-        <label style="cursor:pointer">
-          <input type="radio" name="mood" value="positive" style="display:none">
-          <div class="mood-btn" onclick="selectMood('positive',this)">🟢<br><small>Позитив</small></div>
-        </label>
-        <label style="cursor:pointer">
-          <input type="radio" name="mood" value="neutral" checked style="display:none">
-          <div class="mood-btn selected-neutral" onclick="selectMood('neutral',this)">🟡<br><small>Нейтрально</small></div>
-        </label>
-        <label style="cursor:pointer">
-          <input type="radio" name="mood" value="risk" style="display:none">
-          <div class="mood-btn" onclick="selectMood('risk',this)">🔴<br><small>Риск</small></div>
-        </label>
-      </div>
+  <div class="section">
+    <h3>🏆 Достижения за квартал</h3>
+    <div id="achievements-list">
+      {% for a in qbr.achievements or [] %}
+      <div class="item-row"><input type="text" value="{{ a }}" placeholder="Достижение..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
     </div>
-
-    <div class="form-group">
-      <label>Следующий QBR</label>
-      <input type="date" name="next_meeting" class="form-control">
-    </div>
-
-    {% if client.tg_chat_id %}
-    <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;cursor:pointer">
-      <input type="checkbox" name="send_tg" value="1" style="width:16px;height:16px">
-      <span style="font-size:0.88rem">Отправить итоги в TG-канал</span>
-    </label>
-    {% endif %}
-
-    <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:12px">
-      💾 Сохранить QBR
-    </button>
-    <a href="/prep/{{ client.id }}" class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:8px">Отмена</a>
+    <button class="btn btn-sm btn-outline" onclick="addItem('achievements-list','Достижение...')">+ Добавить</button>
   </div>
 
-  <!-- Автозаполнение из истории -->
-  {% if meetings %}
-  <div class="card" style="margin-top:16px">
-    <h3 style="margin-bottom:12px;font-size:0.9rem;color:var(--text-muted)">История за квартал</h3>
-    {% for m in meetings %}
-    <div class="meeting-item">
-      <div class="meeting-meta">
-        <span class="meeting-date" style="font-size:0.85rem">{{ m.meeting_date[:10] }}</span>
-        <span class="badge" style="background:var(--surface2);color:var(--text-muted);font-size:0.7rem">
-          {{ {'checkup':'Чекап','qbr':'QBR','urgent':'Экстренная'}[m.meeting_type] }}
-        </span>
-      </div>
-      {% if m.summary %}<div class="meeting-summary" style="font-size:0.82rem">{{ m.summary[:150] }}{% if m.summary|length > 150 %}…{% endif %}</div>{% endif %}
+  <div class="section">
+    <h3>⚠️ Проблемы</h3>
+    <div id="issues-list">
+      {% for i in qbr.issues or [] %}
+      <div class="item-row"><input type="text" value="{{ i }}" placeholder="Проблема..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
     </div>
-    {% endfor %}
+    <button class="btn btn-sm btn-outline" onclick="addItem('issues-list','Проблема...')">+ Добавить</button>
   </div>
-  {% endif %}
+
+  <div class="section">
+    <h3> Ключевые инсайты</h3>
+    <div id="insights-list">
+      {% for ins in qbr.key_insights or [] %}
+      <div class="item-row"><input type="text" value="{{ ins }}" placeholder="Инсайт..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addItem('insights-list','Инсайт...')">+ Добавить</button>
+  </div>
+
+  <div class="section">
+    <h3>🎯 Цели на следующий квартал</h3>
+    <div id="goals-list">
+      {% for g in qbr.next_quarter_goals or [] %}
+      <div class="item-row"><input type="text" value="{{ g }}" placeholder="Цель..."><span class="remove" onclick="this.parentElement.remove()">✕</span></div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addItem('goals-list','Цель...')">+ Добавить</button>
+  </div>
+
+  <div class="section">
+    <h3>📋 Будущие работы</h3>
+    <div id="future-list">
+      {% for fw in qbr.future_work or [] %}
+      <div class="item-row">
+        <input type="text" value="{{ fw.task or '' }}" placeholder="Задача..." class="fw-task">
+        <input type="text" value="{{ fw.quarter or '' }}" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;">
+        <select class="fw-priority" style="max-width:100px;">
+          <option value="high" {{ 'selected' if fw.priority == 'high' else '' }}>Высокий</option>
+          <option value="medium" {{ 'selected' if fw.priority == 'medium' else '' }}>Средний</option>
+          <option value="low" {{ 'selected' if fw.priority == 'low' else '' }}>Низкий</option>
+        </select>
+        <span class="remove" onclick="this.parentElement.remove()">✕</span>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="addFutureWork()">+ Добавить работу</button>
+  </div>
+
+  <div class="section">
+    <h3>📝 Итоги</h3>
+    <div class="field">
+      <textarea id="summary" placeholder="Краткое резюме QBR...">{{ qbr.summary or '' }}</textarea>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>📄 Презентация</h3>
+    <div class="field">
+      <label>Ссылка на презентацию (Google Slides, Figma, etc.)</label>
+      <input type="url" id="presentation-url" value="{{ qbr.presentation_url or '' }}" placeholder="https://docs.google.com/presentation/...">
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>📊 Выжимка для руководства</h3>
+    <div class="field">
+      <textarea id="exec-summary" placeholder="Краткая выжимка ключевых метрик и решений для руководства...">{{ qbr.executive_summary or '' }}</textarea>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <button class="btn" onclick="saveQBR()">💾 Сохранить QBR</button>
+    <button class="btn btn-outline" onclick="openStatusModal()">📊 Изменить статус</button>
+    <span class="saved-msg" id="saved">✅ Сохранено</span>
+  </div>
 </div>
 
+<!-- Status Modal -->
+<div class="modal-overlay" id="statusModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeStatusModal()">✕</button>
+    <h3>📊 Статус QBR</h3>
+    <div class="field">
+      <label>Текущий статус</label>
+      <select id="qbr-status">
+        <option value="draft" {{ 'selected' if qbr and qbr.status == 'draft' else '' }}>📝 Черновик</option>
+        <option value="scheduled" {{ 'selected' if qbr and qbr.status == 'scheduled' else '' }}>📅 Запланирован</option>
+        <option value="completed" {{ 'selected' if qbr and qbr.status == 'completed' else '' }}>✅ Завершён</option>
+        <option value="cancelled" {{ 'selected' if qbr and qbr.status == 'cancelled' else '' }}>❌ Отменён</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn" onclick="saveStatus()">Сохранить</button>
+      <button class="btn btn-outline" onclick="closeStatusModal()">Отмена</button>
+    </div>
+  </div>
 </div>
-</form>
 
 <script>
-function addQbrTask() {
-  const container = document.getElementById('aq-tasks');
-  const row = document.createElement('div');
-  row.className = 'task-row';
-  row.innerHTML = `
-    <input type="text" name="aq_task_text" class="form-control" placeholder="Задача / инициатива...">
-    <input type="date" name="aq_task_due" class="form-control">
-    <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('.task-row').remove()">✕</button>
-  `;
-  container.appendChild(row);
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+function addItem(listId,placeholder){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="'+placeholder+'"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById(listId).appendChild(d);
 }
-
-function selectMood(mood, el) {
-  document.querySelectorAll('.mood-btn').forEach(b => b.className = 'mood-btn');
-  el.className = `mood-btn selected-${mood}`;
-  document.querySelector(`input[value="${mood}"]`).checked = true;
+function addFutureWork(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Задача..." class="fw-task"><input type="text" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;"><select class="fw-priority" style="max-width:100px;"><option value="high">Высокий</option><option value="medium" selected>Средний</option><option value="low">Низкий</option></select><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('future-list').appendChild(d);
+}
+function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
+function getFutureWork(){
+  const items=[];
+  document.querySelectorAll('#future-list .item-row').forEach(row=>{
+    const task=row.querySelector('.fw-task').value;
+    if(task) items.push({task, quarter:row.querySelector('.fw-quarter').value, priority:row.querySelector('.fw-priority').value});
+  });
+  return items;
+}
+async function saveQBR(){
+  const data={
+    date:document.getElementById('qbr-date').value,
+    achievements:getListValues('achievements-list'),
+    issues:getListValues('issues-list'),
+    key_insights:getListValues('insights-list'),
+    next_quarter_goals:getListValues('goals-list'),
+    future_work:getFutureWork(),
+    summary:document.getElementById('summary').value,
+    presentation_url:document.getElementById('presentation-url').value,
+    executive_summary:document.getElementById('exec-summary').value,
+    status:'draft'
+  };
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+}
+function openStatusModal(){document.getElementById('statusModal').classList.add('visible');}
+function closeStatusModal(){document.getElementById('statusModal').classList.remove('visible');}
+async function saveStatus(){
+  const status=document.getElementById('qbr-status').value;
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  if(r.ok){closeStatusModal();location.reload();}
 }
 </script>
+<div id="qbr-empty" style="display:none;text-align:center;padding:60px 20px;color:var(--muted);">
+  <div style="font-size:3rem;margin-bottom:12px;">📊</div>
+  <div style="font-size:1.1rem;font-weight:600;color:var(--text);margin-bottom:8px;">QBR ещё не создан</div>
+  <div style="font-size:.84rem;margin-bottom:20px;">Quarterly Business Review позволяет проанализировать квартал и спланировать следующий</div>
+  <button onclick="createQBR()" class="btn btn-p">+ Создать QBR</button>
+</div>
+</body>
+</html>
 
+<script>
+
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+function addItem(listId,placeholder){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="'+placeholder+'"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById(listId).appendChild(d);
+}
+function addFutureWork(){
+  const d=document.createElement('div');d.className='item-row';
+  d.innerHTML='<input type="text" placeholder="Задача..." class="fw-task"><input type="text" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;"><select class="fw-priority" style="max-width:100px;"><option value="high">Высокий</option><option value="medium" selected>Средний</option><option value="low">Низкий</option></select><span class="remove" onclick="this.parentElement.remove()">✕</span>';
+  document.getElementById('future-list').appendChild(d);
+}
+function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
+function getFutureWork(){
+  const items=[];
+  document.querySelectorAll('#future-list .item-row').forEach(row=>{
+    const task=row.querySelector('.fw-task').value;
+    if(task) items.push({task, quarter:row.querySelector('.fw-quarter').value, priority:row.querySelector('.fw-priority').value});
+  });
+  return items;
+}
+async function saveQBR(){
+  const data={
+    date:document.getElementById('qbr-date').value,
+    achievements:getListValues('achievements-list'),
+    issues:getListValues('issues-list'),
+    key_insights:getListValues('insights-list'),
+    next_quarter_goals:getListValues('goals-list'),
+    future_work:getFutureWork(),
+    summary:document.getElementById('summary').value,
+    presentation_url:document.getElementById('presentation-url').value,
+    executive_summary:document.getElementById('exec-summary').value,
+    status:'draft'
+  };
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+}
+function openStatusModal(){document.getElementById('statusModal').classList.add('visible');}
+function closeStatusModal(){document.getElementById('statusModal').classList.remove('visible');}
+async function saveStatus(){
+  const status=document.getElementById('qbr-status').value;
+  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  if(r.ok){closeStatusModal();location.reload();}
+}
+
+</script>
 {% endblock %}

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Добро пожаловать — AM Hub</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    html, body {
+      height: 100%;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    body.onb-fullscreen {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      background:
+        radial-gradient(ellipse 70% 55% at 20% 0%, var(--accent-glow), transparent 60%),
+        radial-gradient(ellipse 60% 45% at 85% 95%, rgba(179,107,255,.22), transparent 60%),
+        radial-gradient(ellipse 80% 60% at 50% 50%, rgba(76,165,255,.1), transparent 70%),
+        var(--bg);
+      background-attachment: fixed;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+
+    .onb-skip {
+      position: fixed;
+      top: 20px;
+      right: 24px;
+      z-index: 10;
+      background: transparent;
+      border: 1px solid var(--border-s);
+      color: var(--text-dim);
+      padding: 7px 14px;
+      border-radius: var(--radius);
+      font-size: .78rem;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all var(--t);
+    }
+    .onb-skip:hover {
+      color: var(--text);
+      border-color: var(--accent-ring);
+      background: var(--accent-dim);
+    }
+
+    .onb-card {
+      position: relative;
+      width: 100%;
+      max-width: 640px;
+      background: linear-gradient(180deg, rgba(19,25,36,.92), rgba(13,17,23,.92));
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border-s);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-xl);
+      padding: 40px 44px 32px;
+      overflow: hidden;
+    }
+    .onb-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 80% 40% at 50% 0%, var(--accent-glow), transparent 70%);
+      pointer-events: none;
+      opacity: .6;
+    }
+
+    .stepper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+    .stepper-count {
+      font-size: .72rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .stepper-count b {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .stepper-dots {
+      display: flex;
+      gap: 6px;
+    }
+    .stepper-dot {
+      width: 28px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--surface-3);
+      transition: background var(--t);
+    }
+    .stepper-dot.active {
+      background: linear-gradient(90deg, var(--accent), var(--purple));
+    }
+    .stepper-dot.done {
+      background: var(--accent-dim);
+    }
+
+    .onb-slide {
+      position: relative;
+      display: none;
+      animation: slideIn .35s cubic-bezier(.2,.8,.2,1);
+    }
+    .onb-slide.active {
+      display: block;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(24px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .welcome {
+      text-align: center;
+      padding: 20px 0 10px;
+    }
+    .welcome-logo {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 22px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: 700;
+      color: #fff;
+      box-shadow: 0 20px 60px -10px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.2);
+    }
+    .welcome-title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+      background: linear-gradient(180deg, #fff, #c9d0e6);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .welcome-sub {
+      font-size: .95rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+      max-width: 440px;
+      margin: 0 auto;
+    }
+
+    .slide-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: var(--accent-dim);
+      border: 1px solid var(--accent-ring);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      margin-bottom: 18px;
+    }
+    .slide-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      margin-bottom: 10px;
+    }
+    .slide-desc {
+      font-size: .9rem;
+      color: var(--text-dim);
+      line-height: 1.65;
+      margin-bottom: 24px;
+    }
+    .slide-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .onb-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid var(--border-s);
+      background: var(--surface-2);
+      color: var(--text);
+      font-family: inherit;
+      font-size: .86rem;
+      font-weight: 500;
+      padding: 10px 18px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      text-decoration: none;
+      transition: all var(--t);
+    }
+    .onb-btn:hover {
+      background: var(--surface-3);
+      border-color: var(--accent-ring);
+      color: var(--text);
+    }
+    .onb-btn.primary {
+      background: linear-gradient(180deg, var(--accent), #6c79f1);
+      border-color: transparent;
+      color: #fff;
+      box-shadow: 0 6px 22px -6px var(--accent-glow);
+    }
+    .onb-btn.primary:hover {
+      filter: brightness(1.1);
+      color: #fff;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 22px;
+      cursor: pointer;
+      user-select: none;
+      transition: border-color var(--t);
+    }
+    .checkbox-row:hover {
+      border-color: var(--accent-ring);
+    }
+    .checkbox-row input {
+      accent-color: var(--accent);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+    .checkbox-row span {
+      font-size: .86rem;
+      color: var(--text);
+    }
+    .checkbox-hint {
+      font-size: .78rem;
+      color: var(--text-dim);
+      margin-top: -12px;
+      margin-bottom: 22px;
+    }
+
+    .final-check {
+      width: 88px;
+      height: 88px;
+      margin: 10px auto 24px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--green), #16a577);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.6rem;
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 20px 60px -10px rgba(35,209,139,.4);
+      animation: pop .5s cubic-bezier(.2,1.4,.4,1);
+    }
+    @keyframes pop {
+      from { transform: scale(0); }
+      to { transform: scale(1); }
+    }
+
+    .onb-nav {
+      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-top: 32px;
+      padding-top: 22px;
+      border-top: 1px solid var(--border);
+    }
+    .onb-nav .onb-btn.ghost {
+      background: transparent;
+      border-color: transparent;
+      color: var(--text-dim);
+    }
+    .onb-nav .onb-btn.ghost:hover {
+      color: var(--text);
+      background: var(--surface-2);
+    }
+
+    @media (max-width: 520px) {
+      .onb-card { padding: 28px 22px 24px; }
+      .welcome-title { font-size: 1.4rem; }
+      .slide-title { font-size: 1.1rem; }
+    }
+  </style>
+</head>
+<body class="onb-fullscreen">
+
+  <button class="onb-skip" onclick="skipOnboarding()" title="Пропустить тур">
+    Пропустить
+  </button>
+
+  <div class="onb-card" id="card">
+
+    <div class="stepper" id="stepper" style="display:none">
+      <div class="stepper-count">Шаг <b id="step-current">1</b>/5</div>
+      <div class="stepper-dots" id="stepper-dots">
+        <div class="stepper-dot"></div>
+        <div class="stepper-dot"></div>
+        <div class="stepper-dot"></div>
+        <div class="stepper-dot"></div>
+        <div class="stepper-dot"></div>
+      </div>
+    </div>
+
+    <!-- Welcome -->
+    <div class="onb-slide active" data-slide="0">
+      <div class="welcome">
+        <div class="welcome-logo">AQ</div>
+        <div class="welcome-title">Добро пожаловать в AM Hub</div>
+        <div class="welcome-sub">
+          {% if user and (user.name or user.email) %}Привет, {{ user.name or user.email }}! {% endif %}Пройдём 5 шагов настройки за 3 минуты — и ваш хаб готов к работе.
+        </div>
+      </div>
+      <div class="onb-nav">
+        <span></span>
+        <button class="onb-btn primary" onclick="next()">Начать →</button>
+      </div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="onb-slide" data-slide="1">
+      <div class="slide-icon">🔗</div>
+      <div class="slide-title">Подключите Merchrules</div>
+      <div class="slide-desc">
+        Ваши клиенты, задачи и встречи подтянутся автоматически. Откройте настройки в новой вкладке, введите логин и пароль от CRM, вернитесь сюда и нажмите «Готово».
+      </div>
+      <div class="slide-actions">
+        <a href="/settings" target="_blank" rel="noopener" class="onb-btn primary">Открыть настройки</a>
+      </div>
+      <div class="onb-nav">
+        <button class="onb-btn ghost" onclick="prev()">← Назад</button>
+        <button class="onb-btn" onclick="next()">Готово →</button>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="onb-slide" data-slide="2">
+      <div class="slide-icon">🧩</div>
+      <div class="slide-title">Установите расширение</div>
+      <div class="slide-desc">
+        Chrome-расширение AM Hub Sync забирает данные из Merchrules напрямую в браузере — быстро, безопасно, без прокси. Установите его и запустите первую синхронизацию.
+      </div>
+      <div class="slide-actions">
+        <a href="/settings/extension" target="_blank" rel="noopener" class="onb-btn primary">Скачать расширение</a>
+      </div>
+      <div class="onb-nav">
+        <button class="onb-btn ghost" onclick="prev()">← Назад</button>
+        <button class="onb-btn" onclick="next()">Готово →</button>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="onb-slide" data-slide="3">
+      <div class="slide-icon">👥</div>
+      <div class="slide-title">Выберите свой портфель</div>
+      <div class="slide-desc">
+        Отметьте клиентов из общего пула, за которых вы отвечаете. Они попадут в ваш личный кабинет, дашборды и уведомления.
+      </div>
+      <div class="slide-actions">
+        <a href="/settings/my-clients" target="_blank" rel="noopener" class="onb-btn primary">Открыть портфель</a>
+      </div>
+      <div class="onb-nav">
+        <button class="onb-btn ghost" onclick="prev()">← Назад</button>
+        <button class="onb-btn" onclick="next()">Готово →</button>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="onb-slide" data-slide="4">
+      <div class="slide-icon">🔔</div>
+      <div class="slide-title">Настройте уведомления</div>
+      <div class="slide-desc">
+        Телеграм-бот уже подключён к хабу. Включите уведомления, чтобы не пропускать просрочки, встречи и важные события по клиентам.
+      </div>
+      <label class="checkbox-row">
+        <input type="checkbox" id="notifyToggle" checked>
+        <span>Включить уведомления в Telegram</span>
+      </label>
+      <div class="checkbox-hint">Вы сможете отключить или настроить каналы в любой момент в Settings.</div>
+      <div class="onb-nav">
+        <button class="onb-btn ghost" onclick="prev()">← Назад</button>
+        <button class="onb-btn" onclick="next()">Готово →</button>
+      </div>
+    </div>
+
+    <!-- Step 5 -->
+    <div class="onb-slide" data-slide="5">
+      <div class="final-check">✓</div>
+      <div style="text-align:center">
+        <div class="slide-title" style="font-size:1.5rem">Готово!</div>
+        <div class="slide-desc">
+          Настройка завершена. Перезапустить этот тур можно в любой момент из раздела Settings.
+        </div>
+      </div>
+      <div class="onb-nav" style="justify-content:center">
+        <button class="onb-btn primary" onclick="finish()" style="min-width:220px">🚀 Начать работу</button>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+(function(){
+  var TOTAL = 5; // steps 1..5 (welcome is 0, not counted)
+  var current = 0;
+
+  var slides = document.querySelectorAll('.onb-slide');
+  var stepper = document.getElementById('stepper');
+  var stepNum = document.getElementById('step-current');
+  var dots = document.querySelectorAll('.stepper-dot');
+
+  function render() {
+    slides.forEach(function(s){
+      s.classList.toggle('active', Number(s.dataset.slide) === current);
+    });
+    if (current >= 1 && current <= TOTAL) {
+      stepper.style.display = 'flex';
+      stepNum.textContent = current;
+      dots.forEach(function(d, i){
+        d.classList.remove('active','done');
+        if (i + 1 < current) d.classList.add('done');
+        else if (i + 1 === current) d.classList.add('active');
+      });
+    } else {
+      stepper.style.display = 'none';
+    }
+  }
+
+  window.next = function(){
+    if (current < TOTAL) {
+      current += 1;
+      render();
+    }
+  };
+  window.prev = function(){
+    if (current > 0) {
+      current -= 1;
+      render();
+    }
+  };
+  window.skipOnboarding = function(){
+    try { localStorage.setItem('amhub_onboarded', 'skipped'); } catch(e) {}
+    window.location.replace('/dashboard');
+  };
+  window.finish = function(){
+    try {
+      localStorage.setItem('amhub_onboarded', 'true');
+      var notify = document.getElementById('notifyToggle');
+      if (notify) localStorage.setItem('amhub_notify_tg', notify.checked ? '1' : '0');
+    } catch(e) {}
+    window.location.replace('/dashboard');
+  };
+
+  // Keyboard navigation
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowRight' || e.key === 'Enter') {
+      if (current < TOTAL) window.next();
+      else window.finish();
+    } else if (e.key === 'ArrowLeft') {
+      window.prev();
+    } else if (e.key === 'Escape') {
+      window.skipOnboarding();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

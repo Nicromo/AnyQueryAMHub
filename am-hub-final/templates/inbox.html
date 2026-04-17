@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Входящие — AM Hub{% endblock %}
+{% block page_title %}Входящие{% endblock %}
+
+{% block head %}
+<style>
+    .main { margin-left:240px; padding:24px 28px; }
+    h1 { font-size:1.4rem; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
+    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .inbox-item { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; border-left:4px solid var(--border); }
+    .inbox-item.priority-high { border-left-color:var(--red); }
+    .inbox-item.priority-medium { border-left-color:var(--yellow); }
+    .inbox-item .title { font-size:.9rem; font-weight:600; margin-bottom:4px; }
+    .inbox-item .message { font-size:.82rem; color:var(--muted); }
+    .inbox-item .meta { font-size:.72rem; color:var(--muted); margin-top:4px; display:flex; gap:8px; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:600; }
+    .badge-critical { background:rgba(239,68,68,.15); color:var(--red); }
+    .badge-overdue { background:rgba(239,68,68,.15); color:var(--red); }
+    .badge-blocked { background:rgba(239,68,68,.15); color:var(--red); }
+    .badge-notification { background:rgba(129,140,248,.15); color:var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>📬 Inbox</h1>
+  <p class="sub">Уведомления, просрочки, заблокированные задачи</p>
+  <div id="inbox-list">Загрузка...</div>
+</div>
+
+<script>
+function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
+const s=localStorage.getItem('theme');if(s) document.documentElement.setAttribute('data-theme',s);
+
+async function loadInbox(){
+  try{
+    const r=await fetch('/api/inbox');
+    const d=await r.json();
+    const el=document.getElementById('inbox-list');
+    if(!d.items.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);">✅ Всё чисто!</div>';return;}
+    el.innerHTML=d.items.map(i=>{
+      const badgeClass=i.type==='critical'?'badge-critical':i.type==='overdue'?'badge-overdue':i.type==='blocked'?'badge-blocked':'badge-notification';
+      const link=i.client_id?`/client/${i.client_id}`:'#';
+      return `<a href="${link}" class="inbox-item priority-${i.priority||'medium'}"><div class="title">${i.title}</div><div class="message">${i.message}</div><div class="meta"><span class="badge ${badgeClass}">${i.type}</span><span>${i.date?i.date.slice(0,10):''}</span></div></a>`;
+    }).join('');
+  }catch(e){console.error(e);}
+}
+loadInbox();
+</script>
+{% endblock %}

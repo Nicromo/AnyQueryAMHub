@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --bg: #07090f;
+      --surface: #0d1117;
+      --surface-2: #131924;
+      --surface-3: #192030;
+      --border: rgba(255,255,255,.07);
+      --border-s: rgba(255,255,255,.12);
+      --text: #e8ecf4;
+      --text-dim: #7d8aaa;
+      --muted: #4c567a;
+      --accent: #818cf8;
+      --accent-l: #a5b4fc;
+      --accent-dim: rgba(129,140,248,.14);
+      --accent-glow: rgba(129,140,248,.35);
+      --green: #23d18b;
+      --red: #f0556a;
+      --yellow: #f5a623;
+      --radius: 8px;
+      --radius-lg: 12px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    body {
+      width: 360px;
+      min-height: 520px;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% 0%, var(--accent-glow), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      padding: 0;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px 14px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(129,140,248,.08), transparent);
+    }
+    .logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.85rem;
+      letter-spacing: -0.02em;
+      box-shadow: 0 6px 18px -4px var(--accent-glow);
+    }
+    .header-text h1 {
+      font-size: .94rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .header-text .sub {
+      font-size: .72rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .body { padding: 14px 18px 18px; }
+
+    .status-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      margin-bottom: 16px;
+      transition: border-color .2s;
+    }
+    .status-card.ok    { border-color: rgba(35,209,139,.25); background: rgba(35,209,139,.05); }
+    .status-card.error { border-color: rgba(240,85,106,.25); background: rgba(240,85,106,.05); }
+    .status-card.warn  { border-color: rgba(245,166,35,.25); background: rgba(245,166,35,.05); }
+    .status-card.run   { border-color: rgba(129,140,248,.3); background: rgba(129,140,248,.06); }
+
+    .status-emoji {
+      font-size: 1.6rem;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .status-info { flex: 1; min-width: 0; }
+    .status-label {
+      font-size: .88rem;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .status-time {
+      font-size: .72rem;
+      color: var(--text-dim);
+      margin-top: 3px;
+    }
+
+    .section { margin-bottom: 12px; }
+    .section label {
+      display: block;
+      font-size: .68rem;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    input {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 11px;
+      color: var(--text);
+      font-size: .83rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .15s, background .15s;
+    }
+    input:focus { border-color: var(--accent); background: var(--surface-3); }
+    input::placeholder { color: var(--muted); }
+
+    .divider { height: 1px; background: var(--border); margin: 14px -2px; }
+
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: .85rem;
+      font-weight: 600;
+      font-family: inherit;
+      margin-top: 6px;
+      transition: all .15s;
+    }
+    .btn-primary {
+      background: linear-gradient(180deg, var(--accent), #6c79f1);
+      color: #fff;
+      box-shadow: 0 4px 14px -4px var(--accent-glow);
+    }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-primary:disabled { opacity: .55; cursor: default; filter: none; }
+
+    .btn-secondary {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border-s);
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent-l); background: var(--surface-3); }
+
+    .error-box {
+      background: rgba(240,85,106,.1);
+      border: 1px solid rgba(240,85,106,.3);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font-size: .75rem;
+      color: #fca5a5;
+      margin-top: 10px;
+      word-break: break-word;
+    }
+    .result-box {
+      background: rgba(35,209,139,.08);
+      border: 1px solid rgba(35,209,139,.25);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font-size: .75rem;
+      color: #86efac;
+      margin-top: 10px;
+    }
+    .hint { font-size: .7rem; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
+    .footer {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: center;
+      font-size: .68rem;
+      color: var(--muted);
+      letter-spacing: .04em;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">AQ</div>
+  <div class="header-text">
+    <h1>AM Hub Sync</h1>
+    <div class="sub">Merchrules → AM Hub</div>
+  </div>
+</div>
+
+<div class="body">
+
+  <!-- Большой статус -->
+  <div class="status-card warn" id="statusCard">
+    <div class="status-emoji" id="statusEmoji">🟡</div>
+    <div class="status-info">
+      <div class="status-label" id="statusLabel">Не настроено</div>
+      <div class="status-time" id="statusTime">Заполните настройки ниже</div>
+    </div>
+  </div>
+
+  <!-- Merchrules -->
+  <div class="section">
+    <label>Merchrules логин</label>
+    <input type="email" id="mrLogin" placeholder="manager@company.ru" autocomplete="username">
+  </div>
+  <div class="section">
+    <label>Merchrules пароль</label>
+    <input type="password" id="mrPass" placeholder="••••••••" autocomplete="current-password">
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- AM Hub -->
+  <div class="section">
+    <label>AM Hub URL</label>
+    <input type="url" id="hubUrl" placeholder="https://amhub.up.railway.app">
+  </div>
+  <div class="section">
+    <label>AM Hub токен</label>
+    <input type="password" id="hubToken" placeholder="Токен из настроек AM Hub">
+    <div class="hint">Settings → Персональный токен в интерфейсе хаба</div>
+  </div>
+
+  <button class="btn btn-primary" id="saveBtn" onclick="save()">Сохранить и синхронизировать</button>
+  <button class="btn btn-secondary" id="openHubBtn" onclick="openHub()">Открыть хаб →</button>
+
+  <div id="errorBox" class="error-box" style="display:none"></div>
+  <div id="resultBox" class="result-box" style="display:none"></div>
+
+  <div class="footer">AM Hub Extension v1</div>
+</div>
+
+<script>
+(function(){
+  var DEFAULT_HUB_URL = "https://amhub.up.railway.app";
+  var hasChrome = typeof chrome !== "undefined" && chrome.storage && chrome.storage.local;
+  var hasRuntime = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage;
+
+  function $(id){ return document.getElementById(id); }
+
+  function fmtTime(ts) {
+    if (!ts) return "";
+    try {
+      var d = (typeof ts === "number") ? new Date(ts) : new Date(String(ts));
+      if (isNaN(d.getTime())) return String(ts);
+      var hh = String(d.getHours()).padStart(2,"0");
+      var mm = String(d.getMinutes()).padStart(2,"0");
+      return hh + ":" + mm;
+    } catch(e) { return String(ts); }
+  }
+
+  function setStatus(kind, emoji, label, time) {
+    var card = $("statusCard");
+    card.classList.remove("ok","error","warn","run");
+    card.classList.add(kind);
+    $("statusEmoji").textContent = emoji;
+    $("statusLabel").textContent = label;
+    $("statusTime").textContent = time || "";
+  }
+
+  function showError(msg) {
+    var b = $("errorBox");
+    b.textContent = msg;
+    b.style.display = "block";
+    $("resultBox").style.display = "none";
+  }
+  function showResult(msg) {
+    var b = $("resultBox");
+    b.textContent = msg;
+    b.style.display = "block";
+    $("errorBox").style.display = "none";
+  }
+
+  function loadSettings() {
+    if (!hasChrome) {
+      $("hubUrl").value = DEFAULT_HUB_URL;
+      setStatus("warn", "🟡", "Не настроено", "Chrome API недоступен (превью)");
+      return;
+    }
+    chrome.storage.local.get(["mr_login","mr_password","hub_url","hub_token"], function(s){
+      if (s.mr_login) $("mrLogin").value = s.mr_login;
+      if (s.mr_password) $("mrPass").value = s.mr_password;
+      $("hubUrl").value = s.hub_url || DEFAULT_HUB_URL;
+      if (s.hub_token) $("hubToken").value = s.hub_token;
+
+      var ready = s.mr_login && s.mr_password && (s.hub_url || DEFAULT_HUB_URL) && s.hub_token;
+      if (ready) {
+        setStatus("ok", "🟢", "Подключено", "Настройки сохранены");
+      } else {
+        setStatus("warn", "🟡", "Не настроено", "Заполните все поля");
+      }
+    });
+  }
+
+  function loadStatus() {
+    if (!hasRuntime) return;
+    try {
+      chrome.runtime.sendMessage({ action: "getStatus" }, function(res){
+        if (chrome.runtime.lastError || !res) return;
+        var t = fmtTime(res.last_sync);
+        if (res.status === "ok") {
+          var extra = res.last_result
+            ? "Клиентов: " + (res.last_result.clients_synced||0) + ", задач: " + (res.last_result.tasks_synced||0)
+            : "";
+          setStatus("ok", "🟢", "Подключено", (t ? "Последняя: " + t : "") + (extra ? " • " + extra : ""));
+        } else if (res.status === "error") {
+          setStatus("error", "🔴", "Ошибка", res.error ? String(res.error).slice(0,80) : "Неизвестная ошибка");
+          if (res.error) showError(res.error);
+        } else if (res.status === "running") {
+          setStatus("run", "🟠", "Синхронизация…", t ? "Запущена в " + t : "");
+        } else {
+          // idle — оставляем то, что выставил loadSettings
+        }
+      });
+    } catch(e) { /* fallback silently */ }
+  }
+
+  window.save = function(){
+    var login = $("mrLogin").value.trim();
+    var pass = $("mrPass").value;
+    var url = $("hubUrl").value.trim().replace(/\/$/, "") || DEFAULT_HUB_URL;
+    var token = $("hubToken").value.trim();
+
+    if (!login || !pass || !url || !token) {
+      showError("Заполните все поля");
+      setStatus("warn", "🟡", "Не настроено", "Заполните все поля");
+      return;
+    }
+
+    if (!hasChrome) {
+      showError("Chrome API недоступен — это превью popup.html вне расширения.");
+      return;
+    }
+
+    chrome.storage.local.set({
+      mr_login: login,
+      mr_password: pass,
+      hub_url: url,
+      hub_token: token,
+    }, function(){
+      showResult("Настройки сохранены, запускаю синхронизацию…");
+      setStatus("run", "🟠", "Синхронизация…", fmtTime(Date.now()));
+      if (hasRuntime) {
+        try {
+          chrome.runtime.sendMessage({ action: "sync" }, function(){
+            setTimeout(loadStatus, 400);
+          });
+        } catch(e) {}
+      }
+    });
+  };
+
+  window.openHub = function(){
+    var url = ($("hubUrl").value.trim().replace(/\/$/, "")) || DEFAULT_HUB_URL;
+    if (hasChrome && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url: url });
+    } else {
+      window.open(url, "_blank", "noopener");
+    }
+  };
+
+  loadSettings();
+  loadStatus();
+  if (hasRuntime) setInterval(loadStatus, 3000);
+})();
+</script>
+</body>
+</html>

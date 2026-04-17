@@ -60,7 +60,7 @@
              value="{{ profile.mr_password }}" placeholder="••••••••"
              autocomplete="current-password"
              style="padding-right:44px">
-      <button onclick="togglePass('f-mr-pass', this)"
+      <button onclick="togglePass('f-mr-pass', this)" aria-label="Показать пароль"
               style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem">
         👁
       </button>
@@ -89,7 +89,7 @@
                value="{{ profile.airtable_token or default_airtable_token }}"
                placeholder="patXXX..."
                style="padding-right:44px">
-        <button onclick="togglePass('f-at-token', this)"
+        <button onclick="togglePass('f-at-token', this)" aria-label="Показать токен"
                 style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem">
           👁
         </button>

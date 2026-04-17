@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% block title %}Настройка sidebar · AM Hub{% endblock %}
+{% block page_title %}Настройка sidebar{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Скрыть разделы и собрать свои категории</div>{% endblock %}
+
+{% block content %}
+<style>
+  .sb-card {
+    background: var(--surface, var(--card, #111827));
+    border: 1px solid var(--border, #1e2a3a);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .sb-card h3 {
+    margin: 0 0 14px 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text, #e6e8ef);
+  }
+  .sb-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px 16px;
+  }
+  .sb-check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    transition: background .15s;
+    cursor: pointer;
+  }
+  .sb-check-row:hover { background: var(--bg, #0a0e1a); }
+  .sb-check-row input { cursor: pointer; accent-color: var(--accent, #6474ff); }
+  .sb-check-row span { font-size: .88rem; color: var(--text, #e6e8ef); }
+  .sb-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .sb-btn {
+    padding: 9px 18px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: .86rem;
+    font-weight: 500;
+  }
+  .sb-btn-primary { background: var(--accent, #6474ff); color: #fff; }
+  .sb-btn-ghost {
+    background: transparent;
+    color: var(--text-muted, #8892b0);
+    border: 1px solid var(--border, #1e2a3a);
+  }
+  .sb-btn-danger {
+    background: transparent;
+    color: #f0556a;
+    border: 1px solid #f0556a55;
+  }
+  .sb-cat {
+    background: var(--bg, #0a0e1a);
+    border: 1px solid var(--border, #1e2a3a);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .sb-cat-header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .sb-cat-header input[type="text"] {
+    flex: 1;
+    padding: 7px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #1e2a3a);
+    background: var(--surface, var(--card, #111827));
+    color: var(--text, #e6e8ef);
+    font-size: .86rem;
+  }
+  .sb-cat-items {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 4px 12px;
+  }
+  .sb-cat-items label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: .82rem;
+    color: var(--text-muted, #8892b0);
+    cursor: pointer;
+  }
+  .sb-rm-cat {
+    background: transparent;
+    border: 1px solid #f0556a55;
+    color: #f0556a;
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: .78rem;
+  }
+  .sb-hint {
+    color: var(--text-muted, #8892b0);
+    font-size: .82rem;
+    margin-top: 6px;
+  }
+  #nav-order-list {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #nav-order-list li {
+    cursor: grab;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: var(--bg, #0a0e1a);
+    border: 1px solid var(--border, #1e2a3a);
+    color: var(--text, #e6e8ef);
+    font-size: .86rem;
+    user-select: none;
+    transition: background .15s, transform .12s;
+  }
+  #nav-order-list li:hover { background: var(--surface, var(--card, #111827)); }
+  #nav-order-list li:active { cursor: grabbing; }
+  #nav-order-list li.dragging { opacity: 0.5; }
+  #nav-order-list li .drag-handle {
+    opacity: .5;
+    margin-right: 8px;
+  }
+  .sb-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    background: var(--surface, #111827);
+    border: 1px solid var(--border, #1e2a3a);
+    color: var(--text, #e6e8ef);
+    font-size: .86rem;
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0,0,0,.3);
+    opacity: 0;
+    transition: opacity .2s;
+  }
+  .sb-toast.show { opacity: 1; }
+  .sb-toast.error { border-color: #f0556a; color: #f0556a; }
+</style>
+
+<div class="sb-card">
+  <h3>👁️ Разделы sidebar</h3>
+  <div class="sb-hint">Снимите галку, чтобы скрыть раздел из левого меню.</div>
+  <div class="sb-grid" id="sb-sections" style="margin-top:12px"></div>
+</div>
+
+<div class="sb-card">
+  <h3>⭐ Кастомные категории (до 5)</h3>
+  <div class="sb-hint">Соберите свои группы ссылок — они появятся сверху sidebar-а. Клонируют существующие пункты, не удаляют оригиналы.</div>
+  <div id="sb-cats" style="margin-top:12px"></div>
+  <button class="sb-btn sb-btn-ghost" onclick="addCat()" style="margin-top:8px">+ Добавить категорию</button>
+</div>
+
+<div class="sb-card">
+  <h3>↕️ Порядок разделов</h3>
+  <div class="sb-hint">Перетащите разделы, чтобы изменить их порядок в левом меню.</div>
+  <ul id="nav-order-list"></ul>
+</div>
+
+<div class="sb-actions">
+  <button class="sb-btn sb-btn-primary" onclick="savePrefs()">Сохранить</button>
+  <button class="sb-btn sb-btn-danger" onclick="resetPrefs()">Сбросить всё</button>
+  <a href="/help" class="sb-btn sb-btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center">← Назад к помощи</a>
+</div>
+
+<script>
+const SECTIONS = [
+  {id: "dashboard", label: "🎛️ Командный центр"},
+  {id: "today", label: "☀️ Сегодня"},
+  {id: "clients", label: "👥 Все клиенты"},
+  {id: "top50", label: "🏆 Top-50"},
+  {id: "tasks", label: "✅ Задачи"},
+  {id: "meetings", label: "📅 Встречи"},
+  {id: "portfolio", label: "🗂️ Портфель"},
+  {id: "analytics", label: "📈 Аналитика"},
+  {id: "ai_chat", label: "🤖 AI-ассистент"},
+  {id: "kanban", label: "📋 Канбан"},
+  {id: "kpi", label: "🎯 Мой KPI"},
+  {id: "qbr_calendar", label: "📆 QBR Календарь"},
+  {id: "cabinet", label: "🗂️ Мой кабинет"},
+  {id: "followup_templates", label: "📝 Шаблоны"},
+  {id: "auto_tasks", label: "🤖 Автозадачи"},
+  {id: "roadmap", label: "🗺️ Роадмап"},
+  {id: "internal_tasks", label: "🔒 Внутренние задачи"},
+  {id: "extension", label: "🧩 Расширение"},
+  {id: "help", label: "❓ Помощь"},
+];
+
+const PREFS_KEY = "amhub_sidebar_prefs";
+const API_URL = "/api/settings/sidebar";
+
+function loadLocalPrefs() {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; }
+  catch(e) { return {}; }
+}
+
+function normalizePrefs(p) {
+  p = p || {};
+  p.hidden = Array.isArray(p.hidden) ? p.hidden : [];
+  p.collapsed = Array.isArray(p.collapsed) ? p.collapsed : [];
+  p.custom_categories = Array.isArray(p.custom_categories) ? p.custom_categories : [];
+  if (!Array.isArray(p.order)) p.order = null;
+  return p;
+}
+
+let prefs = normalizePrefs(loadLocalPrefs());
+
+function showToast(msg, isError) {
+  let t = document.createElement("div");
+  t.className = "sb-toast" + (isError ? " error" : "");
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  setTimeout(() => {
+    t.classList.remove("show");
+    setTimeout(() => t.remove(), 300);
+  }, 2200);
+}
+
+function renderSections() {
+  const wrap = document.getElementById("sb-sections");
+  wrap.innerHTML = SECTIONS.map(s => {
+    const checked = !prefs.hidden.includes(s.id);
+    return `<label class="sb-check-row">
+      <input type="checkbox" data-sec-id="${s.id}" ${checked ? "checked" : ""}>
+      <span>${s.label}</span>
+    </label>`;
+  }).join("");
+}
+
+function renderCats() {
+  const wrap = document.getElementById("sb-cats");
+  if (!prefs.custom_categories.length) {
+    wrap.innerHTML = '<div class="sb-hint">Пока ни одной кастомной категории.</div>';
+    return;
+  }
+  wrap.innerHTML = prefs.custom_categories.map((cat, idx) => `
+    <div class="sb-cat" data-idx="${idx}">
+      <div class="sb-cat-header">
+        <input type="text" value="${(cat.name||'').replace(/"/g,'&quot;')}" placeholder="Название категории" data-cat-name="${idx}">
+        <button class="sb-rm-cat" onclick="removeCat(${idx})">Удалить</button>
+      </div>
+      <div class="sb-cat-items">
+        ${SECTIONS.map(s => `
+          <label>
+            <input type="checkbox" data-cat-item="${idx}" value="${s.id}" ${(cat.items||[]).includes(s.id) ? "checked" : ""}>
+            ${s.label}
+          </label>
+        `).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+function addCat() {
+  if (prefs.custom_categories.length >= 5) {
+    alert("Максимум 5 кастомных категорий.");
+    return;
+  }
+  syncFromDOM();
+  prefs.custom_categories.push({name: "Новая категория", items: []});
+  renderCats();
+}
+
+function removeCat(idx) {
+  syncFromDOM();
+  prefs.custom_categories.splice(idx, 1);
+  renderCats();
+}
+
+function renderOrder() {
+  const ul = document.getElementById("nav-order-list");
+  if (!ul) return;
+  // Текущий порядок: prefs.order (если задан) либо оригинальный порядок SECTIONS
+  const knownIds = SECTIONS.map(s => s.id);
+  let order = Array.isArray(prefs.order) && prefs.order.length
+    ? prefs.order.filter(id => knownIds.includes(id))
+    : knownIds.slice();
+  // Добавим те, что отсутствуют в сохранённом порядке (новые секции)
+  knownIds.forEach(id => { if (!order.includes(id)) order.push(id); });
+
+  ul.innerHTML = order.map(id => {
+    const s = SECTIONS.find(x => x.id === id);
+    if (!s) return "";
+    return `<li draggable="true" data-id="${s.id}"><span class="drag-handle">⋮⋮</span>${s.label}</li>`;
+  }).join("");
+  attachDragHandlers();
+}
+
+let dragSrc = null;
+function attachDragHandlers() {
+  document.querySelectorAll('#nav-order-list li').forEach(li => {
+    li.addEventListener('dragstart', e => { dragSrc = li; li.classList.add('dragging'); });
+    li.addEventListener('dragend', () => { li.classList.remove('dragging'); dragSrc = null; });
+    li.addEventListener('dragover', e => { e.preventDefault(); });
+    li.addEventListener('drop', e => {
+      e.preventDefault();
+      if (dragSrc && dragSrc !== li) {
+        const parent = li.parentNode;
+        const rect = li.getBoundingClientRect();
+        const after = e.clientY > rect.top + rect.height / 2;
+        parent.insertBefore(dragSrc, after ? li.nextSibling : li);
+      }
+    });
+  });
+}
+
+function syncFromDOM() {
+  // hidden
+  const hidden = [];
+  document.querySelectorAll("#sb-sections input[type=checkbox]").forEach(cb => {
+    if (!cb.checked) hidden.push(cb.dataset.secId);
+  });
+  prefs.hidden = hidden;
+  // categories
+  const cats = [];
+  document.querySelectorAll("#sb-cats .sb-cat").forEach(node => {
+    const idx = node.dataset.idx;
+    const name = node.querySelector(`[data-cat-name="${idx}"]`).value.trim() || "Без названия";
+    const items = [];
+    node.querySelectorAll(`[data-cat-item="${idx}"]`).forEach(cb => {
+      if (cb.checked) items.push(cb.value);
+    });
+    cats.push({name, items});
+  });
+  prefs.custom_categories = cats;
+  // order
+  const order = [];
+  document.querySelectorAll("#nav-order-list li").forEach(li => {
+    if (li.dataset.id) order.push(li.dataset.id);
+  });
+  prefs.order = order.length ? order : null;
+}
+
+async function savePrefs() {
+  syncFromDOM();
+  const payload = {
+    hidden: prefs.hidden || [],
+    collapsed: prefs.collapsed || [],
+    custom_categories: prefs.custom_categories || [],
+    order: prefs.order || null,
+  };
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    // sync localStorage как кэш для быстрого старта
+    localStorage.setItem(PREFS_KEY, JSON.stringify(payload));
+    showToast("Сохранено");
+    setTimeout(() => location.reload(), 600);
+  } catch (err) {
+    console.warn("save sidebar prefs failed", err);
+    // fallback: хотя бы localStorage
+    localStorage.setItem(PREFS_KEY, JSON.stringify(payload));
+    showToast("Ошибка сохранения на сервере. Сохранено локально.", true);
+  }
+}
+
+async function resetPrefs() {
+  if (!confirm("Сбросить все настройки sidebar?")) return;
+  const empty = {hidden: [], collapsed: [], custom_categories: [], order: null};
+  try {
+    await fetch(API_URL, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      credentials: "same-origin",
+      body: JSON.stringify(empty),
+    });
+  } catch (e) { console.warn("reset sidebar prefs failed", e); }
+  localStorage.removeItem(PREFS_KEY);
+  location.reload();
+}
+
+async function bootstrap() {
+  // 1) показываем локальные сразу (быстрый старт)
+  renderSections();
+  renderCats();
+  renderOrder();
+  // 2) тянем с сервера
+  try {
+    const res = await fetch(API_URL, {credentials: "same-origin"});
+    if (res.status === 401) {
+      showToast("Не авторизован — настройки сохраняются только локально.", true);
+      return;
+    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const server = normalizePrefs(await res.json());
+    prefs = server;
+    // обновим кэш
+    localStorage.setItem(PREFS_KEY, JSON.stringify(server));
+    renderSections();
+    renderCats();
+    renderOrder();
+  } catch (err) {
+    console.warn("load sidebar prefs failed, using localStorage fallback", err);
+  }
+}
+
+bootstrap();
+</script>
+{% endblock %}
