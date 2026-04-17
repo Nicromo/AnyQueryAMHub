@@ -12,10 +12,12 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ", "")
 QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
 
 
-def _chat_sync(system: str, user: str, max_tokens: int = 3000) -> str:
+def _chat_sync(system: str, user: str, max_tokens: int = 3000, user_groq_key: str = "") -> str:
     """Синхронный запрос к AI (Groq → Qwen fallback)."""
     # Попробовать Groq
-    if GROQ_API_KEY:
+    # Per-user key overrides global
+    groq_key = user_groq_key or GROQ_API_KEY
+    if groq_key:
         import httpx
         try:
             with httpx.Client(timeout=60) as client:
@@ -25,7 +27,7 @@ def _chat_sync(system: str, user: str, max_tokens: int = 3000) -> str:
                         {"role": "system", "content": system},
                         {"role": "user", "content": user}
                     ], "max_tokens": max_tokens, "temperature": 0.1},
-                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                 )
             if resp.status_code == 200:
                 return resp.json()["choices"][0]["message"]["content"].strip()
