@@ -1,22 +1,40 @@
-// extension.jsx — Chrome extension popup redesign
+// extension.jsx — Chrome extension popup preview (реальные данные из window.*)
 
-function ExtensionPopup({ state = "connected" }) {
-  // state: "connected" | "running" | "error" | "empty"
-  const W = 380;
+function ExtensionPopup({ state = "empty" }) {
+  // Реальные данные из window.*
+  const S    = (typeof window !== "undefined" && window.__SIDEBAR_STATS) || {};
+  const U    = (typeof window !== "undefined" && window.__CURRENT_USER)  || {};
+  const HUB  = (typeof window !== "undefined" && window.__HUB_URL)       || window.location.origin;
+  const EXT  = (typeof window !== "undefined" && window.__EXTENSIONS && window.__EXTENSIONS[0]) || {};
+  const version = EXT.version || "—";
+
+  // Авто-определяем state: если есть данные — connected, иначе empty
+  const autoState = (S.clientsTotal > 0) ? "connected" : state;
+
   const statusMap = {
-    connected: { tone: "ok",     title: "Подключено", sub: "синхр. 2 мин назад · 14 клиентов обновлено" },
-    running:   { tone: "signal", title: "Синхронизация…", sub: "этап 3/5 · задачи → AM Hub" },
-    error:     { tone: "critical", title: "Ошибка авторизации", sub: "Merchrules вернул 401" },
-    empty:     { tone: "neutral", title: "Не настроено", sub: "заполните поля ниже" },
-  }[state];
+    connected: { tone: "ok",       title: "Подключено",         sub: `${U.name || U.email || "—"} · AM Hub` },
+    running:   { tone: "signal",   title: "Синхронизация…",     sub: "обновление данных" },
+    error:     { tone: "critical", title: "Ошибка подключения", sub: "проверьте токен в настройках" },
+    empty:     { tone: "neutral",  title: "Не настроено",       sub: "заполните поля ниже для подключения" },
+  }[autoState] || { tone: "neutral", title: "—", sub: "—" };
 
-  const color = statusMap.tone === "ok" ? "var(--ok)" :
-                statusMap.tone === "signal" ? "var(--signal)" :
-                statusMap.tone === "critical" ? "var(--critical)" : "var(--ink-5)";
+  const color = {
+    ok:       "var(--ok)",
+    signal:   "var(--signal)",
+    critical: "var(--critical)",
+    neutral:  "var(--ink-5)",
+  }[statusMap.tone] || "var(--ink-5)";
+
+  // Реальные KPI из sidebar_stats
+  const stats = [
+    { l: "клиенты",  v: S.clientsTotal  || 0 },
+    { l: "задачи",   v: S.tasksActive   || 0 },
+    { l: "встречи",  v: S.meetingsUpcoming || 0 },
+  ];
 
   return (
     <div style={{
-      width: W, background: "var(--ink-1)", color: "var(--ink-8)",
+      width: 360, background: "var(--ink-1)", color: "var(--ink-8)",
       fontFamily: "var(--f-display)", fontSize: 13,
       border: "1px solid var(--line)", borderRadius: 8,
       overflow: "hidden",
@@ -36,20 +54,20 @@ function ExtensionPopup({ state = "connected" }) {
           fontFamily: "var(--f-mono)", fontWeight: 700, fontSize: 13, letterSpacing: -0.5,
         }}>A</div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>AM Hub · Sync</div>
+          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>AM Hub</div>
           <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            merchrules → hub
+            Sync · Checkup · Tokens
           </div>
         </div>
-        <button style={{ background: "transparent", border: 0, color: "var(--ink-6)", cursor: "pointer" }}>
-          <I.gear size={14}/>
-        </button>
+        <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          v {version}
+        </div>
       </div>
 
       {/* status card */}
       <div style={{
         margin: 12,
-        padding: "14px 14px",
+        padding: "12px 14px",
         background: "var(--ink-2)",
         border: "1px solid var(--line)",
         borderLeft: `2px solid ${color}`,
@@ -57,25 +75,27 @@ function ExtensionPopup({ state = "connected" }) {
         display: "flex", alignItems: "center", gap: 12,
       }}>
         <div style={{
-          width: 32, height: 32, borderRadius: 999,
+          width: 30, height: 30, borderRadius: 999, flexShrink: 0,
           background: `color-mix(in oklch, ${color} 12%, transparent)`,
           border: `1px solid color-mix(in oklch, ${color} 30%, transparent)`,
           display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0, color,
+          color,
         }}>
-          {state === "running" ? <I.refresh size={16} style={{ animation: "spin 1.2s linear infinite" }}/> :
-           state === "error"   ? <I.alert size={16}/> :
-           state === "empty"   ? <I.puzzle size={16}/> :
-                                 <I.circle_check size={16}/>}
+          {autoState === "running" ? <I.refresh size={15}/> :
+           autoState === "error"   ? <I.alert size={15}/> :
+           autoState === "empty"   ? <I.puzzle size={15}/> :
+                                     <I.circle_check size={15}/>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-9)" }}>{statusMap.title}</div>
-          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 2 }}>{statusMap.sub}</div>
+          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {statusMap.sub}
+          </div>
         </div>
       </div>
 
-      {/* stats row */}
-      {state === "connected" && (
+      {/* stats row — только если есть реальные данные */}
+      {autoState === "connected" && S.clientsTotal > 0 && (
         <div style={{
           margin: "0 12px 12px",
           padding: "10px 12px",
@@ -83,101 +103,74 @@ function ExtensionPopup({ state = "connected" }) {
           borderRadius: 4,
           display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6,
         }}>
-          {[
-            { l: "клиенты", v: 14, d: "+2" },
-            { l: "задачи",  v: 37, d: "+5" },
-            { l: "события", v: 128, d: "+14" },
-          ].map((s, i) => (
+          {stats.map((s, i) => (
             <div key={i} style={{
               textAlign: "center",
               borderRight: i === 2 ? "none" : "1px solid var(--line-soft)",
             }}>
               <div style={{ fontSize: 20, fontWeight: 500, color: "var(--ink-9)", letterSpacing: "-0.02em", fontFamily: "var(--f-mono)" }}>{s.v}</div>
               <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.l}</div>
-              <div className="mono" style={{ fontSize: 10, color: "var(--ok)", marginTop: 1 }}>{s.d}</div>
             </div>
           ))}
         </div>
       )}
 
-      {/* fields */}
+      {/* settings fields — без захардкоженных данных */}
       <div style={{ padding: "0 14px 14px" }}>
         <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: 4, marginBottom: 10 }}>
           ── учётные данные
         </div>
 
         {[
-          { label: "Merchrules · логин", val: "anna.sokolova@company.ru", type: "text", icon: "link" },
-          { label: "Merchrules · пароль", val: "••••••••••••", type: "password", icon: "lock" },
-          { label: "AM Hub · URL",  val: "hub.amteam.ops",  type: "text", icon: "link" },
-          { label: "AM Hub · токен", val: "••••••• j7f2", type: "password", icon: "lock" },
+          { label: "Merchrules · логин", placeholder: "manager@company.ru",   type: "text",     icon: "link" },
+          { label: "Merchrules · пароль", placeholder: "пароль",              type: "password", icon: "lock" },
+          { label: "AM Hub · URL",        placeholder: HUB,                   type: "text",     icon: "link" },
+          { label: "AM Hub · токен",      placeholder: "токен из кабинета",   type: "password", icon: "lock" },
         ].map((f, i) => (
           <div key={i} style={{ marginBottom: 8 }}>
             <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>{f.label}</div>
             <div style={{
               display: "flex", alignItems: "center", gap: 8,
               padding: "8px 10px",
-              background: "var(--ink-2)", border: "1px solid var(--line)",
+              background: "var(--ink-1)", border: "1px solid var(--line)",
               borderRadius: 4,
             }}>
               {React.createElement(I[f.icon], { size: 12, stroke: "var(--ink-5)" })}
-              <input type={f.type} defaultValue={f.val} style={{
-                flex: 1, background: "transparent", border: 0, color: "var(--ink-8)",
+              <input type={f.type} placeholder={f.placeholder} disabled style={{
+                flex: 1, background: "transparent", border: 0,
+                color: "var(--ink-5)",
                 fontFamily: "var(--f-mono)", fontSize: 12, outline: "none",
+                cursor: "default",
               }}/>
             </div>
           </div>
         ))}
 
-        <Btn kind="primary" full size="m" style={{ marginTop: 6 }}
-             icon={<I.refresh size={14}/>}>
-          Сохранить и синхронизировать
-        </Btn>
-        <Btn kind="ghost" full size="m" style={{ marginTop: 6 }}
-             iconRight={<I.arrow_r size={13}/>}>
-          Открыть AM Hub
-        </Btn>
-      </div>
-
-      {/* log feed */}
-      <div style={{
-        padding: "10px 14px",
-        background: "var(--ink-0)",
-        borderTop: "1px solid var(--line-soft)",
-      }}>
-        <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>
-          последние события
+        <div style={{ padding: "8px 10px", background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 11.5, color: "var(--ink-6)", lineHeight: 1.5, marginBottom: 8 }}>
+          Заполните поля в самом расширении (иконка в тулбаре Chrome).
+          URL и токен — скопируйте из блока справа.
         </div>
-        {[
-          { t: "12:44", msg: "merchrules: 14 клиентов синхр.", tone: "ok" },
-          { t: "12:44", msg: "hub: 37 задач обновлено", tone: "ok" },
-          { t: "12:29", msg: "merchrules: delta poll", tone: "neutral" },
-          { t: "09:15", msg: "hub: токен обновлён", tone: "neutral" },
-        ].map((l, i) => (
-          <div key={i} className="mono" style={{
-            display: "grid", gridTemplateColumns: "48px 1fr",
-            fontSize: 10.5, color: "var(--ink-6)",
-            padding: "2px 0",
-          }}>
-            <span style={{ color: "var(--ink-5)" }}>{l.t}</span>
-            <span style={{ color: l.tone === "ok" ? "var(--ok)" : "var(--ink-7)" }}>
-              {l.tone === "ok" ? "✓ " : "· "}{l.msg}
-            </span>
-          </div>
-        ))}
+
+        <Btn kind="ghost" full size="m" onClick={() => window.open("/static/amhub-ext.zip")}
+             icon={<I.download size={14}/>}>
+          Скачать расширение (.zip)
+        </Btn>
       </div>
 
       {/* footer */}
       <div style={{
         padding: "8px 14px",
+        background: "var(--ink-0)",
         borderTop: "1px solid var(--line-soft)",
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
-        <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>v 2.0 · build 224</span>
-        <span className="mono" style={{ fontSize: 9.5, color: "var(--ok)" }}>● online</span>
+        <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          am hub ext · v {version}
+        </span>
+        <span className="mono" style={{ fontSize: 9.5, color: autoState === "connected" ? "var(--ok)" : "var(--ink-5)" }}>
+          ● {autoState === "connected" ? "online" : "offline"}
+        </span>
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

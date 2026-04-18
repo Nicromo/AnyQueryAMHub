@@ -19,8 +19,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 AIRTABLE_TOKEN        = os.getenv("AIRTABLE_TOKEN", "")
-AIRTABLE_BASE_ID      = os.getenv("AIRTABLE_BASE_ID", "")
-AIRTABLE_TABLE_ID     = os.getenv("AIRTABLE_TABLE_ID", "")
+# Defaults hardcoded — user's specific base/tables, no Railway var needed
+AIRTABLE_BASE_ID      = os.getenv("AIRTABLE_BASE_ID", "appEAS1rPKpevoIel")
+AIRTABLE_TABLE_ID     = os.getenv("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn")
 AIRTABLE_QBR_TABLE_ID = os.getenv("AIRTABLE_QBR_TABLE_ID", "tblqQbChhRYoZoxWu")
 AIRTABLE_VIEW_ID      = os.getenv("AIRTABLE_VIEW_ID", "")
 
@@ -579,30 +580,72 @@ async def push_qbr_to_airtable(
     quarter: str,
     summary: str,
     achievements: list,
+    date=None,
+    manager_email: str = "",
     token: str = "",
 ) -> bool:
     """
-    Создать/обновить QBR запись в Airtable QBR-таблице.
+    Создать/обновить QBR запись в Airtable QBR-таблице (tblqQbChhRYoZoxWu).
+
+    Сначала ищем существующую запись по client_name + quarter.
+    Если есть — PATCH, если нет — POST.
     """
-    qbr_table = os.getenv("AIRTABLE_QBR_TABLE_ID", "tblqQbChhRYoZoxWu")
+    qbr_table = AIRTABLE_QBR_TABLE_ID or "tblqQbChhRYoZoxWu"
     use_token = token or AIRTABLE_TOKEN
     if not use_token or not AIRTABLE_BASE_ID or not qbr_table:
+        logger.warning("push_qbr_to_airtable: missing Airtable config")
         return False
     try:
+        fields: dict = {}
+        if client_name:    fields["Проект"]   = client_name
+        if quarter:        fields["Квартал"]  = quarter
+        if summary:        fields["Итоги"]    = summary
+        if achievements:   fields["Достижения"] = "\n".join(achievements)
+        if manager_email:  fields["Менеджер"] = manager_email
+        # date → write into the month column matching the quarter
+        if date:
+            try:
+                d = date if hasattr(date, "strftime") else datetime.fromisoformat(str(date)[:10])
+                # Column name format used in Airtable: "мар.26", "апр.26" etc.
+                MONTH_RU = ["янв", "фев", "мар", "апр", "май", "июн",
+                            "июл", "авг", "сен", "окт", "ноя", "дек"]
+                col = f"{MONTH_RU[d.month - 1]}.{str(d.year)[2:]}"
+                fields[col] = d.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            except Exception as e:
+                logger.warning("push_qbr_to_airtable: could not format date: %s", e)
+
         async with httpx.AsyncClient(timeout=15) as hx:
-            fields = {
-                "Клиент": client_name,
-                "Квартал": quarter,
-                "Итоги": summary,
-                "Достижения": "\n".join(achievements) if achievements else "",
-            }
-            resp = await hx.post(
+            # Try to find existing record
+            search = await hx.get(
                 f"{BASE_URL}/{AIRTABLE_BASE_ID}/{qbr_table}",
                 headers=_headers(use_token),
-                json={"fields": fields},
-                timeout=15,
+                params={"filterByFormula": f'AND({{Проект}}="{client_name}", {{Квартал}}="{quarter}")', "pageSize": 1},
+                timeout=10,
             )
-            return resp.status_code in (200, 201)
+            existing_id = None
+            if search.status_code == 200:
+                recs = search.json().get("records", [])
+                if recs:
+                    existing_id = recs[0]["id"]
+
+            if existing_id:
+                resp = await hx.patch(
+                    f"{BASE_URL}/{AIRTABLE_BASE_ID}/{qbr_table}/{existing_id}",
+                    headers=_headers(use_token),
+                    json={"fields": fields},
+                    timeout=15,
+                )
+            else:
+                resp = await hx.post(
+                    f"{BASE_URL}/{AIRTABLE_BASE_ID}/{qbr_table}",
+                    headers=_headers(use_token),
+                    json={"fields": fields},
+                    timeout=15,
+                )
+            ok = resp.status_code in (200, 201)
+            if not ok:
+                logger.warning("push_qbr_to_airtable: %d %s", resp.status_code, resp.text[:200])
+            return ok
     except Exception as e:
         logger.error("push_qbr_to_airtable error: %s", e)
     return False

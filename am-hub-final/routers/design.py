@@ -523,6 +523,10 @@ async def qbr_create(
         except Exception:
             pass
 
+    # Fetch client for name lookup + Airtable record ID
+    client_obj = db.query(Client).filter(Client.id == client_id).first()
+    client_name = client_obj.name if client_obj else str(client_id)
+
     if existing:
         if date_val:
             existing.date = date_val
@@ -531,23 +535,40 @@ async def qbr_create(
         if body.get("summary"):
             existing.summary = body["summary"]
         db.commit()
-        return {"ok": True, "id": existing.id, "action": "updated"}
+        qbr_obj = existing
+        action = "updated"
     else:
         year = int(quarter.split("-")[0]) if "-" in quarter else datetime.utcnow().year
-        qbr = QBR(
+        qbr_obj = QBR(
             client_id=client_id,
             quarter=quarter,
             year=year,
             date=date_val,
             status=body.get("status", "scheduled"),
             summary=body.get("summary"),
+            manager_email=body.get("manager_email") or (client_obj.manager_email if client_obj else None),
         )
-        if hasattr(qbr, "manager_email") and body.get("manager_email"):
-            qbr.manager_email = body["manager_email"]
-        db.add(qbr)
+        db.add(qbr_obj)
         db.commit()
-        db.refresh(qbr)
-        return {"ok": True, "id": qbr.id, "action": "created"}
+        db.refresh(qbr_obj)
+        action = "created"
+
+    # Push to Airtable QBR table asynchronously (fire-and-forget)
+    try:
+        from airtable_sync import push_qbr_to_airtable
+        import asyncio
+        asyncio.create_task(push_qbr_to_airtable(
+            client_name=client_name,
+            quarter=quarter,
+            summary=qbr_obj.summary or "",
+            achievements=qbr_obj.achievements or [],
+            date=date_val,
+            manager_email=qbr_obj.manager_email or "",
+        ))
+    except Exception:
+        pass  # Non-blocking — don't fail the request if Airtable is unavailable
+
+    return {"ok": True, "id": qbr_obj.id, "action": action}
 
 
 @router.post("/api/qbr/sync-airtable")
