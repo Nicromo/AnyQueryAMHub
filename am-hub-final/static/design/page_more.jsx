@@ -675,36 +675,115 @@ function PageInternal() {
 
 // ── Extension install page ────────────────────────────────
 function PageExtInstall() {
+  const EXTS   = (typeof window !== "undefined" && window.__EXTENSIONS) || [];
+  const HUB    = (typeof window !== "undefined" && window.__HUB_URL)    || window.location.origin;
+
+  // Простой clipboard helper с fallback
+  function _copy(text, label) {
+    try {
+      navigator.clipboard.writeText(text);
+      alert((label || "Скопировано") + ": " + text);
+    } catch (e) {
+      prompt("Скопируйте вручную:", text);
+    }
+  }
+
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","расширение"]} title="Расширение браузера"
-        subtitle="Синхронизация Merchrules → AM Hub в один клик"/>
-      <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 420px", gap: 28 }}>
+      <TopBar breadcrumbs={["am hub","расширение"]} title="Расширения браузера"
+        subtitle={`${EXTS.length} ${EXTS.length === 1 ? "расширение" : "расширения"} · скачать, установить, настроить`}/>
+      <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 380px", gap: 28 }}>
+
+        {/* ── LEFT: карточки расширений ───────────────────── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <Card title="Установка · 3 шага">
+
+          {EXTS.map((ext, i) => (
+            <Card
+              key={ext.id}
+              title={<span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                {ext.name}
+                {ext.primary && <Badge tone="signal" dot>основное</Badge>}
+                {ext.auto_update && <Badge tone="info">auto-update</Badge>}
+              </span>}
+              action={<span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>v {ext.version}</span>}
+            >
+              <div style={{ fontSize: 13, color: "var(--ink-7)", lineHeight: 1.5, marginBottom: 14 }}>
+                {ext.description}
+              </div>
+
+              {/* download кнопки */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                {ext.crx_url && (
+                  <a href={ext.crx_url} download style={{ textDecoration: "none" }}>
+                    <Btn kind="primary" size="m" icon={<I.download size={14}/>}>
+                      Скачать .crx ({ext.crx_size_kb} KB)
+                    </Btn>
+                  </a>
+                )}
+                {ext.zip_url && (
+                  <a href={ext.zip_url} download style={{ textDecoration: "none" }}>
+                    <Btn kind={ext.crx_url ? "ghost" : "primary"} size="m" icon={<I.download size={14}/>}>
+                      Скачать .zip ({ext.zip_size_kb} KB)
+                    </Btn>
+                  </a>
+                )}
+              </div>
+
+              {ext.extension_id && (
+                <div style={{ marginTop: 14, padding: 10, background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4, display: "flex", alignItems: "center", gap: 10 }}>
+                  <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>id</span>
+                  <code className="mono" style={{ fontSize: 11, color: "var(--ink-7)", flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{ext.extension_id}</code>
+                  <button onClick={() => _copy(ext.extension_id, "Extension ID")}
+                    style={{ background: "var(--ink-3)", border: "1px solid var(--line)", borderRadius: 3, padding: "3px 8px", cursor: "pointer", color: "var(--ink-7)", fontSize: 11 }}>
+                    <I.copy size={11}/>
+                  </button>
+                </div>
+              )}
+            </Card>
+          ))}
+
+          {EXTS.length === 0 && (
+            <Card title="Нет расширений">
+              <div style={{ padding: "20px 0", color: "var(--ink-6)", fontSize: 13 }}>
+                Метаданные расширений не загружены.
+              </div>
+            </Card>
+          )}
+
+          {/* Install steps */}
+          <Card title="Как установить · .crx (рекомендуется)">
             {[
-              { s: "01", t: "Скачать архив", sub: "amhub-sync.zip · 42 KB", a: "Скачать" },
-              { s: "02", t: "Открыть chrome://extensions и включить режим разработчика", sub: "в правом верхнем углу" },
-              { s: "03", t: "Load unpacked → выбрать распакованную папку", sub: "расширение появится в тулбаре" },
-            ].map((step,i)=>(
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "48px 1fr 100px", gap: 14, padding: "16px 0", borderBottom: i===2?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
+              { s: "01", t: "Скачать .crx файл расширения", sub: "кнопка выше" },
+              { s: "02", t: "Открыть chrome://extensions", sub: "включить Developer mode в правом верхнем углу" },
+              { s: "03", t: "Перетащить .crx на страницу chrome://extensions", sub: "подтвердить установку" },
+              { s: "04", t: "Открыть popup и настроить поля", sub: "URL и токен — ниже в боковой панели" },
+            ].map((step, i, a) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: 14, padding: "14px 0", borderBottom: i === a.length - 1 ? "none" : "1px solid var(--line-soft)", alignItems: "flex-start" }}>
                 <span className="mono" style={{ fontSize: 22, color: "var(--signal)", fontWeight: 500 }}>{step.s}</span>
                 <div>
                   <div style={{ fontSize: 14, color: "var(--ink-9)", fontWeight: 500 }}>{step.t}</div>
                   <div className="mono" style={{ fontSize: 11, color: "var(--ink-5)", marginTop: 3 }}>{step.sub}</div>
                 </div>
-                {step.a && <Btn size="s" kind="primary" icon={<I.download size={12}/>}>{step.a}</Btn>}
               </div>
             ))}
+            <div style={{ marginTop: 12, padding: 12, background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, display: "flex", alignItems: "center", gap: 10 }}>
+              <I.link size={14} stroke="var(--signal)"/>
+              <span style={{ flex: 1, fontSize: 13, color: "var(--ink-7)" }}>Открыть <code className="mono" style={{ color: "var(--ink-9)" }}>chrome://extensions</code></span>
+              <button onClick={() => _copy("chrome://extensions", "URL")}
+                style={{ background: "var(--ink-3)", border: "1px solid var(--line)", borderRadius: 3, padding: "4px 10px", cursor: "pointer", color: "var(--ink-7)", fontSize: 11 }}>
+                скопировать
+              </button>
+            </div>
           </Card>
 
-          <Card title="Что делает расширение">
+          {/* What it does */}
+          <Card title="Что делает AM Hub Sync">
             {[
-              { i: "refresh", t: "Синхронизирует клиентов и задачи каждые 15 минут" },
+              { i: "refresh", t: "Синхронизирует клиентов и задачи каждые 30 минут" },
               { i: "bell",    t: "Уведомляет при критических изменениях в Merchrules" },
-              { i: "lock",    t: "Хранит ключи локально, не отправляет на сервер" },
-              { i: "spark",   t: "Автоматически создаёт задачи по правилам" },
-            ].map((r,i)=>{const Ic = I[r.i]; return (
+              { i: "lock",    t: "Токены хранятся в chrome.storage.local, не на сервере" },
+              { i: "spark",   t: "Auto-update через git — установили один раз, обновления сами" },
+            ].map((r,i)=>{const Ic = I[r.i] || I.circle_check; return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i===3?"none":"1px solid var(--line-soft)" }}>
                 <div style={{ width: 28, height: 28, borderRadius: 4, background: "var(--ink-1)", border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--signal)" }}><Ic size={14}/></div>
                 <span style={{ fontSize: 13, color: "var(--ink-8)" }}>{r.t}</span>
@@ -713,10 +792,48 @@ function PageExtInstall() {
           </Card>
         </div>
 
-        <div>
-          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>превью popup</div>
-          <ExtensionPopup state="connected"/>
+        {/* ── RIGHT: настройки для вставки + preview ──────── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+          <Card title="Настройки для popup" action={<span className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>вставить в поля расширения</span>}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+              <div>
+                <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>AM Hub · URL</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input readOnly value={HUB || window.location.origin}
+                    style={{ flex: 1, padding: "8px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontFamily: "var(--f-mono)", fontSize: 12, outline: "none" }}/>
+                  <Btn size="s" kind="ghost" icon={<I.copy size={12}/>} onClick={() => _copy(HUB || window.location.origin, "Hub URL")}>копия</Btn>
+                </div>
+              </div>
+
+              <div>
+                <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>AM Hub · токен</div>
+                <div style={{ padding: 10, background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 12, color: "var(--ink-7)", lineHeight: 1.5 }}>
+                  Токен берётся из cookie <code className="mono" style={{ color: "var(--ink-9)" }}>auth_token</code> этого браузера
+                  при использовании Hub-API. Для расширения — сгенерируйте отдельный API-токен в
+                  разделе <span style={{ color: "var(--signal)" }}>Мой кабинет → API</span> (скоро).
+                </div>
+              </div>
+
+              <div>
+                <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Merchrules</div>
+                <div style={{ padding: 10, background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 12, color: "var(--ink-7)", lineHeight: 1.5 }}>
+                  Логин и пароль Merchrules — свои индивидуальные. Расширение хранит их локально
+                  и использует только для синхронизации с вашим AM Hub.
+                </div>
+              </div>
+
+            </div>
+          </Card>
+
+          <Card title="Живой превью popup">
+            {typeof window !== "undefined" && window.ExtensionPopup
+              ? <ExtensionPopup state="connected"/>
+              : <div style={{ padding: 20, color: "var(--ink-6)", fontSize: 12, textAlign: "center" }}>превью недоступно</div>}
+          </Card>
         </div>
+
       </div>
     </div>
   );

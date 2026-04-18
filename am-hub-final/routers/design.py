@@ -7,7 +7,10 @@ URL-схема: /design/{page_id}
 Один шаблон design/app.html рендерит шелл (sidebar + topbar)
 и монтирует нужный PageX-компонент по active_page.
 """
+import json
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
@@ -22,6 +25,74 @@ from models import (
     AuditLog, UserClientAssignment,
 )
 import design_mappers as dm
+
+_EXT_BASE = Path(__file__).resolve().parent.parent / "static"
+
+
+def _read_manifest_version(manifest_path: Path) -> str:
+    try:
+        if manifest_path.exists():
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return str(data.get("version", "—"))
+    except Exception:
+        pass
+    return "—"
+
+
+def _file_size_kb(p: Path) -> int:
+    try:
+        return round(p.stat().st_size / 1024) if p.exists() else 0
+    except Exception:
+        return 0
+
+
+def _list_extensions() -> List[dict]:
+    """Метаданные всех Chrome-расширений для страницы установки."""
+    sync_dir = _EXT_BASE / "extensions" / "amhub-sync"
+    hub_ext_dir = _EXT_BASE / "amhub-ext"
+    checkup_dir = _EXT_BASE / "checkup-ext"
+
+    return [
+        {
+            "id": "amhub-sync",
+            "name": "AM Hub · Sync",
+            "description": "Синхронизация Merchrules → AM Hub. Автообновление через GitHub.",
+            "version": _read_manifest_version(_EXT_BASE.parent.parent / "extension" / "manifest.json"),
+            "extension_id": "gcgjcpgbbliblmlhmfpcffnkoehibiep",
+            "crx_url":       "/static/extensions/amhub-sync/amhub-sync.crx",
+            "crx_size_kb":   _file_size_kb(sync_dir / "amhub-sync.crx"),
+            "zip_url":       "/static/extensions/amhub-sync/amhub-sync.zip",
+            "zip_size_kb":   _file_size_kb(sync_dir / "amhub-sync.zip"),
+            "auto_update":   True,
+            "primary":       True,
+        },
+        {
+            "id": "amhub-ext",
+            "name": "AM Hub · Ext",
+            "description": "Многофункциональное расширение: Sync · Checkup · Tokens.",
+            "version": _read_manifest_version(hub_ext_dir / "manifest.json"),
+            "extension_id": None,
+            "crx_url":     None,
+            "crx_size_kb": 0,
+            "zip_url":     "/static/amhub-ext.zip",
+            "zip_size_kb": _file_size_kb(_EXT_BASE / "amhub-ext.zip"),
+            "auto_update": False,
+            "primary":     False,
+        },
+        {
+            "id": "checkup-ext",
+            "name": "Search Quality Checkup",
+            "description": "Автоматический чекап качества поиска Diginetica.",
+            "version": _read_manifest_version(checkup_dir / "manifest.json"),
+            "extension_id": None,
+            "crx_url":     None,
+            "crx_size_kb": 0,
+            "zip_url":     "/static/checkup-ext.zip",
+            "zip_size_kb": _file_size_kb(_EXT_BASE / "checkup-ext.zip"),
+            "auto_update": False,
+            "primary":     False,
+        },
+    ]
 
 router = APIRouter(prefix="/design", tags=["design"])
 templates = Jinja2Templates(directory="templates")
@@ -237,4 +308,6 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "sidebar_stats":   sidebar_stats,
         "current_client":  None,  # подставится в design_client_detail
         "pagination":      pagination,
+        "extensions":      _list_extensions(),
+        "hub_url":         os.getenv("APP_URL") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "",
     }
