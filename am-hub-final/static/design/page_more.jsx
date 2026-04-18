@@ -750,13 +750,15 @@ function PageExtInstall() {
             </Card>
           )}
 
-          {/* Install steps */}
-          <Card title="Как установить · .crx (рекомендуется)">
+          {/* Install steps — Load unpacked из .zip (Chrome блокирует drag-drop .crx
+              без подписи Web Store, поэтому единственный надёжный путь для
+              внутреннего расширения — Developer mode + Load unpacked) */}
+          <Card title="Как установить · 4 шага">
             {[
-              { s: "01", t: "Скачать .crx файл расширения", sub: "кнопка выше" },
-              { s: "02", t: "Открыть chrome://extensions", sub: "включить Developer mode в правом верхнем углу" },
-              { s: "03", t: "Перетащить .crx на страницу chrome://extensions", sub: "подтвердить установку" },
-              { s: "04", t: "Открыть popup и настроить поля", sub: "URL и токен — ниже в боковой панели" },
+              { s: "01", t: "Скачать .zip расширения", sub: "кнопка выше" },
+              { s: "02", t: "Распаковать архив в любую папку", sub: "не удаляйте её после установки" },
+              { s: "03", t: "Открыть chrome://extensions и включить Developer mode", sub: "тумблер в правом верхнем углу" },
+              { s: "04", t: "Load unpacked → выбрать распакованную папку", sub: "иконка появится в тулбаре" },
             ].map((step, i, a) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: 14, padding: "14px 0", borderBottom: i === a.length - 1 ? "none" : "1px solid var(--line-soft)", alignItems: "flex-start" }}>
                 <span className="mono" style={{ fontSize: 22, color: "var(--signal)", fontWeight: 500 }}>{step.s}</span>
@@ -776,13 +778,13 @@ function PageExtInstall() {
             </div>
           </Card>
 
-          {/* What it does */}
-          <Card title="Что делает AM Hub Sync">
+          {/* Что внутри — модули единого расширения */}
+          <Card title="Модули внутри AM Hub">
             {[
-              { i: "refresh", t: "Синхронизирует клиентов и задачи каждые 30 минут" },
-              { i: "bell",    t: "Уведомляет при критических изменениях в Merchrules" },
-              { i: "lock",    t: "Токены хранятся в chrome.storage.local, не на сервере" },
-              { i: "spark",   t: "Auto-update через git — установили один раз, обновления сами" },
+              { i: "refresh", t: "Sync — Merchrules → AM Hub, каждые 30 минут и по кнопке" },
+              { i: "check",   t: "Checkup — автоматический анализ качества поиска Diginetica" },
+              { i: "lock",    t: "Tokens — перехват сессий Ktalk и T-Bank Time для API" },
+              { i: "bell",    t: "Уведомления при критических изменениях" },
             ].map((r,i)=>{const Ic = I[r.i] || I.circle_check; return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i===3?"none":"1px solid var(--line-soft)" }}>
                 <div style={{ width: 28, height: 28, borderRadius: 4, background: "var(--ink-1)", border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--signal)" }}><Ic size={14}/></div>

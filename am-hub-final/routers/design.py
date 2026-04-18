@@ -47,50 +47,32 @@ def _file_size_kb(p: Path) -> int:
 
 
 def _list_extensions() -> List[dict]:
-    """Метаданные всех Chrome-расширений для страницы установки."""
-    sync_dir = _EXT_BASE / "extensions" / "amhub-sync"
-    hub_ext_dir = _EXT_BASE / "amhub-ext"
-    checkup_dir = _EXT_BASE / "checkup-ext"
+    """Метаданные единого Chrome-расширения AM Hub.
 
+    Внутри одного расширения три модуля:
+      • Sync — Merchrules → AM Hub (каждые 30 мин + по кнопке)
+      • Checkup — качество поиска Diginetica (ручной запуск)
+      • Tokens — перехват сессий time.tbank.ru и tbank.ktalk.ru
+    """
+    hub_ext_dir = _EXT_BASE / "amhub-ext"
     return [
         {
-            "id": "amhub-sync",
-            "name": "AM Hub · Sync",
-            "description": "Синхронизация Merchrules → AM Hub. Автообновление через GitHub.",
-            "version": _read_manifest_version(_EXT_BASE.parent.parent / "extension" / "manifest.json"),
-            "extension_id": "gcgjcpgbbliblmlhmfpcffnkoehibiep",
-            "crx_url":       "/static/extensions/amhub-sync/amhub-sync.crx",
-            "crx_size_kb":   _file_size_kb(sync_dir / "amhub-sync.crx"),
-            "zip_url":       "/static/extensions/amhub-sync/amhub-sync.zip",
-            "zip_size_kb":   _file_size_kb(sync_dir / "amhub-sync.zip"),
-            "auto_update":   True,
-            "primary":       True,
-        },
-        {
-            "id": "amhub-ext",
-            "name": "AM Hub · Ext",
-            "description": "Многофункциональное расширение: Sync · Checkup · Tokens.",
+            "id": "amhub",
+            "name": "AM Hub",
+            "description": (
+                "Единое расширение для менеджеров: синхронизация клиентов/задач "
+                "из Merchrules, чекап качества поиска Diginetica, перехват токенов "
+                "встреч и таймтрекинга."
+            ),
             "version": _read_manifest_version(hub_ext_dir / "manifest.json"),
-            "extension_id": None,
-            "crx_url":     None,
-            "crx_size_kb": 0,
             "zip_url":     "/static/amhub-ext.zip",
             "zip_size_kb": _file_size_kb(_EXT_BASE / "amhub-ext.zip"),
-            "auto_update": False,
-            "primary":     False,
-        },
-        {
-            "id": "checkup-ext",
-            "name": "Search Quality Checkup",
-            "description": "Автоматический чекап качества поиска Diginetica.",
-            "version": _read_manifest_version(checkup_dir / "manifest.json"),
-            "extension_id": None,
-            "crx_url":     None,
-            "crx_size_kb": 0,
-            "zip_url":     "/static/checkup-ext.zip",
-            "zip_size_kb": _file_size_kb(_EXT_BASE / "checkup-ext.zip"),
-            "auto_update": False,
-            "primary":     False,
+            "modules": [
+                {"icon": "refresh", "name": "Sync",    "desc": "Merchrules → AM Hub · каждые 30 мин"},
+                {"icon": "check",   "name": "Checkup", "desc": "Качество поиска Diginetica · ручной запуск"},
+                {"icon": "lock",    "name": "Tokens",  "desc": "Перехват сессий Ktalk и T-Bank Time"},
+            ],
+            "primary": True,
         },
     ]
 
