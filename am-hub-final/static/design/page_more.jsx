@@ -1372,4 +1372,279 @@ function PageAssignments() {
   );
 }
 
-Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PageAI, PageKanban, PageKPI, PageCabinet, PageTemplates, PageAuto, PageRoadmap, PageInternal, PageExtInstall, PageHelp, PageProfile, PageAssignments });
+// ── QBR Calendar ──────────────────────────────────────────
+function PageQBR() {
+  const QBR_DATA = (typeof window !== "undefined" && window.QBR_DATA) || [];
+  const [syncing, setSyncing] = React.useState(false);
+  const [syncMsg, setSyncMsg] = React.useState(null);
+  const [editQbr, setEditQbr] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+
+  // Build month columns: last 3 months + next 3 months from today
+  const today = new Date();
+  const months = [];
+  for (let i = -3; i <= 3; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
+    months.push({
+      key: d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"),
+      label: d.toLocaleString("ru-RU", { month: "short", year: "2-digit" }),
+      year: d.getFullYear(),
+      month: d.getMonth() + 1,
+    });
+  }
+  const todayYM = today.toISOString().slice(0, 7);
+
+  // Build rows grouped by manager
+  const mgrMap = {};
+  QBR_DATA.forEach(function(q) {
+    const mgr = q.manager_email || "—";
+    if (!mgrMap[mgr]) mgrMap[mgr] = {};
+    const clKey = q.client_name + ":" + q.client_id;
+    if (!mgrMap[mgr][clKey]) mgrMap[mgr][clKey] = { client_name: q.client_name, client_id: q.client_id, cells: {} };
+    if (q.date) mgrMap[mgr][clKey].cells[q.date.slice(0, 7)] = q;
+  });
+  const rows = Object.keys(mgrMap).map(function(mgr) {
+    return { manager_email: mgr, clients: Object.values(mgrMap[mgr]) };
+  });
+
+  const isOverdue = function(dateStr, status) {
+    if (!dateStr || status === "completed" || status === "cancelled") return false;
+    return new Date(dateStr) < today;
+  };
+  const statusColor = function(status, dateStr) {
+    if (isOverdue(dateStr, status)) return "var(--critical)";
+    if (status === "completed") return "var(--ok)";
+    if (status === "scheduled") return "var(--signal)";
+    return "var(--ink-5)";
+  };
+
+  const totalQbrs = QBR_DATA.length;
+  const completed = QBR_DATA.filter(function(q){ return q.status === "completed"; }).length;
+  const scheduled = QBR_DATA.filter(function(q){ return q.status === "scheduled"; }).length;
+  const overdue = QBR_DATA.filter(function(q){ return isOverdue(q.date, q.status); }).length;
+
+  const syncAirtable = async function() {
+    setSyncing(true); setSyncMsg(null);
+    try {
+      const r = await fetch("/design/api/qbr/sync-airtable", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const d = await r.json();
+      setSyncMsg(d.ok
+        ? "Синхронизировано: +" + d.created + " создано, " + d.updated + " обновлено"
+        : "Ошибка: " + (d.error || "неизвестная"));
+      if (d.ok) setTimeout(function(){ location.reload(); }, 1200);
+    } catch (e) {
+      setSyncMsg("Ошибка: " + e.message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const saveQbr = async function() {
+    if (!editQbr) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/design/api/qbr", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: editQbr.client_id,
+          quarter: editQbr.quarter,
+          date: editQbr.date,
+          status: editQbr.status || "scheduled",
+        }),
+      });
+      const d = await r.json();
+      if (d.ok) { setEditQbr(null); location.reload(); }
+      else alert("Ошибка: " + (d.detail || JSON.stringify(d)));
+    } catch (e) {
+      alert("Ошибка: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <TopBar
+        breadcrumbs={["am hub", "qbr"]}
+        title="QBR Календарь"
+        subtitle={totalQbrs + " записей · " + completed + " проведено · " + scheduled + " запланировано · " + overdue + " просрочено"}
+        actions={<>
+          <Btn kind="ghost" size="m" icon={<I.plus size={14}/>} onClick={() => {
+            const clientId = prompt("ID клиента:");
+            if (!clientId) return;
+            const qNum = Math.ceil((today.getMonth() + 1) / 3);
+            const quarter = prompt("Квартал:", today.getFullYear() + "-Q" + qNum);
+            if (!quarter) return;
+            const date = prompt("Дата QBR (YYYY-MM-DD):", today.toISOString().slice(0, 10));
+            if (!date) return;
+            setEditQbr({ client_id: parseInt(clientId, 10), client_name: "Клиент #" + clientId, quarter, date, status: "scheduled" });
+          }}>Запланировать QBR</Btn>
+          <Btn kind="primary" size="m" disabled={syncing} onClick={syncAirtable}>
+            {syncing ? "Синхронизация…" : "Синхронизировать с Airtable"}
+          </Btn>
+        </>}
+      />
+
+      {syncMsg && (
+        <div style={{
+          margin: "0 28px 14px", padding: "10px 14px", borderRadius: 6, fontSize: 12,
+          background: syncMsg.startsWith("Ошибка") ? "color-mix(in oklch, var(--critical) 12%, transparent)" : "color-mix(in oklch, var(--ok) 12%, transparent)",
+          border: "1px solid " + (syncMsg.startsWith("Ошибка") ? "color-mix(in oklch, var(--critical) 30%, transparent)" : "color-mix(in oklch, var(--ok) 30%, transparent)"),
+          color: syncMsg.startsWith("Ошибка") ? "var(--critical)" : "var(--ok)",
+        }}>{syncMsg}</div>
+      )}
+
+      <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+          <KPI label="Всего QBR" value={totalQbrs} sub="записей"/>
+          <KPI label="Проведено" value={completed} tone="ok"/>
+          <KPI label="Запланировано" value={scheduled} tone="signal"/>
+          <KPI label="Просрочено" value={overdue} tone={overdue > 0 ? "critical" : undefined}/>
+        </div>
+
+        {QBR_DATA.length === 0 ? (
+          <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
+            Нет данных QBR. Нажмите «Синхронизировать с Airtable» для импорта.
+          </div>
+        ) : (
+          <Card title="QBR Календарь · по менеджерам">
+            <div style={{ overflowX: "auto" }}>
+              {/* Header */}
+              <div style={{ display: "grid", gridTemplateColumns: "200px " + months.map(function(){ return "1fr"; }).join(" "), gap: 0,
+                background: "var(--ink-1)", borderBottom: "1px solid var(--line)", padding: "8px 0",
+                fontFamily: "var(--f-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em",
+                color: "var(--ink-5)", minWidth: 600 }}>
+                <span style={{ padding: "0 10px" }}>клиент</span>
+                {months.map(function(m) {
+                  return (
+                    <span key={m.key} style={{ padding: "0 6px", textAlign: "center", color: m.key === todayYM ? "var(--signal)" : undefined }}>
+                      {m.label}
+                    </span>
+                  );
+                })}
+              </div>
+
+              {rows.map(function(mgrRow, mi) {
+                return (
+                  <div key={mgrRow.manager_email}>
+                    <div style={{ padding: "8px 10px", background: "var(--ink-2)",
+                      borderTop: mi > 0 ? "2px solid var(--line)" : undefined,
+                      borderBottom: "1px solid var(--line-soft)",
+                      display: "flex", alignItems: "center", gap: 8 }}>
+                      <Avatar name={mgrRow.manager_email} size={20}/>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ink-8)" }}>{mgrRow.manager_email}</span>
+                      <Badge tone="info">{mgrRow.clients.length} клиентов</Badge>
+                    </div>
+
+                    {mgrRow.clients.map(function(cl, ci) {
+                      return (
+                        <div key={cl.client_name + cl.client_id}
+                          style={{ display: "grid", gridTemplateColumns: "200px " + months.map(function(){ return "1fr"; }).join(" "), gap: 0,
+                            borderBottom: ci === mgrRow.clients.length - 1 ? "none" : "1px solid var(--line-soft)",
+                            alignItems: "center", minWidth: 600 }}>
+                          <span style={{ padding: "10px 10px", fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {cl.client_name}
+                          </span>
+                          {months.map(function(m) {
+                            const q = cl.cells[m.key];
+                            if (!q) {
+                              return (
+                                <div key={m.key} style={{ padding: "8px 6px", display: "flex", justifyContent: "center" }}>
+                                  <button
+                                    onClick={() => setEditQbr({ client_id: cl.client_id, client_name: cl.client_name,
+                                      quarter: m.year + "-Q" + Math.ceil(m.month / 3),
+                                      date: m.key + "-01", status: "scheduled" })}
+                                    style={{ width: 24, height: 24, border: "1px dashed var(--line)", borderRadius: 4,
+                                      background: "transparent", cursor: "pointer", color: "var(--ink-5)", fontSize: 14 }}>+</button>
+                                </div>
+                              );
+                            }
+                            const col = statusColor(q.status, q.date);
+                            return (
+                              <div key={m.key} style={{ padding: "8px 6px", display: "flex", justifyContent: "center" }}>
+                                <button onClick={() => setEditQbr(Object.assign({}, q))}
+                                  title={q.client_name + " · " + q.quarter + " · " + q.status}
+                                  style={{ padding: "3px 7px",
+                                    background: "color-mix(in oklch, " + col + " 14%, transparent)",
+                                    border: "1px solid color-mix(in oklch, " + col + " 40%, transparent)",
+                                    borderRadius: 4, cursor: "pointer", fontSize: 10.5,
+                                    fontFamily: "var(--f-mono)", color: col, whiteSpace: "nowrap" }}>
+                                  {q.date ? q.date.slice(5) : "·"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+      </div>
+
+      {/* Edit modal */}
+      {editQbr && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex",
+          alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setEditQbr(null); }}>
+          <div style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 8,
+            padding: 24, width: 360, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: "var(--ink-9)" }}>
+                QBR · {editQbr.client_name}
+              </div>
+              <button onClick={() => setEditQbr(null)}
+                style={{ background: "transparent", border: 0, cursor: "pointer", color: "var(--ink-6)", fontSize: 18 }}>✕</button>
+            </div>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Квартал</span>
+              <input value={editQbr.quarter || ""} readOnly
+                style={{ padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4,
+                  color: "var(--ink-7)", fontSize: 12, fontFamily: "var(--f-mono)", outline: "none" }}/>
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Дата проведения</span>
+              <input type="date" value={editQbr.date || ""}
+                onChange={(e) => setEditQbr(Object.assign({}, editQbr, { date: e.target.value }))}
+                style={{ padding: "8px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4,
+                  color: "var(--ink-8)", fontSize: 12, fontFamily: "var(--f-mono)", outline: "none" }}/>
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Статус</span>
+              <select value={editQbr.status || "scheduled"}
+                onChange={(e) => setEditQbr(Object.assign({}, editQbr, { status: e.target.value }))}
+                style={{ padding: "8px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4,
+                  color: "var(--ink-8)", fontSize: 12, fontFamily: "var(--f-mono)", outline: "none" }}>
+                <option value="scheduled">scheduled</option>
+                <option value="completed">completed</option>
+                <option value="cancelled">cancelled</option>
+                <option value="draft">draft</option>
+              </select>
+            </label>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              <Btn kind="primary" size="m" disabled={saving} onClick={saveQbr}>
+                {saving ? "Сохраняю…" : "Сохранить"}
+              </Btn>
+              <Btn kind="ghost" size="m" onClick={() => setEditQbr(null)}>Отмена</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PageAI, PageKanban, PageKPI, PageCabinet, PageTemplates, PageAuto, PageRoadmap, PageInternal, PageExtInstall, PageHelp, PageProfile, PageAssignments, PageQBR });

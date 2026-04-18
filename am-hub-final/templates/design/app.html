@@ -85,6 +85,7 @@
     window.GMV_SPARK        = {{ gmv_spark      | tojson }};
     window.DAY_KPI          = {{ day_kpi        | tojson }};
     window.REMINDERS        = {{ reminders      | tojson }};
+    window.QBR_DATA         = {{ qbr_data       | safe }};
     window.__CURRENT_USER = {{ {
       "name": user.name,
       "email": user.email,
