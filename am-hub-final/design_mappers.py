@@ -491,23 +491,49 @@ KNOWN_TOOLS = [
 
 
 def tools_from_sync_logs(db: Any, now: datetime) -> List[Dict[str, Any]]:
-    """Статус каждой известной интеграции по последнему SyncLog.
-    ok = есть запись за последние 24ч со status='success' (иначе false)."""
+    """Статус каждой известной интеграции:
+      • сначала проверяется env-конфиг (есть ли токены/ключи) —
+        без него интеграция offline независимо от SyncLog
+      • если конфиг есть — последний успех в SyncLog за 24ч → online
+    """
     from models import SyncLog
+
+    # Карта проверки env-конфига. Если ни одна из переменных не задана —
+    # интеграция считается не подключённой независимо от логов.
+    def _configured(key: str) -> bool:
+        import os
+        envs = {
+            "merchrules": ["MERCHRULES_URL", "MERCHRULES_EMAIL", "MERCHRULES_PASSWORD"],
+            "airtable":   ["AIRTABLE_API_KEY", "AIRTABLE_BASE_ID"],
+            "ktalk":      ["KTALK_TOKEN", "KTALK_API_KEY"],
+            "outlook":    ["OUTLOOK_TENANT_ID", "OUTLOOK_CLIENT_ID"],
+            "telegram":   ["TELEGRAM_BOT_TOKEN", "TELEGRAM_TOKEN"],
+            "diginetica": ["DIGINETICA_API_KEY"],
+        }.get(key, [])
+        return any(os.getenv(e) for e in envs)
+
     out = []
     for name, detail, key in KNOWN_TOOLS:
+        configured = _configured(key)
         last = (
             db.query(SyncLog)
               .filter(SyncLog.integration == key)
               .order_by(SyncLog.started_at.desc())
               .first()
         )
-        ok = False
         sync_label = "—"
+        ok = False
         if last:
             sync_label = relative_time_short(last.started_at, now)
-            ok = (last.status == "success") and (now - last.started_at).total_seconds() < 86400
-        out.append({"name": name, "detail": detail, "ok": ok, "sync": sync_label})
+            if configured and last.status == "success" and (now - last.started_at).total_seconds() < 86400:
+                ok = True
+        out.append({
+            "name": name,
+            "detail": detail,
+            "ok": ok,
+            "sync": sync_label if configured else "не настроено",
+            "configured": configured,
+        })
     return out
 
 

@@ -119,12 +119,17 @@ function PageToday() {
               <Btn size="s" kind="ghost">{`просроч. · ${overdueTasks.length}`}</Btn>
             </div>
           }>
+            {TK.length === 0 && (
+              <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Открытых задач нет.
+              </div>
+            )}
             <div>
-              {TASKS.map((t, i) => (
+              {TK.map((t, i) => (
                 <div key={i} style={{
                   display: "grid", gridTemplateColumns: "20px 1fr 90px 120px 24px",
                   gap: 12, padding: "12px 4px",
-                  borderBottom: i === TASKS.length-1 ? "none" : "1px solid var(--line-soft)",
+                  borderBottom: i === TK.length-1 ? "none" : "1px solid var(--line-soft)",
                   alignItems: "center",
                 }}>
                   <input type="checkbox" style={{ accentColor: "var(--signal)" }}/>
@@ -135,7 +140,7 @@ function PageToday() {
                   <Badge tone={t.priority === "critical" ? "critical" : t.priority === "high" ? "warn" : t.priority === "med" ? "info" : "neutral"} dot>
                     {t.priority}
                   </Badge>
-                  <span className="mono" style={{ fontSize: 11, color: t.due.includes("просроч") ? "var(--critical)" : "var(--ink-6)" }}>{t.due}</span>
+                  <span className="mono" style={{ fontSize: 11, color: (t.due||"").includes("просроч") ? "var(--critical)" : "var(--ink-6)" }}>{t.due}</span>
                   <I.dot3 size={14} stroke="var(--ink-6)"/>
                 </div>
               ))}
@@ -146,63 +151,52 @@ function PageToday() {
         {/* right column */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
 
-          <Card title="KPI дня" dense>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {[
-                { k: "Встречи", v: "2/3", pct: 67, tone: "signal" },
-                { k: "Задачи закрыты", v: "3/8", pct: 38, tone: "warn" },
-                { k: "Ответов в час", v: "6.4", pct: 80, tone: "ok" },
-                { k: "Фокус-время", v: "2.5ч", pct: 50, tone: "info" },
-              ].map((r, i) => (
-                <div key={i}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.k}</span>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-8)" }}>{r.v}</span>
+          {(function(){
+            const S = (typeof window !== "undefined" && window.DAY_KPI) || null;
+            if (!S) return null;
+            const rows = [
+              { k: "Встречи",        v: `${S.meetings_done||0}/${S.meetings_total||0}`, pct: S.meetings_pct||0, tone: "signal" },
+              { k: "Задачи закрыты", v: `${S.tasks_done||0}/${S.tasks_total||0}`, pct: S.tasks_pct||0, tone: S.tasks_pct>=60?"ok":"warn" },
+            ];
+            return <Card title="KPI дня" dense>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {rows.map((r, i) => (
+                  <div key={i}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                      <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.k}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-8)" }}>{r.v}</span>
+                    </div>
+                    <Progress value={r.pct} tone={r.tone} h={3}/>
                   </div>
-                  <Progress value={r.pct} tone={r.tone} h={3}/>
+                ))}
+              </div>
+            </Card>;
+          })()}
+
+          {(function(){
+            const R = (typeof window !== "undefined" && window.REMINDERS) || [];
+            if (!R.length) return (
+              <Card title="Напоминания" dense>
+                <div style={{ padding: "12px 0", color: "var(--ink-6)", fontSize: 12.5, textAlign: "center" }}>
+                  Нет запланированных напоминаний.
+                </div>
+              </Card>
+            );
+            return <Card title="Напоминания">
+              {R.map((r, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 0",
+                  borderBottom: i === R.length - 1 ? "none" : "1px solid var(--line-soft)",
+                  opacity: r.done ? 0.45 : 1,
+                }}>
+                  <I.bell size={13} stroke={r.done ? "var(--ink-5)" : "var(--signal)"}/>
+                  <div style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)", textDecoration: r.done ? "line-through" : "none" }}>{r.msg || r.text}</div>
+                  <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{r.t || r.time}</span>
                 </div>
               ))}
-            </div>
-          </Card>
-
-          <Card title="Напоминания">
-            {[
-              { t: "09:45", msg: "Подготовить материалы к 14:00", done: true },
-              { t: "13:30", msg: "Перезвонить Денису по договору" },
-              { t: "17:00", msg: "Заполнить чекап-результат" },
-              { t: "18:30", msg: "Сдать отчёт за неделю" },
-            ].map((r, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "10px 0",
-                borderBottom: i === 3 ? "none" : "1px solid var(--line-soft)",
-                opacity: r.done ? 0.45 : 1,
-              }}>
-                <I.bell size={13} stroke={r.done ? "var(--ink-5)" : "var(--signal)"}/>
-                <div style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)", textDecoration: r.done ? "line-through" : "none" }}>{r.msg}</div>
-                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{r.t}</span>
-              </div>
-            ))}
-          </Card>
-
-          <Card title="Стрик" dense>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
-              <span style={{ fontSize: 38, fontWeight: 500, color: "var(--signal)", letterSpacing: "-0.03em", lineHeight: 1 }}>14</span>
-              <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>дней подряд</span>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(14, 1fr)", gap: 3 }}>
-              {Array.from({length: 14}).map((_, i) => (
-                <div key={i} style={{
-                  height: 18,
-                  background: `color-mix(in oklch, var(--signal) ${Math.min(80, 20 + i*5)}%, var(--ink-3))`,
-                  borderRadius: 2,
-                }}/>
-              ))}
-            </div>
-            <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 8 }}>
-              все ежедневные цели выполнены
-            </div>
-          </Card>
+            </Card>;
+          })()}
         </div>
       </div>
     </div>

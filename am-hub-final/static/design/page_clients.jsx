@@ -2,6 +2,25 @@
 
 function PageClients() {
   const P = (typeof window !== "undefined" && window.__PAGINATION) || { page: 1, total: 0, total_pages: 1, has_prev: false, has_next: false };
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const [segFilter, setSegFilter] = React.useState("all");
+
+  // Сегменты из реальных клиентов
+  const _norm = (s) => (s || "").toUpperCase().replace(/\s+/g, "");
+  const segments = [
+    { key: "all",    label: "все",         match: () => true },
+    { key: "A+",     label: "A+",          match: (c) => _norm(c.segment) === "A+" },
+    { key: "A",      label: "A",           match: (c) => _norm(c.segment) === "A" },
+    { key: "B+",     label: "B+",          match: (c) => _norm(c.segment) === "B+" },
+    { key: "B",      label: "B",           match: (c) => _norm(c.segment) === "B" },
+    { key: "C",      label: "C",           match: (c) => _norm(c.segment) === "C" },
+    { key: "NEW",    label: "NEW",         match: (c) => _norm(c.segment) === "NEW" || c.is_new },
+    { key: "RISK",   label: "churn-риск",  match: (c) => c.status === "risk" },
+  ];
+  const counted = segments.map(s => ({ ...s, n: CL.filter(s.match).length }));
+  const activeSeg = counted.find(s => s.key === segFilter) || counted[0];
+  const visibleClients = CL.filter(activeSeg.match);
+
   return (
     <div>
       <TopBar
@@ -10,26 +29,36 @@ function PageClients() {
         subtitle={`${P.total} клиентов · стр. ${P.page} из ${P.total_pages}`}
         actions={
           <>
-            <Btn kind="ghost" size="m" icon={<I.filter size={14}/>}>Фильтры</Btn>
-            <Btn kind="ghost" size="m" icon={<I.download size={14}/>}>Экспорт</Btn>
-            <Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Новый клиент</Btn>
+            <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
+              onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
+            <Btn kind="primary" size="m" icon={<I.plus size={14}/>}
+              onClick={() => { const name = prompt("Название нового клиента:"); if (!name) return;
+                fetch("/api/clients", { method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })
+                  .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+                  .then(() => location.reload())
+                  .catch(e => alert("Ошибка: " + e));
+              }}>Новый клиент</Btn>
           </>
         }
       />
       <div style={{ padding: "22px 28px 40px" }}>
         {/* filter chips */}
         <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-          {["все · 248", "A+ · 18", "A · 46", "B+ · 62", "B · 71", "C · 38", "NEW · 13", "churn-риск · 6"].map((c, i) => (
-            <button key={i} style={{
-              padding: "6px 11px",
-              background: i === 0 ? "var(--signal)" : "var(--ink-2)",
-              color: i === 0 ? "var(--ink-0)" : "var(--ink-7)",
-              border: `1px solid ${i === 0 ? "var(--signal)" : "var(--line)"}`,
-              borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11,
-              textTransform: "uppercase", letterSpacing: "0.06em",
-              cursor: "pointer",
-            }}>{c}</button>
-          ))}
+          {counted.map((s) => {
+            const active = s.key === segFilter;
+            return (
+              <button key={s.key} onClick={() => setSegFilter(s.key)} style={{
+                padding: "6px 11px",
+                background: active ? "var(--signal)" : "var(--ink-2)",
+                color: active ? "var(--ink-0)" : "var(--ink-7)",
+                border: `1px solid ${active ? "var(--signal)" : "var(--line)"}`,
+                borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11,
+                textTransform: "uppercase", letterSpacing: "0.06em",
+                cursor: "pointer",
+              }}>{s.label} · {s.n}</button>
+            );
+          })}
         </div>
 
         {/* table */}
@@ -52,9 +81,14 @@ function PageClients() {
             <span>след. контакт</span>
             <span></span>
           </div>
-          {CLIENTS.map((c, i) => {
+          {visibleClients.length === 0 && (
+            <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+              В сегменте «{activeSeg.label}» клиентов нет.
+            </div>
+          )}
+          {visibleClients.map((c, i) => {
             const statusTone = c.status === "risk" ? "critical" : c.status === "warn" ? "warn" : "ok";
-            const isDown = c.delta.startsWith("−");
+            const isDown = (c.delta || "").startsWith("−");
             return (
               <div key={c.id}
                 onClick={() => { window.location.href = "/design/client/" + c.id; }}
@@ -63,7 +97,7 @@ function PageClients() {
                 gridTemplateColumns: "6px 2.2fr 1fr 1.4fr 1.2fr 30px",
                 gap: 16,
                 padding: "14px 18px",
-                borderBottom: i === CLIENTS.length - 1 ? "none" : "1px solid var(--line-soft)",
+                borderBottom: i === visibleClients.length - 1 ? "none" : "1px solid var(--line-soft)",
                 alignItems: "center",
                 cursor: "pointer",
               }}>

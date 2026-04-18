@@ -23,6 +23,7 @@ from auth import decode_access_token
 from models import (
     Client, Task, Meeting, User,
     AuditLog, UserClientAssignment, RoadmapItem,
+    FollowupTemplate,
 )
 import design_mappers as dm
 

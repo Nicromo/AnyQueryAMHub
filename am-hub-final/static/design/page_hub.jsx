@@ -220,36 +220,45 @@ function PageHub() {
 
             {/* tools + jobs */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-              <Card title="Инструменты" action={<a className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>5/6 online</a>}>
+              <Card title="Инструменты" action={
+                <a className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>
+                  {`${TOOLS.filter(t=>t.ok).length}/${TOOLS.length} online`}
+                </a>
+              }>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {TOOLS.map((t, i) => (
-                    <div key={i} style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "9px 10px",
-                      background: "var(--ink-1)",
-                      borderRadius: 4,
-                      borderLeft: `2px solid ${t.ok ? "var(--ok)" : "var(--ink-3)"}`,
-                    }}>
-                      <div style={{
-                        width: 22, height: 22, borderRadius: 3,
-                        background: "var(--ink-3)", display: "flex",
-                        alignItems: "center", justifyContent: "center",
-                        color: "var(--ink-7)", flexShrink: 0,
+                  {TOOLS.map((t, i) => {
+                    const cfg = t.configured !== false;
+                    const state = t.ok ? "online" : (cfg ? "offline" : "не настроено");
+                    const color = t.ok ? "var(--ok)" : (cfg ? "var(--ink-5)" : "var(--warn)");
+                    return (
+                      <div key={i} style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "9px 10px",
+                        background: "var(--ink-1)",
+                        borderRadius: 4,
+                        borderLeft: `2px solid ${t.ok ? "var(--ok)" : (cfg ? "var(--ink-3)" : "var(--warn)")}`,
                       }}>
-                        <I.link size={12}/>
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 500, color: "var(--ink-8)" }}>{t.name}</div>
-                        <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.detail}</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div className="mono" style={{ fontSize: 10.5, color: t.ok ? "var(--ok)" : "var(--ink-5)" }}>
-                          {t.ok ? "● online" : "○ offline"}
+                        <div style={{
+                          width: 22, height: 22, borderRadius: 3,
+                          background: "var(--ink-3)", display: "flex",
+                          alignItems: "center", justifyContent: "center",
+                          color: "var(--ink-7)", flexShrink: 0,
+                        }}>
+                          <I.link size={12}/>
                         </div>
-                        <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)" }}>{t.sync}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 500, color: "var(--ink-8)" }}>{t.name}</div>
+                          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.detail}</div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div className="mono" style={{ fontSize: 10.5, color }}>
+                            {t.ok ? "● online" : (cfg ? "○ offline" : "◌ не настр.")}
+                          </div>
+                          <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)" }}>{t.sync}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </Card>
 
@@ -421,10 +430,19 @@ function PageHub() {
 
 // ── Big sparkline/area chart ──────────────────────────────
 function BigSpark() {
-  const data = [42,44,46,45,48,50,49,52,55,54,56,58,60,59,62,63,61,65,67,66,69,71,70,73,75,72,76,78,77,80,82];
+  const data = (typeof window !== "undefined" && window.GMV_SPARK) || [];
   const w = 520, h = 120;
-  const min = Math.min(...data), max = Math.max(...data), rng = max - min;
-  const pts = data.map((v, i) => [(i / (data.length-1)) * w, h - ((v-min)/rng) * (h-8) - 4]);
+  if (!data.length) {
+    return (
+      <div style={{ width: "100%", height: h, display: "flex", alignItems: "center", justifyContent: "center",
+                    color: "var(--ink-6)", fontSize: 12.5, fontFamily: "var(--f-mono)",
+                    background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4 }}>
+        Данных GMV пока нет — появятся после первой синхронизации
+      </div>
+    );
+  }
+  const min = Math.min(...data), max = Math.max(...data), rng = Math.max(1, max - min);
+  const pts = data.map((v, i) => [(i / Math.max(1, data.length-1)) * w, h - ((v-min)/rng) * (h-8) - 4]);
   const path = pts.map((p,i) => (i?"L":"M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
   const area = path + ` L ${w} ${h} L 0 ${h} Z`;
   return (
@@ -435,13 +453,11 @@ function BigSpark() {
           <stop offset="100%" stopColor="var(--signal)" stopOpacity="0"/>
         </linearGradient>
       </defs>
-      {/* grid lines */}
       {[0.25, 0.5, 0.75].map(p => (
         <line key={p} x1="0" x2={w} y1={h*p} y2={h*p} stroke="var(--line-soft)" strokeDasharray="2 4"/>
       ))}
       <path d={area}  fill="url(#grad)" />
       <path d={path}  fill="none" stroke="var(--signal)" strokeWidth="1.5"/>
-      {/* end dot */}
       <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="3" fill="var(--signal)"/>
       <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="7" fill="var(--signal)" fillOpacity="0.18"/>
     </svg>

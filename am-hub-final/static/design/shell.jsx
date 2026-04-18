@@ -8,7 +8,7 @@ function _stats() {
 // Внешние URL для пунктов с external: true. UI-константы — без бэка.
 const EXTERNAL_URLS = {
   ktalk:      "https://tbank.ktalk.ru",
-  merchrules: "https://merchrules-qa.any-platform.ru",
+  merchrules: "https://merchrules.any-platform.ru/login-page",
 };
 
 function _buildNav() {

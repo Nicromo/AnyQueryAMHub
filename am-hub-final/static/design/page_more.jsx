@@ -217,11 +217,34 @@ function PageMeetings() {
             ))}
           </Card>
 
-          <Card title="Шаблоны встреч" dense>
-            {["30-мин чекап", "60-мин QBR", "15-мин sync", "онбординг · 90 мин", "эскалация"].map((t,i)=>(
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i===4?"none":"1px solid var(--line-soft)" }}>
+          <Card title="Создать встречу" dense>
+            {[
+              { label: "Чекап · 30 мин",     type: "checkup",    dur: 30 },
+              { label: "QBR · 60 мин",       type: "qbr",        dur: 60 },
+              { label: "Sync · 15 мин",      type: "sync",       dur: 15 },
+              { label: "Онбординг · 90 мин", type: "onboarding", dur: 90 },
+              { label: "Эскалация",          type: "escalation", dur: 30 },
+            ].map((t,i,a)=>(
+              <div key={i} onClick={() => {
+                const clientId = prompt("ID клиента для встречи «" + t.label + "»:");
+                if (!clientId) return;
+                fetch("/api/meetings", {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    client_id: parseInt(clientId, 10),
+                    type: t.type,
+                    title: t.label,
+                    duration: t.dur,
+                    date: new Date(Date.now() + 24*60*60*1000).toISOString(),
+                  })
+                }).then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+                  .then(() => { alert("Создано"); location.reload(); })
+                  .catch(e => alert("Ошибка: " + e));
+              }}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i === a.length - 1 ? "none" : "1px solid var(--line-soft)", cursor: "pointer" }}>
                 <I.cal size={14} stroke="var(--ink-6)"/>
-                <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{t}</span>
+                <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{t.label}</span>
                 <I.arrow_r size={12} stroke="var(--ink-5)"/>
               </div>
             ))}
@@ -308,22 +331,31 @@ function PagePortfolio() {
             ))}
           </Card>
 
-          <Card title="Churn-сигналы · 90 дней">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(12,1fr)", gap: 2, marginBottom: 12 }}>
-              {Array.from({length: 90}).map((_, i) => {
-                const v = ((i*17) % 100) / 100;
-                const risk = (i*7) % 29 < 3;
-                return <div key={i} style={{ aspectRatio: "1", background: risk ? "var(--critical)" : `color-mix(in oklch, var(--signal) ${Math.round(v*60+10)}%, var(--ink-3))`, borderRadius: 2 }}/>;
-              })}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>последние 90 дней</div>
-              <div style={{ display: "flex", gap: 10, fontSize: 11 }}>
-                <StatDot tone="critical">{CL.filter(c=>c.status==="risk").length} churn-риск</StatDot>
-                <StatDot tone="warn">{CL.filter(c=>c.status==="warn").length} warn</StatDot>
-                <StatDot tone="ok">{CL.filter(c=>c.status==="ok").length} ок</StatDot>
-              </div>
-            </div>
+          <Card title="Статус портфеля">
+            {(function(){
+              const risk = CL.filter(c=>c.status==="risk").length;
+              const warn = CL.filter(c=>c.status==="warn").length;
+              const ok   = CL.filter(c=>c.status==="ok").length;
+              const total = CL.length || 1;
+              const rows = [
+                { label: "ок",         v: ok,   pct: Math.round(ok/total*100),   tone: "ok" },
+                { label: "warn",       v: warn, pct: Math.round(warn/total*100), tone: "warn" },
+                { label: "churn-риск", v: risk, pct: Math.round(risk/total*100), tone: "critical" },
+              ];
+              return <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "6px 0" }}>
+                {rows.map((r, i) => (
+                  <div key={i}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                      <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.label}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-8)" }}>
+                        {r.v}<span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}> · {r.pct}%</span>
+                      </span>
+                    </div>
+                    <Progress value={r.pct} tone={r.tone} h={4}/>
+                  </div>
+                ))}
+              </div>;
+            })()}
           </Card>
         </div>
       </div>
@@ -666,36 +698,79 @@ function PageAuto() {
 
 // ── Roadmap ───────────────────────────────────────────────
 function PageRoadmap() {
-  const cols = (typeof window !== "undefined" && window.ROADMAP) || [];
+  const rawCols = (typeof window !== "undefined" && window.ROADMAP) || [];
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  const isAdmin = (U.role || "") === "admin";
+
+  // Фиксированные колонки (даже если БД пустая — показываем все 5)
+  const DEFAULT = [
+    { key: "q1",      title: "Q1 · готово",   tone: "ok" },
+    { key: "q2",      title: "Q2 · в работе", tone: "signal" },
+    { key: "q3",      title: "Q3 · план",     tone: "info" },
+    { key: "q4",      title: "Q4 · идеи",     tone: "warn" },
+    { key: "backlog", title: "Бэклог",        tone: "neutral" },
+  ];
+  const byKey = Object.fromEntries(rawCols.map(c => [c.key || c.column_key, c]));
+  const cols = DEFAULT.map(d => ({ ...d, ...(byKey[d.key] || {}), items: (byKey[d.key]?.items) || [] }));
+
+  const addItem = (col) => {
+    const title = prompt(`Новый пункт в «${col.title}»:`);
+    if (!title) return;
+    fetch("/design/api/roadmap", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        column_key: col.key, column_title: col.title,
+        tone: col.tone, title,
+      })
+    }).then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+      .then(() => location.reload())
+      .catch(e => alert("Ошибка: " + e));
+  };
+
+  const delItem = (id, title) => {
+    if (!confirm(`Удалить «${title}»?`)) return;
+    fetch(`/design/api/roadmap/${id}`, { method: "DELETE", credentials: "include" })
+      .then(r => r.ok ? location.reload() : alert("Ошибка удаления"));
+  };
+
   return (
     <div>
       <TopBar breadcrumbs={["am hub","роадмап"]} title="Роадмап"
         subtitle={`Что команда строит в AM Hub · ${new Date().getFullYear()}`}/>
       <div style={{ padding: "22px 28px 40px" }}>
-        {cols.length === 0 && (
-          <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
-            Роадмап пока не настроен. Добавьте элементы в разделе администрирования.
+        {!isAdmin && rawCols.length === 0 && (
+          <div style={{ padding: "20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6, marginBottom: 14 }}>
+            Роадмап пока пуст. Пункты добавляют администраторы.
           </div>
         )}
-        {cols.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols.length},1fr)`, gap: 14 }}>
-            {cols.map((c,i)=>(
-              <div key={i} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderTop: `3px solid var(--${c.tone || "neutral"})`, borderRadius: "0 0 6px 6px", padding: 14 }}>
-                <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>{c.title || c.t}</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {(c.items || []).map((it,j)=>(
-                    <div key={j} style={{ padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4 }}>
-                      <div style={{ fontSize: 12.5, color: "var(--ink-8)" }}>{typeof it === "string" ? it : (it.title || it.name)}</div>
-                    </div>
-                  ))}
-                  {(!c.items || c.items.length === 0) && (
-                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", fontStyle: "italic" }}>пусто</div>
-                  )}
-                </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols.length},1fr)`, gap: 14 }}>
+          {cols.map((c, i) => (
+            <div key={c.key} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderTop: `3px solid var(--${c.tone})`, borderRadius: "0 0 6px 6px", padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{c.title}</div>
+                {isAdmin && (
+                  <button onClick={() => addItem(c)} title="Добавить"
+                    style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--ink-7)", width: 22, height: 22, borderRadius: 3, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>+</button>
+                )}
               </div>
-            ))}
-          </div>
-        )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {c.items.map((it, j) => (
+                  <div key={j} style={{ padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{typeof it === "string" ? it : (it.title || it.name)}</div>
+                    {isAdmin && it.id && (
+                      <button onClick={() => delItem(it.id, it.title)} title="Удалить"
+                        style={{ background: "transparent", border: 0, color: "var(--ink-5)", cursor: "pointer", padding: 2, fontSize: 12 }}>✕</button>
+                    )}
+                  </div>
+                ))}
+                {c.items.length === 0 && (
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", fontStyle: "italic" }}>пусто</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
