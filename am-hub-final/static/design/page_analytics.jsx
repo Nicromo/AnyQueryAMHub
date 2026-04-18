@@ -1,24 +1,56 @@
 // page_analytics.jsx — Analytics + QBR Calendar
 
+// Парсер GMV дублируется из page_hub — standalone безопасен
+function _pga(str) {
+  if (!str || typeof str !== "string") return 0;
+  const n = parseFloat(str.replace(/[^\d.,]/g, "").replace(",", "."));
+  if (isNaN(n)) return 0;
+  if (str.includes("м")) return n * 1_000_000;
+  if (str.includes("к")) return n * 1_000;
+  return n;
+}
+
 function PageAnalytics() {
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const totalGmv = CL.reduce((s, c) => s + _pga(c.gmv), 0);
+  const gmvFmt = totalGmv >= 1_000_000 ? `₽ ${(totalGmv/1_000_000).toFixed(1)}м` : `₽ ${Math.round(totalGmv/1000)}к`;
+
+  const okCount = CL.filter(c => c.status === "ok").length;
+  const warnCount = CL.filter(c => c.status === "warn").length;
+  const riskCount = CL.filter(c => c.status === "risk").length;
+  const retentionPct = CL.length > 0 ? Math.round((okCount / CL.length) * 100) : 0;
+  // "Health" — среднее: ok=85, warn=60, risk=35
+  const avgHealth = CL.length > 0
+    ? Math.round((okCount * 85 + warnCount * 60 + riskCount * 35) / CL.length)
+    : 0;
+
+  // Топ рисков
+  const topRisks = CL
+    .filter(c => c.status === "risk")
+    .slice(0, 6)
+    .map(c => ({
+      id: c.id,
+      c: c.name,
+      why: c.delta ? `GMV ${c.delta}` : (c.days_since != null ? `не на связи ${c.days_since} дн.` : "требует внимания"),
+      score: 100 - (c.days_since || 0),
+    }));
+
   return (
     <div>
       <TopBar
         breadcrumbs={["am hub", "аналитика"]}
         title="Аналитика портфеля"
-        subtitle="Q2'26 · апрель, неделя 16"
+        subtitle={`${CL.length} клиентов в скоупе`}
         actions={<>
-          <Btn kind="ghost" size="m">Q1'26</Btn>
-          <Btn kind="dim" size="m">Q2'26</Btn>
           <Btn kind="ghost" size="m" icon={<I.download size={14}/>}>PDF</Btn>
         </>}
       />
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-          <KPI label="GMV · квартал" value="₽ 174м" delta="+18%" sub="к Q1'26" big/>
-          <KPI label="Average Health" value="81" tone="ok" delta="+3" sub="из 100"/>
-          <KPI label="Retention · 90д" value="94%" tone="signal" delta="+1.2пп"/>
-          <KPI label="Churn · квартал" value="6" unit="клиентов" tone="critical" delta="+2"/>
+          <KPI label="GMV · портфель" value={gmvFmt} sub={`${CL.length} клиентов`} big/>
+          <KPI label="Средний health" value={avgHealth} tone={avgHealth>=75?"ok":avgHealth>=55?"warn":"critical"} sub="из 100"/>
+          <KPI label="Retention" value={`${retentionPct}%`} tone={retentionPct>=90?"signal":retentionPct>=70?"warn":"critical"} sub="доля клиентов в ok"/>
+          <KPI label="В зоне риска" value={String(riskCount)} tone={riskCount>0?"critical":undefined} sub={`+ ${warnCount} warn`}/>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
@@ -38,13 +70,13 @@ function PageAnalytics() {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-          <Card title="Топ-риски" action={<Badge tone="critical" dot>6 активных</Badge>}>
-            {[
-              { c: "Aura Beauty", why: "GMV −18%, чекап просрочен", score: 82 },
-              { c: "Nextfood Retail", why: "3 блокирующих задачи", score: 74 },
-              { c: "Umbra Living", why: "Не в сети 18 дней", score: 66 },
-              { c: "Fiori Shop", why: "Контракт истекает", score: 58 },
-            ].map((r, i) => (
+          <Card title="Топ-риски" action={<Badge tone="critical" dot>{topRisks.length} активных</Badge>}>
+            {topRisks.length === 0 && (
+              <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Нет клиентов в статусе risk.
+              </div>
+            )}
+            {topRisks.map((r, i) => (
               <div key={i} style={{
                 display: "grid", gridTemplateColumns: "1fr 90px 40px",
                 gap: 12, padding: "10px 0",

@@ -21,6 +21,7 @@ const ORDER = [
   "icons.jsx",
   "primitives.jsx",
   "shell.jsx",
+  "extension.jsx",     // ExtensionPopup — используется в PageExtInstall из page_more
   "page_today.jsx",
   "page_clients.jsx",
   "page_hub.jsx",

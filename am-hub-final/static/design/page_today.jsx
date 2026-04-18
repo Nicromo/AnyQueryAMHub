@@ -1,12 +1,40 @@
 // page_today.jsx — Today & Tasks
 
 function PageToday() {
+  const TK = (typeof window !== "undefined" && window.TASKS)    || [];
+  const MT = (typeof window !== "undefined" && window.MEETINGS) || [];
+  const CL = (typeof window !== "undefined" && window.CLIENTS)  || [];
+  const U  = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+
+  // Фактические встречи сегодня
+  const todayMeetings = MT.filter(m => m.day === "сегодня");
+  const overdueTasks  = TK.filter(t => (t.due || "").indexOf("просроч") !== -1);
+  const todayTasks    = TK.filter(t => t.due === "сегодня");
+  const firstRisk     = CL.find(c => c.status === "risk");
+
+  // Таймлайн: встречи сегодня + 3 плановых слота focus-time
+  const timeline = todayMeetings.map(m => ({
+    t: m.when || "—",
+    item: `${m.type === "qbr" ? "QBR" : m.type === "checkup" ? "Чекап" : "Встреча"} · ${m.client}`,
+    place: "KTalk",
+    tone: m.mood === "risk" ? "critical" : m.mood === "warn" ? "warn" : "signal",
+  })).sort((a, b) => (a.t > b.t ? 1 : -1));
+
+  // Форматируем заголовок даты
+  const now = new Date();
+  const weekdays = ["воскресенье","понедельник","вторник","среда","четверг","пятница","суббота"];
+  const months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+  const dateLabel = `${weekdays[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]}`;
+
+  const firstName = (U.name || "").split(" ")[0] || "коллега";
+  const greet = now.getHours() < 12 ? "Доброе утро" : now.getHours() < 18 ? "Добрый день" : "Добрый вечер";
+
   return (
     <div>
       <TopBar
         breadcrumbs={["am hub", "ежедневное", "сегодня"]}
-        title="Сегодня · четверг, 18 апреля"
-        subtitle="3 встречи · 5 задач · 2 сигнала требуют действия"
+        title={`Сегодня · ${dateLabel}`}
+        subtitle={`${todayMeetings.length} ${todayMeetings.length === 1 ? "встреча" : "встреч"} · ${todayTasks.length} задач на сегодня · ${overdueTasks.length} просрочено`}
         actions={<>
           <Btn kind="ghost" size="m" icon={<I.mic size={14}/>}>Голосовая заметка</Btn>
           <Btn kind="primary" size="m" icon={<I.lightning size={14}/>}>Сгенерить план</Btn>
@@ -26,24 +54,41 @@ function PageToday() {
               <span className="mono" style={{ fontSize: 10.5, color: "var(--signal)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 500 }}>утренний бриф · 09:12</span>
             </div>
             <div style={{ fontSize: 16, color: "var(--ink-9)", lineHeight: 1.55, letterSpacing: "-0.005em" }}>
-              Доброе утро, Анна. Сегодня <b style={{ color: "var(--signal)" }}>ключевая встреча</b> — чекап со СтройМаркет-21 в 14:00. Они выросли на 12%, но воронка оплаты просела.
-              <br/><br/>
-              До обеда закрой задачу по Aura Beauty (она просрочена 2 дня и блокирует QBR). Вечером — подготовка презентации для ТехноЛайн.
+              {greet}, {firstName}.{" "}
+              {todayMeetings.length === 0 && overdueTasks.length === 0 && !firstRisk && (
+                <>Сегодня ничего срочного — отличный день для проактивной работы с портфелем.</>
+              )}
+              {todayMeetings.length > 0 && (
+                <>
+                  Сегодня <b style={{ color: "var(--signal)" }}>{todayMeetings.length} {todayMeetings.length === 1 ? "встреча" : (todayMeetings.length < 5 ? "встречи" : "встреч")}</b>
+                  {todayMeetings[0] && (<>, ближайшая — {todayMeetings[0].type || "встреча"} с {todayMeetings[0].client} в {todayMeetings[0].when}</>)}.
+                </>
+              )}
+              {overdueTasks.length > 0 && (
+                <>
+                  <br/><br/>
+                  До обеда закрой <b style={{ color: "var(--critical)" }}>{overdueTasks.length} {overdueTasks.length === 1 ? "просроченную задачу" : "просроченных задач"}</b>
+                  {overdueTasks[0] && (<> — начни с «{overdueTasks[0].title}»</>)}.
+                </>
+              )}
+              {firstRisk && (
+                <>
+                  <br/><br/>
+                  Держи в приоритете <b style={{ color: "var(--ink-9)" }}>{firstRisk.name}</b> — он в зоне риска.
+                </>
+              )}
             </div>
           </div>
 
-          {/* timeline */}
-          <Card title="Таймлайн дня">
+          {/* timeline — реальные встречи дня */}
+          <Card title="Таймлайн дня" action={<span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{timeline.length} {timeline.length === 1 ? "событие" : "событий"}</span>}>
             <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-              {[
-                { t: "09:00", item: "Утренняя планёрка команды", place: "KTalk", tone: "neutral" },
-                { t: "10:30", item: "Подготовка: лимиты вывода для СтройМаркет-21", place: "focus time · 90 мин", tone: "signal" },
-                { t: "12:00", item: "Обед", place: "", tone: "neutral" },
-                { t: "14:00", item: "Чекап · СтройМаркет-21", place: "KTalk · Ольга Ларина", tone: "critical" },
-                { t: "15:00", item: "QBR-подготовка · Aura Beauty", place: "focus time · 60 мин", tone: "warn" },
-                { t: "16:30", item: "QBR · ТехноЛайн", place: "онлайн · 4 участника", tone: "signal" },
-                { t: "18:00", item: "Дайджест недели · команда", place: "Telegram", tone: "neutral" },
-              ].map((r, i) => (
+              {timeline.length === 0 && (
+                <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                  Сегодня встреч нет — свободный день для фокусной работы.
+                </div>
+              )}
+              {timeline.map((r, i) => (
                 <div key={i} style={{
                   display: "grid", gridTemplateColumns: "60px 14px 1fr",
                   gap: 12, padding: "10px 0",
@@ -66,12 +111,12 @@ function PageToday() {
             </div>
           </Card>
 
-          {/* tasks inbox */}
+          {/* tasks inbox — реальные задачи */}
           <Card title="Очередь задач" action={
             <div style={{ display: "flex", gap: 6 }}>
-              <Btn size="s" kind="dim">все · 37</Btn>
-              <Btn size="s" kind="ghost">мои · 12</Btn>
-              <Btn size="s" kind="ghost">просроч. · 3</Btn>
+              <Btn size="s" kind="dim">{`все · ${TK.length}`}</Btn>
+              <Btn size="s" kind="ghost">{`сегодня · ${todayTasks.length}`}</Btn>
+              <Btn size="s" kind="ghost">{`просроч. · ${overdueTasks.length}`}</Btn>
             </div>
           }>
             <div>

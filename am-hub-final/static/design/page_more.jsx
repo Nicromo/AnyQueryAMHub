@@ -1,19 +1,43 @@
 // page_more.jsx — remaining tabs (top50, tasks, meetings, portfolio, ai, kanban, kpi, cabinet, templates, auto, roadmap, internal, extension-install, help)
 
 // ── Top-50 ────────────────────────────────────────────────
+// Парсер GMV-строки дублируется между страницами — локальный,
+// чтобы не городить глобалы. _parseGmv определён в page_hub.jsx.
+function _pg(str) {
+  if (!str || typeof str !== "string") return 0;
+  const n = parseFloat(str.replace(/[^\d.,]/g, "").replace(",", "."));
+  if (isNaN(n)) return 0;
+  if (str.includes("м")) return n * 1_000_000;
+  if (str.includes("к")) return n * 1_000;
+  return n;
+}
+
 function PageTop50() {
-  const rows = [
-    { rk: 1, name: "СтройМаркет-21", seg: "A+", gmv: "₽ 4.8м", growth: "+12%", health: 72, pm: "Анна С." },
-    { rk: 2, name: "Retail Group PRO", seg: "A+", gmv: "₽ 4.2м", growth: "+22%", health: 88, pm: "Кирилл В." },
-    { rk: 3, name: "ТехноЛайн", seg: "A", gmv: "₽ 2.1м", growth: "+4%", health: 81, pm: "Анна С." },
-    { rk: 4, name: "Aura Beauty", seg: "A", gmv: "₽ 3.1м", growth: "−18%", health: 42, pm: "Анна С." },
-    { rk: 5, name: "Gemini Shop", seg: "B+", gmv: "₽ 1.6м", growth: "−3%", health: 64, pm: "Анна С." },
-    { rk: 6, name: "Orbita Marketplace", seg: "A", gmv: "₽ 2.8м", growth: "+8%", health: 90, pm: "Лиза М." },
-    { rk: 7, name: "Nextfood Retail", seg: "B+", gmv: "₽ 1.4м", growth: "−12%", health: 38, pm: "Павел Р." },
-    { rk: 8, name: "Моя Полка", seg: "B", gmv: "₽ 1.1м", growth: "+8%", health: 76, pm: "Анна С." },
-    { rk: 9, name: "Kitchen Garden", seg: "B", gmv: "₽ 0.9м", growth: "+22%", health: 70, pm: "Анна С." },
-    { rk: 10, name: "Fiori Shop", seg: "B", gmv: "₽ 0.8м", growth: "−5%", health: 52, pm: "Лиза М." },
-  ];
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  // Сортировка по убыванию GMV, топ-50
+  const rows = CL
+    .slice()
+    .map((c, idx) => ({
+      rk: idx + 1,  // временный, перезапишем после сортировки
+      id: c.id,
+      name: c.name,
+      seg: c.seg,
+      gmv: c.gmv,
+      gmvRub: _pg(c.gmv),
+      growth: c.delta || "—",
+      // health — грубая оценка: status ok=85, warn=60, risk=35
+      health: c.status === "risk" ? 35 : c.status === "warn" ? 60 : 85,
+      pm: c.pm,
+    }))
+    .sort((a, b) => b.gmvRub - a.gmvRub)
+    .slice(0, 50)
+    .map((r, i) => ({ ...r, rk: i + 1 }));
+
+  // Агрегаты для KPI
+  const totalRub = rows.reduce((s, r) => s + r.gmvRub, 0);
+  const avgHealth = rows.length ? Math.round(rows.reduce((s, r) => s + r.health, 0) / rows.length) : 0;
+  const atRisk = rows.filter(r => r.health < 55).length;
+  const growing = rows.filter(r => (r.growth || "").startsWith("+")).length;
   return (
     <div>
       <TopBar breadcrumbs={["am hub","top-50"]} title="Top-50 · приоритетный портфель"
@@ -21,10 +45,10 @@ function PageTop50() {
         actions={<><Btn kind="ghost" size="m" icon={<I.filter size={14}/>}>Фильтр</Btn><Btn kind="primary" size="m" icon={<I.download size={14}/>}>PDF-отчёт</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
-          <KPI label="Top-50 · GMV" value="₽ 134м" delta="+14%" sub="из ₽ 174м всего" big/>
-          <KPI label="Средний health" value="71" tone="warn" delta="−3"/>
-          <KPI label="Под риском" value="8" tone="critical" sub="из 50"/>
-          <KPI label="Рост >10%" value="23" tone="ok" sub="клиентов"/>
+          <KPI label={`Top-${rows.length} · GMV`} value={totalRub >= 1_000_000 ? `₽ ${(totalRub/1_000_000).toFixed(1)}м` : totalRub >= 1000 ? `₽ ${Math.round(totalRub/1000)}к` : `₽ ${Math.round(totalRub)}`} sub={`${rows.length} клиентов`} big/>
+          <KPI label="Средний health" value={avgHealth} tone={avgHealth>=75?"ok":avgHealth>=55?"warn":"critical"}/>
+          <KPI label="Под риском" value={atRisk} tone={atRisk>0?"critical":undefined} sub={`из ${rows.length}`}/>
+          <KPI label="Растут" value={growing} tone="ok" sub="клиентов"/>
         </div>
 
         <Card title="Рейтинг · апрель 2026">
@@ -32,13 +56,20 @@ function PageTop50() {
             <div style={{ display: "grid", gridTemplateColumns: "50px 1.6fr 70px 110px 90px 1fr 110px", gap: 14, padding: "10px 10px", background: "var(--ink-1)", borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-5)" }}>
               <span>#</span><span>клиент</span><span>seg</span><span>gmv 30д</span><span>Δ</span><span>health</span><span>am</span>
             </div>
+            {rows.length === 0 && (
+              <div style={{ padding: "28px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Нет клиентов в скоупе. После первой синхронизации с Merchrules — они появятся здесь.
+              </div>
+            )}
             {rows.map((r, i) => (
-              <div key={r.rk} style={{ display: "grid", gridTemplateColumns: "50px 1.6fr 70px 110px 90px 1fr 110px", gap: 14, padding: "12px 10px", alignItems: "center", borderBottom: i===rows.length-1?"none":"1px solid var(--line-soft)" }}>
+              <div key={r.rk}
+                onClick={() => { if (r.id) window.location.href = "/design/client/" + r.id; }}
+                style={{ display: "grid", gridTemplateColumns: "50px 1.6fr 70px 110px 90px 1fr 110px", gap: 14, padding: "12px 10px", alignItems: "center", borderBottom: i===rows.length-1?"none":"1px solid var(--line-soft)", cursor: "pointer" }}>
                 <span className="mono" style={{ fontSize: 13, fontWeight: 500, color: r.rk <= 3 ? "var(--signal)" : "var(--ink-6)" }}>{String(r.rk).padStart(2,"0")}</span>
                 <span style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{r.name}</span>
                 <Seg value={r.seg}/>
                 <span className="mono" style={{ fontSize: 12, color: "var(--ink-8)" }}>{r.gmv}</span>
-                <span className="mono" style={{ fontSize: 12, color: r.growth.startsWith("−") ? "var(--critical)" : "var(--ok)", fontWeight: 500 }}>{r.growth}</span>
+                <span className="mono" style={{ fontSize: 12, color: (r.growth||"").startsWith("−") ? "var(--critical)" : "var(--ok)", fontWeight: 500 }}>{r.growth}</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ flex: 1 }}><Progress value={r.health} tone={r.health>=75?"ok":r.health>=55?"warn":"critical"} h={3}/></div>
                   <span className="mono" style={{ fontSize: 11, color: "var(--ink-7)", width: 22, textAlign: "right" }}>{r.health}</span>
@@ -55,31 +86,36 @@ function PageTop50() {
 
 // ── Tasks ─────────────────────────────────────────────────
 function PageTasks() {
+  const TK = (typeof window !== "undefined" && window.TASKS) || [];
+
+  // Группировка реальных задач по колонкам.
+  // На сервере (design_mappers) статус не передаётся в task-dict — есть только due и priority.
+  // Поэтому колонки делим по смыслу due: просрочено → "В работе" (требует внимания),
+  // сегодня → "Сегодня", через N дн. → "Бэклог". Готовые (status=done) не приходят с сервера.
+  const today = [], soon = [], backlog = [], overdue = [];
+  TK.forEach(t => {
+    const due = (t.due || "").toLowerCase();
+    if (due.indexOf("просроч") !== -1) overdue.push(t);
+    else if (due === "сегодня") today.push(t);
+    else if (due === "завтра" || due.indexOf("через") !== -1) backlog.push(t);
+    else backlog.push(t);
+  });
+
   const cols = [
-    { title: "Бэклог", tone: "neutral", count: 14, items: [
-      { t: "Согласовать условия Q3", cl: "Orbita", pr: "med" },
-      { t: "Добавить метрики конверсии", cl: "Dostavka Pro", pr: "low" },
-      { t: "Ротация API ключа", cl: "Vivo Tea", pr: "low" },
-    ]},
-    { title: "Сегодня", tone: "signal", count: 8, items: [
-      { t: "Поднять лимит вывода", cl: "СтройМаркет-21", pr: "high" },
-      { t: "Отправить follow-up", cl: "ТехноЛайн", pr: "med" },
-      { t: "QBR подготовка", cl: "Aura Beauty", pr: "high" },
-    ]},
-    { title: "В работе", tone: "warn", count: 6, items: [
-      { t: "Исследовать воронку оплаты", cl: "Aura Beauty", pr: "critical" },
-      { t: "Запрос договора", cl: "Kitchen Garden", pr: "med" },
-    ]},
-    { title: "Готово · 7д", tone: "ok", count: 23, items: [
-      { t: "Онбординг завершён", cl: "Моя Полка", pr: "med" },
-      { t: "KPI обновлены", cl: "Raduga Mall", pr: "low" },
-      { t: "Договор подписан", cl: "Lumen", pr: "high" },
-    ]},
+    { title: "Просрочено", tone: "critical", count: overdue.length, items: overdue.slice(0, 8).map(t => ({ t: t.title, cl: t.client, pr: t.priority })) },
+    { title: "Сегодня",    tone: "signal",   count: today.length,   items: today.slice(0, 8).map(t => ({ t: t.title, cl: t.client, pr: t.priority })) },
+    { title: "В работе",   tone: "warn",     count: 0,              items: [] },  // нет источника (status=in_progress приходят в today/backlog)
+    { title: "Бэклог",     tone: "neutral",  count: backlog.length, items: backlog.slice(0, 8).map(t => ({ t: t.title, cl: t.client, pr: t.priority })) },
   ];
+  const totalActive = TK.length;
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","задачи"]} title="Задачи · канбан" subtitle="37 активных · 3 просрочено · 23 закрыто за неделю"
-        actions={<><Btn kind="ghost" size="m">Мои</Btn><Btn kind="dim" size="m">Вся команда</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Задача</Btn></>}/>
+      <TopBar breadcrumbs={["am hub","задачи"]} title="Задачи · канбан"
+        subtitle={`${totalActive} активных · ${overdue.length} просрочено · ${today.length} на сегодня`}
+        actions={<><Btn kind="ghost" size="m">Мои</Btn><Btn kind="dim" size="m">Вся команда</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
+          // Клик на "+" открывает глобальную модалку из shell (FAB всегда в DOM)
+          document.querySelector('button[title="Новая задача"]')?.click();
+        }}>Задача</Btn></>}/>
       <div style={{ padding: "22px 28px 40px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
           {cols.map((c, i) => (
@@ -113,21 +149,36 @@ function PageTasks() {
 
 // ── Meetings ──────────────────────────────────────────────
 function PageMeetings() {
-  const meets = [
-    { d: "сегодня · 14:00", cl: "СтройМаркет-21", kind: "checkup",   seg: "A+", who: "Ольга Ларина", ch: "KTalk",   mood: "risk" },
-    { d: "сегодня · 16:30", cl: "ТехноЛайн",      kind: "QBR",       seg: "A",  who: "Дмитрий К.",  ch: "KTalk",   mood: "ok" },
-    { d: "завтра · 10:00",  cl: "Kitchen Garden", kind: "onboarding",seg: "B",  who: "Ирина Н.",    ch: "Zoom",    mood: "warn" },
-    { d: "завтра · 15:00",  cl: "Aura Beauty",    kind: "urgent",    seg: "A",  who: "Максим Р.",   ch: "KTalk",   mood: "risk" },
-    { d: "20 апр · 11:00",  cl: "Gemini Shop",    kind: "checkup",   seg: "B+", who: "Виктор Л.",   ch: "оффлайн", mood: "ok" },
-    { d: "22 апр · 14:30",  cl: "Orbita Mkt",     kind: "qbr-auto",  seg: "A",  who: "—",           ch: "авто",    mood: "info" },
-    { d: "23 апр · 09:00",  cl: "Моя Полка",      kind: "checkup",   seg: "B",  who: "Игорь П.",    ch: "KTalk",   mood: "ok" },
-  ];
+  const MT = (typeof window !== "undefined" && window.MEETINGS) || [];
+
+  // Маппинг из window.MEETINGS (server-shape: {when, day, client, type, seg, mood})
+  // в UI-shape: {d, cl, kind, seg, who, ch, mood}.
+  const meets = MT.map(m => ({
+    d: `${m.day || "—"} · ${m.when || ""}`.trim(),
+    cl: m.client || "—",
+    kind: m.type || "sync",
+    seg: m.seg || "—",
+    who: "—",   // attendees не пробрасываются с сервера (JSONB поле)
+    ch: "",     // channel не в шаблоне сервера
+    mood: m.mood || "ok",
+  }));
+
+  // Агрегаты справа
+  const total = meets.length;
+  const withRisk = meets.filter(m => m.mood === "risk").length;
+  const withOk = meets.filter(m => m.mood === "ok").length;
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","встречи"]} title="Встречи" subtitle="Календарь всех чекапов, QBR и экстренных встреч"
+      <TopBar breadcrumbs={["am hub","встречи"]} title="Встречи"
+        subtitle={total > 0 ? `${total} предстоящих · ${withRisk} с риском · ${withOk} ок` : "Нет предстоящих встреч"}
         actions={<><Btn kind="ghost" size="m">Все</Btn><Btn kind="dim" size="m">Мои</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Запланировать</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 320px", gap: 18 }}>
-        <Card title="Расписание · неделя 16">
+        <Card title="Расписание · предстоящие">
+          {meets.length === 0 && (
+            <div style={{ padding: "28px 10px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+              Нет предстоящих встреч в вашем календаре.
+            </div>
+          )}
           {meets.map((m, i) => (
             <div key={i} style={{ display: "grid", gridTemplateColumns: "150px 1fr 140px 90px 40px", gap: 14, padding: "14px 6px", borderBottom: i===meets.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
               <div>
@@ -149,12 +200,12 @@ function PageMeetings() {
         </Card>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <Card title="Статистика · квартал" dense>
+          <Card title="Статистика · предстоящие" dense>
             {[
-              { l: "Проведено", v: 129, total: 148 },
-              { l: "Отменено", v: 12, total: 148 },
-              { l: "С риском", v: 38, total: 129 },
-              { l: "С положительным", v: 74, total: 129 },
+              { l: "Всего", v: total, total: Math.max(total, 1) },
+              { l: "С риском", v: withRisk, total: Math.max(total, 1) },
+              { l: "С позитивом", v: withOk, total: Math.max(total, 1) },
+              { l: "Нейтральные", v: Math.max(0, total - withRisk - withOk), total: Math.max(total, 1) },
             ].map((s, i) => (
               <div key={i} style={{ padding: "10px 0", borderBottom: i===3?"none":"1px solid var(--line-soft)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
@@ -183,25 +234,54 @@ function PageMeetings() {
 
 // ── Portfolio ─────────────────────────────────────────────
 function PagePortfolio() {
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+
+  // Группируем реальных клиентов по сегментам
+  const segs = [
+    { l: "ENT",  segs: ["ENT"],          t: "signal" },
+    { l: "SME+", segs: ["SME+"],         t: "signal" },
+    { l: "SME",  segs: ["SME", "SME-"],  t: "info" },
+    { l: "SMB",  segs: ["SMB"],          t: "info" },
+    { l: "SS",   segs: ["SS"],           t: "warn" },
+    { l: "NEW",  segs: [""],             t: "ok" },    // без сегмента
+  ].map(group => {
+    const members = CL.filter(c => group.segs.includes((c.seg || "").toUpperCase()));
+    const rub = members.reduce((s, c) => s + _pg(c.gmv), 0);
+    return {
+      ...group,
+      n: members.length,
+      v: rub >= 1_000_000 ? `₽ ${(rub/1_000_000).toFixed(1)}м`
+         : rub >= 1000    ? `₽ ${Math.round(rub/1000)}к`
+         : `₽ ${Math.round(rub)}`,
+    };
+  });
+
+  // PM-распределение
+  const pmMap = {};
+  CL.forEach(c => {
+    if (!c.pm || c.pm === "—") return;
+    if (!pmMap[c.pm]) pmMap[c.pm] = { pm: c.pm, n: 0, r: 0 };
+    pmMap[c.pm].n += 1;
+    if (c.status === "risk") pmMap[c.pm].r += 1;
+  });
+  const pms = Object.values(pmMap).sort((a, b) => b.n - a.n).slice(0, 8);
+  const maxPm = pms.reduce((m, p) => Math.max(m, p.n), 1);
+
+  const totalGmv = CL.reduce((s, c) => s + _pg(c.gmv), 0);
+  const totalFmt = totalGmv >= 1_000_000 ? `₽ ${(totalGmv/1_000_000).toFixed(1)}м` : `₽ ${Math.round(totalGmv/1000)}к`;
+
   return (
     <div>
       <TopBar breadcrumbs={["am hub","портфель"]} title="Портфель · структура"
-        subtitle="248 клиентов · ₽ 174м · 4 менеджера"
+        subtitle={`${CL.length} клиентов · ${totalFmt} · ${pms.length} ${pms.length === 1 ? "менеджер" : "менеджеров"}`}
         actions={<><Btn kind="ghost" size="m">По сегменту</Btn><Btn kind="dim" size="m">По менеджеру</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12 }}>
-          {[
-            { l: "A+", n: 18, v: "₽ 48м", t: "signal" },
-            { l: "A",  n: 46, v: "₽ 62м", t: "signal" },
-            { l: "B+", n: 62, v: "₽ 34м", t: "info" },
-            { l: "B",  n: 71, v: "₽ 21м", t: "info" },
-            { l: "C",  n: 38, v: "₽ 7.4м", t: "warn" },
-            { l: "NEW",n: 13, v: "₽ 1.6м", t: "ok" },
-          ].map((s,i)=>(
+          {segs.map((s,i)=>(
             <div key={i} style={{ padding: 16, background: "var(--ink-2)", border: "1px solid var(--line)", borderLeft: `3px solid var(--${s.t})`, borderRadius: 6 }}>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>сегмент</div>
-              <div style={{ fontSize: 32, fontWeight: 500, color: `var(--${s.t})`, letterSpacing: "-0.03em", marginTop: 4 }}>{s.l}</div>
-              <div className="mono" style={{ fontSize: 12, color: "var(--ink-8)", marginTop: 6 }}>{s.n} клиентов</div>
+              <div style={{ fontSize: 28, fontWeight: 500, color: `var(--${s.t})`, letterSpacing: "-0.03em", marginTop: 4 }}>{s.l}</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--ink-8)", marginTop: 6 }}>{s.n} {s.n === 1 ? "клиент" : "клиентов"}</div>
               <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{s.v}</div>
             </div>
           ))}
@@ -209,20 +289,20 @@ function PagePortfolio() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
           <Card title="Распределение по менеджерам">
-            {[
-              { pm: "Анна Соколова",  n: 72, r: 3, tone: "signal" },
-              { pm: "Кирилл Воронов", n: 64, r: 1, tone: "info" },
-              { pm: "Лиза Морозова",  n: 58, r: 0, tone: "ok" },
-              { pm: "Павел Ремнёв",   n: 54, r: 4, tone: "warn" },
-            ].map((p,i)=>(
-              <div key={i} style={{ padding: "14px 0", borderBottom: i===3?"none":"1px solid var(--line-soft)", display: "grid", gridTemplateColumns: "36px 1fr 60px 90px 60px", gap: 12, alignItems: "center" }}>
+            {pms.length === 0 && (
+              <div style={{ padding: "22px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Нет данных о менеджерах клиентов.
+              </div>
+            )}
+            {pms.map((p, i) => (
+              <div key={i} style={{ padding: "14px 0", borderBottom: i===pms.length-1?"none":"1px solid var(--line-soft)", display: "grid", gridTemplateColumns: "36px 1fr 60px 90px 60px", gap: 12, alignItems: "center" }}>
                 <Avatar name={p.pm}/>
                 <div>
                   <div style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{p.pm}</div>
-                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>tier-1 · senior</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>account manager</div>
                 </div>
                 <span className="mono" style={{ fontSize: 13, color: "var(--ink-8)" }}>{p.n}</span>
-                <Progress value={p.n/0.72} tone={p.tone} h={3}/>
+                <Progress value={(p.n / maxPm) * 100} tone={p.r > 0 ? "warn" : "signal"} h={3}/>
                 {p.r > 0 ? <Badge tone="critical" dot>{p.r} risk</Badge> : <Badge tone="ok" dot>ok</Badge>}
               </div>
             ))}
@@ -237,11 +317,11 @@ function PagePortfolio() {
               })}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>янв · фев · мар · апр</div>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>последние 90 дней</div>
               <div style={{ display: "flex", gap: 10, fontSize: 11 }}>
-                <StatDot tone="critical">6 churn</StatDot>
-                <StatDot tone="warn">11 риск</StatDot>
-                <StatDot tone="ok">231 ок</StatDot>
+                <StatDot tone="critical">{CL.filter(c=>c.status==="risk").length} churn-риск</StatDot>
+                <StatDot tone="warn">{CL.filter(c=>c.status==="warn").length} warn</StatDot>
+                <StatDot tone="ok">{CL.filter(c=>c.status==="ok").length} ок</StatDot>
               </div>
             </div>
           </Card>
@@ -338,18 +418,35 @@ function PageKanban() { return <PageTasks/>; }
 
 // ── KPI ───────────────────────────────────────────────────
 function PageKPI() {
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const U  = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  const S  = (typeof window !== "undefined" && window.__SIDEBAR_STATS) || {};
+
+  const totalGmv = CL.reduce((s, c) => s + _pg(c.gmv), 0);
+  const gmvFmt = totalGmv >= 1_000_000 ? `₽ ${(totalGmv/1_000_000).toFixed(1)}м` : `₽ ${Math.round(totalGmv/1000)}к`;
+
+  // Процент health>=ok из всего скоупа
+  const okClients = CL.filter(c => c.status === "ok").length;
+  const retention = CL.length > 0 ? Math.round((okClients / CL.length) * 100) : 0;
+
+  // План GMV — 120% от текущего (как грубая оценка)
+  const gmvPlan = Math.round(totalGmv * 1.2);
+  const gmvPlanFmt = gmvPlan >= 1_000_000 ? `₽ ${(gmvPlan/1_000_000).toFixed(1)}м` : `₽ ${Math.round(gmvPlan/1000)}к`;
+
+  const kpis = [
+    { l: "GMV портфеля", v: gmvFmt, plan: gmvPlanFmt, pct: gmvPlan > 0 ? Math.round((totalGmv/gmvPlan)*100) : 0, tone: "ok" },
+    { l: "Клиентов ok",  v: String(okClients), plan: String(CL.length), pct: CL.length > 0 ? Math.round((okClients/CL.length)*100) : 0, tone: "signal" },
+    { l: "Retention",    v: `${retention}%`, plan: "92%", pct: retention > 92 ? 100 : Math.round((retention/92)*100), tone: retention >= 92 ? "signal" : "warn" },
+    { l: "Активных задач", v: String(S.tasksActive || 0), plan: "—", pct: 0, tone: "info" },
+  ];
+
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","мой kpi"]} title="Мой KPI · Q2'26"
-        subtitle="Анна Соколова · tier 1 · план до 30 июня"/>
+      <TopBar breadcrumbs={["am hub","мой kpi"]} title="Мой KPI"
+        subtitle={`${U.name || U.email || "Менеджер"} · ${U.role || "user"}`}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
-          {[
-            { l: "GMV портфеля", v: "₽ 48м", plan: "₽ 60м", pct: 80, tone: "ok" },
-            { l: "Чекапы", v: "32", plan: "40", pct: 80, tone: "ok" },
-            { l: "Retention", v: "94%", plan: "92%", pct: 102, tone: "signal" },
-            { l: "NPS", v: "62", plan: "70", pct: 88, tone: "warn" },
-          ].map((k,i)=>(
+          {kpis.map((k,i)=>(
             <div key={i} style={{ padding: 18, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{k.l}</div>
               <div style={{ fontSize: 34, fontWeight: 500, color: `var(--${k.tone})`, letterSpacing: "-0.03em", lineHeight: 1, marginTop: 8 }}>{k.v}</div>
