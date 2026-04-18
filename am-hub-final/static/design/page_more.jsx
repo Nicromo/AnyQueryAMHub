@@ -387,7 +387,11 @@ function PageAI() {
     if (!msg || sending) return;
     setInput("");
     setError(null);
-    const history = messages.map(m => ({ role: m.role, content: m.content || m.text }));
+    const history = messages.map(m => ({
+      // Сервер ждёт role ∈ {"user","assistant"} — нормализуем "ai" → "assistant"
+      role: m.role === "ai" ? "assistant" : m.role,
+      content: m.content || m.text,
+    }));
     setMessages(prev => [...prev, { role: "user", content: msg }]);
     setSending(true);
     try {
@@ -399,7 +403,7 @@ function PageAI() {
       });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
-      setMessages(prev => [...prev, { role: "ai", content: d.reply || d.answer || "" }]);
+      setMessages(prev => [...prev, { role: "assistant", content: d.reply || d.answer || "" }]);
     } catch (e) {
       setError(e.message || "Не удалось получить ответ");
     } finally {
@@ -407,7 +411,32 @@ function PageAI() {
     }
   };
 
-  const newSession = () => { setMessages([]); setError(null); };
+  const newSession = async () => {
+    try {
+      await fetch("/api/ai/chat/history", { method: "DELETE", credentials: "include" });
+    } catch (e) {}
+    setMessages([]); setError(null);
+  };
+
+  // Голосовой ввод через WebSpeech API (если доступен)
+  const recogRef = React.useRef(null);
+  const [listening, setListening] = React.useState(false);
+  const toggleMic = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Голосовой ввод не поддерживается этим браузером."); return; }
+    if (listening) { recogRef.current?.stop(); setListening(false); return; }
+    const r = new SR();
+    r.lang = "ru-RU"; r.continuous = false; r.interimResults = true;
+    r.onresult = (ev) => {
+      let text = "";
+      for (let i = 0; i < ev.results.length; i++) text += ev.results[i][0].transcript;
+      setInput(text);
+    };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
+    recogRef.current = r;
+    r.start(); setListening(true);
+  };
 
   const quickCommands = [
     { label: "Брифинг на завтра",   text: "Подготовь брифинг на завтра по моему портфелю" },
@@ -442,8 +471,10 @@ function PageAI() {
           <form onSubmit={(e) => { e.preventDefault(); send(); }}
             style={{ display: "flex", gap: 8, marginTop: 14, padding: 10, background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6 }}>
             <input value={input} onChange={(e) => setInput(e.target.value)} disabled={sending}
-              placeholder="Спросите о портфеле, клиенте или задаче…"
+              placeholder={listening ? "Говорите…" : "Спросите о портфеле, клиенте или задаче…"}
               style={{ flex: 1, background: "transparent", border: 0, color: "var(--ink-8)", outline: "none", fontFamily: "var(--f-display)", fontSize: 13 }}/>
+            <Btn size="s" kind={listening ? "primary" : "ghost"} type="button" onClick={toggleMic}
+              icon={<I.mic size={12}/>} title={listening ? "Стоп" : "Голосовой ввод"}/>
             <Btn size="s" kind="primary" type="submit" disabled={sending || !input.trim()} iconRight={<I.arrow_r size={12}/>}>Отправить</Btn>
           </form>
         </Card>
@@ -560,10 +591,63 @@ function PageKPI() {
 
 // ── Cabinet ───────────────────────────────────────────────
 function PageCabinet() {
+  const fileInputRef = React.useRef(null);
+  const [uploading, setUploading] = React.useState(false);
+  const [recording, setRecording] = React.useState(false);
+  const recorderRef = React.useRef(null);
+  const chunksRef = React.useRef([]);
+
+  const uploadFiles = async (fileList) => {
+    if (!fileList?.length) return;
+    setUploading(true);
+    try {
+      for (const f of fileList) {
+        const fd = new FormData();
+        fd.append("file", f);
+        fd.append("category", f.type.startsWith("audio/") ? "voice" : "misc");
+        const r = await fetch("/api/files", { method: "POST", credentials: "include", body: fd });
+        if (!r.ok) { alert("Ошибка загрузки " + f.name); break; }
+      }
+      location.reload();
+    } finally { setUploading(false); }
+  };
+
+  const startRecord = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => chunksRef.current.push(e.data);
+      mr.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        await uploadFiles([new File([blob], `voice_${ts}.webm`, { type: "audio/webm" })]);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start();
+      recorderRef.current = mr;
+      setRecording(true);
+    } catch (e) {
+      alert("Нет доступа к микрофону: " + e.message);
+    }
+  };
+  const stopRecord = () => { recorderRef.current?.stop(); setRecording(false); };
+
   return (
     <div>
       <TopBar breadcrumbs={["am hub","мой кабинет"]} title="Мой кабинет" subtitle="Личные материалы, заметки и документы"
-        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Загрузить</Btn>}/>
+        actions={<>
+          <input type="file" ref={fileInputRef} multiple style={{ display: "none" }}
+            onChange={(e) => uploadFiles(e.target.files)}/>
+          <Btn kind={recording ? "primary" : "ghost"} size="m" icon={<I.mic size={14}/>}
+            onClick={recording ? stopRecord : startRecord}>
+            {recording ? "Остановить запись" : "Запись голоса"}
+          </Btn>
+          <Btn kind="primary" size="m" icon={<I.plus size={14}/>} disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}>
+            {uploading ? "Загружаю…" : "Загрузить"}
+          </Btn>
+        </>}/>
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "220px 1fr", gap: 18 }}>
         <Card title="Папки">
           {(function(){
@@ -594,14 +678,27 @@ function PageCabinet() {
                 Файлов пока нет. Загрузите первый документ кнопкой выше.
               </div>;
             }
+            const delFile = async (id, name) => {
+              if (!confirm(`Удалить «${name}»?`)) return;
+              const r = await fetch(`/api/files/${id}`, { method: "DELETE", credentials: "include" });
+              if (r.ok) location.reload(); else alert("Ошибка удаления");
+            };
             return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
-              {files.map((f,i)=>(
-                <div key={i} style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
-                  <Placeholder h={90} label={f.type || f.t}/>
-                  <div style={{ padding: 10 }}>
-                    <div style={{ fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name || f.n}</div>
-                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 3 }}>{f.date || f.d}</div>
+              {files.map((f, i) => (
+                <div key={f.id || i} style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden", position: "relative" }}>
+                  <div onClick={() => { if (f.url) window.open(f.url, "_blank"); }}
+                       style={{ cursor: f.url ? "pointer" : "default" }}>
+                    <Placeholder h={90} label={f.type || f.t}/>
+                    <div style={{ padding: 10 }}>
+                      <div style={{ fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name || f.n}</div>
+                      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 3 }}>{f.date || f.d}</div>
+                    </div>
                   </div>
+                  {f.id && (
+                    <button onClick={() => delFile(f.id, f.name || f.n)}
+                      title="Удалить"
+                      style={{ position: "absolute", top: 6, right: 6, width: 22, height: 22, background: "rgba(0,0,0,.5)", border: 0, borderRadius: 3, color: "#fff", cursor: "pointer", fontSize: 11 }}>✕</button>
+                  )}
                 </div>
               ))}
             </div>;
@@ -618,7 +715,17 @@ function PageTemplates() {
   return (
     <div>
       <TopBar breadcrumbs={["am hub","шаблоны"]} title="Шаблоны" subtitle="Follow-up, чекапы, QBR — шаблоны общения с клиентами"
-        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Новый шаблон</Btn>}/>
+        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
+          const name = prompt("Название шаблона:"); if (!name) return;
+          const category = prompt("Категория (general/qbr/sync/checkup/email):", "general") || "general";
+          const body = prompt("Текст шаблона (используй {{name}} для подстановки):");
+          if (!body) return;
+          fetch("/design/api/templates", {
+            method: "POST", credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, category, body }),
+          }).then(r => r.ok ? location.reload() : alert("Ошибка"));
+        }}>Новый шаблон</Btn>}/>
       <div style={{ padding: "22px 28px 40px" }}>
         {tpls.length === 0 && (
           <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
@@ -657,7 +764,20 @@ function PageAuto() {
     <div>
       <TopBar breadcrumbs={["am hub","автозадачи"]} title="Автозадачи"
         subtitle="Правила `IF-THEN`: когда система создаёт задачи автоматически"
-        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Новое правило</Btn>}/>
+        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
+          const name = prompt("Название правила:"); if (!name) return;
+          const trigger = prompt("Триггер (health_drop / days_no_contact / meeting_done / checkup_due):", "health_drop") || "health_drop";
+          const task_title = prompt("Название создаваемой задачи:"); if (!task_title) return;
+          const task_priority = prompt("Приоритет (low/medium/high):", "medium") || "medium";
+          const body = { name, trigger, task_title, task_priority, task_due_days: 3, is_active: true, trigger_config: {} };
+          if (trigger === "health_drop") body.trigger_config = { threshold: 50 };
+          if (trigger === "days_no_contact") body.trigger_config = { days: 30 };
+          fetch("/api/auto-tasks/rules", {
+            method: "POST", credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }).then(r => r.ok ? location.reload() : alert("Ошибка"));
+        }}>Новое правило</Btn>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
           <KPI label="Правил активно" value={String(activeCount)} unit={`/ ${rules.length}`}/>
@@ -700,7 +820,7 @@ function PageAuto() {
 function PageRoadmap() {
   const rawCols = (typeof window !== "undefined" && window.ROADMAP) || [];
   const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
-  const isAdmin = (U.role || "") === "admin";
+  const canEdit = !!U.email;  // любой авторизованный менеджер может редактировать
 
   // Фиксированные колонки (даже если БД пустая — показываем все 5)
   const DEFAULT = [
@@ -739,7 +859,7 @@ function PageRoadmap() {
       <TopBar breadcrumbs={["am hub","роадмап"]} title="Роадмап"
         subtitle={`Что команда строит в AM Hub · ${new Date().getFullYear()}`}/>
       <div style={{ padding: "22px 28px 40px" }}>
-        {!isAdmin && rawCols.length === 0 && (
+        {!canEdit && rawCols.length === 0 && (
           <div style={{ padding: "20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6, marginBottom: 14 }}>
             Роадмап пока пуст. Пункты добавляют администраторы.
           </div>
@@ -749,7 +869,7 @@ function PageRoadmap() {
             <div key={c.key} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderTop: `3px solid var(--${c.tone})`, borderRadius: "0 0 6px 6px", padding: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{c.title}</div>
-                {isAdmin && (
+                {canEdit && (
                   <button onClick={() => addItem(c)} title="Добавить"
                     style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--ink-7)", width: 22, height: 22, borderRadius: 3, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>+</button>
                 )}
@@ -758,7 +878,7 @@ function PageRoadmap() {
                 {c.items.map((it, j) => (
                   <div key={j} style={{ padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4, display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{typeof it === "string" ? it : (it.title || it.name)}</div>
-                    {isAdmin && it.id && (
+                    {canEdit && it.id && (
                       <button onClick={() => delItem(it.id, it.title)} title="Удалить"
                         style={{ background: "transparent", border: 0, color: "var(--ink-5)", cursor: "pointer", padding: 2, fontSize: 12 }}>✕</button>
                     )}
@@ -782,7 +902,16 @@ function PageInternal() {
     <div>
       <TopBar breadcrumbs={["am hub","внутренние задачи"]} title="Внутренние задачи"
         subtitle="Задачи команды без привязки к клиенту"
-        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Задача</Btn>}/>
+        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
+          const title = prompt("Задача:"); if (!title) return;
+          const priority = prompt("Приоритет (low/med/high):", "med") || "med";
+          const due = prompt("Срок (дней от сегодня):", "7");
+          fetch("/design/api/internal-tasks", {
+            method: "POST", credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, priority, due }),
+          }).then(r => r.ok ? location.reload() : alert("Ошибка"));
+        }}>Задача</Btn>}/>
       <div style={{ padding: "22px 28px 40px" }}>
         <Card title="Задачи команды">
           {(function(){
@@ -1014,4 +1143,154 @@ function PageHelp() {
   );
 }
 
-Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PageAI, PageKanban, PageKPI, PageCabinet, PageTemplates, PageAuto, PageRoadmap, PageInternal, PageExtInstall, PageHelp });
+// ── Profile ───────────────────────────────────────────────
+function PageProfile() {
+  const [prof, setProf] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  React.useEffect(() => {
+    fetch("/design/api/profile", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setProf(d));
+  }, []);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true); setMsg(null);
+    const body = {
+      first_name: prof.first_name || "",
+      last_name: prof.last_name || "",
+      telegram_id: prof.telegram_id || "",
+    };
+    const r = await fetch("/design/api/profile", {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    setMsg(r.ok ? "Сохранено" : "Ошибка сохранения");
+    setTimeout(() => setMsg(null), 2500);
+  };
+
+  if (!prof) return <div style={{ padding: 40, color: "var(--ink-6)", textAlign: "center" }}>Загружаю профиль…</div>;
+
+  return (
+    <div>
+      <TopBar breadcrumbs={["am hub","профиль"]} title="Мой профиль" subtitle={prof.email}/>
+      <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 320px", gap: 18 }}>
+        <Card title="Личные данные">
+          <form onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {[
+              { k: "email",       l: "Email",       readonly: true,  type: "email" },
+              { k: "first_name",  l: "Имя / инициалы", type: "text" },
+              { k: "last_name",   l: "Фамилия",     type: "text" },
+              { k: "telegram_id", l: "Telegram ID (chat_id)", type: "text" },
+            ].map(f => (
+              <label key={f.k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{f.l}</span>
+                <input type={f.type} value={prof[f.k] || ""} readOnly={f.readonly} disabled={f.readonly}
+                  onChange={(e) => setProf({ ...prof, [f.k]: e.target.value })}
+                  style={{ padding: "8px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-8)", fontSize: 13, fontFamily: "var(--f-mono)", outline: "none" }}/>
+              </label>
+            ))}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6 }}>
+              <Btn kind="primary" type="submit" size="m" disabled={saving}>{saving ? "Сохраняю…" : "Сохранить"}</Btn>
+              {msg && <span className="mono" style={{ fontSize: 11, color: msg.includes("Ошибка") ? "var(--critical)" : "var(--ok)" }}>{msg}</span>}
+            </div>
+          </form>
+        </Card>
+
+        <Card title="Статистика">
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {[
+              { l: "Роль",                v: prof.role },
+              { l: "Клиентов (по email)", v: prof.clients_by_email },
+              { l: "Клиентов (assigned)", v: prof.clients_assigned },
+              { l: "Telegram",            v: prof.telegram_id ? "✓" : "не привязан" },
+            ].map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.l}</span>
+                <span style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{r.v || "—"}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ── Assignments admin ─────────────────────────────────────
+function PageAssignments() {
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const [managers, setManagers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    fetch("/design/api/users", { credentials: "include" })
+      .then(r => r.ok ? r.json() : { users: [] })
+      .then(d => { setManagers(d.users || d || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if ((U.role || "") !== "admin") {
+    return (
+      <div>
+        <TopBar breadcrumbs={["am hub","админ","назначения"]} title="Назначения клиентов"/>
+        <div style={{ padding: "40px 28px", color: "var(--ink-6)", textAlign: "center" }}>
+          Доступ только для администраторов.
+        </div>
+      </div>
+    );
+  }
+
+  const reassign = async (clientId, clientName) => {
+    const target = prompt(`Передать «${clientName}» другому менеджеру.\nВведите email:`);
+    if (!target) return;
+    const r = await fetch("/design/api/assign-client", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, manager_email: target.trim().toLowerCase() }),
+    });
+    if (r.ok) location.reload(); else {
+      const err = await r.text();
+      alert("Ошибка: " + err);
+    }
+  };
+
+  return (
+    <div>
+      <TopBar breadcrumbs={["am hub","админ","назначения"]} title="Назначения клиентов"
+        subtitle={`${CL.length} клиентов · ${managers.length || "?"} менеджеров`}/>
+      <div style={{ padding: "22px 28px 40px" }}>
+        <Card title="Передать клиента">
+          {CL.length === 0 && (
+            <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+              Нет клиентов в системе.
+            </div>
+          )}
+          <div style={{ background: "var(--ink-2)", borderRadius: 4 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px 120px", gap: 14, padding: "10px 14px", background: "var(--ink-1)", fontFamily: "var(--f-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-5)" }}>
+              <span>клиент</span>
+              <span>текущий менеджер</span>
+              <span>сегмент</span>
+              <span>действие</span>
+            </div>
+            {CL.map((c, i) => (
+              <div key={c.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px 120px", gap: 14, padding: "12px 14px", borderBottom: i === CL.length - 1 ? "none" : "1px solid var(--line-soft)", alignItems: "center" }}>
+                <span style={{ fontSize: 13, color: "var(--ink-9)" }}>{c.name}</span>
+                <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{c.manager_email || c.pm || "—"}</span>
+                <Seg value={c.segment || c.seg}/>
+                <Btn size="s" kind="ghost" onClick={() => reassign(c.id, c.name)}>Передать</Btn>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PageAI, PageKanban, PageKPI, PageCabinet, PageTemplates, PageAuto, PageRoadmap, PageInternal, PageExtInstall, PageHelp, PageProfile, PageAssignments });

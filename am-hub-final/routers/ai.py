@@ -304,9 +304,12 @@ async def api_ai_chat(
 
 @router.get("/api/ai/chat/history")
 async def api_ai_chat_history(
+    limit: int = 50,
+    client_id: Optional[int] = None,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
+    """История последних N сообщений чата для текущего пользователя."""
     if not auth_token: raise HTTPException(status_code=401)
     from auth import decode_access_token
     payload = decode_access_token(auth_token)
@@ -315,7 +318,37 @@ async def api_ai_chat_history(
     if not user: raise HTTPException(status_code=401)
 
     from models import AIChat
-    from sqlalchemy import func
+    q = db.query(AIChat).filter(AIChat.user_id == user.id)
+    if client_id:
+        q = q.filter(AIChat.client_id == client_id)
+    rows = q.order_by(AIChat.created_at.desc()).limit(max(1, min(200, limit))).all()
+    rows.reverse()  # хронологический порядок
+    messages = [{
+        "role":    r.role,     # "user" | "assistant"
+        "content": r.content,
+        "at":      r.created_at.isoformat() if r.created_at else None,
+        "client_id": r.client_id,
+    } for r in rows]
+    return {"messages": messages, "count": len(messages)}
+
+
+@router.delete("/api/ai/chat/history")
+async def api_ai_chat_clear(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Очистить историю текущего пользователя (новая сессия)."""
+    if not auth_token: raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload: raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user: raise HTTPException(status_code=401)
+
+    from models import AIChat
+    deleted = db.query(AIChat).filter(AIChat.user_id == user.id).delete()
+    db.commit()
+    return {"ok": True, "deleted": deleted}
 
 
 def _env(key: str, default: str = "") -> str:

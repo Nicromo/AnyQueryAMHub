@@ -102,6 +102,8 @@ PAGES = {
     "internal":  ("PageInternal",   ["am hub", "инструменты", "внутр."],   "Внутренние задачи"),
     "help":      ("PageHelp",       ["am hub", "интеграции", "помощь"],    "Помощь"),
     "extension": ("PageExtInstall", ["am hub", "интеграции", "расширение"], "Расширение"),
+    "profile":   ("PageProfile",    ["am hub", "профиль"],                 "Мой профиль"),
+    "assignments":("PageAssignments",["am hub", "админ", "назначения"],    "Назначения клиентов"),
 }
 
 
@@ -152,9 +154,10 @@ async def roadmap_create(
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
+    """Создать элемент роадмапа. Любой авторизованный менеджер может добавлять."""
     user = _get_user(auth_token, db)
-    if not user or (user.role or "") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
     item = RoadmapItem(
         column_key   = (body.get("column_key") or "backlog").lower(),
@@ -176,14 +179,218 @@ async def roadmap_delete(
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
+    """Удалить элемент роадмапа. Admin — любой; manager — только свои (через TODO author_id).
+    Пока все авторизованные могут удалять — добавим author_id и фильтр позже."""
     user = _get_user(auth_token, db)
-    if not user or (user.role or "") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     it = db.query(RoadmapItem).filter(RoadmapItem.id == item_id).first()
     if not it:
         raise HTTPException(status_code=404, detail="Not found")
     db.delete(it); db.commit()
     return {"ok": True}
+
+
+@router.post("/api/roadmap/from-meeting/{meeting_id}")
+async def roadmap_from_meeting(
+    meeting_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Авто-добавить пункт в бэклог по завершённой встрече (из follow-up)."""
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    m = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    # Определим следующий квартал
+    from datetime import datetime
+    now = datetime.utcnow()
+    q = (now.month - 1) // 3 + 1
+    next_q = q + 1 if q < 4 else 1
+    col_key = f"q{next_q}"
+    col_title = f"Q{next_q} · план"
+    client_name = m.client.name if m.client else "клиент"
+    title = f"Follow-up по встрече {m.type or 'meeting'} · {client_name}"
+    item = RoadmapItem(
+        column_key=col_key, column_title=col_title, tone="info",
+        title=title,
+        description=f"Создано авто из meeting_id={meeting_id}",
+    )
+    db.add(item); db.commit(); db.refresh(item)
+    return {"ok": True, "id": item.id}
+
+
+# ── Templates CRUD ───────────────────────────────────────────
+@router.post("/api/templates")
+async def template_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    t = FollowupTemplate(
+        user_id=user.id,
+        name=(body.get("name") or "").strip(),
+        category=(body.get("category") or "general").strip(),
+        content=(body.get("body") or body.get("content") or "").strip(),
+    )
+    if not t.name or not t.content:
+        raise HTTPException(status_code=400, detail="name and body required")
+    db.add(t); db.commit(); db.refresh(t)
+    return {"ok": True, "id": t.id}
+
+
+@router.delete("/api/templates/{tid}")
+async def template_delete(
+    tid: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    t = db.query(FollowupTemplate).filter(FollowupTemplate.id == tid).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Not found")
+    if t.user_id != user.id and (user.role or "") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    db.delete(t); db.commit()
+    return {"ok": True}
+
+
+# ── Internal tasks quick create ──────────────────────────────
+@router.post("/api/internal-tasks")
+async def internal_task_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    t = Task(
+        client_id=None,
+        title=title,
+        description=body.get("description") or "",
+        priority=body.get("priority") or "medium",
+        status="plan",
+        team=body.get("owner") or (user.email or ""),
+        source="internal",
+    )
+    # due_date — если пришёл как "YYYY-MM-DD" или "N дней"
+    due = body.get("due")
+    if due:
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            if isinstance(due, str) and due.isdigit():
+                t.due_date = _dt.utcnow() + _td(days=int(due))
+            else:
+                t.due_date = _dt.fromisoformat(due)
+        except Exception:
+            pass
+    db.add(t); db.commit(); db.refresh(t)
+    return {"ok": True, "id": t.id}
+
+
+# ── Profile ──────────────────────────────────────────────────
+@router.get("/api/profile")
+async def profile_get(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    # Скоуп клиентов
+    my_clients = db.query(Client).filter(Client.manager_email == user.email).count() if user.email else 0
+    assigned = db.query(UserClientAssignment).filter(UserClientAssignment.user_id == user.id).count()
+    return {
+        "id":         user.id,
+        "email":      user.email,
+        "name":       user.name,
+        "role":       user.role,
+        "is_active":  user.is_active,
+        "telegram_id": user.telegram_id,
+        "settings":   user.settings or {},
+        "clients_by_email": my_clients,
+        "clients_assigned": assigned,
+    }
+
+
+@router.put("/api/profile")
+async def profile_update(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    for field in ("first_name", "last_name", "telegram_id"):
+        if field in body:
+            setattr(user, field, body[field])
+    if "settings" in body and isinstance(body["settings"], dict):
+        cur = dict(user.settings or {})
+        cur.update(body["settings"])
+        user.settings = cur
+    db.commit()
+    return {"ok": True}
+
+
+# ── Users list (for assignments) ─────────────────────────────
+@router.get("/api/users")
+async def users_list(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    rows = db.query(User).filter(User.is_active == True).order_by(User.email).all()
+    return {"users": [{
+        "id": u.id, "email": u.email, "name": u.name,
+        "role": u.role, "is_active": u.is_active,
+    } for u in rows]}
+
+
+# ── Client assignment (admin only) ───────────────────────────
+@router.post("/api/assign-client")
+async def assign_client(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Передать клиента другому менеджеру: переустанавливает Client.manager_email
+    и пересоздаёт UserClientAssignment. Admin only."""
+    user = _get_user(auth_token, db)
+    if not user or (user.role or "") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    body = await request.json()
+    client_id = int(body.get("client_id") or 0)
+    target_email = (body.get("manager_email") or "").strip().lower()
+    if not client_id or not target_email:
+        raise HTTPException(status_code=400, detail="client_id and manager_email required")
+    client = db.query(Client).filter(Client.id == client_id).first()
+    target = db.query(User).filter(User.email == target_email).first()
+    if not client or not target:
+        raise HTTPException(status_code=404, detail="client or target user not found")
+    old_email = client.manager_email
+    client.manager_email = target_email
+    # Чистим старые assignments и создаём новый
+    db.query(UserClientAssignment).filter(UserClientAssignment.client_id == client.id).delete()
+    db.add(UserClientAssignment(user_id=target.id, client_id=client.id))
+    db.commit()
+    return {"ok": True, "from": old_email, "to": target_email}
 
 
 # ── Seed CSMs ────────────────────────────────────────────────
@@ -362,4 +569,7 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "team_response":   dm.team_response(db, now),
         "recent_files":    dm.recent_files(db, user),
         "roadmap":         dm.roadmap_data(db),
+        "gmv_spark":       dm.gmv_spark(db, user, now),
+        "day_kpi":         dm.day_kpi(db, user, now),
+        "reminders":       dm.reminders_for_user(db, user, now),
     }

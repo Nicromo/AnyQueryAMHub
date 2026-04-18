@@ -325,6 +325,7 @@ app = FastAPI(
 # ============================================================================
 from routers import ai, tasks, meetings, clients, sync, settings, auth, integrations, analytics, misc
 from routers import account_dashboard
+from routers import files as files_router
 
 app.include_router(auth.router, tags=["auth"])
 app.include_router(settings.router, tags=["settings"])
@@ -336,6 +337,7 @@ app.include_router(sync.router, tags=["sync"])
 app.include_router(integrations.router, tags=["integrations"])
 app.include_router(analytics.router, tags=["analytics"])
 app.include_router(misc.router, tags=["misc"])
+app.include_router(files_router.router, tags=["files"])
 from routers import (
     auto_tasks, followup_mgmt, user_mgmt, misc_small,
     onboarding_mgmt, checkups_mgmt, admin as admin_router,

@@ -743,7 +743,8 @@ def heatmap_activity(db: Any, user: Any, now: datetime,
         if not visible_ids:
             return {"rows": [], "weeks": [], "matrix": []}
         cq = cq.filter(Client.id.in_(visible_ids))
-    clients = cq.order_by(Client.id.desc()).limit(14).all()
+    # Сортировка по GMV убыв. (клиенты с большим оборотом сверху)
+    clients = cq.order_by(Client.gmv.desc().nullslast(), Client.id.desc()).limit(14).all()
     if not clients:
         return {"rows": [], "weeks": [], "matrix": []}
 
@@ -805,7 +806,7 @@ def team_response(db: Any, now: datetime) -> List[Dict[str, Any]]:
             .filter(Client.manager_email == u.email,
                     Task.status == "done",
                     Task.created_at >= thirty_ago).all()
-        if len(tasks) < 3:   # статистическая минимально-значимая выборка
+        if len(tasks) < 10:  # стат-значимая выборка ≥10 реакций
             continue
 
         task_ids = [t.id for t in tasks]
@@ -827,7 +828,7 @@ def team_response(db: Any, now: datetime) -> List[Dict[str, Any]]:
             if t and t.created_at and ts > t.created_at:
                 deltas.append((ts - t.created_at).total_seconds() / 3600)
 
-        if len(deltas) < 3:
+        if len(deltas) < 10:
             continue
         avg_h = sum(deltas) / len(deltas)
         if avg_h < 1:
@@ -842,15 +843,110 @@ def team_response(db: Any, now: datetime) -> List[Dict[str, Any]]:
 
 
 def recent_files(db: Any, user: Any, limit: int = 8) -> List[Dict[str, Any]]:
-    """Последние VoiceNote как «недавние файлы» кабинета."""
-    q = db.query(VoiceNote).order_by(VoiceNote.created_at.desc()).limit(limit)
+    """Последние FileUpload + VoiceNote пользователя (admin видит всех)."""
+    from models import FileUpload as _FU
+    q = db.query(_FU).order_by(_FU.created_at.desc())
+    if user and (user.role or "") != "admin":
+        q = q.filter(_FU.user_id == user.id)
+    files = q.limit(limit).all()
+    out = [{
+        "id":   f.id,
+        "name": f.filename,
+        "type": f"{(f.mime_type or 'файл').split('/')[-1]} · {round((f.size_bytes or 0)/1024)} KB",
+        "date": f.created_at.strftime("%d %b") if f.created_at else "—",
+        "url":  f"/api/files/{f.id}",
+        "category": f.category or "misc",
+    } for f in files]
+    return out
+
+
+def gmv_spark(db: Any, user: Any, now: datetime, days: int = 30) -> List[float]:
+    """Дневные значения GMV за последние N дней. Использует RevenueEntry если есть,
+    иначе считает активности через AuditLog как прокси."""
+    try:
+        from models import RevenueEntry
+    except Exception:
+        return []
+    since = now - timedelta(days=days)
+    q = db.query(RevenueEntry).filter(RevenueEntry.period >= since.strftime("%Y-%m-%d"))
+    if user and (user.role or "") != "admin":
+        q = q.join(Client, RevenueEntry.client_id == Client.id).filter(Client.manager_email == user.email)
     rows = q.all()
-    return [{
-        "name": f"voice_{v.id}.mp3",
-        "type": f"голос · {v.duration_seconds//60}:{v.duration_seconds%60:02d}" if v.duration_seconds else "голос",
-        "date": v.created_at.strftime("%d %b") if v.created_at else "—",
-        "url":  v.audio_url,
-    } for v in rows]
+    if not rows:
+        return []
+    # Группировка по periоду (день)
+    buckets: Dict[str, float] = {}
+    for r in rows:
+        k = str(r.period)[:10]
+        buckets[k] = buckets.get(k, 0.0) + float(r.amount or 0)
+    out = []
+    for i in range(days):
+        d = (since + timedelta(days=i)).strftime("%Y-%m-%d")
+        out.append(buckets.get(d, 0.0))
+    return out
+
+
+def day_kpi(db: Any, user: Any, now: datetime) -> Dict[str, Any]:
+    """KPI дня для PageToday: встречи/задачи — план vs факт."""
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+
+    mq = db.query(Meeting)
+    tq = db.query(Task)
+    if user and (user.role or "") != "admin":
+        mq = mq.join(Client, Meeting.client_id == Client.id, isouter=True) \
+               .filter((Client.manager_email == user.email) | (Meeting.client_id.is_(None)))
+        tq = tq.join(Client, Task.client_id == Client.id, isouter=True) \
+               .filter((Client.manager_email == user.email) | (Task.client_id.is_(None)))
+
+    m_total = mq.filter(Meeting.date >= start, Meeting.date < end).count()
+    m_done  = mq.filter(Meeting.date >= start, Meeting.date < end,
+                        Meeting.followup_status.in_(["filled", "sent"])).count()
+    t_total = tq.filter(Task.due_date >= start, Task.due_date < end).count()
+    t_done  = tq.filter(Task.due_date >= start, Task.due_date < end, Task.status == "done").count()
+    return {
+        "meetings_done":  m_done,
+        "meetings_total": m_total,
+        "meetings_pct":   int(m_done / m_total * 100) if m_total else 0,
+        "tasks_done":     t_done,
+        "tasks_total":    t_total,
+        "tasks_pct":      int(t_done / t_total * 100) if t_total else 0,
+    }
+
+
+def reminders_for_user(db: Any, user: Any, now: datetime, limit: int = 10) -> List[Dict[str, Any]]:
+    """Персональные напоминания (Reminder) + high-priority просроченные задачи."""
+    out: List[Dict[str, Any]] = []
+    try:
+        from models import Reminder
+        rq = db.query(Reminder).filter(Reminder.user_id == user.id,
+                                       Reminder.done == False,
+                                       Reminder.remind_at <= now + timedelta(days=1)) \
+                               .order_by(Reminder.remind_at.asc()).limit(limit).all()
+        for r in rq:
+            out.append({
+                "t": r.remind_at.strftime("%H:%M") if r.remind_at else "",
+                "msg": r.text,
+                "done": bool(r.done),
+            })
+    except Exception:
+        pass
+
+    # Добавляем top-3 просроченных задачи как виртуальные напоминания
+    if user and user.email:
+        overdue = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True) \
+            .filter((Client.manager_email == user.email) | (Task.client_id.is_(None)),
+                    Task.status != "done",
+                    Task.due_date != None,
+                    Task.due_date < now) \
+            .order_by(Task.due_date.asc()).limit(3).all()
+        for t in overdue:
+            out.append({
+                "t": "просроч.",
+                "msg": t.title,
+                "done": False,
+            })
+    return out[:limit]
 
 
 _ROADMAP_DEFAULT_ORDER = ["q1", "q2", "q3", "q4", "backlog"]

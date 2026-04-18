@@ -111,3 +111,13 @@ html, body {
 
 ::selection { background: var(--signal); color: var(--ink-0); }
 :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* Safari < 16 fallback: если color-mix недоступен, используем rgba-alpha */
+@supports not (background: color-mix(in oklch, red 50%, blue)) {
+  :root, [data-theme="dark"] {
+    --signal-glow:  rgba(205, 241, 58, 0.18);
+  }
+  [data-theme="light"] {
+    --signal-glow:  rgba(150, 200, 40, 0.20);
+  }
+}

@@ -46,6 +46,10 @@ function _buildNav() {
       { id: "extension",  label: "Расширение", icon: "puzzle", status: "ok" },
       { id: "help",       label: "Помощь",     icon: "help" },
     ]},
+    { group: "Администрирование", items: [
+      { id: "profile",     label: "Мой профиль",     icon: "users" },
+      { id: "assignments", label: "Назначения",      icon: "folder" },
+    ]},
   ];
 }
 
