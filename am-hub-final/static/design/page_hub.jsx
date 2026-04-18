@@ -6,6 +6,27 @@ function _fmt(n) {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
+// Парсер GMV-строки "₽ 4.8м" → 4_800_000 (приблизительно).
+// Сервер форматирует mrr в строку, raw-число у нас нет — пытаемся восстановить.
+function _parseGmv(gmv) {
+  if (!gmv || typeof gmv !== "string") return 0;
+  const num = parseFloat(gmv.replace(/[^\d.,]/g, "").replace(",", "."));
+  if (isNaN(num)) return 0;
+  if (gmv.includes("м")) return num * 1_000_000;
+  if (gmv.includes("к")) return num * 1_000;
+  return num;
+}
+
+function _formatGmv(rub) {
+  if (!rub) return "₽ 0";
+  if (rub >= 1_000_000) {
+    const v = rub / 1_000_000;
+    return "₽ " + (v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "")) + "м";
+  }
+  if (rub >= 1_000) return "₽ " + Math.round(rub / 1000) + "к";
+  return "₽ " + Math.round(rub);
+}
+
 // Агрегат MRR по сегменту. Возвращает { label → сумма }.
 function _aggregateMrr(clients) {
   const buckets = { "ENT/SME+": 0, "SME": 0, "SMB": 0, "SS": 0, "NEW": 0 };
@@ -26,6 +47,29 @@ function _aggregateMrr(clients) {
 function PageHub() {
   const S  = (typeof window !== "undefined" && window.__SIDEBAR_STATS)  || {};
   const CL = (typeof window !== "undefined" && window.CLIENTS)          || [];
+  const TK = (typeof window !== "undefined" && window.TASKS)            || [];
+  const MT = (typeof window !== "undefined" && window.MEETINGS)         || [];
+
+  // Агрегат GMV по бакетам сегментов (A+/ENT → signal, SME → info, SMB → warn, SS/NEW → ok)
+  const buckets = [
+    { key: "ENT+SME+", label: "ENT / SME+", segs: ["ENT", "SME+"], color: "signal", rub: 0 },
+    { key: "SME",      label: "SME",        segs: ["SME", "SME-"], color: "info",   rub: 0 },
+    { key: "SMB",      label: "SMB",        segs: ["SMB"],         color: "warn",   rub: 0 },
+    { key: "SS",       label: "SS",         segs: ["SS"],          color: "ok",     rub: 0 },
+  ];
+  let totalGmv = 0;
+  CL.forEach((c) => {
+    const rub = _parseGmv(c.gmv);
+    totalGmv += rub;
+    const b = buckets.find((x) => x.segs.includes((c.seg || "").toUpperCase()));
+    if (b) b.rub += rub;
+  });
+  const pctOf = (rub) => (totalGmv > 0 ? Math.round((rub / totalGmv) * 100) : 0);
+
+  // Фокус на сегодня
+  const meetingsToday = MT.filter((m) => m.day === "сегодня").length;
+  const overdueTasks  = TK.filter((t) => typeof t.due === "string" && t.due.indexOf("просроч") !== -1).length;
+  const firstRisk = CL.find((c) => c.status === "risk");
 
   // Сигналы — реальные клиенты в статусе risk/warn
   const signals = CL
@@ -151,24 +195,23 @@ function PageHub() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 20, alignItems: "stretch" }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14 }}>
-                    <div style={{ fontSize: 38, fontWeight: 500, letterSpacing: "-0.03em", lineHeight: 1, color: "var(--ink-9)" }}>₽ 58.4м</div>
-                    <div className="mono" style={{ fontSize: 13, color: "var(--ok)", fontWeight: 500 }}>+8.2% ↗</div>
+                    <div style={{ fontSize: 38, fontWeight: 500, letterSpacing: "-0.03em", lineHeight: 1, color: "var(--ink-9)" }}>
+                      {_formatGmv(totalGmv)}
+                    </div>
+                    <div className="mono" style={{ fontSize: 13, color: "var(--ink-5)", fontWeight: 500 }}>
+                      {CL.length} {CL.length === 1 ? "клиент" : (CL.length < 5 ? "клиента" : "клиентов")}
+                    </div>
                   </div>
                   <BigSpark/>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, borderLeft: "1px solid var(--line)", paddingLeft: 18 }}>
-                  {[
-                    { label: "A+ / A", value: "₽ 34.2м", pct: 59, color: "signal" },
-                    { label: "B / B+",  value: "₽ 16.8м", pct: 29, color: "info" },
-                    { label: "C",       value: "₽ 6.1м",  pct: 10, color: "warn" },
-                    { label: "NEW",     value: "₽ 1.3м",  pct: 2,  color: "ok" },
-                  ].map((r, i) => (
+                  {buckets.map((r, i) => (
                     <div key={i}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
                         <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.label}</span>
-                        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ink-8)" }}>{r.value}</span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ink-8)" }}>{_formatGmv(r.rub)}</span>
                       </div>
-                      <Progress value={r.pct} tone={r.color} h={3}/>
+                      <Progress value={pctOf(r.rub)} tone={r.color} h={3}/>
                     </div>
                   ))}
                 </div>
@@ -274,7 +317,24 @@ function PageHub() {
                 marginBottom: 12,
               }}>
                 <div style={{ fontSize: 13, color: "var(--ink-7)", lineHeight: 1.5 }}>
-                  Сегодня в приоритете <span style={{ color: "var(--signal)" }}>3 встречи</span> и <span style={{ color: "var(--critical)" }}>1 просроченная задача</span>. AI рекомендует сначала закрыть риск по Aura Beauty.
+                  {meetingsToday === 0 && overdueTasks === 0 && !firstRisk
+                    ? "Сегодня ничего не горит — используйте время на план развития аккаунтов."
+                    : (
+                      <>
+                        Сегодня в приоритете{" "}
+                        <span style={{ color: "var(--signal)" }}>{meetingsToday} {meetingsToday === 1 ? "встреча" : (meetingsToday < 5 && meetingsToday > 0 ? "встречи" : "встреч")}</span>
+                        {overdueTasks > 0 && (
+                          <>
+                            {" "}и{" "}
+                            <span style={{ color: "var(--critical)" }}>{overdueTasks} {overdueTasks === 1 ? "просроченная задача" : (overdueTasks < 5 ? "просроченных задачи" : "просроченных задач")}</span>
+                          </>
+                        )}
+                        {firstRisk && (
+                          <>. AI рекомендует сначала закрыть риск по <span style={{ color: "var(--ink-9)", fontWeight: 500 }}>{firstRisk.name}</span></>
+                        )}
+                        .
+                      </>
+                    )}
                 </div>
               </div>
 
