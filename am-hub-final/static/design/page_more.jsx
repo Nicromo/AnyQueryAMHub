@@ -603,7 +603,7 @@ function PageTemplates() {
               </div>
               <Badge tone="ghost">{(t.usage ?? 0)}×</Badge>
             </div>
-            <div style={{ fontSize: 12, color: "var(--ink-6)", lineHeight: 1.5, padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11, whiteSpace: "pre-wrap", overflow: "hidden", maxHeight: 70 }}>{t.body || ""}</div>
+            <div style={{ color: "var(--ink-6)", lineHeight: 1.5, padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11, whiteSpace: "pre-wrap", overflow: "hidden", maxHeight: 70 }}>{t.body || ""}</div>
             <div style={{ display: "flex", gap: 6 }}>
               <Btn size="s" kind="ghost">Превью</Btn>
               <Btn size="s" kind="dim">Применить</Btn>

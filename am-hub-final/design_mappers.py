@@ -574,11 +574,28 @@ def templates_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
 
 
 def auto_rules_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
-    """Правила автозадач — для менеджера видны свои + глобальные."""
+    """Правила автозадач — для менеджера видны свои + глобальные.
+    `hits` — кол-во Task с таким же task_title за последние 30 дней
+    (грубая оценка срабатываний до появления полноценного rule_log).
+    """
     q = db.query(AutoTaskRule)
     if user and (user.role or "") != "admin":
         q = q.filter((AutoTaskRule.user_id == user.id) | (AutoTaskRule.user_id.is_(None)))
     rows = q.order_by(AutoTaskRule.created_at.desc()).all()
+    if not rows:
+        return []
+
+    thirty_ago = datetime.utcnow() - timedelta(days=30)
+    titles = list({r.task_title for r in rows if r.task_title})
+    hits_map: Dict[str, int] = {}
+    if titles:
+        hits_rows = db.query(Task.title).filter(
+            Task.title.in_(titles),
+            Task.created_at >= thirty_ago,
+        ).all()
+        for (title,) in hits_rows:
+            hits_map[title] = hits_map.get(title, 0) + 1
+
     _TRIG_LABEL = {
         "health_drop":     "Падение Health Score",
         "days_no_contact": "Нет контакта N дней",
@@ -601,26 +618,52 @@ def auto_rules_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
             "on":   bool(r.is_active),
             "trig": _TRIG_LABEL.get(r.trigger, r.trigger) + trig_extra,
             "then": r.task_title,
-            "hits": 0,  # статистика срабатываний пока не собирается
+            "hits": hits_map.get(r.task_title, 0),
         })
     return out
 
 
 def auto_stats(db: Any, user: Any, now: datetime) -> Dict[str, Any]:
-    """Агрегаты для шапки PageAuto: задачи 30д + среднее время реакции."""
+    """Агрегаты для шапки PageAuto:
+      • tasks_30d        — задачи, созданные за 30д (как proxy активности правил)
+      • avg_reaction_min — среднее (update_audit - task.created_at) для done-задач
+    """
     thirty_ago = now - timedelta(days=30)
-    q = db.query(Task).filter(
-        Task.source == "automation",
-        Task.created_at >= thirty_ago,
-    )
+
+    # Базовый фильтр по правам
+    tq = db.query(Task).filter(Task.created_at >= thirty_ago)
     if user and (user.role or "") != "admin":
-        q = q.join(Client, Task.client_id == Client.id, isouter=True) \
-             .filter((Client.manager_email == user.email) | (Task.client_id.is_(None)))
-    tasks_30d = q.count()
+        tq = tq.join(Client, Task.client_id == Client.id, isouter=True) \
+               .filter((Client.manager_email == user.email) | (Task.client_id.is_(None)))
+    recent_tasks = tq.all()
+    tasks_30d = len(recent_tasks)
+
+    # Среднее время реакции: для done-задач ищем самый ранний AuditLog update
+    done_tasks = [t for t in recent_tasks if t.status == "done" and t.created_at]
+    avg_reaction_min = None
+    if done_tasks:
+        task_ids = [t.id for t in done_tasks]
+        logs = db.query(AuditLog).filter(
+            AuditLog.resource_type == "task",
+            AuditLog.resource_id.in_(task_ids),
+            AuditLog.action.in_(["update", "complete", "done"]),
+        ).order_by(AuditLog.created_at.asc()).all()
+        first_update = {}
+        for lg in logs:
+            if lg.resource_id not in first_update and lg.created_at:
+                first_update[lg.resource_id] = lg.created_at
+        deltas = []
+        for t in done_tasks:
+            ts = first_update.get(t.id)
+            if ts and ts > t.created_at:
+                deltas.append((ts - t.created_at).total_seconds() / 60)
+        if deltas:
+            avg_reaction_min = int(sum(deltas) / len(deltas))
+
     return {
         "tasks_30d":        tasks_30d,
         "tasks_30d_delta":  None,
-        "avg_reaction_min": None,
+        "avg_reaction_min": avg_reaction_min,
         "avg_reaction_delta": None,
     }
 
@@ -721,25 +764,44 @@ def heatmap_activity(db: Any, user: Any, now: datetime,
 
 
 def team_response(db: Any, now: datetime) -> List[Dict[str, Any]]:
-    """Среднее время реакции на назначенную задачу (30д)."""
+    """Среднее время реакции команды (30д):
+    для каждого менеджера — (AuditLog update/complete - Task.created_at)
+    по его завершённым задачам.
+    """
     thirty_ago = now - timedelta(days=30)
-    users = db.query(User).filter(User.is_active == True).all() if hasattr(User, "is_active") \
-            else db.query(User).all()
+    users = db.query(User).filter(User.is_active == True).all()
+
     out = []
     for u in users:
+        if not u.email:
+            continue
         tasks = db.query(Task).join(Client, Task.client_id == Client.id) \
             .filter(Client.manager_email == u.email,
                     Task.status == "done",
                     Task.created_at >= thirty_ago).all()
-        if not tasks:
+        if len(tasks) < 3:   # статистическая минимально-значимая выборка
             continue
+
+        task_ids = [t.id for t in tasks]
+        logs = db.query(AuditLog).filter(
+            AuditLog.user_id == u.id,
+            AuditLog.resource_type == "task",
+            AuditLog.resource_id.in_(task_ids),
+            AuditLog.action.in_(["update", "complete", "done"]),
+        ).order_by(AuditLog.created_at.asc()).all()
+        first_update = {}
+        for lg in logs:
+            if lg.resource_id not in first_update and lg.created_at:
+                first_update[lg.resource_id] = lg.created_at
+
         deltas = []
-        for t in tasks:
-            # reaction time approx: created_at → updated/due heuristic not available;
-            # skip tasks without clear signal
-            if t.due_date and t.created_at and t.due_date > t.created_at:
-                deltas.append((t.due_date - t.created_at).total_seconds() / 3600)
-        if not deltas:
+        tmap = {t.id: t for t in tasks}
+        for tid, ts in first_update.items():
+            t = tmap.get(tid)
+            if t and t.created_at and ts > t.created_at:
+                deltas.append((ts - t.created_at).total_seconds() / 3600)
+
+        if len(deltas) < 3:
             continue
         avg_h = sum(deltas) / len(deltas)
         if avg_h < 1:
@@ -748,7 +810,7 @@ def team_response(db: Any, now: datetime) -> List[Dict[str, Any]]:
             avg_str = f"{int(avg_h)}ч {int((avg_h%1)*60)}м"
         else:
             avg_str = f"{int(avg_h)}ч"
-        tone = "ok" if avg_h < 2 else ("signal" if avg_h < 1 else "warn" if avg_h < 24 else "critical")
+        tone = "signal" if avg_h < 1 else ("ok" if avg_h < 4 else "warn" if avg_h < 24 else "critical")
         out.append({"name": u.name or u.email, "avg": avg_str, "tone": tone})
     return out
 
