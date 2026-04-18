@@ -12,6 +12,7 @@ const Icon = ({ d, size = 16, stroke = "currentColor", children, sw = 1.5, fill 
 const I = {
   command:   (p) => <Icon {...p}><path d="M5 9h4V5M15 5v4h4M19 15h-4v4M9 19v-4H5"/><rect x="9" y="9" width="6" height="6"/></Icon>,
   sun:       (p) => <Icon {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></Icon>,
+  moon:      (p) => <Icon {...p}><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></Icon>,
   users:     (p) => <Icon {...p}><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14c3 0 5.5 2 5.5 5"/></Icon>,
   trophy:    (p) => <Icon {...p}><path d="M7 4h10v4a5 5 0 0 1-10 0V4zM7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3M10 14h4v3h-4zM8 20h8"/></Icon>,
   check:     (p) => <Icon {...p}><rect x="4" y="5" width="16" height="15" rx="1"/><path d="M8 12l3 3 5-6"/></Icon>,

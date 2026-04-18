@@ -4,6 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AM Hub · {{ page_title }}</title>
+  <script>
+    // Раннее применение сохранённой темы — до рендера, чтобы не было мигания.
+    (function(){
+      try {
+        var t = localStorage.getItem("amhub-theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch(e) {}
+    })();
+  </script>
 
   <link rel="preconnect" href="https://fonts.bunny.net">
   <link rel="stylesheet" href="https://fonts.bunny.net/css?family=inter-tight:300,400,500,600,700|jetbrains-mono:400,500,600">

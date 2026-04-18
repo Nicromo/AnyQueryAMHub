@@ -333,54 +333,96 @@ function PagePortfolio() {
 
 // ── AI Assistant ──────────────────────────────────────────
 function PageAI() {
+  const [messages, setMessages] = React.useState([]);
+  const [input, setInput] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const listRef = React.useRef(null);
+
+  React.useEffect(() => {
+    fetch("/api/ai/chat/history", { credentials: "include" })
+      .then(r => r.ok ? r.json() : { messages: [] })
+      .then(d => setMessages(d.messages || d || []))
+      .catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages]);
+
+  const send = async (text) => {
+    const msg = (text ?? input).trim();
+    if (!msg || sending) return;
+    setInput("");
+    setError(null);
+    const history = messages.map(m => ({ role: m.role, content: m.content || m.text }));
+    setMessages(prev => [...prev, { role: "user", content: msg }]);
+    setSending(true);
+    try {
+      const r = await fetch("/api/ai/chat", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg, history }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      setMessages(prev => [...prev, { role: "ai", content: d.reply || d.answer || "" }]);
+    } catch (e) {
+      setError(e.message || "Не удалось получить ответ");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const newSession = () => { setMessages([]); setError(null); };
+
+  const quickCommands = [
+    { label: "Брифинг на завтра",   text: "Подготовь брифинг на завтра по моему портфелю" },
+    { label: "Кто на churn-риске",  text: "Какие клиенты сейчас на churn-риске?" },
+    { label: "Топ задач на неделю", text: "Какие задачи важнее всего сделать на этой неделе?" },
+    { label: "Сводка по встречам",  text: "Дай сводку по предстоящим встречам на 7 дней" },
+  ];
+
+  const now = new Date();
+  const dateLabel = now.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const user = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+
   return (
     <div>
       <TopBar breadcrumbs={["am hub","ai-ассистент"]} title="AI-ассистент"
         subtitle="Чат с данными портфеля · авто-брифы · генерация follow-up"
-        actions={<><Btn kind="ghost" size="m">История</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Новая сессия</Btn></>}/>
+        actions={<><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={newSession}>Новая сессия</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
-        <Card title="Диалог · 18 апр, 11:42" action={<Badge tone="signal">gpt-5 · data-grounded</Badge>}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: 540, overflow: "auto" }}>
-            <Msg role="user">Какие клиенты в A+ показали худшие результаты за март?</Msg>
-            <Msg role="ai">Я нашла 3 клиента в сегменте A+ с отрицательным трендом за март:
-              <div style={{ marginTop: 10, background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, padding: 10 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px", gap: 10, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--ink-6)", paddingBottom: 6, borderBottom: "1px solid var(--line-soft)" }}>
-                  <span>КЛИЕНТ</span><span>GMV</span><span>Δ</span>
-                </div>
-                {[["Aura Beauty","₽ 3.1м","−18%"],["СтройМаркет-21","₽ 4.8м","−4%"],["Lumen","₽ 2.6м","−2%"]].map((r,i)=>(
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px", gap: 10, fontFamily: "var(--f-mono)", fontSize: 12, padding: "6px 0" }}>
-                    <span style={{ color: "var(--ink-8)" }}>{r[0]}</span>
-                    <span style={{ color: "var(--ink-7)" }}>{r[1]}</span>
-                    <span style={{ color: "var(--critical)" }}>{r[2]}</span>
-                  </div>
-                ))}
+        <Card title={`Диалог · ${dateLabel}`} action={<Badge tone="signal">data-grounded</Badge>}>
+          <div ref={listRef} style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: 540, minHeight: 200, overflow: "auto" }}>
+            {messages.length === 0 && (
+              <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Задайте первый вопрос — ассистент отвечает с учётом данных вашего портфеля.
               </div>
-              <div style={{ marginTop: 8 }}>Основной риск — Aura Beauty. Подготовить план action-итемов?</div>
-            </Msg>
-            <Msg role="user">Да, подготовь.</Msg>
-            <Msg role="ai">План из 5 шагов для Aura Beauty:
-              <ol style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
-                <li>Срочная встреча с CMO · сегодня 15:00</li>
-                <li>Drilldown воронки оплаты · шаг &laquo;адрес&raquo;</li>
-                <li>Предложить персональные условия лояльности</li>
-                <li>Вернуть до 10 апр к уровню Q1</li>
-                <li>Мониторинг 7 дней · ежедневный чек</li>
-              </ol>
-            </Msg>
+            )}
+            {messages.map((m, i) => (
+              <Msg key={i} role={m.role === "user" ? "user" : "ai"}>{m.content || m.text}</Msg>
+            ))}
+            {sending && <Msg role="ai"><span style={{ color: "var(--ink-5)" }}>печатает…</span></Msg>}
+            {error && <div style={{ padding: 10, background: "color-mix(in oklch, var(--critical) 10%, transparent)", border: "1px solid color-mix(in oklch, var(--critical) 30%, transparent)", borderRadius: 6, color: "var(--critical)", fontSize: 12 }}>{error}</div>}
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 14, padding: 10, background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6 }}>
-            <input placeholder="Спросите о портфеле, клиенте или задаче…" style={{ flex: 1, background: "transparent", border: 0, color: "var(--ink-8)", outline: "none", fontFamily: "var(--f-display)", fontSize: 13 }}/>
-            <Btn size="s" kind="ghost" icon={<I.mic size={12}/>}/>
-            <Btn size="s" kind="primary" iconRight={<I.arrow_r size={12}/>}>Отправить</Btn>
-          </div>
+          <form onSubmit={(e) => { e.preventDefault(); send(); }}
+            style={{ display: "flex", gap: 8, marginTop: 14, padding: 10, background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6 }}>
+            <input value={input} onChange={(e) => setInput(e.target.value)} disabled={sending}
+              placeholder="Спросите о портфеле, клиенте или задаче…"
+              style={{ flex: 1, background: "transparent", border: 0, color: "var(--ink-8)", outline: "none", fontFamily: "var(--f-display)", fontSize: 13 }}/>
+            <Btn size="s" kind="primary" type="submit" disabled={sending || !input.trim()} iconRight={<I.arrow_r size={12}/>}>Отправить</Btn>
+          </form>
         </Card>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <Card title="Быстрые команды" dense>
-            {["Брифинг на завтра","Кто на churn-риске","Собрать QBR для Aura","Перевести встречу","Экспорт в PDF"].map((c,i)=>(
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i===4?"none":"1px solid var(--line-soft)", cursor: "pointer" }}>
+            {quickCommands.map((c, i) => (
+              <div key={i} onClick={() => send(c.text)}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i === quickCommands.length - 1 ? "none" : "1px solid var(--line-soft)", cursor: "pointer" }}>
                 <I.spark size={12} stroke="var(--signal)"/>
-                <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{c}</span>
+                <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{c.label}</span>
                 <Kbd>↵</Kbd>
               </div>
             ))}
@@ -388,10 +430,10 @@ function PageAI() {
 
           <Card title="Контекст сессии" dense>
             <div style={{ fontSize: 12, color: "var(--ink-7)", lineHeight: 1.55 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span className="dim">модель</span><span className="mono">gpt-5</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span className="dim">документов</span><span className="mono">4 288</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span className="dim">свежесть</span><span className="mono">live · 2 мин</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span className="dim">токенов</span><span className="mono">18.4k</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span className="dim">менеджер</span><span className="mono" style={{ fontSize: 11 }}>{user.name || "—"}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span className="dim">клиентов</span><span className="mono">{(window.CLIENTS || []).length}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span className="dim">сообщений</span><span className="mono">{messages.length}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span className="dim">статус</span><span className="mono" style={{ color: sending ? "var(--warn)" : "var(--ok)" }}>{sending ? "ждёт ответа" : "готов"}</span></div>
             </div>
           </Card>
         </div>
@@ -458,18 +500,26 @@ function PageKPI() {
         </div>
 
         <Card title="Прогресс · по неделям">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(13,1fr)", gap: 4, alignItems: "end", height: 160 }}>
-            {Array.from({length: 13}).map((_, i) => {
-              const h = 30 + Math.abs(Math.sin(i*1.3))*100;
-              const active = i <= 3;
-              return (
-                <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  <div style={{ width: "100%", height: h, background: active ? "var(--signal)" : "var(--ink-3)", borderRadius: "2px 2px 0 0" }}/>
-                  <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)" }}>W{14+i}</span>
-                </div>
-              );
-            })}
-          </div>
+          {(function(){
+            const weekly = (typeof window !== "undefined" && window.KPI_WEEKLY) || [];
+            if (!weekly.length) {
+              return <div style={{ padding: "30px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Данных о недельном прогрессе пока нет.
+              </div>;
+            }
+            const maxV = Math.max(1, ...weekly.map(w => w.value || 0));
+            return <div style={{ display: "grid", gridTemplateColumns: `repeat(${weekly.length},1fr)`, gap: 4, alignItems: "end", height: 160 }}>
+              {weekly.map((w, i) => {
+                const h = Math.max(4, Math.round((w.value || 0) / maxV * 140));
+                return (
+                  <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                    <div style={{ width: "100%", height: h, background: w.active ? "var(--signal)" : "var(--ink-3)", borderRadius: "2px 2px 0 0" }} title={String(w.value || 0)}/>
+                    <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)" }}>{w.label || `W${i+1}`}</span>
+                  </div>
+                );
+              })}
+            </div>;
+          })()}
         </Card>
       </div>
     </div>
@@ -484,44 +534,46 @@ function PageCabinet() {
         actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Загрузить</Btn>}/>
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "220px 1fr", gap: 18 }}>
         <Card title="Папки">
-          {[
-            { n: "Брифы клиентов", c: 42, i: "folder" },
-            { n: "QBR-презентации", c: 18, i: "doc" },
-            { n: "Заметки голосом", c: 37, i: "mic" },
-            { n: "Скриншоты", c: 128, i: "eye" },
-            { n: "Договоры", c: 14, i: "doc" },
-            { n: "Черновики", c: 6, i: "spark" },
-          ].map((f,i)=>{
-            const Ic = I[f.i];
-            return (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 6px", borderBottom: i===5?"none":"1px solid var(--line-soft)", cursor: "pointer" }}>
-                <Ic size={14} stroke="var(--ink-6)"/>
-                <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{f.n}</span>
-                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{f.c}</span>
-              </div>
-            );
-          })}
+          {(function(){
+            const folders = (typeof window !== "undefined" && window.CABINET_FOLDERS) || [];
+            if (!folders.length) {
+              return <div style={{ padding: "16px 0", color: "var(--ink-6)", fontSize: 12, textAlign: "center" }}>
+                Нет папок.
+              </div>;
+            }
+            return folders.map((f,i)=>{
+              const Ic = I[f.icon || f.i] || I.folder;
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 6px", borderBottom: i === folders.length - 1 ? "none" : "1px solid var(--line-soft)", cursor: "pointer" }}>
+                  <Ic size={14} stroke="var(--ink-6)"/>
+                  <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{f.name || f.n}</span>
+                  <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{f.count ?? f.c ?? 0}</span>
+                </div>
+              );
+            });
+          })()}
         </Card>
 
         <Card title="Недавние файлы" action={<Btn size="s" kind="ghost" icon={<I.grid size={12}/>}>Grid</Btn>}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
-            {[
-              { n: "QBR-СтройМаркет-21.pdf",  t: "pdf · 2.1 MB", d: "2 дня назад" },
-              { n: "Бриф Aura Beauty.md",     t: "markdown",     d: "3 дня назад" },
-              { n: "Заметка · 14:32 · ТехноЛайн.mp3", t: "голос · 3:12", d: "сегодня" },
-              { n: "Воронка оплаты.png",      t: "png · 840 KB", d: "вчера" },
-              { n: "Шаблон follow-up.docx",   t: "doc",          d: "1 неделя" },
-              { n: "KPI-портфель-Q2.xlsx",    t: "spreadsheet",  d: "10 апр" },
-            ].map((f,i)=>(
-              <div key={i} style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
-                <Placeholder h={90} label={f.t}/>
-                <div style={{ padding: 10 }}>
-                  <div style={{ fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.n}</div>
-                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 3 }}>{f.d}</div>
+          {(function(){
+            const files = (typeof window !== "undefined" && window.RECENT_FILES) || [];
+            if (!files.length) {
+              return <div style={{ padding: "30px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Файлов пока нет. Загрузите первый документ кнопкой выше.
+              </div>;
+            }
+            return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
+              {files.map((f,i)=>(
+                <div key={i} style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
+                  <Placeholder h={90} label={f.type || f.t}/>
+                  <div style={{ padding: 10 }}>
+                    <div style={{ fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name || f.n}</div>
+                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 3 }}>{f.date || f.d}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>;
+          })()}
         </Card>
       </div>
     </div>
@@ -530,35 +582,35 @@ function PageCabinet() {
 
 // ── Templates ─────────────────────────────────────────────
 function PageTemplates() {
-  const tpls = [
-    { n: "Чекап · стандарт", cat: "чекапы", usage: 164, body: "Добрый день, {{name}}. Коротко синхронизуемся по прогрессу..." },
-    { n: "Follow-up после встречи", cat: "email", usage: 98, body: "Спасибо за встречу. По итогам договорились:" },
-    { n: "Эскалация · просрочка", cat: "email", usage: 34, body: "Коллеги, по итогам анализа ситуация требует внимания..." },
-    { n: "QBR · повестка", cat: "встречи", usage: 76, body: "1. Итоги квартала\n2. KPI\n3. Риски\n4. План Q+1" },
-    { n: "Онбординг · шаг 1", cat: "онбординг", usage: 48, body: "Добро пожаловать в команду AM Hub!" },
-    { n: "Churn-retention", cat: "email", usage: 12, body: "Мы заметили, что активность снизилась..." },
-  ];
+  const tpls = (typeof window !== "undefined" && window.TEMPLATES) || [];
   return (
     <div>
       <TopBar breadcrumbs={["am hub","шаблоны"]} title="Шаблоны" subtitle="Follow-up, чекапы, QBR — шаблоны общения с клиентами"
         actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Новый шаблон</Btn>}/>
-      <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
+      <div style={{ padding: "22px 28px 40px" }}>
+        {tpls.length === 0 && (
+          <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
+            Шаблонов пока нет. Создайте первый, нажав «Новый шаблон».
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
         {tpls.map((t,i)=>(
           <div key={i} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6, padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: "var(--ink-9)" }}>{t.n}</div>
-                <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 3 }}>{t.cat}</div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: "var(--ink-9)" }}>{t.name || t.n}</div>
+                <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 3 }}>{t.category || t.cat}</div>
               </div>
-              <Badge tone="ghost">{t.usage}×</Badge>
+              <Badge tone="ghost">{(t.usage ?? 0)}×</Badge>
             </div>
-            <div style={{ fontSize: 12, color: "var(--ink-6)", lineHeight: 1.5, padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11, whiteSpace: "pre-wrap", overflow: "hidden", maxHeight: 70 }}>{t.body}</div>
+            <div style={{ fontSize: 12, color: "var(--ink-6)", lineHeight: 1.5, padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11, whiteSpace: "pre-wrap", overflow: "hidden", maxHeight: 70 }}>{t.body || ""}</div>
             <div style={{ display: "flex", gap: 6 }}>
               <Btn size="s" kind="ghost">Превью</Btn>
               <Btn size="s" kind="dim">Применить</Btn>
             </div>
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
@@ -566,13 +618,9 @@ function PageTemplates() {
 
 // ── Auto tasks ────────────────────────────────────────────
 function PageAuto() {
-  const rules = [
-    { on: true,  trig: "GMV −10% за 7 дней",          then: "Создать задачу · приоритет high",  hits: 18 },
-    { on: true,  trig: "Чекап просрочен >3 дня",      then: "Уведомить в Telegram + задача",   hits: 42 },
-    { on: true,  trig: "Новый клиент попадает в A",   then: "Запланировать welcome-звонок",    hits: 8 },
-    { on: false, trig: "Контракт истекает <30 дней",  then: "Создать задачу на обновление",    hits: 0 },
-    { on: true,  trig: "Ответа не было 7 дней",       then: "Отправить follow-up шаблон #2",   hits: 67 },
-  ];
+  const rules = (typeof window !== "undefined" && window.AUTO_RULES) || [];
+  const stats = (typeof window !== "undefined" && window.AUTO_STATS) || {};
+  const activeCount = rules.filter(r => r.on).length;
   return (
     <div>
       <TopBar breadcrumbs={["am hub","автозадачи"]} title="Автозадачи"
@@ -580,12 +628,17 @@ function PageAuto() {
         actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Новое правило</Btn>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-          <KPI label="Правил активно" value="4" unit="/ 5"/>
-          <KPI label="Создано задач · 30д" value="135" tone="signal" delta="+22%"/>
-          <KPI label="Ср. время реакции" value="44" unit="минут" tone="ok" delta="−28%"/>
+          <KPI label="Правил активно" value={String(activeCount)} unit={`/ ${rules.length}`}/>
+          <KPI label="Создано задач · 30д" value={String(stats.tasks_30d ?? 0)} tone="signal" delta={stats.tasks_30d_delta}/>
+          <KPI label="Ср. время реакции" value={String(stats.avg_reaction_min ?? "—")} unit={stats.avg_reaction_min != null ? "минут" : ""} tone="ok" delta={stats.avg_reaction_delta}/>
         </div>
 
         <Card title="Правила">
+          {rules.length === 0 && (
+            <div style={{ padding: "30px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+              Автоправил пока нет. Нажмите «Новое правило», чтобы создать первое.
+            </div>
+          )}
           {rules.map((r,i)=>(
             <div key={i} style={{ display: "grid", gridTemplateColumns: "48px 1fr 1fr 80px 40px", gap: 14, padding: "14px 6px", borderBottom: i===rules.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
               <label style={{ display: "inline-flex", alignItems: "center" }}>
@@ -613,31 +666,36 @@ function PageAuto() {
 
 // ── Roadmap ───────────────────────────────────────────────
 function PageRoadmap() {
-  const cols = [
-    { t: "Q1 · готово",      tone: "ok",       items: ["Единая карточка клиента", "Интеграция KTalk", "Автосинхр. Merchrules"] },
-    { t: "Q2 · в работе",    tone: "signal",   items: ["AI-ассистент с контекстом", "QBR-календарь", "Мобильная версия"] },
-    { t: "Q3 · план",        tone: "info",     items: ["Voice-заметки → follow-up", "Голосовой ассистент", "Интеграция Diginetica"] },
-    { t: "Бэклог",           tone: "neutral",  items: ["Расширенная аналитика", "Темплейты на SQL", "API для клиентов", "Автоотчёты"] },
-  ];
+  const cols = (typeof window !== "undefined" && window.ROADMAP) || [];
   return (
     <div>
       <TopBar breadcrumbs={["am hub","роадмап"]} title="Роадмап"
-        subtitle="Что команда строит в AM Hub · 2026"/>
+        subtitle={`Что команда строит в AM Hub · ${new Date().getFullYear()}`}/>
       <div style={{ padding: "22px 28px 40px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
-          {cols.map((c,i)=>(
-            <div key={i} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderTop: `3px solid var(--${c.tone})`, borderRadius: "0 0 6px 6px", padding: 14 }}>
-              <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>{c.t}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {c.items.map((it,j)=>(
-                  <div key={j} style={{ padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4 }}>
-                    <div style={{ fontSize: 12.5, color: "var(--ink-8)" }}>{it}</div>
-                  </div>
-                ))}
+        {cols.length === 0 && (
+          <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
+            Роадмап пока не настроен. Добавьте элементы в разделе администрирования.
+          </div>
+        )}
+        {cols.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols.length},1fr)`, gap: 14 }}>
+            {cols.map((c,i)=>(
+              <div key={i} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderTop: `3px solid var(--${c.tone || "neutral"})`, borderRadius: "0 0 6px 6px", padding: 14 }}>
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>{c.title || c.t}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {(c.items || []).map((it,j)=>(
+                    <div key={j} style={{ padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4 }}>
+                      <div style={{ fontSize: 12.5, color: "var(--ink-8)" }}>{typeof it === "string" ? it : (it.title || it.name)}</div>
+                    </div>
+                  ))}
+                  {(!c.items || c.items.length === 0) && (
+                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", fontStyle: "italic" }}>пусто</div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -652,21 +710,26 @@ function PageInternal() {
         actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Задача</Btn>}/>
       <div style={{ padding: "22px 28px 40px" }}>
         <Card title="Задачи команды">
-          {[
-            { t: "Пересмотр сегментации A/B", owner: "Анна С.", due: "22 апр", pr: "high" },
-            { t: "Обновление шаблонов чекапа", owner: "Лиза М.", due: "25 апр", pr: "med" },
-            { t: "Документация API для Merchrules", owner: "Кирилл В.", due: "1 мая", pr: "low" },
-            { t: "Тренинг по новым правилам Diginetica", owner: "все", due: "3 мая", pr: "med" },
-            { t: "Retro Q1", owner: "Павел Р.", due: "30 апр", pr: "low" },
-          ].map((r,i,a)=>(
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "20px 1fr 180px 80px 80px", gap: 14, padding: "12px 6px", borderBottom: i===a.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
-              <input type="checkbox" style={{ accentColor: "var(--signal)" }}/>
-              <span style={{ fontSize: 13, color: "var(--ink-8)" }}>{r.t}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={r.owner} size={20}/><span style={{ fontSize: 12, color: "var(--ink-7)" }}>{r.owner}</span></div>
-              <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{r.due}</span>
-              <Badge tone={r.pr==="high"?"warn":r.pr==="med"?"info":"neutral"} dot>{r.pr}</Badge>
-            </div>
-          ))}
+          {(function(){
+            const items = (typeof window !== "undefined" && window.INTERNAL_TASKS) || [];
+            if (!items.length) {
+              return <div style={{ padding: "30px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Внутренних задач пока нет.
+              </div>;
+            }
+            return items.map((r,i,a)=>{
+              const pr = r.priority || r.pr || "low";
+              return (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "20px 1fr 180px 80px 80px", gap: 14, padding: "12px 6px", borderBottom: i===a.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
+                  <input type="checkbox" defaultChecked={!!r.done} style={{ accentColor: "var(--signal)" }}/>
+                  <span style={{ fontSize: 13, color: "var(--ink-8)" }}>{r.title || r.t}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={r.owner || "—"} size={20}/><span style={{ fontSize: 12, color: "var(--ink-7)" }}>{r.owner || "—"}</span></div>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{r.due || "—"}</span>
+                  <Badge tone={pr==="high"?"warn":pr==="med"?"info":"neutral"} dot>{pr}</Badge>
+                </div>
+              );
+            });
+          })()}
         </Card>
       </div>
     </div>

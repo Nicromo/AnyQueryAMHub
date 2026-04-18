@@ -265,6 +265,7 @@ function TopBar({ title, subtitle, breadcrumbs = [], actions, meta }) {
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {actions}
+        <ThemeToggle/>
         <button style={{
           width: 34, height: 34, background: "transparent",
           border: "1px solid var(--line)", borderRadius: 4,
@@ -280,6 +281,32 @@ function TopBar({ title, subtitle, breadcrumbs = [], actions, meta }) {
         </button>
       </div>
     </header>
+  );
+}
+
+// ── Theme toggle — persists in localStorage, flips html[data-theme] ──
+function ThemeToggle() {
+  const getInitial = () => {
+    if (typeof document === "undefined") return "dark";
+    return document.documentElement.getAttribute("data-theme") || "dark";
+  };
+  const [theme, setTheme] = React.useState(getInitial);
+  React.useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("amhub-theme", theme); } catch (e) {}
+  }, [theme]);
+  const flip = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  return (
+    <button onClick={flip}
+      title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+      style={{
+        width: 34, height: 34, background: "transparent",
+        border: "1px solid var(--line)", borderRadius: 4,
+        color: "var(--ink-7)", cursor: "pointer",
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+      }}>
+      {theme === "dark" ? <I.sun size={15}/> : <I.moon size={15}/>}
+    </button>
   );
 }
 
