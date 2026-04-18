@@ -33,6 +33,19 @@ async function mrGet(token, path, params = {}) {
   return r.json();
 }
 
+// Lightweight auth-only check for UI "Test connection" button
+export async function testMrAuth() {
+  if (!CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD) {
+    throw new Error("Введите логин и пароль Merchrules");
+  }
+  const token = await mrAuth();
+  // Verify token works by fetching one account
+  const accData = await mrGet(token, "/backend-v2/accounts", { limit: 1 });
+  if (accData === null) throw new Error("Merchrules: авторизация прошла, но API вернул ошибку");
+  const accounts = accData?.accounts || accData?.items || (Array.isArray(accData) ? accData : []);
+  return { ok: true, accounts_total: accounts.length };
+}
+
 export async function doSync() {
   if (!CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD) throw new Error("Merchrules: не заданы логин/пароль");
   if (!CONFIG.HUB_URL)  throw new Error("AM Hub URL не настроен");

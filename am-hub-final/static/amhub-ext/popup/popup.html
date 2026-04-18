@@ -245,10 +245,6 @@
       <input id="s-hub-url" placeholder="https://your-hub.railway.app"></div>
     <div class="gap"><lbl>Токен (из Настройки → Аккаунт)</lbl>
       <input id="s-hub-token" type="password" placeholder="Токен авторизации"></div>
-    <div class="gap">
-      <button class="btn btn-p" data-action="saveSettings">💾 Сохранить</button>
-    </div>
-    <div id="s-result" class="hidden" style="margin-top:7px"></div>
   </div>
 
   <!-- Merchrules -->
@@ -279,6 +275,12 @@
     <div class="sec-title">Менеджер</div>
     <div class="gap"><lbl>Ваше имя (для отчётов)</lbl>
       <input id="s-manager" placeholder="Иван Иванов"></div>
+  </div>
+
+  <!-- Global save -->
+  <div class="sec" style="position:sticky;bottom:0;background:var(--ink-1);border-top:1px solid var(--line);padding-top:12px">
+    <button class="btn btn-p" data-action="saveSettings" style="width:100%">💾 Сохранить все настройки</button>
+    <div id="s-result" class="hidden" style="margin-top:7px"></div>
   </div>
 </div>
 
