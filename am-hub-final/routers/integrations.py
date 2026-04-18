@@ -36,8 +36,26 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
+async def _params_from(request: Request, *keys):
+    """Собрать параметры из query или JSON body — для api_route(GET+POST)."""
+    qp = request.query_params
+    out = {k: qp.get(k, "") for k in keys}
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if isinstance(body, dict):
+            for k in keys:
+                if not out.get(k) and body.get(k):
+                    out[k] = body.get(k)
+    return out
+
+
 @router.api_route("/api/integrations/test/merchrules", methods=["GET", "POST"])
-async def test_merchrules(login: str = "", password: str = ""):
+async def test_merchrules(request: Request):
+    p = await _params_from(request, "login", "password")
+    login, password = p["login"], p["password"]
     if not login or not password:
         return {"error": "Need login and password"}
     import httpx
@@ -56,7 +74,9 @@ async def test_merchrules(login: str = "", password: str = ""):
 
 
 @router.api_route("/api/integrations/test/ktalk", methods=["GET", "POST"])
-async def test_ktalk(space: str = "", token: str = ""):
+async def test_ktalk(request: Request):
+    p = await _params_from(request, "space", "token")
+    space, token = p["space"], p["token"]
     if not space or not token:
         return {"error": "Need space and token"}
     import httpx

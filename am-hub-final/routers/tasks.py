@@ -87,13 +87,33 @@ async def api_update_task(task_id: int, request: Request, db: Session = Depends(
     return {"ok": True}
 
 
-@router.delete("/api/tasks/{task_id}")
-async def api_delete_task(task_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+def _authed_user(db: Session, auth_token: Optional[str]) -> User:
     if not auth_token:
         raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401)
+    return user
+
+
+def _task_for_user(db: Session, task_id: int, user: User) -> Task:
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404)
+    # Менеджер — только свои клиенты; admin видит всё
+    if user.role == "manager" and task.client and task.client.manager_email and task.client.manager_email != user.email:
+        raise HTTPException(status_code=403, detail="Not your client")
+    return task
+
+
+@router.delete("/api/tasks/{task_id}")
+async def api_delete_task(task_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    user = _authed_user(db, auth_token)
+    task = _task_for_user(db, task_id, user)
     db.delete(task)
     db.commit()
     return {"ok": True}
@@ -102,16 +122,13 @@ async def api_delete_task(task_id: int, db: Session = Depends(get_db), auth_toke
 @router.post("/api/tasks/{task_id}/snooze")
 async def api_snooze_task(task_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Отложить задачу на N дней (по умолчанию 1)."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
+    user = _authed_user(db, auth_token)
+    task = _task_for_user(db, task_id, user)
     try:
         body = await request.json()
     except Exception:
         body = {}
     days = int(body.get("days", 1))
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404)
     base = task.due_date or datetime.utcnow()
     task.due_date = base + timedelta(days=days)
     db.commit()

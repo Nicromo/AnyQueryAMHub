@@ -264,6 +264,9 @@ async def lifespan(app: FastAPI):
                     logger.info(f"✅ TG webhook: {domain}/webhook/telegram")
         except Exception as e:
             logger.warning(f"TG webhook: {e}")
+    except RuntimeError:
+        # fail-fast: security invariants (admin password, secret key и т.п.) — не глушим
+        raise
     except Exception as e:
         logger.error(f"Startup error: {e}")
     yield
@@ -865,12 +868,18 @@ async def health_deep():
     except Exception as e:
         out["checks"]["db"] = f"fail: {str(e)[:120]}"
         out["status"] = "degraded"
-    # Scheduler
+    # Scheduler — НЕ инициализируем, просто смотрим текущее состояние
     try:
-        from scheduler import _get_scheduler
-        s = _get_scheduler()
-        out["checks"]["scheduler"] = "running" if s.running else "stopped"
-        out["checks"]["scheduled_jobs"] = len(s.get_jobs())
+        import scheduler as _sched_mod
+        s = getattr(_sched_mod, "_scheduler", None)
+        if s is None:
+            out["checks"]["scheduler"] = "not_initialized"
+            out["status"] = "degraded"
+        else:
+            out["checks"]["scheduler"] = "running" if s.running else "stopped"
+            out["checks"]["scheduled_jobs"] = len(s.get_jobs())
+            if not s.running:
+                out["status"] = "degraded"
     except Exception as e:
         out["checks"]["scheduler"] = f"fail: {str(e)[:120]}"
         out["status"] = "degraded"
