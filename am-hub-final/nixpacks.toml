@@ -11,5 +11,11 @@ cmds = [
 [phases.build]
 cmds = ["mkdir -p data"]
 
+# PATH добавляет venv/bin — теперь `uvicorn` найдётся даже без
+# абсолютного пути (на случай если Custom Start Command в Railway UI
+# переопределит [start] отсюда).
 [start]
 cmd = "/opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1"
+
+[variables]
+PATH = "/opt/venv/bin:$PATH"
