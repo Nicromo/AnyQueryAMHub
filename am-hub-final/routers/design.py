@@ -186,6 +186,23 @@ async def roadmap_delete(
     return {"ok": True}
 
 
+# ── Seed CSMs ────────────────────────────────────────────────
+# Идемпотентно; доступно admin либо при пустой таблице users (bootstrap).
+@router.post("/api/seed-csms")
+async def seed_csms_endpoint(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    users_count = db.query(User).count()
+    # Разрешаем: admin OR bootstrap (пустая таблица)
+    if users_count > 0 and (not user or (user.role or "") != "admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from seed_csms import seed
+    report = seed(dry_run=False)
+    return report
+
+
 @router.get("/{page_id}", response_class=HTMLResponse)
 async def design_page(
     page_id: str,
