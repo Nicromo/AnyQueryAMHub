@@ -25,33 +25,92 @@ function _findToken(obj, depth = 0) {
   return null;
 }
 
+// Extract token from a successful response (body object, string, or headers)
+async function _extractToken(response) {
+  // 1. Check response headers first (some APIs return token in Authorization/X-Auth-Token)
+  const headerToken = response.headers.get("Authorization") ||
+                      response.headers.get("X-Auth-Token") ||
+                      response.headers.get("X-Access-Token");
+  if (headerToken) {
+    const stripped = headerToken.replace(/^Bearer\s+/i, "").trim();
+    if (stripped.length > 10) return stripped;
+  }
+
+  // 2. Parse body — could be object, array, or raw string
+  const text = await response.text();
+  if (!text) return null;
+
+  // 2a. Raw JWT string (starts with "eyJ")
+  const trimmed = text.trim().replace(/^"/, "").replace(/"$/, "");
+  if (/^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // 2b. JSON object/array
+  try {
+    const d = JSON.parse(text);
+    return _findToken(d);
+  } catch {
+    return null;
+  }
+}
+
+async function _tryAuth(field, body, contentType) {
+  return fetch(`${MR_BASE}/backend-v2/auth/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": contentType },
+    body,
+  });
+}
+
 async function mrAuth() {
   const attempts = [];
-  // username first — we know MR API requires this field
+
+  // Strategy 1: JSON with each of 3 username field names
   for (const field of ["username", "email", "login"]) {
     try {
-      const r = await fetch(`${MR_BASE}/backend-v2/auth/login`, {
-        method: "POST",
-        credentials: "include",   // allow Set-Cookie session tokens
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD }),
-      });
+      const r = await _tryAuth(
+        field,
+        JSON.stringify({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD }),
+        "application/json"
+      );
       if (r.ok) {
-        const d = await r.json();
-        const token = _findToken(d);
+        const token = await _extractToken(r.clone());
         if (token) return token;
-        // No body token — list response keys to help diagnose
-        const keys = Object.keys(d || {}).slice(0, 10).join(",");
-        attempts.push(`${field}:200 but no token field (keys: [${keys}])`);
+        // Couldn't find token in body/headers — log response for diagnosis
+        let bodyKeys = "";
+        try {
+          const d = await r.json();
+          if (d && typeof d === "object") bodyKeys = "keys: [" + Object.keys(d).slice(0, 10).join(",") + "]";
+          else bodyKeys = "body-type: " + typeof d;
+        } catch { bodyKeys = "non-json body"; }
+        attempts.push(`json/${field}:200 no-token (${bodyKeys})`);
       } else {
         let body = "";
-        try { body = (await r.text()).slice(0, 140); } catch {}
-        attempts.push(`${field}:HTTP ${r.status}${body ? ` — ${body}` : ""}`);
+        try { body = (await r.text()).slice(0, 120); } catch {}
+        attempts.push(`json/${field}:HTTP ${r.status}${body ? ` — ${body}` : ""}`);
       }
     } catch (e) {
-      attempts.push(`${field}:${e.message}`);
+      attempts.push(`json/${field}:${e.message}`);
     }
   }
+
+  // Strategy 2: form-urlencoded OAuth2 password flow (FastAPI standard)
+  try {
+    const form = new URLSearchParams({ username: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD });
+    const r = await _tryAuth("form", form.toString(), "application/x-www-form-urlencoded");
+    if (r.ok) {
+      const token = await _extractToken(r.clone());
+      if (token) return token;
+      attempts.push("form:200 no-token");
+    } else {
+      attempts.push(`form:HTTP ${r.status}`);
+    }
+  } catch (e) {
+    attempts.push(`form:${e.message}`);
+  }
+
   const all401 = attempts.every(a => a.includes("HTTP 401") || a.includes("HTTP 403"));
   if (all401) throw new Error("Merchrules: неверный логин или пароль");
   throw new Error("Merchrules auth failed: " + attempts.join(" | "));
