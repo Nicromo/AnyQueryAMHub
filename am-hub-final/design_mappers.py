@@ -15,7 +15,10 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from models import CHECKUP_INTERVALS, Meeting, Task
+from models import (
+    CHECKUP_INTERVALS, Meeting, Task,
+    FollowupTemplate, AutoTaskRule, AuditLog, Client, User, VoiceNote,
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -548,3 +551,220 @@ def jobs_from_sync_logs(db: Any, now: datetime, limit: int = 8) -> List[Dict[str
             "ok":       (r.status == "success"),
         })
     return out
+
+
+# ══════════════════════════════════════════════════════════════
+# Новые мапперы для design-страниц (аналитика/шаблоны/автозадачи/внутренние)
+# ══════════════════════════════════════════════════════════════
+def templates_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
+    """Шаблоны текущего менеджера + глобальные (если такие будут).
+    Usage считается по TaskComment пока не поддерживается — вернём 0."""
+    q = db.query(FollowupTemplate)
+    if user and user.id:
+        q = q.filter((FollowupTemplate.user_id == user.id) | (FollowupTemplate.user_id.is_(None)))
+    rows = q.order_by(FollowupTemplate.created_at.desc()).limit(40).all()
+    return [{
+        "id":       t.id,
+        "name":     t.name,
+        "category": t.category or "general",
+        "body":     (t.content or "")[:400],
+        "usage":    0,  # счётчик использования пока не отслеживается
+    } for t in rows]
+
+
+def auto_rules_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
+    """Правила автозадач — для менеджера видны свои + глобальные."""
+    q = db.query(AutoTaskRule)
+    if user and (user.role or "") != "admin":
+        q = q.filter((AutoTaskRule.user_id == user.id) | (AutoTaskRule.user_id.is_(None)))
+    rows = q.order_by(AutoTaskRule.created_at.desc()).all()
+    _TRIG_LABEL = {
+        "health_drop":     "Падение Health Score",
+        "days_no_contact": "Нет контакта N дней",
+        "meeting_done":    "После встречи",
+        "followup_sent":   "После отправки follow-up",
+        "checkup_due":     "Чекап просрочен",
+        "segment_match":   "Попадание в сегмент",
+        "manual":          "Ручной",
+    }
+    out = []
+    for r in rows:
+        cfg = r.trigger_config or {}
+        trig_extra = ""
+        if r.trigger == "health_drop" and cfg.get("threshold"):
+            trig_extra = f" · <{cfg['threshold']}"
+        elif r.trigger == "days_no_contact" and cfg.get("days"):
+            trig_extra = f" · {cfg['days']} дн."
+        out.append({
+            "id":   r.id,
+            "on":   bool(r.is_active),
+            "trig": _TRIG_LABEL.get(r.trigger, r.trigger) + trig_extra,
+            "then": r.task_title,
+            "hits": 0,  # статистика срабатываний пока не собирается
+        })
+    return out
+
+
+def auto_stats(db: Any, user: Any, now: datetime) -> Dict[str, Any]:
+    """Агрегаты для шапки PageAuto: задачи 30д + среднее время реакции."""
+    thirty_ago = now - timedelta(days=30)
+    q = db.query(Task).filter(
+        Task.source == "automation",
+        Task.created_at >= thirty_ago,
+    )
+    if user and (user.role or "") != "admin":
+        q = q.join(Client, Task.client_id == Client.id, isouter=True) \
+             .filter((Client.manager_email == user.email) | (Task.client_id.is_(None)))
+    tasks_30d = q.count()
+    return {
+        "tasks_30d":        tasks_30d,
+        "tasks_30d_delta":  None,
+        "avg_reaction_min": None,
+        "avg_reaction_delta": None,
+    }
+
+
+def internal_tasks_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
+    """Внутренние задачи команды (client_id IS NULL)."""
+    q = db.query(Task).filter(Task.client_id.is_(None)).order_by(Task.due_date.asc().nullslast()).limit(40)
+    rows = q.all()
+    return [{
+        "id":       t.id,
+        "title":    t.title,
+        "owner":    (t.team or "—"),
+        "due":      t.due_date.strftime("%d %b") if t.due_date else "—",
+        "priority": (t.priority or "low"),
+        "done":     (t.status == "done"),
+    } for t in rows]
+
+
+def kpi_weekly(db: Any, user: Any, now: datetime, weeks: int = 13) -> List[Dict[str, Any]]:
+    """Кол-во завершённых задач по неделям (последние N недель)."""
+    out = []
+    current_week_start = now - timedelta(days=now.weekday())
+    current_week_start = current_week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    q = db.query(Task).filter(Task.status == "done")
+    if user and (user.role or "") != "admin":
+        q = q.join(Client, Task.client_id == Client.id, isouter=True) \
+             .filter((Client.manager_email == user.email) | (Task.client_id.is_(None)))
+    tasks = q.all()
+
+    for i in range(weeks):
+        week_start = current_week_start - timedelta(weeks=weeks - 1 - i)
+        week_end   = week_start + timedelta(days=7)
+        count = sum(
+            1 for t in tasks
+            if t.created_at and week_start <= t.created_at < week_end
+        )
+        out.append({
+            "label":  f"W{week_start.isocalendar()[1]}",
+            "value":  count,
+            "active": week_end <= now + timedelta(days=1),
+        })
+    return out
+
+
+def heatmap_activity(db: Any, user: Any, now: datetime,
+                     visible_ids: Optional[List[int]], weeks: int = 7) -> Dict[str, Any]:
+    """Heatmap: активность (кол-во событий AuditLog) по клиент×неделя."""
+    cq = db.query(Client)
+    if visible_ids is not None:
+        if not visible_ids:
+            return {"rows": [], "weeks": [], "matrix": []}
+        cq = cq.filter(Client.id.in_(visible_ids))
+    clients = cq.order_by(Client.id.desc()).limit(14).all()
+    if not clients:
+        return {"rows": [], "weeks": [], "matrix": []}
+
+    current_week_start = now - timedelta(days=now.weekday())
+    current_week_start = current_week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_starts = [current_week_start - timedelta(weeks=weeks - 1 - i) for i in range(weeks)]
+    week_labels = [f"W{ws.isocalendar()[1]}" for ws in week_starts]
+
+    earliest = week_starts[0]
+    aq = db.query(AuditLog).filter(
+        AuditLog.resource_type == "client",
+        AuditLog.resource_id.in_([c.id for c in clients]),
+        AuditLog.created_at >= earliest,
+    )
+    audits = aq.all()
+
+    counts: Dict[int, Dict[int, int]] = {c.id: {i: 0 for i in range(weeks)} for c in clients}
+    for a in audits:
+        if not a.created_at:
+            continue
+        for i, ws in enumerate(week_starts):
+            we = ws + timedelta(days=7)
+            if ws <= a.created_at < we:
+                counts[a.resource_id][i] = counts[a.resource_id].get(i, 0) + 1
+                break
+
+    max_v = max((v for c in counts.values() for v in c.values()), default=1) or 1
+    matrix = []
+    for c in clients:
+        row = []
+        for i in range(weeks):
+            n = counts[c.id].get(i, 0)
+            row.append({
+                "value": round(n / max_v, 3),
+                "risk":  (c.health_score is not None and c.health_score < 50),
+            })
+        matrix.append(row)
+
+    return {
+        "rows":   [c.name for c in clients],
+        "weeks":  week_labels,
+        "matrix": matrix,
+    }
+
+
+def team_response(db: Any, now: datetime) -> List[Dict[str, Any]]:
+    """Среднее время реакции на назначенную задачу (30д)."""
+    thirty_ago = now - timedelta(days=30)
+    users = db.query(User).filter(User.is_active == True).all() if hasattr(User, "is_active") \
+            else db.query(User).all()
+    out = []
+    for u in users:
+        tasks = db.query(Task).join(Client, Task.client_id == Client.id) \
+            .filter(Client.manager_email == u.email,
+                    Task.status == "done",
+                    Task.created_at >= thirty_ago).all()
+        if not tasks:
+            continue
+        deltas = []
+        for t in tasks:
+            # reaction time approx: created_at → updated/due heuristic not available;
+            # skip tasks without clear signal
+            if t.due_date and t.created_at and t.due_date > t.created_at:
+                deltas.append((t.due_date - t.created_at).total_seconds() / 3600)
+        if not deltas:
+            continue
+        avg_h = sum(deltas) / len(deltas)
+        if avg_h < 1:
+            avg_str = f"{int(avg_h*60)}м"
+        elif avg_h < 10:
+            avg_str = f"{int(avg_h)}ч {int((avg_h%1)*60)}м"
+        else:
+            avg_str = f"{int(avg_h)}ч"
+        tone = "ok" if avg_h < 2 else ("signal" if avg_h < 1 else "warn" if avg_h < 24 else "critical")
+        out.append({"name": u.name or u.email, "avg": avg_str, "tone": tone})
+    return out
+
+
+def recent_files(db: Any, user: Any, limit: int = 8) -> List[Dict[str, Any]]:
+    """Последние VoiceNote как «недавние файлы» кабинета."""
+    q = db.query(VoiceNote).order_by(VoiceNote.created_at.desc()).limit(limit)
+    rows = q.all()
+    return [{
+        "name": f"voice_{v.id}.mp3",
+        "type": f"голос · {v.duration_seconds//60}:{v.duration_seconds%60:02d}" if v.duration_seconds else "голос",
+        "date": v.created_at.strftime("%d %b") if v.created_at else "—",
+        "url":  v.audio_url,
+    } for v in rows]
+
+
+def roadmap_data() -> List[Dict[str, Any]]:
+    """Роадмап пока без БД — возвращаем пусто.
+    Когда появится модель RoadmapItem — заменить на выборку."""
+    return []

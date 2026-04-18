@@ -292,4 +292,14 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "pagination":      pagination,
         "extensions":      _list_extensions(),
         "hub_url":         os.getenv("APP_URL") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "",
+        # Расширенные данные для design-страниц (см. design_mappers)
+        "templates":       dm.templates_to_design(db, user),
+        "auto_rules":      dm.auto_rules_to_design(db, user),
+        "auto_stats":      dm.auto_stats(db, user, now),
+        "internal_tasks":  dm.internal_tasks_to_design(db, user),
+        "kpi_weekly":      dm.kpi_weekly(db, user, now),
+        "heatmap":         dm.heatmap_activity(db, user, now, visible_ids),
+        "team_response":   dm.team_response(db, now),
+        "recent_files":    dm.recent_files(db, user),
+        "roadmap":         dm.roadmap_data(),
     }

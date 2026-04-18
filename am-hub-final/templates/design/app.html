@@ -72,6 +72,16 @@
     window.__HUB_URL        = {{ hub_url        | tojson }};
     window.__ACTIVE_PAGE    = {{ active_page    | tojson }};
     window.__COMPONENT      = {{ component_name | tojson }};
+    // Данные для design-страниц (см. design_mappers / routers/design.py)
+    window.TEMPLATES        = {{ templates      | tojson }};
+    window.AUTO_RULES       = {{ auto_rules     | tojson }};
+    window.AUTO_STATS       = {{ auto_stats     | tojson }};
+    window.INTERNAL_TASKS   = {{ internal_tasks | tojson }};
+    window.KPI_WEEKLY       = {{ kpi_weekly     | tojson }};
+    window.HEATMAP          = {{ heatmap        | tojson }};
+    window.TEAM_RESPONSE    = {{ team_response  | tojson }};
+    window.RECENT_FILES     = {{ recent_files   | tojson }};
+    window.ROADMAP          = {{ roadmap        | tojson }};
     window.__CURRENT_USER = {{ {
       "name": user.name,
       "email": user.email,
