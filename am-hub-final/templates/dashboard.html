@@ -245,8 +245,8 @@ async function updateNotifBadge(){
   try{
     const r=await fetch('/api/notifications');
     const d=await r.json();
-    const bell=document.getElementById('notifBell');
-    if(d.notifications&&d.notifications.length>0){
+    const bell=document.getElementById('dashNotifBell');
+    if(bell && d.notifications&&d.notifications.length>0){
       bell.textContent='🔔('+d.notifications.length+')';
       bell.style.background='rgba(239,68,68,.2)';bell.style.borderRadius='12px';bell.style.padding='4px 8px';
     }
@@ -385,7 +385,7 @@ window.addEventListener('load',()=>{
     </div>
     <div class="topbar-actions">
       <button class="btn btn-sm" onclick="openSearch()" title="Поиск (Ctrl+K)">🔍</button>
-      <button class="btn btn-sm" id="notifBell" onclick="location.href='/inbox'" title="Уведомления">🔔</button>
+      <button class="btn btn-sm" id="dashNotifBell" onclick="toggleNotifPanel()" title="Уведомления">🔔</button>
       <button class="btn btn-sm" onclick="location.reload()">🔄</button>
       <a class="btn btn-sm btn-p" href="/sync">Sync</a>
     </div>

@@ -10,7 +10,7 @@ import { CONFIG } from "./config.js";
  * @param {string} apiKey — ключ клиента
  * @returns {Object} — полный ответ API
  */
-export async function searchDiginetica(query, apiKey) {
+export async function searchDiginetica(query, apiKey, searchUrl) {
   const params = new URLSearchParams({
     st: query,
     apiKey,
@@ -31,7 +31,7 @@ export async function searchDiginetica(query, apiKey) {
     searchConfiguration: "false",
   });
 
-  const resp = await fetch(`${CONFIG.DIGINETICA_SEARCH_URL}?${params}`);
+  const resp = await fetch(`${searchUrl || CONFIG.DIGINETICA_SEARCH_URL}?${params}`);
   if (!resp.ok) throw new Error(`Diginetica API: ${resp.status}`);
   return resp.json();
 }

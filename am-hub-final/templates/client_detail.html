@@ -330,11 +330,11 @@
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-wrap:wrap;">
       <div>
         <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Название</label>
-        <input id="edit-name" value="{{ client.name }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+        <input id="edit-name-full" value="{{ client.name }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
       </div>
       <div>
         <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Сегмент</label>
-        <select id="edit-segment" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+        <select id="edit-segment-full" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
           <option value="">— Не задан —</option>
           {% for seg in ["ENT","SME+","SME","SME-","SMB","SS"] %}
           <option value="{{ seg }}" {% if client.segment == seg %}selected{% endif %}>{{ seg }}</option>
@@ -343,11 +343,11 @@
       </div>
       <div>
         <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Домен</label>
-        <input id="edit-domain" value="{{ client.domain or '' }}" placeholder="company.ru" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+        <input id="edit-domain-full" value="{{ client.domain or '' }}" placeholder="company.ru" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
       </div>
       <div>
         <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Health Score (0–1)</label>
-        <input id="edit-health" type="number" min="0" max="1" step="0.05" value="{{ client.health_score or 0 }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
+        <input id="edit-health-full" type="number" min="0" max="1" step="0.05" value="{{ client.health_score or 0 }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;">
@@ -970,10 +970,10 @@ function toggleEditClient() {
 async function saveClient() {
   const el = document.getElementById('edit-client-result');
   const data = {
-    name: document.getElementById('edit-name').value.trim(),
-    segment: document.getElementById('edit-segment').value,
-    domain: document.getElementById('edit-domain').value.trim(),
-    health_score: parseFloat(document.getElementById('edit-health').value) || 0,
+    name: document.getElementById('edit-name-full').value.trim(),
+    segment: document.getElementById('edit-segment-full').value,
+    domain: document.getElementById('edit-domain-full').value.trim(),
+    health_score: parseFloat(document.getElementById('edit-health-full').value) || 0,
   };
   try {
     const r = await fetch('/api/clients/' + clientId, {

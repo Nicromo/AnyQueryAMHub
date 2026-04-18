@@ -248,6 +248,9 @@ async def job_sync_merchrules():
         logger.info(f"✅ Merchrules total: {total_clients} new clients, {total_tasks} new tasks")
     except Exception as e:
         logger.error(f"❌ job_sync_merchrules: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_sync_airtable_clients():
@@ -304,6 +307,9 @@ async def job_sync_airtable_clients():
         db.close()
     except Exception as e:
         logger.error(f"❌ job_sync_airtable: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_sync_ktalk_meetings():
@@ -401,7 +407,7 @@ async def job_sync_ktalk_meetings():
                             for p in participants:
                                 pname = (p.get("name") or "").lower()
                                 pemail = (p.get("email") or "").lower()
-                                if c.name.lower() in pname or (c.domain and c.domain.lower() in pemail):
+                                if c.name.lower() in pname or (c.domain and pemail.endswith("@" + c.domain.lower())):
                                     client = c
                                     break
                             if client:
@@ -461,6 +467,9 @@ async def job_sync_ktalk_meetings():
         db.close()
     except Exception as e:
         logger.error(f"❌ job_sync_ktalk: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_deadline_reminders():
@@ -539,6 +548,9 @@ async def job_deadline_reminders():
         logger.info(f"✅ Deadline reminders sent to {len(users)} users")
     except Exception as e:
         logger.error(f"❌ job_deadline_reminders: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_check_overdue_checkups():
@@ -584,6 +596,9 @@ async def job_check_overdue_checkups():
             db.close()
     except Exception as e:
         logger.error(f"❌ job_check_overdue_checkups: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_morning_plan():
@@ -650,6 +665,9 @@ async def job_morning_plan():
         db.close()
     except Exception as e:
         logger.error(f"❌ job_morning_plan: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_weekly_digest():
@@ -703,6 +721,9 @@ async def job_weekly_digest():
         db.close()
     except Exception as e:
         logger.error(f"❌ job_weekly_digest: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_sync_meetings_and_slots():
@@ -743,7 +764,7 @@ async def job_sync_meetings_and_slots():
                 if any(c_lower in n for n in attendee_names):
                     client = c
                     break
-                if c.domain and any(c.domain.lower() in em for em in attendee_emails):
+                if c.domain and any(em.endswith("@" + c.domain.lower()) for em in attendee_emails):
                     client = c
                     break
 
@@ -767,6 +788,9 @@ async def job_sync_meetings_and_slots():
             logger.info(f"✅ Outlook: {new_count} new meetings synced")
     except Exception as e:
         logger.error(f"❌ job_sync_outlook: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 # ── START ────────────────────────────────────────────────────────────────────
@@ -836,6 +860,9 @@ async def job_health_recalc_all():
             db.close()
     except Exception as e:
         logger.error(f"❌ Health recalc job error: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_ktalk_sync():
@@ -947,6 +974,9 @@ async def job_ktalk_sync():
             db.close()
     except Exception as e:
         logger.error(f"❌ Ktalk job error: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 
 async def job_renewal_alerts():
@@ -992,6 +1022,9 @@ async def job_renewal_alerts():
             db.close()
     except Exception as e:
         logger.error(f"❌ Renewal alerts error: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
 
 def start_scheduler():
     sched = _get_scheduler()
