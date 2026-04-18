@@ -1,8 +1,7 @@
 /**
  * popup.js — логика единого AM Hub popup
+ * jsPDF загружается локально в popup.html (window.jspdf)
  */
-
-import { jsPDF } from "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 const TABS = ["sync","checkup","settings"];
@@ -17,6 +16,7 @@ function switchTab(tab, btn) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  bindEvents();
   await loadSettings();
   checkHubConnection();
   refreshSyncStatus();
@@ -25,6 +25,36 @@ async function init() {
   chrome.runtime.onMessage.addListener(msg => {
     if (msg.type === "PROGRESS") updateProgress(msg.current, msg.total);
   });
+}
+
+// ── Event bindings (CSP-safe, без inline onclick) ─────────────────────────────
+function bindEvents() {
+  // Вкладки
+  document.querySelectorAll(".tabs .tab").forEach(el => {
+    el.addEventListener("click", () => switchTab(el.dataset.t, el));
+  });
+  // Sync
+  document.getElementById("btn-sync-now").addEventListener("click", syncNow);
+  document.getElementById("btn-open-hub").addEventListener("click", openHub);
+  document.getElementById("btn-open-time").addEventListener("click", openTime);
+  document.getElementById("btn-open-ktalk").addEventListener("click", openKtalk);
+  // Checkup
+  document.getElementById("btn-load-cabinet").addEventListener("click", loadCabinet);
+  document.querySelectorAll("#qtabs .qtab").forEach(el => {
+    el.addEventListener("click", () => setQType(el.dataset.qt, el));
+  });
+  document.getElementById("ck-run").addEventListener("click", runCheck);
+  document.getElementById("ck-cal").addEventListener("click", runCal);
+  document.getElementById("btn-gen-pdf").addEventListener("click", genPDF);
+  document.getElementById("btn-export-csv").addEventListener("click", exportCSV);
+  // Продукты рендерятся динамически — делегирование
+  document.getElementById("ck-products").addEventListener("click", e => {
+    const chip = e.target.closest(".prod-chip");
+    if (chip && chip.dataset.product) setProduct(chip.dataset.product, chip);
+  });
+  // Settings
+  document.getElementById("btn-save-settings").addEventListener("click", saveSettings);
+  document.getElementById("btn-test-mr").addEventListener("click", testMR);
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -40,7 +70,7 @@ async function loadSettings() {
   if (s.managerName) document.getElementById("s-manager").value    = s.managerName;
 }
 
-window.saveSettings = async function() {
+async function saveSettings() {
   const data = {
     hub_url:      document.getElementById("s-hub-url").value.trim().replace(/\/$/, ""),
     hub_token:    document.getElementById("s-hub-token").value.trim(),
@@ -88,19 +118,19 @@ async function refreshSyncStatus() {
   }
 }
 
-window.syncNow = async function() {
+async function syncNow() {
   document.getElementById("sync-dot").className = "dot dot-run";
   document.getElementById("sync-label").textContent = "Синхронизация...";
   showBox("sync-result", "⏳ Идёт синхронизация...", "warn");
   const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" });
   refreshSyncStatus();
-};
+}
 
-window.openHub = function() {
+function openHub() {
   chrome.storage.local.get("hub_url", d => {
     if (d.hub_url) chrome.tabs.create({ url: d.hub_url });
   });
-};
+}
 
 // ── Token status ──────────────────────────────────────────────────────────────
 async function refreshTokenStatus() {
@@ -129,13 +159,13 @@ async function refreshTokenStatus() {
   }
 }
 
-window.openTime  = () => chrome.tabs.create({ url: "https://time.tbank.ru" });
-window.openKtalk = () => chrome.tabs.create({ url: "https://tbank.ktalk.ru" });
+function openTime()  { chrome.tabs.create({ url: "https://time.tbank.ru" }); }
+function openKtalk() { chrome.tabs.create({ url: "https://tbank.ktalk.ru" }); }
 
 // ── Checkup ───────────────────────────────────────────────────────────────────
 let ckResults = [];
 
-window.loadCabinet = async function() {
+async function loadCabinet() {
   const id = document.getElementById("ck-cabinet").value.trim();
   if (!id) return;
   showAlert("⏳ Загружаем данные кабинета...", "warn");
@@ -151,7 +181,7 @@ window.loadCabinet = async function() {
     const labels = { sort: "🔍 Sort", autocomplete: "⌨ Auto", recommendations: "⭐ Rec" };
     const cls    = { sort: "p-sort", autocomplete: "p-auto", recommendations: "p-rec" };
     prodEl.innerHTML = products.map((p, i) =>
-      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" onclick="setProduct('${p}',this)">${labels[p]||p}</span>`
+      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" data-product="${p}">${labels[p]||p}</span>`
     ).join("");
   }
 
@@ -164,19 +194,19 @@ window.loadCabinet = async function() {
   showAlert("", "");
 };
 
-window.setProduct = function(product, el) {
+function setProduct(product, el) {
   document.querySelectorAll(".prod-chip").forEach(c => c.classList.remove("prod-act"));
   el.classList.add("prod-act");
   chrome.runtime.sendMessage({ type: "SET_ACTIVE_PRODUCT", product });
-};
+}
 
-window.setQType = function(qt, btn) {
+function setQType(qt, btn) {
   document.querySelectorAll(".qtab").forEach(b => b.classList.remove("act"));
   btn.classList.add("act");
   chrome.runtime.sendMessage({ type: "SET_QUERY_TYPE", queryType: qt });
-};
+}
 
-window.runCal = async function() {
+async function runCal() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const res = await chrome.runtime.sendMessage({ type: "RUN_CALIBRATION", tabId: tab.id });
   if (res.mode === "api")  showAlert("✅ API-режим — выдача совпадает", "ok");
@@ -185,7 +215,7 @@ window.runCal = async function() {
   else showAlert(res.message || (res.ok ? "OK" : res.error), res.ok ? "ok" : "err");
 };
 
-window.runCheck = async function() {
+async function runCheck() {
   const rawQ = document.getElementById("ck-queries").value.trim();
   if (!rawQ) { showAlert("Введите запросы", "warn"); return; }
   const queries = rawQ.split("\n").map(q => q.trim()).filter(Boolean);
@@ -243,10 +273,11 @@ function renderResults(results) {
     }).join("") + (results.length > 15 ? `<div style="font-size:.7rem;color:#4c567a;text-align:center;padding:6px">...ещё ${results.length-15} запросов в отчёте</div>` : "");
 }
 
-window.genPDF = async function() {
+async function genPDF() {
   if (!ckResults.length) return;
+  if (!window.jspdf) { showBox("sync-result", "❌ jsPDF не загружен", "err"); return; }
   const state = await chrome.runtime.sendMessage({ type: "GET_CHECKUP_STATE" });
-  const { jsPDF: PDF } = window.jspdf || { jsPDF };
+  const { jsPDF: PDF } = window.jspdf;
   const doc = new PDF();
   let y = 20;
   doc.setFontSize(16); doc.text("AM Hub — Search Quality Checkup", 14, y); y += 8;
@@ -266,9 +297,9 @@ window.genPDF = async function() {
     y += 2;
   });
   doc.save(`checkup_${state.clientName||state.cabinetId}_${new Date().toISOString().slice(0,10)}.pdf`);
-};
+}
 
-window.exportCSV = async function() {
+async function exportCSV() {
   if (!ckResults.length) return;
   const state = await chrome.runtime.sendMessage({ type: "GET_CHECKUP_STATE" });
   const rows = [["#","Запрос","Показов","Оценка","Всего товаров","Продукт","Причина","Рекомендация","AI"]];
@@ -285,14 +316,14 @@ window.exportCSV = async function() {
   const a = document.createElement("a");
   a.href = url; a.download = `checkup_${state.clientName||"export"}_${new Date().toISOString().slice(0,10)}.csv`;
   a.click(); URL.revokeObjectURL(url);
-};
+}
 
 // ── Test MR ───────────────────────────────────────────────────────────────────
-window.testMR = async function() {
+async function testMR() {
   showBox("s-mr-result", "⏳ Проверяем...", "warn");
   const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" });
   showBox("s-mr-result", res.ok ? `✅ OK · ${res.result?.clients_synced||0} клиентов` : "❌ " + (res.error||"Ошибка"), res.ok ? "ok" : "err");
-};
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function showAlert(msg, type) {
