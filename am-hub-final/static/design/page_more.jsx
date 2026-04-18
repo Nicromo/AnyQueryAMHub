@@ -14,6 +14,7 @@ function _pg(str) {
 
 function PageTop50() {
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const [showFilter, setShowFilter] = React.useState(false);
   // Сортировка по убыванию GMV, топ-50
   const rows = CL
     .slice()
@@ -42,7 +43,7 @@ function PageTop50() {
     <div>
       <TopBar breadcrumbs={["am hub","top-50"]} title="Top-50 · приоритетный портфель"
         subtitle="Клиенты, формирующие 78% GMV команды"
-        actions={<><Btn kind="ghost" size="m" icon={<I.filter size={14}/>}>Фильтр</Btn><Btn kind="primary" size="m" icon={<I.download size={14}/>}>PDF-отчёт</Btn></>}/>
+        actions={<><Btn kind={showFilter ? "primary" : "ghost"} size="m" icon={<I.filter size={14}/>} onClick={() => setShowFilter(v => !v)}>Фильтр</Btn><Btn kind="primary" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF-отчёт</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
           <KPI label={`Top-${rows.length} · GMV`} value={totalRub >= 1_000_000 ? `₽ ${(totalRub/1_000_000).toFixed(1)}м` : totalRub >= 1000 ? `₽ ${Math.round(totalRub/1000)}к` : `₽ ${Math.round(totalRub)}`} sub={`${rows.length} клиентов`} big/>
@@ -86,7 +87,13 @@ function PageTop50() {
 
 // ── Tasks ─────────────────────────────────────────────────
 function PageTasks() {
-  const TK = (typeof window !== "undefined" && window.TASKS) || [];
+  const [filter, setFilter] = React.useState("mine");
+  const ALL_TK = (typeof window !== "undefined" && window.TASKS) || [];
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  // When filter="mine", show tasks assigned to current user (by team/email); "all" shows all
+  const TK = filter === "mine" && U.email
+    ? ALL_TK.filter(t => !t.team || t.team === U.email || t.team === U.name)
+    : ALL_TK;
 
   // Группировка реальных задач по колонкам.
   // На сервере (design_mappers) статус не передаётся в task-dict — есть только due и priority.
@@ -112,7 +119,7 @@ function PageTasks() {
     <div>
       <TopBar breadcrumbs={["am hub","задачи"]} title="Задачи · канбан"
         subtitle={`${totalActive} активных · ${overdue.length} просрочено · ${today.length} на сегодня`}
-        actions={<><Btn kind="ghost" size="m">Мои</Btn><Btn kind="dim" size="m">Вся команда</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
+        actions={<><Btn kind={filter === "mine" ? "primary" : "ghost"} size="m" onClick={() => setFilter("mine")}>Мои</Btn><Btn kind={filter === "all" ? "primary" : "dim"} size="m" onClick={() => setFilter("all")}>Вся команда</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
           // Клик на "+" открывает глобальную модалку из shell (FAB всегда в DOM)
           document.querySelector('button[title="Новая задача"]')?.click();
         }}>Задача</Btn></>}/>
@@ -171,7 +178,7 @@ function PageMeetings() {
     <div>
       <TopBar breadcrumbs={["am hub","встречи"]} title="Встречи"
         subtitle={total > 0 ? `${total} предстоящих · ${withRisk} с риском · ${withOk} ок` : "Нет предстоящих встреч"}
-        actions={<><Btn kind="ghost" size="m">Все</Btn><Btn kind="dim" size="m">Мои</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Запланировать</Btn></>}/>
+        actions={<><Btn kind="ghost" size="m">Все</Btn><Btn kind="dim" size="m">Мои</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => window.location.href = "/design/meetings?create=1"}>Запланировать</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 320px", gap: 18 }}>
         <Card title="Расписание · предстоящие">
           {meets.length === 0 && (
@@ -297,7 +304,7 @@ function PagePortfolio() {
     <div>
       <TopBar breadcrumbs={["am hub","портфель"]} title="Портфель · структура"
         subtitle={`${CL.length} клиентов · ${totalFmt} · ${pms.length} ${pms.length === 1 ? "менеджер" : "менеджеров"}`}
-        actions={<><Btn kind="ghost" size="m">По сегменту</Btn><Btn kind="dim" size="m">По менеджеру</Btn></>}/>
+        actions={<><Btn kind="ghost" size="m">По сегменту</Btn><Btn kind="dim" size="m">По менеджеру</Btn><Btn kind="primary" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12 }}>
           {segs.map((s,i)=>(
@@ -369,6 +376,7 @@ function PageAI() {
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [showHistory, setShowHistory] = React.useState(false);
   const listRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -453,7 +461,7 @@ function PageAI() {
     <div>
       <TopBar breadcrumbs={["am hub","ai-ассистент"]} title="AI-ассистент"
         subtitle="Чат с данными портфеля · авто-брифы · генерация follow-up"
-        actions={<><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={newSession}>Новая сессия</Btn></>}/>
+        actions={<><Btn kind={showHistory ? "primary" : "ghost"} size="m" icon={<I.doc size={14}/>} onClick={() => setShowHistory(v => !v)}>История</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={newSession}>+ Новая сессия</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
         <Card title={`Диалог · ${dateLabel}`} action={<Badge tone="signal">data-grounded</Badge>}>
           <div ref={listRef} style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: 540, minHeight: 200, overflow: "auto" }}>
@@ -591,119 +599,190 @@ function PageKPI() {
 
 // ── Cabinet ───────────────────────────────────────────────
 function PageCabinet() {
-  const fileInputRef = React.useRef(null);
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  const [files, setFiles] = React.useState([]);
   const [uploading, setUploading] = React.useState(false);
   const [recording, setRecording] = React.useState(false);
-  const recorderRef = React.useRef(null);
-  const chunksRef = React.useRef([]);
+  const [mediaRec, setMediaRec] = React.useState(null);
+  const [reminders, setReminders] = React.useState(
+    (typeof window !== "undefined" && window.REMINDERS) || []
+  );
+  const [newReminder, setNewReminder] = React.useState("");
+  const [reminderDate, setReminderDate] = React.useState("");
+  const [error, setError] = React.useState("");
+  const fileRef = React.useRef(null);
+
+  // Load files on mount
+  React.useEffect(() => {
+    fetch("/api/files", { credentials: "include" })
+      .then(r => r.ok ? r.json() : { files: [] })
+      .then(d => setFiles(d.files || []))
+      .catch(() => {});
+  }, []);
 
   const uploadFiles = async (fileList) => {
-    if (!fileList?.length) return;
-    setUploading(true);
+    if (!fileList.length) return;
+    setUploading(true); setError("");
+    const fd = new FormData();
+    for (const f of fileList) fd.append("files", f);
     try {
-      for (const f of fileList) {
-        const fd = new FormData();
-        fd.append("file", f);
-        fd.append("category", f.type.startsWith("audio/") ? "voice" : "misc");
-        const r = await fetch("/api/files", { method: "POST", credentials: "include", body: fd });
-        if (!r.ok) { alert("Ошибка загрузки " + f.name); break; }
+      const r = await fetch("/api/files", { method: "POST", credentials: "include", body: fd });
+      const d = await r.json();
+      if (d.ok || d.id || d.filename) {
+        // Reload file list
+        const lr = await fetch("/api/files", { credentials: "include" });
+        const ld = await lr.json();
+        setFiles(ld.files || []);
       }
-      location.reload();
-    } finally { setUploading(false); }
+    } catch (e) { setError(String(e)); }
+    setUploading(false);
   };
 
-  const startRecord = async () => {
+  const deleteFile = async (id) => {
+    if (!confirm("Удалить файл?")) return;
+    await fetch("/api/files/" + id, { method: "DELETE", credentials: "include" });
+    setFiles(f => f.filter(x => x.id !== id));
+  };
+
+  const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => chunksRef.current.push(e.data);
+      const chunks = [];
+      mr.ondataavailable = e => chunks.push(e.data);
       mr.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        await uploadFiles([new File([blob], `voice_${ts}.webm`, { type: "audio/webm" })]);
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const fd = new FormData();
+        fd.append("files", blob, `voice_${Date.now()}.webm`);
+        await fetch("/api/files", { method: "POST", credentials: "include", body: fd });
         stream.getTracks().forEach(t => t.stop());
+        const lr = await fetch("/api/files", { credentials: "include" });
+        const ld = await lr.json();
+        setFiles(ld.files || []);
       };
       mr.start();
-      recorderRef.current = mr;
-      setRecording(true);
-    } catch (e) {
-      alert("Нет доступа к микрофону: " + e.message);
-    }
+      setMediaRec(mr); setRecording(true);
+    } catch (e) { setError("Нет доступа к микрофону: " + e.message); }
   };
-  const stopRecord = () => { recorderRef.current?.stop(); setRecording(false); };
+
+  const stopRecording = () => {
+    if (mediaRec) { mediaRec.stop(); setMediaRec(null); setRecording(false); }
+  };
+
+  const addReminder = async () => {
+    if (!newReminder.trim() || !reminderDate) return;
+    try {
+      const r = await fetch("/design/api/reminders", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: newReminder.trim(), remind_at: reminderDate + "T09:00:00" }),
+      });
+      if (r.ok) {
+        setReminders(prev => [...prev, { text: newReminder.trim(), remind_at: reminderDate, done: false }]);
+        setNewReminder(""); setReminderDate("");
+      }
+    } catch (e) { setError(String(e)); }
+  };
+
+  const fmtSize = (bytes) => bytes < 1024 ? bytes + " B" : bytes < 1048576 ? Math.round(bytes/1024) + " KB" : (bytes/1048576).toFixed(1) + " MB";
+  const fmtDate = (s) => { try { return new Date(s).toLocaleDateString("ru-RU"); } catch { return s; } };
 
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","мой кабинет"]} title="Мой кабинет" subtitle="Личные материалы, заметки и документы"
+      <TopBar breadcrumbs={["am hub","инструменты","кабинет"]} title="Мой кабинет"
+        subtitle={`${U.name || U.email || "—"} · ${files.length} файлов`}
         actions={<>
-          <input type="file" ref={fileInputRef} multiple style={{ display: "none" }}
-            onChange={(e) => uploadFiles(e.target.files)}/>
-          <Btn kind={recording ? "primary" : "ghost"} size="m" icon={<I.mic size={14}/>}
-            onClick={recording ? stopRecord : startRecord}>
-            {recording ? "Остановить запись" : "Запись голоса"}
+          <Btn kind="ghost" size="m" icon={<I.mic size={14}/>} onClick={recording ? stopRecording : startRecording}>
+            {recording ? "⏹ Стоп" : "🎙 Запись"}
           </Btn>
-          <Btn kind="primary" size="m" icon={<I.plus size={14}/>} disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}>
-            {uploading ? "Загружаю…" : "Загрузить"}
+          <Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => fileRef.current?.click()}>
+            Загрузить
           </Btn>
         </>}/>
-      <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "220px 1fr", gap: 18 }}>
-        <Card title="Папки">
-          {(function(){
-            const folders = (typeof window !== "undefined" && window.CABINET_FOLDERS) || [];
-            if (!folders.length) {
-              return <div style={{ padding: "16px 0", color: "var(--ink-6)", fontSize: 12, textAlign: "center" }}>
-                Нет папок.
-              </div>;
-            }
-            return folders.map((f,i)=>{
-              const Ic = I[f.icon || f.i] || I.folder;
-              return (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 6px", borderBottom: i === folders.length - 1 ? "none" : "1px solid var(--line-soft)", cursor: "pointer" }}>
-                  <Ic size={14} stroke="var(--ink-6)"/>
-                  <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{f.name || f.n}</span>
-                  <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{f.count ?? f.c ?? 0}</span>
+      <input ref={fileRef} type="file" multiple style={{ display: "none" }}
+        onChange={e => uploadFiles(Array.from(e.target.files || []))}/>
+      <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 340px", gap: 18 }}>
+
+        {/* Left: Files */}
+        <Card title="Файлы и документы" action={uploading && <Badge tone="warn">Загрузка…</Badge>}>
+          {error && <div style={{ padding: "8px 10px", background: "color-mix(in oklch, var(--critical) 10%, transparent)", border: "1px solid color-mix(in oklch, var(--critical) 30%, transparent)", borderRadius: 4, color: "var(--critical)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+
+          {/* Drop zone */}
+          <div onDrop={e => { e.preventDefault(); uploadFiles(Array.from(e.dataTransfer.files || [])); }}
+            onDragOver={e => e.preventDefault()}
+            onClick={() => fileRef.current?.click()}
+            style={{ border: "2px dashed var(--line)", borderRadius: 6, padding: "20px 10px", textAlign: "center", cursor: "pointer", marginBottom: 14, color: "var(--ink-6)", fontSize: 13 }}>
+            <I.plus size={20} stroke="var(--ink-5)"/>
+            <div style={{ marginTop: 6 }}>Перетащите файлы или нажмите для загрузки</div>
+            <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 4 }}>PDF, DOCX, XLSX, PNG, WEBM — до 50 МБ</div>
+          </div>
+
+          {files.length === 0 ? (
+            <div style={{ padding: "20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>Файлов пока нет</div>
+          ) : (
+            files.map((f, i) => (
+              <div key={f.id || i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i === files.length - 1 ? "none" : "1px solid var(--line-soft)" }}>
+                <I.doc size={16} stroke="var(--ink-5)"/>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: "var(--ink-9)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.filename || f.name}</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>
+                    {fmtSize(f.size_bytes || f.size || 0)} · {fmtDate(f.created_at)}
+                    {f.category && f.category !== "misc" ? " · " + f.category : ""}
+                  </div>
                 </div>
-              );
-            });
-          })()}
+                <a href={"/api/files/" + f.id} target="_blank" style={{ color: "var(--signal)", textDecoration: "none" }}>
+                  <I.download size={13}/>
+                </a>
+                <button onClick={() => deleteFile(f.id)} style={{ background: "transparent", border: 0, color: "var(--ink-5)", cursor: "pointer", padding: 4 }}>
+                  <I.trash size={13}/>
+                </button>
+              </div>
+            ))
+          )}
         </Card>
 
-        <Card title="Недавние файлы" action={<Btn size="s" kind="ghost" icon={<I.grid size={12}/>}>Grid</Btn>}>
-          {(function(){
-            const files = (typeof window !== "undefined" && window.RECENT_FILES) || [];
-            if (!files.length) {
-              return <div style={{ padding: "30px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
-                Файлов пока нет. Загрузите первый документ кнопкой выше.
-              </div>;
-            }
-            const delFile = async (id, name) => {
-              if (!confirm(`Удалить «${name}»?`)) return;
-              const r = await fetch(`/api/files/${id}`, { method: "DELETE", credentials: "include" });
-              if (r.ok) location.reload(); else alert("Ошибка удаления");
-            };
-            return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
-              {files.map((f, i) => (
-                <div key={f.id || i} style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden", position: "relative" }}>
-                  <div onClick={() => { if (f.url) window.open(f.url, "_blank"); }}
-                       style={{ cursor: f.url ? "pointer" : "default" }}>
-                    <Placeholder h={90} label={f.type || f.t}/>
-                    <div style={{ padding: 10 }}>
-                      <div style={{ fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name || f.n}</div>
-                      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 3 }}>{f.date || f.d}</div>
-                    </div>
+        {/* Right: Reminders + Profile */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <Card title="Напоминания">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+              <input value={newReminder} onChange={e => setNewReminder(e.target.value)}
+                placeholder="Текст напоминания…"
+                style={{ padding: "8px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontFamily: "var(--f-display)", fontSize: 13, outline: "none" }}/>
+              <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)}
+                style={{ padding: "8px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontFamily: "var(--f-display)", fontSize: 13, outline: "none" }}/>
+              <Btn kind="primary" size="m" full onClick={addReminder} icon={<I.plus size={13}/>}>Добавить</Btn>
+            </div>
+            {reminders.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--ink-6)", textAlign: "center", padding: "12px 0" }}>Нет напоминаний</div>
+            ) : (
+              reminders.slice(0, 8).map((r, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: i === Math.min(reminders.length, 8) - 1 ? "none" : "1px solid var(--line-soft)" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: 999, background: r.done ? "var(--ok)" : "var(--warn)", marginTop: 5, flexShrink: 0 }}/>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, color: r.done ? "var(--ink-6)" : "var(--ink-8)", textDecoration: r.done ? "line-through" : "none" }}>{r.text}</div>
+                    {r.remind_at && <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 2 }}>{fmtDate(r.remind_at)}</div>}
                   </div>
-                  {f.id && (
-                    <button onClick={() => delFile(f.id, f.name || f.n)}
-                      title="Удалить"
-                      style={{ position: "absolute", top: 6, right: 6, width: 22, height: 22, background: "rgba(0,0,0,.5)", border: 0, borderRadius: 3, color: "#fff", cursor: "pointer", fontSize: 11 }}>✕</button>
-                  )}
                 </div>
-              ))}
-            </div>;
-          })()}
-        </Card>
+              ))
+            )}
+          </Card>
+
+          <Card title="Профиль" dense>
+            {[
+              { l: "Имя", v: U.name || "—" },
+              { l: "Email", v: U.email || "—" },
+              { l: "Роль", v: U.role || "—" },
+            ].map((r, i) => (
+              <div key={i} style={{ padding: "10px 0", borderBottom: i === 2 ? "none" : "1px solid var(--line-soft)", display: "flex", alignItems: "center", gap: 10 }}>
+                <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", width: 50, flexShrink: 0 }}>{r.l}</span>
+                <span style={{ fontSize: 13, color: "var(--ink-8)" }}>{r.v}</span>
+              </div>
+            ))}
+            <Btn kind="ghost" size="m" full style={{ marginTop: 10 }} onClick={() => window.location.href = "/design/profile"}>
+              Редактировать профиль
+            </Btn>
+          </Card>
+        </div>
       </div>
     </div>
   );

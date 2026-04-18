@@ -23,7 +23,7 @@ from auth import decode_access_token
 from models import (
     Client, Task, Meeting, User,
     AuditLog, UserClientAssignment, RoadmapItem,
-    FollowupTemplate,
+    FollowupTemplate, QBR,
 )
 import design_mappers as dm
 
@@ -79,6 +79,32 @@ def _list_extensions() -> List[dict]:
 
 router = APIRouter(prefix="/design", tags=["design"])
 templates = Jinja2Templates(directory="templates")
+
+# ── Lazy data loading: map page_id → required data keys ──────
+# Only the listed keys are computed; all others get empty defaults.
+PAGES_DATA_MAP = {
+    "command":    ["clients", "tasks", "meetings", "tools", "sidebar_stats", "gmv_spark", "day_kpi", "activity"],
+    "today":      ["tasks", "meetings", "sidebar_stats", "day_kpi", "reminders"],
+    "clients":    ["clients", "sidebar_stats"],
+    "top50":      ["clients"],
+    "tasks":      ["tasks", "sidebar_stats"],
+    "meetings":   ["meetings", "sidebar_stats"],
+    "portfolio":  ["clients", "sidebar_stats"],
+    "analytics":  ["clients", "meetings", "heatmap", "team_response", "kpi_weekly"],
+    "ai":         ["clients", "activity"],
+    "kanban":     ["tasks", "clients"],
+    "kpi":        ["kpi_weekly", "day_kpi"],
+    "qbr":        ["clients", "qbr_data"],
+    "cabinet":    ["reminders"],
+    "templates":  ["templates"],
+    "auto":       ["auto_rules", "auto_stats"],
+    "roadmap":    ["roadmap"],
+    "internal":   ["internal_tasks"],
+    "help":       [],
+    "extension":  [],
+    "profile":    [],
+    "assignments": ["clients"],
+}
 
 
 # page_id → (Name компонента в window, breadcrumbs, заголовок)
@@ -393,6 +419,28 @@ async def assign_client(
     return {"ok": True, "from": old_email, "to": target_email}
 
 
+# ── Reminders ────────────────────────────────────────────────
+@router.post("/api/reminders")
+async def reminder_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    from models import Reminder
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    from datetime import datetime as _dt
+    r = Reminder(
+        user_id=user.id,
+        text=body.get("text", ""),
+        remind_at=_dt.fromisoformat(body.get("remind_at", _dt.utcnow().isoformat())),
+    )
+    db.add(r); db.commit(); db.refresh(r)
+    return {"ok": True, "id": r.id}
+
+
 # ── Seed CSMs ────────────────────────────────────────────────
 # Идемпотентно; доступно admin либо при пустой таблице users (bootstrap).
 @router.post("/api/seed-csms")
@@ -408,6 +456,131 @@ async def seed_csms_endpoint(
     from seed_csms import seed
     report = seed(dry_run=False)
     return report
+
+
+# ── QBR Calendar API ─────────────────────────────────────────
+@router.get("/api/qbr")
+async def qbr_list(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """List QBRs for current user (grouped by manager)."""
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    visible_ids = _client_ids_for_user(db, user)
+    q = db.query(QBR).join(Client, QBR.client_id == Client.id, isouter=True)
+    if visible_ids is not None:
+        if not visible_ids:
+            return {"qbrs": []}
+        q = q.filter(QBR.client_id.in_(visible_ids))
+    rows = q.order_by(QBR.date.asc()).limit(500).all()
+    result = []
+    for qbr in rows:
+        client_name = qbr.client.name if qbr.client else None
+        result.append({
+            "id": qbr.id,
+            "client_id": qbr.client_id,
+            "client_name": client_name,
+            "quarter": qbr.quarter,
+            "year": qbr.year,
+            "date": qbr.date.strftime("%Y-%m-%d") if qbr.date else None,
+            "status": qbr.status,
+            "manager_email": getattr(qbr, "manager_email", None) or (qbr.client.manager_email if qbr.client else None),
+        })
+    return {"qbrs": result}
+
+
+@router.post("/api/qbr")
+async def qbr_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Create or update a QBR entry."""
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    client_id = body.get("client_id")
+    quarter = (body.get("quarter") or "").strip()
+    if not client_id or not quarter:
+        raise HTTPException(status_code=400, detail="client_id and quarter required")
+
+    # Verify access
+    visible_ids = _client_ids_for_user(db, user)
+    if visible_ids is not None and client_id not in visible_ids:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Upsert
+    existing = db.query(QBR).filter(QBR.client_id == client_id, QBR.quarter == quarter).first()
+    date_str = body.get("date")
+    date_val = None
+    if date_str:
+        try:
+            from datetime import datetime as _dt
+            date_val = _dt.fromisoformat(date_str[:10])
+        except Exception:
+            pass
+
+    if existing:
+        if date_val:
+            existing.date = date_val
+        if body.get("status"):
+            existing.status = body["status"]
+        if body.get("summary"):
+            existing.summary = body["summary"]
+        db.commit()
+        return {"ok": True, "id": existing.id, "action": "updated"}
+    else:
+        year = int(quarter.split("-")[0]) if "-" in quarter else datetime.utcnow().year
+        qbr = QBR(
+            client_id=client_id,
+            quarter=quarter,
+            year=year,
+            date=date_val,
+            status=body.get("status", "scheduled"),
+            summary=body.get("summary"),
+        )
+        if hasattr(qbr, "manager_email") and body.get("manager_email"):
+            qbr.manager_email = body["manager_email"]
+        db.add(qbr)
+        db.commit()
+        db.refresh(qbr)
+        return {"ok": True, "id": qbr.id, "action": "created"}
+
+
+@router.post("/api/qbr/sync-airtable")
+async def qbr_sync_airtable(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Pull QBR data from Airtable tblqQbChhRYoZoxWu."""
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    from airtable_sync import sync_qbr_from_airtable
+    result = await sync_qbr_from_airtable(db)
+    return result
+
+
+# ── Sheets sync API ──────────────────────────────────────────
+@router.post("/api/sync-sheets")
+async def sync_sheets(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Trigger Google Sheets sync (Churn/Downsell + Top-50)."""
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        from sheets_sync import sync_churn_sheet, sync_top50_sheet
+        churn_result = await sync_churn_sheet(db)
+        top50_result = await sync_top50_sheet(db)
+        return {"ok": True, "churn": churn_result, "top50": top50_result}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.get("/{page_id}", response_class=HTMLResponse)
@@ -572,4 +745,5 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "gmv_spark":       dm.gmv_spark(db, user, now),
         "day_kpi":         dm.day_kpi(db, user, now),
         "reminders":       dm.reminders_for_user(db, user, now),
+        "qbr_data":        json.dumps(dm.qbr_calendar(db, user, now)),
     }

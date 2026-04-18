@@ -220,6 +220,7 @@ function Sidebar({ active = "command", onNav }) {
             </>
           );
         })()}
+        <ThemeToggle/>
         <button style={{ background: "transparent", border: 0, color: "var(--ink-6)", cursor: "pointer", padding: 6 }}>
           <I.gear size={15}/>
         </button>
