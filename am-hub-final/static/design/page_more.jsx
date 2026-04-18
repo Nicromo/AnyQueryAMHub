@@ -734,7 +734,6 @@ function PageCabinet() {
   };
 
   const deleteFile = async (id) => {
-    if (!confirm("Удалить файл?")) return;
     await fetch("/api/files/" + id, { method: "DELETE", credentials: "include" });
     setFiles(f => f.filter(x => x.id !== id));
   };
@@ -1042,7 +1041,6 @@ function PageRoadmap() {
   const addItem = (col) => setRmModal({ col });
 
   const delItem = (id, title) => {
-    if (!confirm(`Удалить «${title}»?`)) return;
     fetch(`/design/api/roadmap/${id}`, { method: "DELETE", credentials: "include" })
       .then(r => r.ok ? location.reload() : alert("Ошибка удаления"));
   };
@@ -1169,10 +1167,7 @@ function PageExtInstall() {
   function _copy(text, label) {
     try {
       navigator.clipboard.writeText(text);
-      alert((label || "Скопировано") + ": " + text);
-    } catch (e) {
-      prompt("Скопируйте вручную:", text);
-    }
+    } catch (e) { /* clipboard unavailable, silently skip */ }
   }
 
   return (
