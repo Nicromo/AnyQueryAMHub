@@ -207,6 +207,8 @@ async def lifespan(app: FastAPI):
                     ("clients", "account_plan", "ALTER TABLE clients ADD COLUMN account_plan JSONB"),
                     ("clients", "last_qbr_date","ALTER TABLE clients ADD COLUMN last_qbr_date TIMESTAMP"),
                     ("clients", "next_qbr_date","ALTER TABLE clients ADD COLUMN next_qbr_date TIMESTAMP"),
+                    ("clients", "airtable_site_id", "ALTER TABLE clients ADD COLUMN airtable_site_id VARCHAR"),
+                    ("clients", "gmv",         "ALTER TABLE clients ADD COLUMN gmv FLOAT DEFAULT 0"),
                 ]
                 # Получаем список существующих колонок
                 existing = {
@@ -247,6 +249,12 @@ async def lifespan(app: FastAPI):
                 for tname, tsql in _new_tables.items():
                     db.execute(_text(tsql))
                 db.commit()
+                # Индекс для идемпотентного upsert по airtable_site_id
+                try:
+                    db.execute(_text("CREATE INDEX IF NOT EXISTS ix_clients_airtable_site_id ON clients(airtable_site_id)"))
+                    db.commit()
+                except Exception:
+                    db.rollback()
                 logger.info("✅ Auto-migration complete")
             except Exception as _e:
                 logger.warning(f"Auto-migration warning: {_e}")
@@ -344,6 +352,9 @@ app.include_router(inbox_notifications.router, tags=["inbox"])
 from routers import pdf_export
 app.include_router(pdf_export.router, tags=["pdf"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])
+
+from routers import airtable as airtable_router
+app.include_router(airtable_router.router, tags=["airtable"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router

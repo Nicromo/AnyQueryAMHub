@@ -23,6 +23,7 @@ class Client(Base):
     manager_email = Column(String, nullable=True)
     airtable_record_id = Column(String, nullable=True, unique=True)
     merchrules_account_id = Column(String, nullable=True, unique=True)
+    airtable_site_id = Column(String, nullable=True, index=True)
     site_ids = Column(JSONB, default=list)
     health_score = Column(Float, default=0.0)
     revenue_trend = Column(String, nullable=True)
@@ -41,6 +42,7 @@ class Client(Base):
 
     # Финансы (быстрый доступ)
     mrr = Column(Float, default=0.0)
+    gmv = Column(Float, default=0.0)
     nps_last = Column(Integer, nullable=True)
     nps_date = Column(DateTime, nullable=True)
 
@@ -542,6 +544,33 @@ class NPSEntry(Base):
     recorded_at = Column(DateTime, default=datetime.utcnow)
     recorded_by = Column(String, nullable=True)
     client     = relationship("Client", backref="nps_history")
+
+
+class FileUpload(Base):
+    """Загруженные файлы менеджеров (кабинет)."""
+    __tablename__ = "file_uploads"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    filename = Column(String, nullable=False)
+    storage_path = Column(String, nullable=False)
+    mime_type = Column(String, nullable=True)
+    size_bytes = Column(Integer, default=0)
+    category = Column(String, default="misc")  # brief|qbr|contract|screenshot|misc
+    created_at = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User")
+    client = relationship("Client")
+
+
+class Reminder(Base):
+    """Личные напоминания менеджера (отдельно от Task)."""
+    __tablename__ = "reminders"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    text = Column(String, nullable=False)
+    remind_at = Column(DateTime, nullable=False, index=True)
+    done = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class RoadmapItem(Base):
