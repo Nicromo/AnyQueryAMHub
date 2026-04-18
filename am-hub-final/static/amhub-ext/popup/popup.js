@@ -230,7 +230,8 @@ async function syncNow() {
 
 function openHub() {
   chrome.storage.local.get("hub_url", d => {
-    if (d && d.hub_url) chrome.tabs.create({ url: d.hub_url });
+    const url = (d && d.hub_url) || "https://anyqueryamhub-production-9654.up.railway.app/design/command";
+    chrome.tabs.create({ url });
   });
 }
 
