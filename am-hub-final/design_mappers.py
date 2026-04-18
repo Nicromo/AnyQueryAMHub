@@ -20,6 +20,7 @@ from models import (
     FollowupTemplate, AutoTaskRule, AuditLog, Client, User, VoiceNote,
     RoadmapItem,
 )
+from cache import ttl_cache, invalidate
 
 
 # ──────────────────────────────────────────────────────────────
@@ -275,6 +276,21 @@ def compute_sidebar_stats(
     visible_ids: Optional[List[int]],
     now: datetime,
 ) -> Dict[str, int]:
+    """Wrapper: enables TTL caching while keeping db/visible_ids as live params."""
+    _visible_key = tuple(sorted(visible_ids)) if visible_ids is not None else None
+    return _compute_sidebar_stats_cached(user, db, _visible_key, now)
+
+
+@ttl_cache(ttl=30, key_fn=lambda args, kwargs: str(args[0].id) if args else "default")
+def _compute_sidebar_stats_cached(
+    user: Any,
+    db: Any,
+    visible_ids_tuple: Any,
+    now: datetime,
+) -> Dict[str, int]:
+    """Cached implementation — cache key is user.id, TTL 30s."""
+    # Convert back from tuple to list (or None)
+    visible_ids = list(visible_ids_tuple) if visible_ids_tuple is not None else None
     from models import Client, Task, Meeting, Notification
 
     def _scope(q, column):
@@ -650,10 +666,13 @@ def auto_rules_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
 
 
 def auto_stats(db: Any, user: Any, now: datetime) -> Dict[str, Any]:
-    """Агрегаты для шапки PageAuto:
-      • tasks_30d        — задачи, созданные за 30д (как proxy активности правил)
-      • avg_reaction_min — среднее (update_audit - task.created_at) для done-задач
-    """
+    """Wrapper: caches auto task stats per user, TTL 300s."""
+    return _auto_stats_cached(user, db, now)
+
+
+@ttl_cache(ttl=300, key_fn=lambda args, kwargs: str(args[0].id) if args else "default")
+def _auto_stats_cached(user: Any, db: Any, now: datetime) -> Dict[str, Any]:
+    """Cached auto stats implementation. TTL 300s."""
     thirty_ago = now - timedelta(days=30)
 
     # Базовый фильтр по правам
@@ -709,7 +728,13 @@ def internal_tasks_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
 
 
 def kpi_weekly(db: Any, user: Any, now: datetime, weeks: int = 13) -> List[Dict[str, Any]]:
-    """Кол-во завершённых задач по неделям (последние N недель)."""
+    """Wrapper: caches weekly KPI per user, TTL 600s."""
+    return _kpi_weekly_cached(user, db, now, weeks)
+
+
+@ttl_cache(ttl=600, key_fn=lambda args, kwargs: str(args[0].id) if args else "default")
+def _kpi_weekly_cached(user: Any, db: Any, now: datetime, weeks: int = 13) -> List[Dict[str, Any]]:
+    """Cached weekly KPI implementation. TTL 600s."""
     out = []
     current_week_start = now - timedelta(days=now.weekday())
     current_week_start = current_week_start.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -737,7 +762,16 @@ def kpi_weekly(db: Any, user: Any, now: datetime, weeks: int = 13) -> List[Dict[
 
 def heatmap_activity(db: Any, user: Any, now: datetime,
                      visible_ids: Optional[List[int]], weeks: int = 7) -> Dict[str, Any]:
-    """Heatmap: активность (кол-во событий AuditLog) по клиент×неделя."""
+    """Wrapper: caches heatmap result per user, TTL 300s."""
+    _visible_key = tuple(sorted(visible_ids)) if visible_ids is not None else None
+    return _heatmap_activity_cached(user, db, now, _visible_key, weeks)
+
+
+@ttl_cache(ttl=300, key_fn=lambda args, kwargs: str(args[0].id) if args else "default")
+def _heatmap_activity_cached(user: Any, db: Any, now: datetime,
+                              visible_ids_tuple: Any, weeks: int = 7) -> Dict[str, Any]:
+    """Cached heatmap implementation. TTL 300s."""
+    visible_ids = list(visible_ids_tuple) if visible_ids_tuple is not None else None
     cq = db.query(Client)
     if visible_ids is not None:
         if not visible_ids:
@@ -791,10 +825,13 @@ def heatmap_activity(db: Any, user: Any, now: datetime,
 
 
 def team_response(db: Any, now: datetime) -> List[Dict[str, Any]]:
-    """Среднее время реакции команды (30д):
-    для каждого менеджера — (AuditLog update/complete - Task.created_at)
-    по его завершённым задачам.
-    """
+    """Wrapper: caches team response stats, TTL 300s (global, not per-user)."""
+    return _team_response_cached(db, now)
+
+
+@ttl_cache(ttl=300, key_fn=lambda args, kwargs: "global")
+def _team_response_cached(db: Any, now: datetime) -> List[Dict[str, Any]]:
+    """Cached team response implementation. TTL 300s."""
     thirty_ago = now - timedelta(days=30)
     users = db.query(User).filter(User.is_active == True).all()
 
@@ -861,8 +898,13 @@ def recent_files(db: Any, user: Any, limit: int = 8) -> List[Dict[str, Any]]:
 
 
 def gmv_spark(db: Any, user: Any, now: datetime, days: int = 30) -> List[float]:
-    """Дневные значения GMV за последние N дней. Использует RevenueEntry если есть,
-    иначе считает активности через AuditLog как прокси."""
+    """Wrapper: caches GMV spark data per user, TTL 600s."""
+    return _gmv_spark_cached(user, db, now, days)
+
+
+@ttl_cache(ttl=600, key_fn=lambda args, kwargs: str(args[0].id) if args else "default")
+def _gmv_spark_cached(user: Any, db: Any, now: datetime, days: int = 30) -> List[float]:
+    """Cached GMV spark implementation. TTL 600s."""
     try:
         from models import RevenueEntry
     except Exception:
@@ -947,6 +989,49 @@ def reminders_for_user(db: Any, user: Any, now: datetime, limit: int = 10) -> Li
                 "done": False,
             })
     return out[:limit]
+
+
+def qbr_calendar(db: Any, user: Any, now: datetime) -> List[Dict[str, Any]]:
+    """Return QBR calendar data grouped by manager_email.
+
+    Returns a flat list of dicts, each representing one QBR appointment:
+    {
+        id, client_id, client_name, quarter, year,
+        date (YYYY-MM-DD or null), status, manager_email
+    }
+    Frontend groups by manager_email and lays out month columns.
+    """
+    from models import QBR, Client
+
+    q = db.query(QBR).join(Client, QBR.client_id == Client.id, isouter=True)
+
+    # Scope filter
+    if user and (user.role or "") != "admin" and user.email:
+        # show QBRs for this manager only
+        q = q.filter(
+            (QBR.manager_email == user.email) |
+            (Client.manager_email == user.email)
+        )
+
+    rows = q.order_by(QBR.date.asc().nullslast()).limit(500).all()
+    out = []
+    for qbr in rows:
+        client_name = qbr.client.name if qbr.client else None
+        manager_email = (
+            getattr(qbr, "manager_email", None)
+            or (qbr.client.manager_email if qbr.client else None)
+        )
+        out.append({
+            "id":            qbr.id,
+            "client_id":     qbr.client_id,
+            "client_name":   client_name or "—",
+            "quarter":       qbr.quarter,
+            "year":          qbr.year,
+            "date":          qbr.date.strftime("%Y-%m-%d") if qbr.date else None,
+            "status":        qbr.status or "draft",
+            "manager_email": manager_email or "—",
+        })
+    return out
 
 
 _ROADMAP_DEFAULT_ORDER = ["q1", "q2", "q3", "q4", "backlog"]

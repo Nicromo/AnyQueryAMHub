@@ -145,15 +145,35 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Middleware для добавления security headers"""
+    """Middleware для добавления security headers и cache-control для статики."""
+
+    # Cache-Control TTLs for static assets (seconds)
+    _STATIC_CACHE: dict = {
+        ".js":    86400,   # 1 day  — bundle.js, vendor chunks
+        ".css":   3600,    # 1 hour — tokens.css, stylesheets
+        ".woff":  604800,  # 7 days — fonts
+        ".woff2": 604800,
+        ".ttf":   604800,
+        ".png":   86400,
+        ".svg":   86400,
+        ".ico":   86400,
+    }
 
     async def dispatch(self, request: Request, call_next: Callable) -> any:
         response = await call_next(request)
-        
+
         # Add security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        
+
+        # Add cache-control for static assets
+        path = request.url.path
+        if path.startswith("/static/") and response.status_code == 200:
+            ext = "." + path.rsplit(".", 1)[-1].lower() if "." in path else ""
+            ttl = self._STATIC_CACHE.get(ext)
+            if ttl:
+                response.headers["Cache-Control"] = f"public, max-age={ttl}"
+
         return response

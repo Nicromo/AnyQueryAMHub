@@ -649,9 +649,17 @@ async def design_client_detail(
 
 
 def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, title, page=1, per_page=50):
-    """Общая подготовка данных для обоих роутов — чтобы не дублировать."""
+    """Общая подготовка данных для обоих роутов — чтобы не дублировать.
+
+    Lazy loading: only compute data keys required by the current page
+    (see PAGES_DATA_MAP). All other keys get empty/default values.
+    """
     visible_ids = _client_ids_for_user(db, user)
 
+    # Determine which data keys this page actually needs
+    needed = set(PAGES_DATA_MAP.get(page_id, []))
+
+    # ── Base query builders (shared filters) ──────────────────
     clients_base  = db.query(Client)
     tasks_base    = db.query(Task).options(joinedload(Task.client))
     meetings_base = db.query(Meeting).options(joinedload(Meeting.client))
@@ -666,17 +674,31 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
             tasks_base    = tasks_base.filter(Task.client_id.in_(visible_ids))
             meetings_base = meetings_base.filter(Meeting.client_id.in_(visible_ids))
 
-    # Pagination: работает на любой странице, но реально видна только на /design/clients
-    clients_total = clients_base.count()
-    offset = (page - 1) * per_page
-    clients_q = clients_base.order_by(Client.id.desc()).offset(offset).limit(per_page).all()
+    # ── Clients ───────────────────────────────────────────────
+    if "clients" in needed:
+        clients_total = clients_base.count()
+        offset = (page - 1) * per_page
+        clients_q = clients_base.order_by(Client.id.desc()).offset(offset).limit(per_page).all()
+    else:
+        clients_total = 0
+        clients_q = []
 
-    tasks_q    = tasks_base.filter(Task.status.in_(["plan", "in_progress", "blocked"])) \
-                           .order_by(Task.due_date.asc()).limit(200).all()
-    meetings_q = meetings_base.filter(Meeting.date >= now) \
-                              .order_by(Meeting.date.asc()).limit(100).all()
+    # ── Tasks ─────────────────────────────────────────────────
+    if "tasks" in needed:
+        tasks_q = tasks_base.filter(Task.status.in_(["plan", "in_progress", "blocked"])) \
+                            .order_by(Task.due_date.asc()).limit(200).all()
+    else:
+        tasks_q = []
 
-    total_pages = max(1, (clients_total + per_page - 1) // per_page)
+    # ── Meetings ──────────────────────────────────────────────
+    if "meetings" in needed:
+        meetings_q = meetings_base.filter(Meeting.date >= now) \
+                                  .order_by(Meeting.date.asc()).limit(100).all()
+    else:
+        meetings_q = []
+
+    # Pagination info (always computed, uses cached clients_total)
+    total_pages = max(1, (clients_total + per_page - 1) // per_page) if clients_total else 1
     pagination = {
         "page":         page,
         "per_page":     per_page,
@@ -686,33 +708,57 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "has_next":     page < total_pages,
     }
 
-    # Префетчим встречи ОДНИМ запросом (убираем N+1)
-    next_meetings = dm.prefetch_next_meetings(db, now, visible_ids=visible_ids)
+    # ── Next meetings prefetch (only if clients or meetings are loaded) ──
+    if clients_q or "meetings" in needed:
+        next_meetings = dm.prefetch_next_meetings(db, now, visible_ids=visible_ids)
+    else:
+        next_meetings = {}
 
-    # ACTIVITY
-    audit_rows = (
-        db.query(AuditLog)
-          .order_by(AuditLog.created_at.desc())
-          .limit(20)
-          .all()
-    )
-    user_ids = {a.user_id for a in audit_rows if a.user_id}
-    users_map = {}
-    if user_ids:
-        for u in db.query(User).filter(User.id.in_(user_ids)).all():
-            users_map[u.id] = u.name
+    # ── Activity feed ─────────────────────────────────────────
+    if "activity" in needed:
+        audit_rows = (
+            db.query(AuditLog)
+              .order_by(AuditLog.created_at.desc())
+              .limit(20)
+              .all()
+        )
+        user_ids = {a.user_id for a in audit_rows if a.user_id}
+        users_map = {}
+        if user_ids:
+            for u in db.query(User).filter(User.id.in_(user_ids)).all():
+                users_map[u.id] = u.name
+        ref_client_ids = {a.resource_id for a in audit_rows
+                          if a.resource_type == "client" and a.resource_id}
+        obj_map = {}
+        if ref_client_ids:
+            for c in db.query(Client.id, Client.name).filter(Client.id.in_(ref_client_ids)).all():
+                obj_map[("client", c.id)] = c.name
+        activity = [dm.activity_to_design(a, users_map, obj_map, now) for a in audit_rows]
+    else:
+        activity = []
 
-    ref_client_ids = {a.resource_id for a in audit_rows
-                      if a.resource_type == "client" and a.resource_id}
-    obj_map = {}
-    if ref_client_ids:
-        for c in db.query(Client.id, Client.name).filter(Client.id.in_(ref_client_ids)).all():
-            obj_map[("client", c.id)] = c.name
+    # ── Sidebar stats ─────────────────────────────────────────
+    sidebar_stats = dm.compute_sidebar_stats(db, user, visible_ids, now) \
+        if "sidebar_stats" in needed else {}
 
-    activity = [dm.activity_to_design(a, users_map, obj_map, now) for a in audit_rows]
+    # ── Tools / Jobs ──────────────────────────────────────────
+    tools = dm.tools_from_sync_logs(db, now) if "tools" in needed else []
+    jobs  = dm.jobs_from_sync_logs(db, now, limit=8) if "tools" in needed else []
 
-    # Sidebar stats — живые вместо хардкода в shell.jsx
-    sidebar_stats = dm.compute_sidebar_stats(db, user, visible_ids, now)
+    # ── Extended data (lazy) ──────────────────────────────────
+    templates_data   = dm.templates_to_design(db, user)          if "templates"      in needed else []
+    auto_rules_data  = dm.auto_rules_to_design(db, user)         if "auto_rules"     in needed else []
+    auto_stats_data  = dm.auto_stats(db, user, now)              if "auto_stats"     in needed else {}
+    internal_tasks   = dm.internal_tasks_to_design(db, user)     if "internal_tasks" in needed else []
+    kpi_weekly_data  = dm.kpi_weekly(db, user, now)              if "kpi_weekly"     in needed else []
+    heatmap_data     = dm.heatmap_activity(db, user, now, visible_ids) if "heatmap"  in needed else {"rows": [], "weeks": [], "matrix": []}
+    team_resp_data   = dm.team_response(db, now)                 if "team_response"  in needed else []
+    recent_files     = dm.recent_files(db, user)                 if "recent_files"   in needed else []
+    roadmap_data     = dm.roadmap_data(db)                       if "roadmap"        in needed else []
+    gmv_spark_data   = dm.gmv_spark(db, user, now)               if "gmv_spark"      in needed else []
+    day_kpi_data     = dm.day_kpi(db, user, now)                 if "day_kpi"        in needed else {}
+    reminders_data   = dm.reminders_for_user(db, user, now)      if "reminders"      in needed else []
+    qbr_data         = json.dumps(dm.qbr_calendar(db, user, now)) if "qbr_data"      in needed else "[]"
 
     return {
         "request":        request,
@@ -725,25 +771,25 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "tasks":    [dm.task_to_design(t, now) for t in tasks_q],
         "meetings": [dm.meeting_to_design(m, now) for m in meetings_q],
         "activity":        activity,
-        "tools":           dm.tools_from_sync_logs(db, now),
-        "jobs":            dm.jobs_from_sync_logs(db, now, limit=8),
+        "tools":           tools,
+        "jobs":            jobs,
         "sidebar_stats":   sidebar_stats,
         "current_client":  None,  # подставится в design_client_detail
         "pagination":      pagination,
         "extensions":      _list_extensions(),
         "hub_url":         os.getenv("APP_URL") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "",
         # Расширенные данные для design-страниц (см. design_mappers)
-        "templates":       dm.templates_to_design(db, user),
-        "auto_rules":      dm.auto_rules_to_design(db, user),
-        "auto_stats":      dm.auto_stats(db, user, now),
-        "internal_tasks":  dm.internal_tasks_to_design(db, user),
-        "kpi_weekly":      dm.kpi_weekly(db, user, now),
-        "heatmap":         dm.heatmap_activity(db, user, now, visible_ids),
-        "team_response":   dm.team_response(db, now),
-        "recent_files":    dm.recent_files(db, user),
-        "roadmap":         dm.roadmap_data(db),
-        "gmv_spark":       dm.gmv_spark(db, user, now),
-        "day_kpi":         dm.day_kpi(db, user, now),
-        "reminders":       dm.reminders_for_user(db, user, now),
-        "qbr_data":        json.dumps(dm.qbr_calendar(db, user, now)),
+        "templates":       templates_data,
+        "auto_rules":      auto_rules_data,
+        "auto_stats":      auto_stats_data,
+        "internal_tasks":  internal_tasks,
+        "kpi_weekly":      kpi_weekly_data,
+        "heatmap":         heatmap_data,
+        "team_response":   team_resp_data,
+        "recent_files":    recent_files,
+        "roadmap":         roadmap_data,
+        "gmv_spark":       gmv_spark_data,
+        "day_kpi":         day_kpi_data,
+        "reminders":       reminders_data,
+        "qbr_data":        qbr_data,
     }

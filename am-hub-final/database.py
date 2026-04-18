@@ -21,10 +21,10 @@ if DATABASE_URL.startswith("postgres://"):
 # Railway PostgreSQL держит до 100 connections по умолчанию
 engine = create_engine(
     DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=5,             # connections held in pool
+    max_overflow=10,         # extra connections allowed beyond pool_size
     pool_pre_ping=True,      # авто-реконнект если соединение упало
-    pool_recycle=1800,       # переиспользовать не старше 30 мин
+    pool_recycle=300,        # recycle connections every 5 min (prevents stale connections)
     pool_timeout=30,         # ждать свободное соединение 30 сек
     echo=False,
 )

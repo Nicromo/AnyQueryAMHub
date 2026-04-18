@@ -176,6 +176,10 @@ class QBR(Base):
     # Связанная встреча
     meeting_id = Column(Integer, ForeignKey("meetings.id"), nullable=True)
 
+    # Менеджер / синхронизация
+    manager_email = Column(String, nullable=True, index=True)
+    airtable_record_id = Column(String, nullable=True, index=True)
+
     client = relationship("Client")
     meeting = relationship("Meeting")
 
@@ -476,6 +480,12 @@ from sqlalchemy import Index
 Index("ix_clients_manager_email", Client.manager_email)
 # Tasks by status for kanban
 Index("ix_tasks_client_status", Task.client_id, Task.status)
+# Task.status standalone — for queries filtering only by status
+Index("ix_tasks_status", Task.status)
+# Meetings by date — for upcoming meetings queries
+Index("ix_meetings_date", Meeting.date)
+# Meetings compound (client_id, date) — for client meeting timeline
+Index("ix_meetings_client_date", Meeting.client_id, Meeting.date)
 # History queries
 Index("ix_client_history_client_date", ClientHistory.client_id, ClientHistory.created_at)
 # Notifications
