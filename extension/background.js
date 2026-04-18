@@ -9,7 +9,7 @@ const MR_LOGIN_URL = `${MR_BASE}/backend-v2/auth/login`;
 async function getSettings() {
   return new Promise(resolve => {
     chrome.storage.local.get(
-      ["mr_login", "mr_password", "hub_url", "hub_token", "last_sync", "sync_status"],
+      ["mr_login", "mr_password", "hub_url", "hub_token", "last_sync", "last_sync_result", "sync_status", "sync_error", "sync_log"],
       resolve
     );
   });
@@ -176,8 +176,13 @@ async function doSync(manual = false) {
     await saveSettings({
       sync_status: "ok",
       sync_error: null,
-      last_sync: now,
+      last_sync: Date.now(),   // timestamp для humanAgo / fmtTime
       last_sync_result: result,
+    });
+    await appendLog({
+      ts: Date.now(),
+      tone: "ok",
+      message: `hub: ${result.clients_synced || 0} клиентов, ${result.tasks_synced || 0} задач`,
     });
 
     if (manual) {
@@ -195,6 +200,11 @@ async function doSync(manual = false) {
   } catch (err) {
     console.error("AM Hub sync error:", err);
     await saveSettings({ sync_status: "error", sync_error: err.message });
+    await appendLog({
+      ts: Date.now(),
+      tone: "error",
+      message: String(err.message || "sync failed").slice(0, 140),
+    });
 
     if (manual) {
       chrome.notifications.create({
@@ -219,6 +229,20 @@ chrome.alarms.onAlarm.addListener(alarm => {
 
 // ── Сообщения из popup ──────────────────────────────────────────────────────
 
+// ── Log (последние 10 событий, хранится в chrome.storage) ───────────────────
+const SYNC_LOG_KEY = "sync_log";
+const SYNC_LOG_MAX = 10;
+
+async function appendLog(entry) {
+  try {
+    const cur = await new Promise(r => chrome.storage.local.get([SYNC_LOG_KEY], r));
+    const list = Array.isArray(cur[SYNC_LOG_KEY]) ? cur[SYNC_LOG_KEY] : [];
+    list.unshift(entry);
+    if (list.length > SYNC_LOG_MAX) list.length = SYNC_LOG_MAX;
+    await saveSettings({ [SYNC_LOG_KEY]: list });
+  } catch (e) { /* silent */ }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === "sync") {
     doSync(true).then(sendResponse);
@@ -230,7 +254,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       error: s.sync_error || null,
       last_sync: s.last_sync || null,
       last_result: s.last_sync_result || null,
+      log: Array.isArray(s[SYNC_LOG_KEY]) ? s[SYNC_LOG_KEY] : [],
     }));
+    return true;
+  }
+  if (msg.action === "clearLog") {
+    saveSettings({ [SYNC_LOG_KEY]: [] }).then(() => sendResponse({ ok: true }));
     return true;
   }
 });

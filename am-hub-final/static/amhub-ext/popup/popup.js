@@ -263,12 +263,12 @@ function renderResults(results) {
         <div class="ri-top">
           <span class="badge ${BCLS[sc]}">${sc}</span>
           <div class="ri-q">${r.query}</div>
-          ${r.impressions ? `<span style="font-size:.65rem;color:#4c567a">${r.impressions}</span>` : ""}
+          ${r.impressions ? `<span style="font-size:.65rem;color:#6b6860">${r.impressions}</span>` : ""}
         </div>
         ${r.reason ? `<div class="ri-reason">${r.reason}</div>` : ""}
         ${recs||ai ? `<div class="ri-recs">${recs}${ai}</div>` : ""}
       </div>`;
-    }).join("") + (results.length > 15 ? `<div style="font-size:.7rem;color:#4c567a;text-align:center;padding:6px">...ещё ${results.length-15} запросов в отчёте</div>` : "");
+    }).join("") + (results.length > 15 ? `<div style="font-size:.7rem;color:#6b6860;text-align:center;padding:6px">...ещё ${results.length-15} запросов в отчёте</div>` : "");
 }
 
 window.genPDF = async function() {

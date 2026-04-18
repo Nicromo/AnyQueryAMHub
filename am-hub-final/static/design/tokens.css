@@ -1,0 +1,113 @@
+/* ==============================================
+   AM Hub — design tokens
+   aesthetic: "signal" — warm near-black canvas,
+   lime signal accent, monospace data labels
+   ============================================== */
+:root, [data-theme="dark"] {
+  --ink-0: oklch(0.14 0.008 70);
+  --ink-1: oklch(0.18 0.010 70);
+  --ink-2: oklch(0.22 0.012 70);
+  --ink-3: oklch(0.27 0.014 72);
+  --ink-4: oklch(0.34 0.015 75);
+  --ink-5: oklch(0.45 0.015 78);
+  --ink-6: oklch(0.60 0.012 80);
+  --ink-7: oklch(0.78 0.008 82);
+  --ink-8: oklch(0.92 0.006 85);
+  --ink-9: oklch(0.98 0.004 88);
+
+  --line:      oklch(0.27 0.010 70);
+  --line-soft: oklch(0.23 0.008 70);
+
+  --signal:       oklch(0.87 0.18 118);
+  --signal-dim:   oklch(0.55 0.14 118);
+  --signal-glow:  oklch(0.87 0.18 118 / 0.18);
+
+  --critical:     oklch(0.68 0.22 27);
+  --critical-dim: oklch(0.38 0.12 27);
+  --warn:         oklch(0.80 0.15 72);
+  --warn-dim:     oklch(0.50 0.10 72);
+  --info:         oklch(0.72 0.12 230);
+  --info-dim:     oklch(0.42 0.08 230);
+  --ok:           oklch(0.78 0.14 155);
+  --ok-dim:       oklch(0.45 0.09 155);
+}
+
+[data-theme="light"] {
+  --ink-0: oklch(0.99 0.003 88);
+  --ink-1: oklch(0.97 0.004 85);
+  --ink-2: oklch(1.00 0.002 90);
+  --ink-3: oklch(0.94 0.006 82);
+  --ink-4: oklch(0.86 0.010 80);
+  --ink-5: oklch(0.62 0.012 78);
+  --ink-6: oklch(0.48 0.014 75);
+  --ink-7: oklch(0.34 0.014 72);
+  --ink-8: oklch(0.22 0.012 70);
+  --ink-9: oklch(0.14 0.010 70);
+
+  --line:      oklch(0.89 0.008 80);
+  --line-soft: oklch(0.94 0.006 82);
+
+  --signal:       oklch(0.62 0.18 135);
+  --signal-dim:   oklch(0.48 0.14 135);
+  --signal-glow:  oklch(0.62 0.18 135 / 0.20);
+
+  --critical:     oklch(0.56 0.22 27);
+  --critical-dim: oklch(0.72 0.10 27);
+  --warn:         oklch(0.68 0.16 72);
+  --warn-dim:     oklch(0.82 0.09 72);
+  --info:         oklch(0.54 0.14 230);
+  --info-dim:     oklch(0.78 0.08 230);
+  --ok:           oklch(0.58 0.15 155);
+  --ok-dim:       oklch(0.80 0.09 155);
+}
+
+:root {
+  --f-display: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --f-mono:    "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --t-mega:   64px;
+  --t-h1:     42px;
+  --t-h2:     28px;
+  --t-h3:     20px;
+  --t-body:   14px;
+  --t-sm:     12.5px;
+  --t-xs:     11px;
+  --t-micro:  10px;
+
+  --r-s: 3px;
+  --r-m: 6px;
+  --r-l: 10px;
+  --r-xl: 14px;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 160ms;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--ink-1);
+  color: var(--ink-8);
+  font-family: var(--f-display);
+  font-size: var(--t-body);
+  line-height: 1.5;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  transition: background 200ms var(--ease), color 200ms var(--ease);
+}
+
+.mono { font-family: var(--f-mono); font-feature-settings: "zero", "ss01"; }
+.uppercase { text-transform: uppercase; letter-spacing: 0.08em; }
+.dim { color: var(--ink-6); }
+.muted { color: var(--ink-5); }
+
+.hr { height: 1px; background: var(--line); border: 0; margin: 0; }
+.dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--ink-3); border-radius: 999px; border: 2px solid var(--ink-1); }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+
+::selection { background: var(--signal); color: var(--ink-0); }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }

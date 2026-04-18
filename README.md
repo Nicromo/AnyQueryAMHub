@@ -1,239 +1,340 @@
-# Roadmap — массовое создание задач
+# AM Hub
 
-Веб-интерфейс для создания одной и той же задачи дорожной карты у нескольких партнёров (site_id): сначала задача создаётся у первого партнёра, затем копируется на остальных.
-
----
-
-## 1. Установка с нуля
-
-### Mac
-
-**Шаг 1. Установить Homebrew (если ещё нет)**
-
-Открой **Терминал** (Terminal) и вставь:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-После установки выполни команды, которые выведет установщик (добавление brew в PATH), например:
-
-```bash
-echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-eval "$(/opt/homebrew/bin/brew shellenv)"
-```
-
-**Шаг 2. Установить Docker через Homebrew**
-
-```bash
-brew install --cask docker
-```
-
-Запусти приложение **Docker** из Программ (Applications). Дождись, пока в менюбарке появится иконка Docker и статус "Docker Desktop is running".
-
-**Проверка:**
-
-```bash
-docker --version
-```
+**Enterprise Account Manager Dashboard** — единая операционная консоль для команды AM: реальные данные из Merchrules, персональные дашборды, AI-ассистент, автоматизация встреч и фолоуапов.
 
 ---
 
-### Windows
+## 1. Что внутри
 
-**Шаг 1. Установить Docker Desktop**
+Репо содержит **три продукта**, которые работают вместе:
 
-- Скачай установщик: https://www.docker.com/products/docker-desktop/
-- Запусти установщик и пройди шаги.
-- Перезагрузи ПК при необходимости.
-- Запусти **Docker Desktop** и дождись, пока он полностью запустится.
-
-**Проверка:** открой PowerShell или cmd и выполни:
-
-```bash
-docker --version
-```
-
-*(Homebrew на Windows для этой программы не нужен — достаточно Docker.)*
+| Продукт | Путь | Назначение |
+|---|---|---|
+| **AM Hub** (основной) | `am-hub-final/` | FastAPI + PostgreSQL + Jinja2 — бэкенд, API, UI |
+| **Редизайн UI** | `am-hub-final/static/design/` + `templates/design/` | Новый дизайн всех страниц (JSX → esbuild bundle) |
+| **Chrome extension** | `extension/` | AM Hub · Sync — синхронизация Merchrules ↔ AM Hub |
+| **Roadmap bulk-tasks** | `app.py` + корень | Отдельный мини-инструмент (старый, массовое создание задач) |
 
 ---
 
-## 2. Креды
+## 2. AM Hub — быстрый старт
 
-Программа обращается к API Roadmap (merchrules). Логин и пароль берутся из файла с кредами.
+### Локально (Python)
 
-**Файл:** `~/.search-checkup-creds.json`  
-(на Windows: `C:\Users\<твой_логин>\.search-checkup-creds.json`)
+```bash
+cd am-hub-final
+python -m venv .venv
+.venv\Scripts\activate     # Windows
+# или: source .venv/bin/activate
 
-**Формат файла (минимум для Roadmap):**
-
-```json
-{
-  "merchrules": {
-    "url": "https://merchrules-qa.any-platform.ru",
-    "login": "твой-email@example.com",
-    "password": "твой-пароль"
-  }
-}
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 ```
 
-Если файла нет — создай его вручную или введи логин/пароль в форме на сайте (кнопка «Изменить креды API»), они сохранятся в этот файл.
+Открыть: `http://127.0.0.1:8000/login`
+
+**Первый вход:** задайте админа через env:
+```
+INITIAL_ADMIN_EMAIL=admin@company.ru
+INITIAL_ADMIN_PASSWORD=change-me-plz
+```
+
+### Через Docker
+
+```bash
+docker build -t am-hub .
+docker run -p 8000:8000 --env-file am-hub-final/.env am-hub
+```
+
+### На Railway
+
+Репо уже содержит `railway.json` + `nixpacks.toml`. После подключения репо:
+1. Railway соберёт по `nixpacks.toml` (Python 3.12)
+2. Добавьте env vars в UI (см. раздел Environment ниже)
+3. Деплой стартует автоматически
 
 ---
 
-## 3. Запуск программы (поднять сервер)
-
-Есть два способа: **через Python** (если установлен Python 3) или **через Docker**.
-
-### Вариант A: через Python (Mac / Linux / Windows с Python)
-
-Открой терминал, перейди в папку проекта и запусти приложение:
-
-```bash
-cd /путь/к/skills/roadmap-bulk-tasks
-python3 app.py
-```
-
-*(Замени `/путь/к/skills` на свой путь, например `~/Desktop/WORK/skills` или `C:\Users\Имя\projects\skills`.)*
-
-Увидишь что-то вроде:
+## 3. Архитектура
 
 ```
- * Running on http://0.0.0.0:5051
-```
-
-Открой в браузере: **http://127.0.0.1:5051**
-
-Остановить сервер: в терминале нажми **Ctrl+C**.
-
----
-
-### Вариант B: через Docker
-
-Открой терминал в папке проекта (или в корне `skills`).
-
-**Собрать образ (один раз или после изменений):**
-
-```bash
-cd /путь/к/skills
-docker build -t roadmap-bulk-tasks ./roadmap-bulk-tasks
-```
-
-**Запустить контейнер:**
-
-**Mac / Linux:**
-
-```bash
-docker run -p 5051:5051 -v "$HOME/.search-checkup-creds.json:/root/.search-checkup-creds.json:ro" roadmap-bulk-tasks
-```
-
-**Windows (PowerShell):**
-
-```powershell
-docker run -p 5051:5051 -v "${env:USERPROFILE}\.search-checkup-creds.json:/root/.search-checkup-creds.json:ro" roadmap-bulk-tasks
-```
-
-Открой в браузере: **http://localhost:5051**
-
-Остановить: в терминале **Ctrl+C**. Контейнер остановится.
-
----
-
-## 4. Перезапуск
-
-### Если запускал через Python
-
-**Способ 1 — скрипт (Mac / Linux):**
-
-```bash
-cd /путь/к/skills/roadmap-bulk-tasks
-./restart.sh
-```
-
-Скрипт убьёт старый процесс на порту 5051 и снова запустит `python3 app.py`.
-
-**Способ 2 — вручную:**
-
-1. В терминале, где крутится сервер, нажми **Ctrl+C**.
-2. Снова запусти:
-
-```bash
-cd /путь/к/skills/roadmap-bulk-tasks
-python3 app.py
+┌─────────────────────────────────────────────────────────┐
+│  Browser                                                 │
+│  ├── /login, /dashboard, /clients, ...  (Jinja2 UI)      │
+│  └── /design/*                           (JSX UI)        │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│  FastAPI (am-hub-final/main.py)                          │
+│  ├── routers/auth.py, clients.py, tasks.py, meetings.py  │
+│  ├── routers/analytics.py, ai.py, sync.py, ...           │
+│  ├── routers/design.py          ← новый (редизайн)       │
+│  └── sse.py                     ← real-time              │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│  PostgreSQL / SQLite                                     │
+│  Models: Client, Task, Meeting, CheckUp, QBR, User, ...  │
+└──────────────────────────────────────────────────────────┘
+                   │
+          ┌────────┴────────┬─────────────┐
+          ▼                 ▼             ▼
+    Merchrules API    Airtable       Telegram Bot
+    (sync каждые      (клиенты,      (уведомления,
+     15 мин)           QBR events)    задачи)
 ```
 
 ---
 
-### Если запускал через Docker
+## 4. Редизайн UI (`/design/*`)
 
-1. Останови контейнер: в терминале, где запущен `docker run`, нажми **Ctrl+C**.
-2. Запусти заново той же командой `docker run`, что выше.
+Новый интерфейс доступен параллельно со старым — **старые Jinja2-страницы продолжают работать**.
 
-Если нужно пересобрать образ (после обновления кода), затем запустить:
+### Доступные страницы (19)
 
-```bash
-cd /путь/к/skills
-docker build -t roadmap-bulk-tasks ./roadmap-bulk-tasks
-docker run -p 5051:5051 -v "$HOME/.search-checkup-creds.json:/root/.search-checkup-creds.json:ro" roadmap-bulk-tasks
-```
+| URL | Компонент |
+|---|---|
+| `/design/command` | Командный центр |
+| `/design/today` | Сегодня (таймлайн дня, брифы, задачи) |
+| `/design/clients` | Все клиенты (paginated, 50/страница) |
+| `/design/clients?page=2` | Следующая страница клиентов |
+| `/design/client/{id}` | Карточка клиента (детальная) |
+| `/design/top50` | Top-50 по GMV |
+| `/design/tasks` | Задачи |
+| `/design/meetings` | Встречи |
+| `/design/portfolio` | Портфель |
+| `/design/analytics` | Аналитика |
+| `/design/ai` | AI-ассистент |
+| `/design/kanban` | Канбан |
+| `/design/kpi` | Мой KPI |
+| `/design/qbr` | QBR Календарь |
+| `/design/cabinet` | Мой кабинет |
+| `/design/templates` | Шаблоны |
+| `/design/auto` | Автозадачи |
+| `/design/roadmap` | Роадмап |
+| `/design/internal` | Внутренние задачи |
+| `/design/help` | Помощь |
+| `/design/extension` | Установить расширение |
 
-*(На Windows во второй строке используй вариант с `$env:USERPROFILE` для кредов.)*
+### Фичи нового UI
 
----
+- **Глобальный поиск** — ⌘K / Ctrl+K, ищет клиентов/задачи/встречи одновременно
+- **FAB "+" (плавающая кнопка)** — создать задачу из любой страницы без перехода
+- **Live sidebar-статы** — цифры обновляются из реальной БД (просроченное, скоро чекап, активные задачи)
+- **External links** — KTalk и Merchrules открываются в новой вкладке
+- **Per-user scoping** — менеджер видит только своих клиентов, admin — все
+- **Настраиваемые пороги статуса** через env (см. ниже)
 
-## 5. Как пользоваться интерфейсом
+### Как собрать/пересобрать
 
-1. Открой в браузере http://127.0.0.1:5051 (или http://localhost:5051 при Docker).
-2. Если креды не заданы — нажми «Изменить креды API», введи логин и пароль, сохрани.
-3. Заполни форму: **название** и **описание** задачи, при необходимости статус/приоритет/исполнитель и остальные поля.
-4. В поле **Партнёры (site_id)** введи список через запятую или с новой строки, например: `292, 5335, 8049`.
-5. Нажми **«Создать задачи»**. Создастся одна задача у первого партнёра, затем она скопируется на остальных (лимит API: 5 созданий в час, 10 копирований в минуту).
-
----
-
-## 5.1. Квен: итоги встречи → задачи
-
-В интерфейсе есть блок **«Итоги встречи с партнёром → задачи Квен»**:
-
-1. Вставь текст итогов встречи (заметки, договорённости).
-2. Нажми **«Квен: переформулировать в задачи»**. Сервис через Ollama сформирует список задач с бизнес-фокусом, исполнителем (Диджинетика/партнёр) и командой по контексту (ранжирование → LINGUISTS, данные → ANALYTICS, трекинг → TRACKING и т.д.).
-3. В блоке **«Предпросмотр задач»** отредактируй при необходимости названия, описания, исполнителя, команду и тип задачи; отметь галочками задачи, которые нужно отправить.
-4. Укажи **Партнёры (site_id)** — один или несколько через запятую/с новой строки.
-5. Нажми **«Отправить выбранные задачи в дашборд»**.
-
-**Требование:** для кнопки «Квен» нужен запущенный [Ollama](https://ollama.com) (локально). Модель по умолчанию: `qwen2.5:3b`. Можно задать переменные окружения `OLLAMA_HOST` (по умолчанию `http://localhost:11434`) и `OLLAMA_MODEL`. Без Ollama блок «Итоги встречи» можно не использовать — форма создания одной задачи по-прежнему работает.
-
-**Транскрипция звонка:** в том же интерфейсе есть блок «Транскрипция звонка с партнёром». Загрузите .txt в формате: первая строка — название встречи (например «Азбука Вкуса & Any | QBR»), далее строки «HH:MM:SS	Имя	Текст» (таб между полями). Квен предложит, кто со стороны партнёра (по названию встречи), вы отметите галочками, нажмёте «Обработать» — получите саммари, короткое постмит-сообщение для мессенджера и список задач для дашборда.
-
-**Настройки промпта:** кнопка «⚙ Промпт» в шапке открывает окно, где можно задать свой пресет промпта для «итогов встречи» и для «транскрипции», сохранить варианты (config.json в папке приложения).
-
-**Airtable followup:** в «⚙ Настройки» можно сохранить `Airtable PAT`. После отправки задач сервис дополнительно обновляет таблицу **Клиенты** (base `appEAS1rPKpevoIel`, table `tblIKAi1gcFayRJTn`) по каждому `site_id`:
-- поле `Комментарий` → `DD.MM` + краткая фраза по итогам встречи;
-- поле `Дата последней коммуникации` → текущая дата коммуникации.
-Матчинг по `Site ID` поддерживает значения через запятую (например `221, 715`).
-
-**Запуск с автоустановкой Ollama (macOS):** двойной клик по `Open Roadmap Tasks.command` — скрипт проверит наличие Ollama, при необходимости установит через Homebrew, запустит `ollama serve` в фоне и откроет браузер на http://127.0.0.1:5051.
-
-**Запуск с двойного клика (Linux):** сделайте скрипт исполняемым (`chmod +x run.sh`), затем двойной клик по `run.sh` или из терминала: `./run.sh`. Зависимости и venv создаются при первом запуске, затем открывается браузер.
-
-**Запуск с двойного клика (Windows):** двойной клик по `run.bat`. При первом запуске создаётся окружение и ставятся зависимости, затем открывается браузер на http://127.0.0.1:5051.
-
----
-
-## 6. Одна задача из консоли (без браузера)
-
-Из **корня skills** (при установленном Python):
+Dizайн скомпилирован в `static/design/dist/bundle.js` (131 КБ). Если меняете JSX-исходники в `static/design/*.jsx`:
 
 ```bash
-python3 roadmap-bulk-tasks/import_one_task.py 2262 "Название задачи" "Описание"
+cd am-hub-final
+npm install              # первый раз — ставит esbuild
+npm run build:design     # собирает bundle.js за ~200мс
+git add static/design/dist/bundle.js
+git commit -m "rebuild design bundle"
+git push                 # Railway подхватит
 ```
-
-Подставятся дефолты: статус `plan`, приоритет `medium`, исполнитель Диджинетика.
 
 ---
 
-## Дефолты полей
+## 5. Environment variables
 
-- **Статус** — если не указан: `plan`
-- **Приоритет** — если не указан: `medium`
-- **Исполнитель** — если не указан: Диджинетика (`any`)
+### Обязательные
+| Variable | Зачем |
+|---|---|
+| `DATABASE_URL` | PostgreSQL URL (на Railway даётся автоматически) |
+| `SECRET_KEY` | JWT-ключ для auth cookies |
+| `INITIAL_ADMIN_EMAIL` + `INITIAL_ADMIN_PASSWORD` | Создание админа при первом запуске (если БД пустая) |
+
+### Интеграции (опционально, включаются по наличию)
+| Variable | Интеграция |
+|---|---|
+| `MERCHRULES_LOGIN`, `MERCHRULES_PASSWORD`, `MERCHRULES_API_URL` | Основной источник данных |
+| `AIRTABLE_TOKEN` (или `AIRTABLE_PAT`), `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_ID` | Синхронизация клиентов |
+| `SHEETS_SPREADSHEET_ID` | Google Sheets экспорт |
+| `KTALK_SPACE`, `KTALK_API_TOKEN` | Встречи |
+| `TG_BOT_TOKEN`, `TG_NOTIFY_CHAT_ID` | Telegram-уведомления |
+| `GROQ_API_KEY` / `QWEN_API_KEY` | AI (один из) |
+
+### Редизайн (настраиваемые пороги)
+| Variable | Default | Назначение |
+|---|---|---|
+| `HEALTH_RISK_MAX` | `0.55` | Ниже этого → клиент "risk" (красный) |
+| `HEALTH_WARN_MAX` | `0.80` | Ниже этого → "warn" (жёлтый) |
+| `HEALTH_STALE_MEETING_DAYS` | `30` | Сколько дней без встречи = просроченный чекап |
+
+### Прод-настройки
+| Variable | Назначение |
+|---|---|
+| `ENV=production` | Выключает `/docs`, `/redoc`, ставит secure cookies |
+| `ALLOWED_ORIGINS` | Comma-separated origins для CORS (в проде обязательно явный список, `*` запрещён) |
+
+Пример: `am-hub-final/.env.example`
+
+---
+
+## 6. Chrome Extension (AM Hub · Sync)
+
+Синхронизирует данные из **Merchrules** в **AM Hub** каждые 30 минут (автоматически) + по кнопке.
+
+### Установить
+
+**Вариант A — из ZIP:**
+1. Скачайте `extension/amhub-sync.zip`
+2. Распакуйте
+3. `chrome://extensions` → Developer mode → Load unpacked → выберите папку
+
+**Вариант B — через dev-расширение:**
+1. `chrome://extensions` → Developer mode
+2. Load unpacked → выберите папку `extension/`
+
+### Как настроить
+
+Открыть popup → заполнить 4 поля:
+- **Merchrules · логин** (email)
+- **Merchrules · пароль**
+- **AM Hub · URL** (напр. `https://your-hub.up.railway.app`)
+- **AM Hub · токен** (`Bearer ...`)
+
+Нажать "Сохранить и синхронизировать". При успехе — в логе расширения появится событие.
+
+### Фичи popup'а
+- 4 состояния статуса (connected / running / error / empty)
+- Последние 4 события синхронизации
+- Stats row: клиенты / задачи / события
+- Ручной resync по кнопке в header (⟲)
+- Bundled Inter Tight / JetBrains Mono (без CDN)
+
+### Пересобрать ZIP (после правок)
+
+```bash
+cd extension
+python -c "
+import zipfile, os
+os.chdir('.')
+with zipfile.ZipFile('amhub-sync.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+    for root, dirs, files in os.walk('.'):
+        for f in files:
+            if f == 'amhub-sync.zip': continue
+            p = os.path.join(root, f)
+            z.write(p, os.path.relpath(p))
+"
+```
+
+---
+
+## 7. Как пользоваться AM Hub
+
+### Основной флоу менеджера
+
+1. **Утром** — открыть `/design/today`:
+   - AI-бриф дня: ключевые встречи, риски, приоритеты
+   - Таймлайн дня с цветовыми маркерами
+   - Очередь задач (фильтры: все / мои / просроченные)
+
+2. **Перед встречей** — открыть `/design/client/{id}`:
+   - Карточка с GMV, trend, health, next touchpoint
+   - Список предыдущих встреч и задач
+   - Account Plan (quarterly targets, actions)
+
+3. **После встречи** — автозадачи:
+   - KTalk присылает транскрипт → AI парсит → предлагает задачи
+   - В `/design/auto` — подтвердить / отредактировать / отправить в roadmap
+
+4. **Раз в день** — проверить `/design/analytics`:
+   - Churn-риск, NPS, revenue динамика
+   - QBR-календарь
+
+### Основной флоу команды
+
+- **Командный центр** `/design/command` — общий пульс (все AM, агрегаты)
+- **KPI** `/design/kpi` — личные метрики менеджера
+- **Канбан** `/design/kanban` — задачи по стадиям
+- **Автозадачи** `/design/auto` — задачи, созданные AI из встреч
+
+---
+
+## 8. Разработка
+
+### Структура
+
+```
+am-hub-final/
+├── main.py                  — FastAPI app + routing
+├── models.py                — SQLAlchemy модели
+├── database.py              — engine / sessions
+├── auth.py                  — JWT + user management
+├── schemas.py               — Pydantic DTOs
+├── design_mappers.py        — ORM → design-dict конвертеры
+├── routers/
+│   ├── auth.py, clients.py, tasks.py, meetings.py, ...
+│   └── design.py            — 20 роутов редизайна
+├── templates/               — Jinja2 (старый UI)
+│   └── design/app.html      — единый шаблон для нового UI
+├── static/
+│   ├── css/, js/            — старый UI
+│   └── design/              — новый UI
+│       ├── *.jsx            — исходники
+│       └── dist/bundle.js   — прекомпилированный (коммитить)
+├── integrations/            — Merchrules, Airtable, KTalk, ...
+├── alembic/                 — миграции БД
+├── build-design.mjs         — esbuild build script
+└── package.json             — npm esbuild dependency
+```
+
+### Миграции БД
+
+```bash
+cd am-hub-final
+alembic revision --autogenerate -m "описание"
+alembic upgrade head
+```
+
+### Добавить новый роут в редизайн
+
+1. Добавьте в `routers/design.py` → `PAGES` dict:
+   ```python
+   "myid": ("PageMyComponent", ["am hub", "раздел"], "Заголовок"),
+   ```
+2. Создайте `static/design/page_mypage.jsx` с функцией `PageMyComponent`
+3. Добавьте в `window.PageMyComponent = PageMyComponent;` в конце файла
+4. Обновите `build-design.mjs` ORDER массив
+5. `npm run build:design`
+
+### Тесты
+
+```bash
+cd am-hub-final
+python -m pytest tests/       # если есть
+```
+
+Smoke-тест мапперов:
+```bash
+python -c "import design_mappers as dm; print(dm.HEALTH_RISK_MAX)"
+```
+
+---
+
+## 9. Troubleshooting
+
+| Проблема | Решение |
+|---|---|
+| `/design/*` не открывается | Проверьте, что `static/design/dist/bundle.js` существует (запустите `npm run build:design`) |
+| Бандл устарел после правки JSX | `cd am-hub-final && npm run build:design && git add static/design/dist/bundle.js` |
+| Первая загрузка медленная | Шрифты подгружаются с bunny.net. Для прода можно self-hosted (как в extension) |
+| Empty nav stats | Нет клиентов в БД либо нет прав (проверьте role и UserClientAssignment) |
+| Extension не синхронизирует | Проверьте `hub_url` — должен быть без trailing slash. Смотрите Console расширения |
+| Admin не создан | Задайте `INITIAL_ADMIN_EMAIL` + `INITIAL_ADMIN_PASSWORD` и рестартуйте — сработает на пустой БД |
+
+---
+
+## 10. Лицензия / контакты
+
+Внутренний инструмент команды. Вопросы — в Telegram-канал команды AM Hub.
+
+---
+
+*Проект построен на FastAPI, React 18 (UMD), esbuild, SQLAlchemy, Jinja2. Деплой — Railway. Интеграции — Merchrules, Airtable, Google Sheets, KTalk, Telegram, Groq/Qwen AI.*

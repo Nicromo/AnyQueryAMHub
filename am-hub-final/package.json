@@ -1,0 +1,13 @@
+{
+  "name": "am-hub-design",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Precompile JSX design bundle for AM Hub (removes Babel-in-browser).",
+  "type": "module",
+  "scripts": {
+    "build:design": "node build-design.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.1"
+  }
+}

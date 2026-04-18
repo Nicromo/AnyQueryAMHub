@@ -335,6 +335,10 @@ app.include_router(account_dashboard.router, tags=["account-dashboard"])
 from routers import pages as pages_router
 app.include_router(pages_router.router, tags=["pages"])
 
+# ── Redesign (JSX + server data) ─────────────────────────────────────────────
+from routers import design as design_router
+app.include_router(design_router.router)
+
 # ── SSE (real-time notifications) ────────────────────────────────────────────
 from sse import router as sse_router
 app.include_router(sse_router, tags=["sse"])

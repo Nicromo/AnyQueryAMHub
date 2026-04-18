@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AM Hub · {{ page_title }}</title>
+
+  <link rel="preconnect" href="https://fonts.bunny.net">
+  <link rel="stylesheet" href="https://fonts.bunny.net/css?family=inter-tight:300,400,500,600,700|jetbrains-mono:400,500,600">
+  <link rel="stylesheet" href="/static/design/tokens.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--f-display, -apple-system, "Inter Tight", system-ui, sans-serif);
+      background: var(--ink-1);
+      color: var(--ink-8);
+      -webkit-font-smoothing: antialiased;
+    }
+    .mono { font-family: var(--f-mono, ui-monospace, "JetBrains Mono", monospace); }
+    #__root { min-height: 100vh; }
+    #__boot {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; color: var(--ink-6);
+      font-family: var(--f-mono, monospace); font-size: 12px;
+      letter-spacing: 0.1em; text-transform: uppercase;
+    }
+    #__err {
+      position: fixed; bottom: 12px; left: 12px; right: 12px;
+      font: 12px/1.4 ui-monospace, monospace;
+      background: #2a1215; color: #ff8a80;
+      padding: 10px 14px; border-radius: 8px;
+      border: 1px solid #5c2b2e; z-index: 99999;
+      white-space: pre-wrap; max-height: 40vh; overflow: auto;
+      display: none;
+    }
+  </style>
+
+  <!-- React 18 UMD + прекомпилированный JSX-бандл (esbuild).
+       Babel из рантайма убран — всё транспилировано в static/design/dist/bundle.js.
+       Пересборка: cd am-hub-final && npm run build:design -->
+  <script src="/static/design/react.min.js"></script>
+  <script src="/static/design/react-dom.min.js"></script>
+</head>
+<body>
+  <div id="__root"><div id="__boot">загрузка интерфейса…</div></div>
+  <div id="__err"></div>
+
+  <!-- ─── Серверные данные → глобалы (вариант C, гибрид) ─── -->
+  <script>
+    window.CLIENTS         = {{ clients  | tojson }};
+    window.TASKS           = {{ tasks    | tojson }};
+    window.MEETINGS        = {{ meetings | tojson }};
+    window.ACTIVITY        = {{ activity | tojson }};
+    window.TOOLS           = {{ tools    | tojson }};
+    window.JOBS            = {{ jobs     | tojson }};
+    window.__SIDEBAR_STATS  = {{ sidebar_stats  | tojson }};
+    window.__CURRENT_CLIENT = {{ current_client | tojson }};
+    window.__PAGINATION     = {{ pagination     | tojson }};
+    window.__ACTIVE_PAGE    = {{ active_page    | tojson }};
+    window.__COMPONENT      = {{ component_name | tojson }};
+    window.__CURRENT_USER = {{ {
+      "name": user.name,
+      "email": user.email,
+      "role": user.role,
+    } | tojson }};
+
+    // Отлов ошибок транспиляции / исполнения JSX
+    window.addEventListener("error", function (e) {
+      var box = document.getElementById("__err");
+      if (!box) return;
+      box.style.display = "block";
+      box.textContent = (box.textContent ? box.textContent + "\n" : "")
+        + "[bundle] " + (e.message || e.type)
+        + (e.filename ? " (" + e.filename.slice(-60) + ":" + e.lineno + ")" : "");
+    }, true);
+  </script>
+
+  <!-- Прекомпилированный бандл всех JSX-исходников (иконки + примитивы + шелл + 19 страниц) -->
+  <script src="/static/design/dist/bundle.js"></script>
+
+  <!-- Mount: шелл + нужный PageX компонент (уже доступны на window.*) -->
+  <script>
+    (function mount() {
+      var need = ["Shell", "I", "Btn", window.__COMPONENT];
+      var missing = need.filter(function (n) { return !window[n]; });
+      if (missing.length) {
+        var box = document.getElementById("__err");
+        if (box) {
+          box.style.display = "block";
+          box.textContent = "не удалось загрузить компоненты: " + missing.join(", ")
+            + "\nПроверьте, что /static/design/dist/bundle.js доступен (npm run build:design).";
+        }
+        return;
+      }
+
+      var Comp = window[window.__COMPONENT];
+      var rootEl = document.getElementById("__root");
+
+      function App() {
+        return React.createElement(
+          window.Shell,
+          {
+            active: window.__ACTIVE_PAGE,
+            onNav: function (id) { window.location.href = "/design/" + id; }
+          },
+          React.createElement(Comp, null)
+        );
+      }
+
+      ReactDOM.createRoot(rootEl).render(React.createElement(App));
+    })();
+  </script>
+</body>
+</html>
