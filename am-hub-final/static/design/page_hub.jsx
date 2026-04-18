@@ -98,7 +98,22 @@ function PageHub() {
             <div style={{ display: "flex", gap: 16, paddingRight: 18, borderRight: "1px solid var(--line)" }}>
               <div>
                 <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>неделя</div>
-                <div className="mono" style={{ fontSize: 14, color: "var(--ink-8)", fontWeight: 500 }}>W16 · 14–20 апр</div>
+                <div className="mono" style={{ fontSize: 14, color: "var(--ink-8)", fontWeight: 500 }}>{(function(){
+                  // ISO week: Mon–Sun, week starts Monday
+                  const d = new Date();
+                  const day = d.getDay(); // 0=Sun, 1=Mon … 6=Sat
+                  const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+                  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+                  // ISO week number (Thu-anchor method)
+                  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+                  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+                  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+                  const wn = Math.ceil(((t - y0) / 86400000 + 1) / 7);
+                  const mo = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
+                  const monS = mon.getDate() + (mon.getMonth() !== sun.getMonth() ? " " + mo[mon.getMonth()] : "");
+                  const sunS = sun.getDate() + " " + mo[sun.getMonth()];
+                  return `W${wn} · ${monS}–${sunS}`;
+                })()}</div>
               </div>
               <div>
                 <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>статус</div>

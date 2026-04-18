@@ -1,12 +1,17 @@
 """
 Google Sheets sync — Churn/Downsell и Top-50.
-Требует GOOGLE_SHEETS_CREDS (JSON строка service account) или
-GOOGLE_SHEETS_API_KEY (только для чтения публичных листов).
+
+Работает через CSV-экспорт по публичной ссылке — НЕ нужен API key.
+Условие: таблица открыта "Всем, у кого есть ссылка" (Просмотр).
+
+Чтобы открыть доступ: Файл → Поделиться → Общий доступ по ссылке → Просмотр.
 
 Листы:
   Churn/Downsell: 1Tkax6awhWmNXfXpzORPIqHy5qgAhLzfifSHc-YLQhhY
   Top-50:         10SuYn0w2VyDU87KSrYE-A_TDqkekj7q__o910doRCsc
 """
+import csv
+import io
 import os
 import logging
 from typing import Optional
@@ -15,29 +20,44 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SHEETS_API_KEY    = os.getenv("GOOGLE_SHEETS_API_KEY", "")
-SHEETS_CREDS_JSON = os.getenv("GOOGLE_SHEETS_CREDS", "")  # service account JSON string
-
 CHURN_SHEET_ID = "1Tkax6awhWmNXfXpzORPIqHy5qgAhLzfifSHc-YLQhhY"
 TOP50_SHEET_ID = "10SuYn0w2VyDU87KSrYE-A_TDqkekj7q__o910doRCsc"
 
 
-async def fetch_sheet_range(sheet_id: str, range_: str = "A1:Z1000", api_key: str = "") -> list:
-    """Fetch values from Google Sheets via REST API (requires API key or service account)."""
-    key = api_key or SHEETS_API_KEY
-    if not key:
-        logger.warning("No Google Sheets API key configured")
-        return []
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{range_}"
-    async with httpx.AsyncClient(timeout=20) as hx:
+def _sheet_id_from_url(url_or_id: str) -> str:
+    """Extract sheet ID from a full Google Sheets URL or return as-is."""
+    if "spreadsheets/d/" in url_or_id:
+        part = url_or_id.split("spreadsheets/d/")[1]
+        return part.split("/")[0].split("?")[0]
+    return url_or_id.strip()
+
+
+async def fetch_sheet_csv(sheet_id: str, gid: str = "0") -> list:
+    """Fetch all rows from a public Google Sheet as list-of-lists via CSV export.
+
+    No API key required — sheet must be shared publicly (view only).
+    Returns: [ [header_col1, header_col2, ...], [row1_val1, ...], ... ]
+    """
+    sid = _sheet_id_from_url(sheet_id)
+    url = f"https://docs.google.com/spreadsheets/d/{sid}/export"
+    params = {"format": "csv", "gid": gid}
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as hx:
         try:
-            resp = await hx.get(url, params={"key": key})
-            if resp.status_code != 200:
-                logger.error("Sheets error %d: %s", resp.status_code, resp.text[:200])
+            resp = await hx.get(url, params=params)
+            if resp.status_code == 403:
+                logger.warning("Sheets CSV 403: sheet %s is not publicly accessible", sid)
                 return []
-            return resp.json().get("values", [])
+            if resp.status_code != 200:
+                logger.error("Sheets CSV error %d for sheet %s", resp.status_code, sid)
+                return []
+            # Parse CSV
+            text = resp.text
+            reader = csv.reader(io.StringIO(text))
+            rows = [row for row in reader if any(cell.strip() for cell in row)]
+            logger.info("Sheets CSV: sheet %s → %d rows", sid, len(rows))
+            return rows
         except Exception as e:
-            logger.error("fetch_sheet_range: %s", e)
+            logger.error("fetch_sheet_csv(%s): %s", sid, e)
             return []
 
 
@@ -63,10 +83,7 @@ async def sync_churn_sheet(db) -> dict:
     from models import UpsellEvent, Client
     from datetime import datetime
 
-    if not SHEETS_API_KEY and not SHEETS_CREDS_JSON:
-        return {"ok": False, "error": "GOOGLE_SHEETS_API_KEY not configured", "created": 0, "updated": 0}
-
-    rows = await fetch_sheet_range(CHURN_SHEET_ID, "A1:H500")
+    rows = await fetch_sheet_csv(CHURN_SHEET_ID)
     if not rows or len(rows) < 2:
         return {"ok": False, "error": "Empty sheet or access denied", "created": 0, "updated": 0}
 
@@ -217,10 +234,7 @@ async def sync_top50_sheet(db) -> dict:
     from models import Client
     from datetime import datetime
 
-    if not SHEETS_API_KEY and not SHEETS_CREDS_JSON:
-        return {"ok": False, "error": "GOOGLE_SHEETS_API_KEY not configured", "updated": 0}
-
-    rows = await fetch_sheet_range(TOP50_SHEET_ID, "A1:J200")
+    rows = await fetch_sheet_csv(TOP50_SHEET_ID)
     if not rows or len(rows) < 2:
         return {"ok": False, "error": "Empty sheet or access denied", "updated": 0}
 

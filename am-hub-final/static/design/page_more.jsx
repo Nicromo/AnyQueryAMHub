@@ -1,5 +1,63 @@
 // page_more.jsx — remaining tabs (top50, tasks, meetings, portfolio, ai, kanban, kpi, cabinet, templates, auto, roadmap, internal, extension-install, help)
 
+// ── Reusable in-page form modal (replaces all browser prompt() calls) ────────
+function FormModal({ title, fields, onSubmit, onClose, submitLabel }) {
+  const initVals = {};
+  fields.forEach(function(f){ initVals[f.k] = f.default || ""; });
+  const [vals, setVals] = React.useState(initVals);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  const handleSubmit = async function(e) {
+    e.preventDefault();
+    setSaving(true); setErr(null);
+    try { await onSubmit(vals); }
+    catch(ex) { setErr(String(ex)); setSaving(false); }
+  };
+
+  return (
+    <div onClick={function(e){ if (e.target === e.currentTarget) onClose(); }} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9999,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        width: 440, maxWidth: "90vw", background: "var(--ink-1)", border: "1px solid var(--line)",
+        borderRadius: 8, padding: 24, display: "flex", flexDirection: "column", gap: 18,
+        boxShadow: "0 8px 40px rgba(0,0,0,0.4)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ink-9)" }}>{title}</span>
+          <button onClick={onClose} style={{ background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4 }}>×</button>
+        </div>
+        {err && <div style={{ padding: "8px 10px", background: "color-mix(in oklch,var(--critical) 10%,transparent)", border: "1px solid color-mix(in oklch,var(--critical) 30%,transparent)", borderRadius: 4, color: "var(--critical)", fontSize: 12 }}>{err}</div>}
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {fields.map(function(f) {
+            const inputStyle = { padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontFamily: "var(--f-mono)", fontSize: 12, outline: "none", width: "100%", boxSizing: "border-box" };
+            return (
+              <label key={f.k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{f.label}{f.required && <span style={{color:"var(--critical)"}}> *</span>}</span>
+                {f.type === "select" ? (
+                  <select value={vals[f.k]} onChange={function(e){ setVals(function(v){ return {...v,[f.k]:e.target.value}; }); }} style={inputStyle}>
+                    {(f.options || []).map(function(o){ return <option key={o.v} value={o.v}>{o.l}</option>; })}
+                  </select>
+                ) : f.type === "textarea" ? (
+                  <textarea value={vals[f.k]} onChange={function(e){ setVals(function(v){ return {...v,[f.k]:e.target.value}; }); }} placeholder={f.placeholder||""} rows={4} style={{...inputStyle, resize:"vertical"}}/>
+                ) : (
+                  <input type={f.type||"text"} value={vals[f.k]} onChange={function(e){ setVals(function(v){ return {...v,[f.k]:e.target.value}; }); }} placeholder={f.placeholder||""} required={f.required} style={inputStyle}/>
+                )}
+              </label>
+            );
+          })}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+            <Btn kind="ghost" size="m" type="button" onClick={onClose}>Отмена</Btn>
+            <Btn kind="primary" size="m" type="submit" disabled={saving}>{saving ? "Сохраняю…" : (submitLabel || "Создать")}</Btn>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Top-50 ────────────────────────────────────────────────
 // Парсер GMV-строки дублируется между страницами — локальный,
 // чтобы не городить глобалы. _parseGmv определён в page_hub.jsx.
@@ -90,6 +148,8 @@ function PageTasks() {
   const [filter, setFilter] = React.useState("mine");
   const ALL_TK = (typeof window !== "undefined" && window.TASKS) || [];
   const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  const CL_TASKS = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const [taskModal, setTaskModal] = React.useState(null); // null or {column}
   // When filter="mine", show tasks assigned to current user (by team/email); "all" shows all
   const TK = filter === "mine" && U.email
     ? ALL_TK.filter(t => !t.team || t.team === U.email || t.team === U.name)
@@ -117,6 +177,31 @@ function PageTasks() {
   const totalActive = TK.length;
   return (
     <div>
+      {taskModal && (
+        <FormModal title={"Новая задача · " + (taskModal.column || "бэклог")}
+          fields={[
+            { k: "title",     label: "Задача",   required: true, placeholder: "Написать план развития клиента" },
+            { k: "client_id", label: "Клиент",   type: "select",
+              options: [{ v:"", l:"— без клиента —" }].concat(CL_TASKS.map(function(c){ return { v: String(c.id), l: c.name }; })) },
+            { k: "priority",  label: "Приоритет", type: "select",
+              options: [{v:"low",l:"low"},{v:"med",l:"med"},{v:"high",l:"high"},{v:"critical",l:"critical"}], default: "med" },
+            { k: "due",       label: "Срок (дней от сегодня)", type: "number", default: "3", placeholder: "3" },
+          ]}
+          onClose={() => setTaskModal(null)}
+          onSubmit={async function(vals) {
+            const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + parseInt(vals.due || 3, 10));
+            const body = { title: vals.title, priority: vals.priority || "med", due_date: dueDate.toISOString() };
+            if (vals.client_id) body.client_id = parseInt(vals.client_id, 10);
+            const r = await fetch("/api/tasks", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(await r.text());
+            setTaskModal(null); location.reload();
+          }}
+        />
+      )}
       <TopBar breadcrumbs={["am hub","задачи"]} title="Задачи · канбан"
         subtitle={`${totalActive} активных · ${overdue.length} просрочено · ${today.length} на сегодня`}
         actions={<><Btn kind={filter === "mine" ? "primary" : "ghost"} size="m" onClick={() => setFilter("mine")}>Мои</Btn><Btn kind={filter === "all" ? "primary" : "dim"} size="m" onClick={() => setFilter("all")}>Вся команда</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
@@ -144,7 +229,7 @@ function PageTasks() {
                     </div>
                   </div>
                 ))}
-                <button style={{ marginTop: 4, padding: "8px 10px", background: "transparent", border: "1px dashed var(--line)", borderRadius: 4, color: "var(--ink-5)", cursor: "pointer", fontFamily: "var(--f-mono)", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>+ добавить</button>
+                <button onClick={() => setTaskModal({ column: c.title })} style={{ marginTop: 4, padding: "8px 10px", background: "transparent", border: "1px dashed var(--line)", borderRadius: 4, color: "var(--ink-5)", cursor: "pointer", fontFamily: "var(--f-mono)", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>+ добавить</button>
               </div>
             </div>
           ))}
@@ -157,6 +242,8 @@ function PageTasks() {
 // ── Meetings ──────────────────────────────────────────────
 function PageMeetings() {
   const MT = (typeof window !== "undefined" && window.MEETINGS) || [];
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const [meetModal, setMeetModal] = React.useState(null); // null or {type, label, dur}
 
   // Маппинг из window.MEETINGS (server-shape: {when, day, client, type, seg, mood})
   // в UI-shape: {d, cl, kind, seg, who, ch, mood}.
@@ -178,7 +265,31 @@ function PageMeetings() {
     <div>
       <TopBar breadcrumbs={["am hub","встречи"]} title="Встречи"
         subtitle={total > 0 ? `${total} предстоящих · ${withRisk} с риском · ${withOk} ок` : "Нет предстоящих встреч"}
-        actions={<><Btn kind="ghost" size="m">Все</Btn><Btn kind="dim" size="m">Мои</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => window.location.href = "/design/meetings?create=1"}>Запланировать</Btn></>}/>
+        actions={<><Btn kind="ghost" size="m">Все</Btn><Btn kind="dim" size="m">Мои</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setMeetModal({ type: "sync", label: "Встреча", dur: 30 })}>Запланировать</Btn></>}/>
+      {meetModal && (
+        <FormModal
+          title={"Запланировать · " + meetModal.label}
+          fields={[
+            { k: "client_id", label: "Клиент", required: true, type: "select",
+              options: [{ v: "", l: "— выберите клиента —" }].concat(CL.map(function(c){ return { v: String(c.id), l: c.name }; })) },
+            { k: "date", label: "Дата и время", required: true, type: "datetime-local",
+              default: new Date(Date.now() + 24*3600*1000).toISOString().slice(0,16) },
+          ]}
+          onClose={() => setMeetModal(null)}
+          onSubmit={async function(vals) {
+            if (!vals.client_id) throw new Error("Выберите клиента");
+            const r = await fetch("/api/meetings", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ client_id: parseInt(vals.client_id, 10), type: meetModal.type,
+                title: meetModal.label, duration: meetModal.dur, date: vals.date }),
+            });
+            if (!r.ok) throw new Error(await r.text());
+            setMeetModal(null); location.reload();
+          }}
+          submitLabel="Запланировать"
+        />
+      )}
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 320px", gap: 18 }}>
         <Card title="Расписание · предстоящие">
           {meets.length === 0 && (
@@ -232,23 +343,7 @@ function PageMeetings() {
               { label: "Онбординг · 90 мин", type: "onboarding", dur: 90 },
               { label: "Эскалация",          type: "escalation", dur: 30 },
             ].map((t,i,a)=>(
-              <div key={i} onClick={() => {
-                const clientId = prompt("ID клиента для встречи «" + t.label + "»:");
-                if (!clientId) return;
-                fetch("/api/meetings", {
-                  method: "POST", credentials: "include",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    client_id: parseInt(clientId, 10),
-                    type: t.type,
-                    title: t.label,
-                    duration: t.dur,
-                    date: new Date(Date.now() + 24*60*60*1000).toISOString(),
-                  })
-                }).then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-                  .then(() => { alert("Создано"); location.reload(); })
-                  .catch(e => alert("Ошибка: " + e));
-              }}
+              <div key={i} onClick={() => setMeetModal(t)}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i === a.length - 1 ? "none" : "1px solid var(--line-soft)", cursor: "pointer" }}>
                 <I.cal size={14} stroke="var(--ink-6)"/>
                 <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{t.label}</span>
@@ -791,20 +886,32 @@ function PageCabinet() {
 // ── Templates ─────────────────────────────────────────────
 function PageTemplates() {
   const tpls = (typeof window !== "undefined" && window.TEMPLATES) || [];
+  const [tplModal, setTplModal] = React.useState(false);
   return (
     <div>
+      {tplModal && (
+        <FormModal title="Новый шаблон"
+          fields={[
+            { k: "name",     label: "Название",   required: true, placeholder: "Чекап — начало разговора" },
+            { k: "category", label: "Категория",  type: "select",
+              options: ["general","qbr","sync","checkup","email"].map(function(v){ return {v,l:v}; }) },
+            { k: "body",     label: "Текст шаблона ({{name}} — имя клиента)", type: "textarea", required: true,
+              placeholder: "Привет {{name}}, давай обсудим…" },
+          ]}
+          onClose={() => setTplModal(false)}
+          onSubmit={async function(vals) {
+            const r = await fetch("/design/api/templates", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: vals.name, category: vals.category || "general", body: vals.body }),
+            });
+            if (!r.ok) throw new Error(await r.text());
+            setTplModal(false); location.reload();
+          }}
+        />
+      )}
       <TopBar breadcrumbs={["am hub","шаблоны"]} title="Шаблоны" subtitle="Follow-up, чекапы, QBR — шаблоны общения с клиентами"
-        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
-          const name = prompt("Название шаблона:"); if (!name) return;
-          const category = prompt("Категория (general/qbr/sync/checkup/email):", "general") || "general";
-          const body = prompt("Текст шаблона (используй {{name}} для подстановки):");
-          if (!body) return;
-          fetch("/design/api/templates", {
-            method: "POST", credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, category, body }),
-          }).then(r => r.ok ? location.reload() : alert("Ошибка"));
-        }}>Новый шаблон</Btn>}/>
+        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setTplModal(true)}>Новый шаблон</Btn>}/>
       <div style={{ padding: "22px 28px 40px" }}>
         {tpls.length === 0 && (
           <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
@@ -839,24 +946,44 @@ function PageAuto() {
   const rules = (typeof window !== "undefined" && window.AUTO_RULES) || [];
   const stats = (typeof window !== "undefined" && window.AUTO_STATS) || {};
   const activeCount = rules.filter(r => r.on).length;
+  const [autoModal, setAutoModal] = React.useState(false);
   return (
     <div>
+      {autoModal && (
+        <FormModal title="Новое правило IF-THEN"
+          fields={[
+            { k: "name",          label: "Название правила",  required: true, placeholder: "Чекап при падении health" },
+            { k: "trigger",       label: "Триггер", type: "select",
+              options: [
+                { v: "health_drop",       l: "Падение health-score" },
+                { v: "days_no_contact",   l: "Нет контакта N дней" },
+                { v: "meeting_done",      l: "Встреча завершена" },
+                { v: "checkup_due",       l: "Чекап просрочен" },
+              ] },
+            { k: "task_title",    label: "Задача (THEN — что создать)", required: true, placeholder: "Написать клиенту" },
+            { k: "task_priority", label: "Приоритет задачи", type: "select",
+              options: [{ v:"low",l:"low"},{v:"medium",l:"medium"},{v:"high",l:"high"}] },
+          ]}
+          onClose={() => setAutoModal(false)}
+          onSubmit={async function(vals) {
+            const body = { name: vals.name, trigger: vals.trigger || "health_drop",
+              task_title: vals.task_title, task_priority: vals.task_priority || "medium",
+              task_due_days: 3, is_active: true, trigger_config: {} };
+            if (body.trigger === "health_drop")     body.trigger_config = { threshold: 50 };
+            if (body.trigger === "days_no_contact") body.trigger_config = { days: 30 };
+            const r = await fetch("/api/auto-tasks/rules", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(await r.text());
+            setAutoModal(false); location.reload();
+          }}
+        />
+      )}
       <TopBar breadcrumbs={["am hub","автозадачи"]} title="Автозадачи"
         subtitle="Правила `IF-THEN`: когда система создаёт задачи автоматически"
-        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
-          const name = prompt("Название правила:"); if (!name) return;
-          const trigger = prompt("Триггер (health_drop / days_no_contact / meeting_done / checkup_due):", "health_drop") || "health_drop";
-          const task_title = prompt("Название создаваемой задачи:"); if (!task_title) return;
-          const task_priority = prompt("Приоритет (low/medium/high):", "medium") || "medium";
-          const body = { name, trigger, task_title, task_priority, task_due_days: 3, is_active: true, trigger_config: {} };
-          if (trigger === "health_drop") body.trigger_config = { threshold: 50 };
-          if (trigger === "days_no_contact") body.trigger_config = { days: 30 };
-          fetch("/api/auto-tasks/rules", {
-            method: "POST", credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }).then(r => r.ok ? location.reload() : alert("Ошибка"));
-        }}>Новое правило</Btn>}/>
+        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setAutoModal(true)}>Новое правило</Btn>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
           <KPI label="Правил активно" value={String(activeCount)} unit={`/ ${rules.length}`}/>
@@ -899,9 +1026,9 @@ function PageAuto() {
 function PageRoadmap() {
   const rawCols = (typeof window !== "undefined" && window.ROADMAP) || [];
   const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
-  const canEdit = !!U.email;  // любой авторизованный менеджер может редактировать
+  const canEdit = !!U.email;
+  const [rmModal, setRmModal] = React.useState(null); // null or {col}
 
-  // Фиксированные колонки (даже если БД пустая — показываем все 5)
   const DEFAULT = [
     { key: "q1",      title: "Q1 · готово",   tone: "ok" },
     { key: "q2",      title: "Q2 · в работе", tone: "signal" },
@@ -912,20 +1039,7 @@ function PageRoadmap() {
   const byKey = Object.fromEntries(rawCols.map(c => [c.key || c.column_key, c]));
   const cols = DEFAULT.map(d => ({ ...d, ...(byKey[d.key] || {}), items: (byKey[d.key]?.items) || [] }));
 
-  const addItem = (col) => {
-    const title = prompt(`Новый пункт в «${col.title}»:`);
-    if (!title) return;
-    fetch("/design/api/roadmap", {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        column_key: col.key, column_title: col.title,
-        tone: col.tone, title,
-      })
-    }).then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-      .then(() => location.reload())
-      .catch(e => alert("Ошибка: " + e));
-  };
+  const addItem = (col) => setRmModal({ col });
 
   const delItem = (id, title) => {
     if (!confirm(`Удалить «${title}»?`)) return;
@@ -935,6 +1049,21 @@ function PageRoadmap() {
 
   return (
     <div>
+      {rmModal && (
+        <FormModal title={`Добавить в «${rmModal.col.title}»`}
+          fields={[{ k: "title", label: "Название пункта", required: true, placeholder: "Новая функция…" }]}
+          onClose={() => setRmModal(null)}
+          onSubmit={async function(vals) {
+            const r = await fetch("/design/api/roadmap", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ column_key: rmModal.col.key, column_title: rmModal.col.title, tone: rmModal.col.tone, title: vals.title }),
+            });
+            if (!r.ok) throw new Error(await r.text());
+            setRmModal(null); location.reload();
+          }}
+        />
+      )}
       <TopBar breadcrumbs={["am hub","роадмап"]} title="Роадмап"
         subtitle={`Что команда строит в AM Hub · ${new Date().getFullYear()}`}/>
       <div style={{ padding: "22px 28px 40px" }}>
@@ -977,20 +1106,32 @@ function PageRoadmap() {
 
 // ── Internal tasks ────────────────────────────────────────
 function PageInternal() {
+  const [intModal, setIntModal] = React.useState(false);
   return (
     <div>
+      {intModal && (
+        <FormModal title="Новая внутренняя задача"
+          fields={[
+            { k: "title",    label: "Задача",    required: true, placeholder: "Обновить регламент" },
+            { k: "priority", label: "Приоритет", type: "select",
+              options: [{v:"low",l:"low"},{v:"med",l:"med"},{v:"high",l:"high"}], default: "med" },
+            { k: "due",      label: "Срок (дней от сегодня)", type: "number", default: "7", placeholder: "7" },
+          ]}
+          onClose={() => setIntModal(false)}
+          onSubmit={async function(vals) {
+            const r = await fetch("/design/api/internal-tasks", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: vals.title, priority: vals.priority || "med", due: vals.due || "7" }),
+            });
+            if (!r.ok) throw new Error(await r.text());
+            setIntModal(false); location.reload();
+          }}
+        />
+      )}
       <TopBar breadcrumbs={["am hub","внутренние задачи"]} title="Внутренние задачи"
         subtitle="Задачи команды без привязки к клиенту"
-        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
-          const title = prompt("Задача:"); if (!title) return;
-          const priority = prompt("Приоритет (low/med/high):", "med") || "med";
-          const due = prompt("Срок (дней от сегодня):", "7");
-          fetch("/design/api/internal-tasks", {
-            method: "POST", credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, priority, due }),
-          }).then(r => r.ok ? location.reload() : alert("Ошибка"));
-        }}>Задача</Btn>}/>
+        actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setIntModal(true)}>Задача</Btn>}/>
       <div style={{ padding: "22px 28px 40px" }}>
         <Card title="Задачи команды">
           {(function(){
@@ -1325,22 +1466,31 @@ function PageAssignments() {
     );
   }
 
-  const reassign = async (clientId, clientName) => {
-    const target = prompt(`Передать «${clientName}» другому менеджеру.\nВведите email:`);
-    if (!target) return;
-    const r = await fetch("/design/api/assign-client", {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, manager_email: target.trim().toLowerCase() }),
-    });
-    if (r.ok) location.reload(); else {
-      const err = await r.text();
-      alert("Ошибка: " + err);
-    }
-  };
+  const [assignModal, setAssignModal] = React.useState(null); // null or {id, name}
+
+  const reassign = (clientId, clientName) => setAssignModal({ id: clientId, name: clientName });
 
   return (
     <div>
+      {assignModal && (
+        <FormModal title={`Передать «${assignModal.name}»`}
+          fields={[
+            { k: "email", label: "Email нового менеджера", required: true, type: "email",
+              placeholder: "manager@company.ru" },
+          ]}
+          onClose={() => setAssignModal(null)}
+          onSubmit={async function(vals) {
+            const r = await fetch("/design/api/assign-client", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ client_id: assignModal.id, manager_email: vals.email.trim().toLowerCase() }),
+            });
+            if (!r.ok) throw new Error(await r.text());
+            setAssignModal(null); location.reload();
+          }}
+          submitLabel="Передать"
+        />
+      )}
       <TopBar breadcrumbs={["am hub","админ","назначения"]} title="Назначения клиентов"
         subtitle={`${CL.length} клиентов · ${managers.length || "?"} менеджеров`}/>
       <div style={{ padding: "22px 28px 40px" }}>
@@ -1375,10 +1525,12 @@ function PageAssignments() {
 // ── QBR Calendar ──────────────────────────────────────────
 function PageQBR() {
   const QBR_DATA = (typeof window !== "undefined" && window.QBR_DATA) || [];
+  const CL_QBR   = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [syncing, setSyncing] = React.useState(false);
   const [syncMsg, setSyncMsg] = React.useState(null);
   const [editQbr, setEditQbr] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
+  const [qbrCreateModal, setQbrCreateModal] = React.useState(false);
 
   // Build month columns: last 3 months + next 3 months from today
   const today = new Date();
@@ -1468,21 +1620,36 @@ function PageQBR() {
 
   return (
     <div>
+      {qbrCreateModal && (
+        <FormModal title="Запланировать QBR"
+          fields={[
+            { k: "client_id", label: "Клиент", required: true, type: "select",
+              options: [{ v:"", l:"— выберите клиента —" }].concat(CL_QBR.map(function(c){ return { v: String(c.id), l: c.name }; })) },
+            { k: "quarter", label: "Квартал (напр. 2026-Q2)", required: true,
+              default: today.getFullYear() + "-Q" + Math.ceil((today.getMonth()+1)/3),
+              placeholder: "2026-Q2" },
+            { k: "date", label: "Дата QBR", required: true, type: "date",
+              default: today.toISOString().slice(0,10) },
+            { k: "status", label: "Статус", type: "select",
+              options: [{v:"scheduled",l:"Запланирован"},{v:"completed",l:"Проведён"},{v:"cancelled",l:"Отменён"}] },
+          ]}
+          onClose={() => setQbrCreateModal(false)}
+          onSubmit={async function(vals) {
+            if (!vals.client_id) throw new Error("Выберите клиента");
+            setQbrCreateModal(false);
+            setEditQbr({ client_id: parseInt(vals.client_id,10),
+              client_name: (CL_QBR.find(function(c){ return String(c.id) === vals.client_id; }) || {}).name || ("Клиент #"+vals.client_id),
+              quarter: vals.quarter, date: vals.date, status: vals.status || "scheduled" });
+          }}
+          submitLabel="Далее →"
+        />
+      )}
       <TopBar
         breadcrumbs={["am hub", "qbr"]}
         title="QBR Календарь"
         subtitle={totalQbrs + " записей · " + completed + " проведено · " + scheduled + " запланировано · " + overdue + " просрочено"}
         actions={<>
-          <Btn kind="ghost" size="m" icon={<I.plus size={14}/>} onClick={() => {
-            const clientId = prompt("ID клиента:");
-            if (!clientId) return;
-            const qNum = Math.ceil((today.getMonth() + 1) / 3);
-            const quarter = prompt("Квартал:", today.getFullYear() + "-Q" + qNum);
-            if (!quarter) return;
-            const date = prompt("Дата QBR (YYYY-MM-DD):", today.toISOString().slice(0, 10));
-            if (!date) return;
-            setEditQbr({ client_id: parseInt(clientId, 10), client_name: "Клиент #" + clientId, quarter, date, status: "scheduled" });
-          }}>Запланировать QBR</Btn>
+          <Btn kind="ghost" size="m" icon={<I.plus size={14}/>} onClick={() => setQbrCreateModal(true)}>Запланировать QBR</Btn>
           <Btn kind="primary" size="m" disabled={syncing} onClick={syncAirtable}>
             {syncing ? "Синхронизация…" : "Синхронизировать с Airtable"}
           </Btn>

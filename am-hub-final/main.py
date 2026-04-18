@@ -199,7 +199,7 @@ async def lifespan(app: FastAPI):
         with SessionLocal() as db:
             try:
                 from sqlalchemy import text as _text
-                # Колонки добавленные в миграции 002 (finance + health + nps)
+                # Колонки добавленные в миграции 002+ (finance + health + nps + qbr)
                 _migrations = [
                     ("clients", "mrr",       "ALTER TABLE clients ADD COLUMN mrr FLOAT DEFAULT 0"),
                     ("clients", "nps_last",   "ALTER TABLE clients ADD COLUMN nps_last INTEGER"),
@@ -209,16 +209,19 @@ async def lifespan(app: FastAPI):
                     ("clients", "next_qbr_date","ALTER TABLE clients ADD COLUMN next_qbr_date TIMESTAMP"),
                     ("clients", "airtable_site_id", "ALTER TABLE clients ADD COLUMN airtable_site_id VARCHAR"),
                     ("clients", "gmv",         "ALTER TABLE clients ADD COLUMN gmv FLOAT DEFAULT 0"),
+                    # QBR columns — required for /design/qbr page
+                    ("qbrs", "manager_email",      "ALTER TABLE qbrs ADD COLUMN manager_email VARCHAR"),
+                    ("qbrs", "airtable_record_id",  "ALTER TABLE qbrs ADD COLUMN airtable_record_id VARCHAR"),
                 ]
-                # Получаем список существующих колонок
-                existing = {
-                    row[0]
-                    for row in db.execute(_text(
-                        "SELECT column_name FROM information_schema.columns WHERE table_name = 'clients'"
-                    )).fetchall()
-                }
+                # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:
-                    if col not in existing:
+                    existing_cols = {
+                        row[0]
+                        for row in db.execute(_text(
+                            f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}'"
+                        )).fetchall()
+                    }
+                    if col not in existing_cols:
                         db.execute(_text(sql))
                         db.commit()
                         logger.info(f"✅ Auto-migrated: {table}.{col}")
