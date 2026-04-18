@@ -6,17 +6,19 @@
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 const TABS = ["sync","checkup","settings"];
-window.switchTab = function(tab, btn) {
+function switchTab(tab, btn) {
   TABS.forEach(t => {
     document.getElementById(`t-${t}`).classList.toggle("hidden", t !== tab);
   });
   document.querySelectorAll(".tab").forEach(b => b.classList.remove("act"));
-  btn.classList.add("act");
+  if (btn) btn.classList.add("act");
   if (tab === "sync") refreshSyncStatus();
-};
+}
+window.switchTab = switchTab;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  wireEvents();
   await loadSettings();
   checkHubConnection();
   refreshSyncStatus();
@@ -24,6 +26,33 @@ async function init() {
   // Слушаем прогресс чекапа
   chrome.runtime.onMessage.addListener(msg => {
     if (msg.type === "PROGRESS") updateProgress(msg.current, msg.total);
+  });
+}
+
+// ── Event wiring (CSP-safe, no inline handlers) ───────────────────────────────
+function wireEvents() {
+  // Main tabs
+  document.querySelectorAll(".tab[data-t]").forEach(el => {
+    el.addEventListener("click", () => switchTab(el.dataset.t, el));
+  });
+  // Checkup query-type tabs
+  document.querySelectorAll(".qtab[data-qt]").forEach(el => {
+    el.addEventListener("click", () => setQType(el.dataset.qt, el));
+  });
+  // data-action buttons
+  const actions = {
+    syncNow, openHub, openTime, openKtalk,
+    loadCabinet, runCheck, runCal, genPDF, exportCSV,
+    saveSettings, testMR,
+  };
+  document.querySelectorAll("[data-action]").forEach(el => {
+    const fn = actions[el.dataset.action];
+    if (fn) el.addEventListener("click", fn);
+  });
+  // Delegated: product chips (injected dynamically)
+  document.getElementById("ck-products").addEventListener("click", e => {
+    const chip = e.target.closest(".prod-chip[data-product]");
+    if (chip) setProduct(chip.dataset.product, chip);
   });
 }
 
@@ -40,7 +69,7 @@ async function loadSettings() {
   if (s.managerName) document.getElementById("s-manager").value    = s.managerName;
 }
 
-window.saveSettings = async function() {
+async function saveSettings() {
   const data = {
     hub_url:      document.getElementById("s-hub-url").value.trim().replace(/\/$/, ""),
     hub_token:    document.getElementById("s-hub-token").value.trim(),
@@ -54,7 +83,7 @@ window.saveSettings = async function() {
   await chrome.runtime.sendMessage({ type: "SET_MANAGER_NAME", name: data.managerName });
   showBox("s-result", "✅ Сохранено", "ok");
   checkHubConnection();
-};
+}
 
 // ── Hub connection ────────────────────────────────────────────────────────────
 async function checkHubConnection() {
@@ -88,19 +117,19 @@ async function refreshSyncStatus() {
   }
 }
 
-window.syncNow = async function() {
+async function syncNow() {
   document.getElementById("sync-dot").className = "dot dot-run";
   document.getElementById("sync-label").textContent = "Синхронизация...";
   showBox("sync-result", "⏳ Идёт синхронизация...", "warn");
   const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" });
   refreshSyncStatus();
-};
+}
 
-window.openHub = function() {
+function openHub() {
   chrome.storage.local.get("hub_url", d => {
     if (d.hub_url) chrome.tabs.create({ url: d.hub_url });
   });
-};
+}
 
 // ── Token status ──────────────────────────────────────────────────────────────
 async function refreshTokenStatus() {
@@ -129,13 +158,13 @@ async function refreshTokenStatus() {
   }
 }
 
-window.openTime  = () => chrome.tabs.create({ url: "https://time.tbank.ru" });
-window.openKtalk = () => chrome.tabs.create({ url: "https://tbank.ktalk.ru" });
+function openTime()  { chrome.tabs.create({ url: "https://time.tbank.ru" }); }
+function openKtalk() { chrome.tabs.create({ url: "https://tbank.ktalk.ru" }); }
 
 // ── Checkup ───────────────────────────────────────────────────────────────────
 let ckResults = [];
 
-window.loadCabinet = async function() {
+async function loadCabinet() {
   const id = document.getElementById("ck-cabinet").value.trim();
   if (!id) return;
   showAlert("⏳ Загружаем данные кабинета...", "warn");
@@ -151,7 +180,7 @@ window.loadCabinet = async function() {
     const labels = { sort: "🔍 Sort", autocomplete: "⌨ Auto", recommendations: "⭐ Rec" };
     const cls    = { sort: "p-sort", autocomplete: "p-auto", recommendations: "p-rec" };
     prodEl.innerHTML = products.map((p, i) =>
-      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" onclick="setProduct('${p}',this)">${labels[p]||p}</span>`
+      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" data-product="${p}">${labels[p]||p}</span>`
     ).join("");
   }
 
@@ -162,30 +191,30 @@ window.loadCabinet = async function() {
     document.getElementById("ck-queries").value = qr.queries.map(q => typeof q === "string" ? q : q.query).join("\n");
   }
   showAlert("", "");
-};
+}
 
-window.setProduct = function(product, el) {
+function setProduct(product, el) {
   document.querySelectorAll(".prod-chip").forEach(c => c.classList.remove("prod-act"));
   el.classList.add("prod-act");
   chrome.runtime.sendMessage({ type: "SET_ACTIVE_PRODUCT", product });
-};
+}
 
-window.setQType = function(qt, btn) {
+function setQType(qt, btn) {
   document.querySelectorAll(".qtab").forEach(b => b.classList.remove("act"));
   btn.classList.add("act");
   chrome.runtime.sendMessage({ type: "SET_QUERY_TYPE", queryType: qt });
-};
+}
 
-window.runCal = async function() {
+async function runCal() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const res = await chrome.runtime.sendMessage({ type: "RUN_CALIBRATION", tabId: tab.id });
   if (res.mode === "api")  showAlert("✅ API-режим — выдача совпадает", "ok");
   else if (res.mode === "site") showAlert("⚠️ Сайт-режим — клиент ранжирует сам", "warn");
   else if (res.needSelector) showAlert("❓ Укажите CSS-селектор товаров", "warn");
   else showAlert(res.message || (res.ok ? "OK" : res.error), res.ok ? "ok" : "err");
-};
+}
 
-window.runCheck = async function() {
+async function runCheck() {
   const rawQ = document.getElementById("ck-queries").value.trim();
   if (!rawQ) { showAlert("Введите запросы", "warn"); return; }
   const queries = rawQ.split("\n").map(q => q.trim()).filter(Boolean);
@@ -202,7 +231,7 @@ window.runCheck = async function() {
   document.getElementById("ck-setup").classList.remove("hidden");
   document.getElementById("ck-results").classList.remove("hidden");
   renderResults(ckResults);
-};
+}
 
 function updateProgress(cur, total) {
   const pct = total ? Math.round(cur / total * 100) : 0;
@@ -243,7 +272,7 @@ function renderResults(results) {
     }).join("") + (results.length > 15 ? `<div style="font-size:.7rem;color:#4c567a;text-align:center;padding:6px">...ещё ${results.length-15} запросов в отчёте</div>` : "");
 }
 
-window.genPDF = async function() {
+async function genPDF() {
   if (!ckResults.length) return;
   const state = await chrome.runtime.sendMessage({ type: "GET_CHECKUP_STATE" });
   const { jsPDF: PDF } = window.jspdf;
@@ -266,9 +295,9 @@ window.genPDF = async function() {
     y += 2;
   });
   doc.save(`checkup_${state.clientName||state.cabinetId}_${new Date().toISOString().slice(0,10)}.pdf`);
-};
+}
 
-window.exportCSV = async function() {
+async function exportCSV() {
   if (!ckResults.length) return;
   const state = await chrome.runtime.sendMessage({ type: "GET_CHECKUP_STATE" });
   const rows = [["#","Запрос","Показов","Оценка","Всего товаров","Продукт","Причина","Рекомендация","AI"]];
@@ -285,14 +314,14 @@ window.exportCSV = async function() {
   const a = document.createElement("a");
   a.href = url; a.download = `checkup_${state.clientName||"export"}_${new Date().toISOString().slice(0,10)}.csv`;
   a.click(); URL.revokeObjectURL(url);
-};
+}
 
 // ── Test MR ───────────────────────────────────────────────────────────────────
-window.testMR = async function() {
+async function testMR() {
   showBox("s-mr-result", "⏳ Проверяем...", "warn");
   const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" });
   showBox("s-mr-result", res.ok ? `✅ OK · ${res.result?.clients_synced||0} клиентов` : "❌ " + (res.error||"Ошибка"), res.ok ? "ok" : "err");
-};
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function showAlert(msg, type) {

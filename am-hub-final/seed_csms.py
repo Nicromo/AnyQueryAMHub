@@ -15,6 +15,8 @@ from typing import List, Tuple
 # Формат: (email, first_name, last_name)
 # first_name хранит инициалы с точками — "Д.", "А.А.", "Т.А." —
 # чтобы @property User.name собирал "Д. Архангельский" / "Т.А. Андрианова".
+ADMINS = {"d.arkhangelskiy@tbank.ru", "s.shkapa@tbank.ru"}
+
 CSMS: List[Tuple[str, str, str]] = [
     ("d.arkhangelskiy@tbank.ru",  "Д.",   "Архангельский"),
     ("y.bandero@tbank.ru",        "Я.",   "Бандеро"),
@@ -41,29 +43,35 @@ def seed(dry_run: bool = False) -> dict:
     from database import SessionLocal
     from models import User
 
-    created, existed = [], []
+    created, existed, promoted = [], [], []
     with SessionLocal() as db:
         for email, first, last in CSMS:
+            role = "admin" if email in ADMINS else "manager"
             u = db.query(User).filter(User.email == email).first()
             if u:
+                # Поднимаем роль существующего до admin, если надо
+                if role == "admin" and (u.role or "") != "admin":
+                    if not dry_run:
+                        u.role = "admin"
+                    promoted.append(email)
                 existed.append(email)
                 continue
             if dry_run:
-                created.append(email)
+                created.append(f"{email} [{role}]")
                 continue
             db.add(User(
                 email=email,
                 first_name=first,
                 last_name=last,
-                role="manager",
+                role=role,
                 is_active=True,
                 settings={},
             ))
-            created.append(email)
+            created.append(f"{email} [{role}]")
         if not dry_run:
             db.commit()
 
-    return {"created": created, "existed": existed, "total": len(CSMS)}
+    return {"created": created, "existed": existed, "promoted": promoted, "total": len(CSMS)}
 
 
 if __name__ == "__main__":

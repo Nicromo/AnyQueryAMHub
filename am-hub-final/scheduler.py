@@ -993,6 +993,94 @@ async def job_renewal_alerts():
     except Exception as e:
         logger.error(f"❌ Renewal alerts error: {e}")
 
+def evaluate_auto_rules():
+    """Раз в час проверяем все активные правила и создаём задачи по триггерам.
+    Дедупликация: не создаём дубль Task с тем же title+client_id в последние 24ч."""
+    from database import SessionLocal
+    from models import AutoTaskRule, Task, Client, Meeting, User
+
+    now = datetime.utcnow()
+    day_ago = now - timedelta(days=1)
+
+    with SessionLocal() as db:
+        rules = db.query(AutoTaskRule).filter(AutoTaskRule.is_active == True).all()
+        total_created = 0
+
+        for rule in rules:
+            cfg = rule.trigger_config or {}
+            # Клиенты в скоупе правила
+            cq = db.query(Client)
+            if rule.user_id:
+                u = db.query(User).filter(User.id == rule.user_id).first()
+                if u and u.email:
+                    cq = cq.filter(Client.manager_email == u.email)
+            seg_filter = rule.segment_filter or []
+            if seg_filter:
+                cq = cq.filter(Client.segment.in_(seg_filter))
+            clients = cq.all()
+
+            for c in clients:
+                should = False
+                if rule.trigger == "health_drop":
+                    thr = float(cfg.get("threshold", 50))
+                    # health_score хранится как доля (0..1) либо как процент (0..100)
+                    hs = c.health_score
+                    if hs is not None:
+                        hs_pct = hs * 100 if hs <= 1 else hs
+                        if hs_pct < thr:
+                            should = True
+                elif rule.trigger == "days_no_contact":
+                    days = int(cfg.get("days", 30))
+                    last = c.last_meeting_date or c.last_checkup
+                    if last and (now - last).days >= days:
+                        should = True
+                elif rule.trigger == "meeting_done":
+                    types = cfg.get("meeting_types") or ["checkup", "qbr"]
+                    recent = db.query(Meeting).filter(
+                        Meeting.client_id == c.id,
+                        Meeting.type.in_(types),
+                        Meeting.date >= day_ago,
+                        Meeting.date <= now,
+                    ).first()
+                    if recent:
+                        should = True
+                elif rule.trigger == "checkup_due":
+                    # скип — checkup_due проверяется отдельным джобом
+                    pass
+
+                if not should:
+                    continue
+
+                # Дедупликация: не создаём если такая же задача уже есть за сутки
+                dup = db.query(Task).filter(
+                    Task.client_id == c.id,
+                    Task.title == rule.task_title,
+                    Task.created_at >= day_ago,
+                ).first()
+                if dup:
+                    continue
+
+                due = now + timedelta(days=int(rule.task_due_days or 3))
+                t = Task(
+                    client_id=c.id,
+                    title=rule.task_title,
+                    description=rule.task_description or f"Авто по правилу: {rule.name}",
+                    status="plan",
+                    priority=rule.task_priority or "medium",
+                    due_date=due,
+                    source="automation",
+                    task_type=rule.task_type or "followup",
+                )
+                db.add(t)
+                total_created += 1
+
+        if total_created:
+            db.commit()
+            logger.info(f"✅ evaluate_auto_rules: создано {total_created} задач")
+        else:
+            logger.info("evaluate_auto_rules: новых задач нет")
+
+
 def start_scheduler():
     sched = _get_scheduler()
 
@@ -1024,6 +1112,9 @@ def start_scheduler():
                   id="ktalk_sync", name="Ktalk Meeting Sync", replace_existing=True)
     sched.add_job(job_renewal_alerts, "cron", hour=9, minute=30, day_of_week="mon",
                   id="renewal_alerts", name="Weekly Renewal Alerts", replace_existing=True)
+
+    sched.add_job(evaluate_auto_rules, "interval", hours=1,
+                  id="evaluate_auto_rules", name="Evaluate Auto Task Rules", replace_existing=True)
 
     sched.start()
     logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")

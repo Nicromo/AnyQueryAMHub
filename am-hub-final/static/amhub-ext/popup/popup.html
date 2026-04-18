@@ -138,9 +138,9 @@
 
 <!-- Tab bar -->
 <div class="tabs">
-  <div class="tab act" data-t="sync"    onclick="switchTab('sync',this)">🔄 Sync</div>
-  <div class="tab"     data-t="checkup" onclick="switchTab('checkup',this)">🔍 Чекап</div>
-  <div class="tab"     data-t="settings"onclick="switchTab('settings',this)">⚙️ Настройки</div>
+  <div class="tab act" data-t="sync">🔄 Sync</div>
+  <div class="tab"     data-t="checkup">🔍 Чекап</div>
+  <div class="tab"     data-t="settings">⚙️ Настройки</div>
 </div>
 
 <!-- ═══════════════════ TAB: SYNC ════════════════════════════ -->
@@ -154,8 +154,8 @@
       </div>
     </div>
     <div class="row">
-      <button class="btn btn-p" onclick="syncNow()">▶ Синхронизировать</button>
-      <button class="btn btn-s" onclick="openHub()">🌐 Открыть хаб</button>
+      <button class="btn btn-p" data-action="syncNow">▶ Синхронизировать</button>
+      <button class="btn btn-s" data-action="openHub">🌐 Открыть хаб</button>
     </div>
     <div id="sync-result" class="hidden"></div>
   </div>
@@ -169,7 +169,7 @@
         <div class="status-label">Tbank Time</div>
         <div class="status-sub" id="tk-time-sub">Не захвачен</div>
       </div>
-      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" onclick="openTime()">Войти</button>
+      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" data-action="openTime">Войти</button>
     </div>
     <div class="status-card" id="tk-ktalk">
       <div class="dot dot-idle" id="tk-ktalk-dot"></div>
@@ -177,7 +177,7 @@
         <div class="status-label">KTalk</div>
         <div class="status-sub" id="tk-ktalk-sub">Не захвачен</div>
       </div>
-      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" onclick="openKtalk()">Войти</button>
+      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" data-action="openKtalk">Войти</button>
     </div>
     <div id="tk-hint" class="box box-warn hidden">
       Войдите в системы выше — токены будут захвачены автоматически
@@ -191,7 +191,7 @@
     <div class="sec-title">Кабинет клиента</div>
     <div style="display:flex;gap:7px;margin-bottom:7px">
       <input id="ck-cabinet" placeholder="ID кабинета (из AM Hub)" style="flex:1">
-      <button class="btn btn-p" style="width:auto;padding:7px 12px" onclick="loadCabinet()">▶</button>
+      <button class="btn btn-p" style="width:auto;padding:7px 12px" data-action="loadCabinet">▶</button>
     </div>
     <div id="ck-client-name" style="font-size:.78rem;color:#7d8aaa;margin-bottom:8px;height:16px"></div>
 
@@ -200,18 +200,18 @@
 
     <!-- Тип запросов -->
     <div class="qtype-tabs" id="qtabs">
-      <div class="qtab act" data-qt="top"      onclick="setQType('top',this)">Топ</div>
-      <div class="qtab"     data-qt="random"   onclick="setQType('random',this)">Случ.</div>
-      <div class="qtab"     data-qt="zero"     onclick="setQType('zero',this)">Нулевые</div>
-      <div class="qtab"     data-qt="zeroquery"onclick="setQType('zeroquery',this)">ZeroQ</div>
+      <div class="qtab act" data-qt="top">Топ</div>
+      <div class="qtab"     data-qt="random">Случ.</div>
+      <div class="qtab"     data-qt="zero">Нулевые</div>
+      <div class="qtab"     data-qt="zeroquery">ZeroQ</div>
     </div>
 
     <div style="font-size:.68rem;color:#4c567a;margin-bottom:4px">Запросы (один на строку)</div>
     <textarea id="ck-queries" rows="4" placeholder="пуховик&#10;куртка&#10;джинсы"></textarea>
 
     <div class="row gap">
-      <button class="btn btn-p" id="ck-run" onclick="runCheck()">▶ Проверить</button>
-      <button class="btn btn-s" id="ck-cal" onclick="runCal()">🎯 Калибровка</button>
+      <button class="btn btn-p" id="ck-run" data-action="runCheck">▶ Проверить</button>
+      <button class="btn btn-s" id="ck-cal" data-action="runCal">🎯 Калибровка</button>
     </div>
     <div id="ck-alert" class="hidden" style="margin-top:7px"></div>
   </div>
@@ -229,8 +229,8 @@
       <div class="stats" id="ck-stats"></div>
       <div id="ck-result-list"></div>
       <div class="row gap">
-        <button class="btn btn-g" onclick="genPDF()">📄 PDF-отчёт</button>
-        <button class="btn btn-s" onclick="exportCSV()">📥 CSV</button>
+        <button class="btn btn-g" data-action="genPDF">📄 PDF-отчёт</button>
+        <button class="btn btn-s" data-action="exportCSV">📥 CSV</button>
       </div>
     </div>
   </div>
@@ -246,7 +246,7 @@
     <div class="gap"><lbl>Токен (из Настройки → Аккаунт)</lbl>
       <input id="s-hub-token" type="password" placeholder="Токен авторизации"></div>
     <div class="gap">
-      <button class="btn btn-p" onclick="saveSettings()">💾 Сохранить</button>
+      <button class="btn btn-p" data-action="saveSettings">💾 Сохранить</button>
     </div>
     <div id="s-result" class="hidden" style="margin-top:7px"></div>
   </div>
@@ -259,7 +259,7 @@
     <div class="gap"><lbl>Пароль</lbl>
       <input id="s-mr-pass" type="password" placeholder="••••••••"></div>
     <div class="gap">
-      <button class="btn btn-s" onclick="testMR()">Проверить соединение</button>
+      <button class="btn btn-s" data-action="testMR">Проверить соединение</button>
     </div>
     <div id="s-mr-result" class="hidden" style="margin-top:7px"></div>
   </div>
