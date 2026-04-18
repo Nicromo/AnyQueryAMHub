@@ -218,6 +218,15 @@ async function saveStatus(){
   const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
   if(r.ok){closeStatusModal();location.reload();}
 }
+async function createQBR(){
+  const r = await fetch('/api/clients/{{ client.id }}/qbr', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({status: 'draft'})
+  });
+  if (r.ok) location.reload();
+  else alert('Не удалось создать QBR');
+}
 </script>
 <div id="qbr-empty" style="display:none;text-align:center;padding:60px 20px;color:var(--muted);">
   <div style="font-size:3rem;margin-bottom:12px;">📊</div>
@@ -228,51 +237,4 @@ async function saveStatus(){
 </body>
 </html>
 
-<script>
-
-function toggleTheme(){const h=document.documentElement;const t=h.getAttribute('data-theme')==='light'?'dark':'light';h.setAttribute('data-theme',t);localStorage.setItem('theme',t);}
-function addItem(listId,placeholder){
-  const d=document.createElement('div');d.className='item-row';
-  d.innerHTML='<input type="text" placeholder="'+placeholder+'"><span class="remove" onclick="this.parentElement.remove()">✕</span>';
-  document.getElementById(listId).appendChild(d);
-}
-function addFutureWork(){
-  const d=document.createElement('div');d.className='item-row';
-  d.innerHTML='<input type="text" placeholder="Задача..." class="fw-task"><input type="text" placeholder="Квартал..." class="fw-quarter" style="max-width:100px;"><select class="fw-priority" style="max-width:100px;"><option value="high">Высокий</option><option value="medium" selected>Средний</option><option value="low">Низкий</option></select><span class="remove" onclick="this.parentElement.remove()">✕</span>';
-  document.getElementById('future-list').appendChild(d);
-}
-function getListValues(listId){return Array.from(document.querySelectorAll('#'+listId+' input')).map(i=>i.value).filter(v=>v);}
-function getFutureWork(){
-  const items=[];
-  document.querySelectorAll('#future-list .item-row').forEach(row=>{
-    const task=row.querySelector('.fw-task').value;
-    if(task) items.push({task, quarter:row.querySelector('.fw-quarter').value, priority:row.querySelector('.fw-priority').value});
-  });
-  return items;
-}
-async function saveQBR(){
-  const data={
-    date:document.getElementById('qbr-date').value,
-    achievements:getListValues('achievements-list'),
-    issues:getListValues('issues-list'),
-    key_insights:getListValues('insights-list'),
-    next_quarter_goals:getListValues('goals-list'),
-    future_work:getFutureWork(),
-    summary:document.getElementById('summary').value,
-    presentation_url:document.getElementById('presentation-url').value,
-    executive_summary:document.getElementById('exec-summary').value,
-    status:'draft'
-  };
-  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  if(r.ok){const el=document.getElementById('saved');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
-}
-function openStatusModal(){document.getElementById('statusModal').classList.add('visible');}
-function closeStatusModal(){document.getElementById('statusModal').classList.remove('visible');}
-async function saveStatus(){
-  const status=document.getElementById('qbr-status').value;
-  const r=await fetch('/api/clients/{{ client.id }}/qbr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
-  if(r.ok){closeStatusModal();location.reload();}
-}
-
-</script>
 {% endblock %}
