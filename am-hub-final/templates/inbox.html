@@ -8,7 +8,7 @@
     h1 { font-size:1.4rem; margin-bottom:4px; }
     .sub { color:var(--muted); font-size:.82rem; margin-bottom:20px; }
     .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-    .inbox-item { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; border-left:4px solid var(--border); }
+    .inbox-item { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; border-left:4px solid var(--border); display:block; text-decoration:none; color:inherit; }
     .inbox-item.priority-high { border-left-color:var(--red); }
     .inbox-item.priority-medium { border-left-color:var(--yellow); }
     .inbox-item .title { font-size:.9rem; font-weight:600; margin-bottom:4px; }
@@ -19,29 +19,122 @@
     .badge-overdue { background:rgba(239,68,68,.15); color:var(--red); }
     .badge-blocked { background:rgba(239,68,68,.15); color:var(--red); }
     .badge-notification { background:rgba(129,140,248,.15); color:var(--accent); }
+
+    .inbox-layout { display:grid; grid-template-columns: minmax(0,1fr) 300px; gap:24px; align-items:start; }
+    .kpi-col { position:sticky; top:24px; display:flex; flex-direction:column; gap:10px; }
+    .kpi-col h3 { font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 4px; font-weight:600; }
+    .kpi-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .kpi-card .lbl { font-size:.8rem; color:var(--muted); }
+    .kpi-card .val { font-size:1.4rem; font-weight:700; color:var(--text); line-height:1; }
+    .kpi-card.accent .val { color:var(--accent); }
+    .kpi-card.red .val { color:var(--red); }
+    .kpi-card.yellow .val { color:var(--yellow); }
+    .kpi-card.green .val { color:var(--green); }
+    .kpi-card.dim .val { color:var(--muted); }
+    @media (max-width: 960px) { .inbox-layout { grid-template-columns: 1fr; } .kpi-col { position:static; } }
 </style>
 {% endblock %}
 
 {% block content %}
 <h1>📬 Inbox</h1>
-  <p class="sub">Уведомления, просрочки, заблокированные задачи</p>
-  <div id="inbox-list">Загрузка...</div>
-</div>
+<p class="sub">Уведомления, просрочки, заблокированные задачи</p>
 
+<div class="inbox-layout">
+  <div id="inbox-list">Загрузка...</div>
+
+  <aside class="kpi-col" aria-label="KPI">
+    <h3>Сводка</h3>
+    <a href="/today" class="kpi-card accent" title="Задачи с дедлайном сегодня">
+      <span class="lbl">Сегодня задач</span><span class="val" id="kpi-today">—</span>
+    </a>
+    <a href="/today" class="kpi-card red" title="Задачи с истёкшим дедлайном">
+      <span class="lbl">Просрочено</span><span class="val" id="kpi-overdue">—</span>
+    </a>
+    <a href="/calendar" class="kpi-card yellow" title="Встречи сегодня">
+      <span class="lbl">Встреч сегодня</span><span class="val" id="kpi-meetings">—</span>
+    </a>
+    <a href="/followup" class="kpi-card" title="Follow-up ожидают отправки">
+      <span class="lbl">Follow-up pending</span><span class="val" id="kpi-followup">—</span>
+    </a>
+    <a href="/kanban" class="kpi-card dim" title="Задачи в работе">
+      <span class="lbl">В работе</span><span class="val" id="kpi-inprogress">—</span>
+    </a>
+    <a href="/kanban" class="kpi-card red" title="Заблокированные задачи">
+      <span class="lbl">Заблокировано</span><span class="val" id="kpi-blocked">—</span>
+    </a>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
 <script>
 async function loadInbox(){
   try{
-    const r=await fetch('/api/inbox');
-    const d=await r.json();
-    const el=document.getElementById('inbox-list');
-    if(!d.items.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted);">✅ Всё чисто!</div>';return;}
-    el.innerHTML=d.items.map(i=>{
-      const badgeClass=i.type==='critical'?'badge-critical':i.type==='overdue'?'badge-overdue':i.type==='blocked'?'badge-blocked':'badge-notification';
-      const link=i.client_id?`/client/${i.client_id}`:'#';
-      return `<a href="${link}" class="inbox-item priority-${i.priority||'medium'}"><div class="title">${i.title}</div><div class="message">${i.message}</div><div class="meta"><span class="badge ${badgeClass}">${i.type}</span><span>${i.date?i.date.slice(0,10):''}</span></div></a>`;
+    const r = await fetch('/api/inbox');
+    if (!r.ok) throw new Error('inbox ' + r.status);
+    const d = await r.json();
+    const el = document.getElementById('inbox-list');
+    if (!d.items || !d.items.length) {
+      el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">✅ Всё чисто!</div>';
+      return;
+    }
+    el.innerHTML = d.items.map(i => {
+      const badgeClass = i.type==='critical'?'badge-critical':i.type==='overdue'?'badge-overdue':i.type==='blocked'?'badge-blocked':'badge-notification';
+      const link = i.client_id ? `/client/${i.client_id}` : '#';
+      return `<a href="${link}" class="inbox-item priority-${i.priority||'medium'}"><div class="title">${i.title||''}</div><div class="message">${i.message||''}</div><div class="meta"><span class="badge ${badgeClass}">${i.type||''}</span><span>${i.date?i.date.slice(0,10):''}</span></div></a>`;
     }).join('');
-  }catch(e){console.error(e);}
+  } catch(e){
+    console.error(e);
+    if (window.showToast) window.showToast('Не удалось загрузить Inbox', 'err');
+  }
 }
+
+function setKpi(id, v){ const el = document.getElementById(id); if (el) el.textContent = (v===null||v===undefined) ? '—' : v; }
+
+async function loadKpi(){
+  try{
+    const r = await fetch('/api/tasks/all');
+    if (r.ok) {
+      const d = await r.json();
+      const tasks = d.tasks || [];
+      const today = new Date().toISOString().slice(0,10);
+      let dueToday=0, overdue=0, inprogress=0, blocked=0;
+      for (const t of tasks) {
+        const st = t.status;
+        if (st === 'in_progress') inprogress++;
+        if (st === 'blocked') blocked++;
+        if (st === 'done') continue;
+        if (!t.due_date) continue;
+        const due = t.due_date.slice(0,10);
+        if (due === today) dueToday++;
+        else if (due < today) overdue++;
+      }
+      setKpi('kpi-today', dueToday);
+      setKpi('kpi-overdue', overdue);
+      setKpi('kpi-inprogress', inprogress);
+      setKpi('kpi-blocked', blocked);
+    }
+  } catch(e){ console.error('tasks kpi', e); if (window.showToast) window.showToast('KPI: ошибка задач', 'err'); }
+
+  try{
+    const r = await fetch('/api/meetings/today');
+    if (r.ok) {
+      const d = await r.json();
+      setKpi('kpi-meetings', (d.meetings||[]).length);
+    }
+  } catch(e){ console.error('meetings kpi', e); }
+
+  try{
+    const r = await fetch('/api/dashboard/actions');
+    if (r.ok) {
+      const d = await r.json();
+      const followups = (d.actions||[]).filter(a => a.type === 'followup').length;
+      setKpi('kpi-followup', followups);
+    }
+  } catch(e){ console.error('actions kpi', e); }
+}
+
 loadInbox();
+loadKpi();
 </script>
 {% endblock %}

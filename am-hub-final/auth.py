@@ -20,9 +20,15 @@ from database import SessionLocal
 from models import User, AuditLog
 
 # Constants
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+_DEFAULT_SECRET = "your-secret-key-change-in-production"
+SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET_KEY") or _DEFAULT_SECRET
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
+
+if os.getenv("ENV", "development") == "production" and SECRET_KEY == _DEFAULT_SECRET:
+    raise RuntimeError(
+        "SECRET_KEY must be set in production — refusing to boot with the default JWT key."
+    )
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

@@ -198,6 +198,103 @@ async function loadActions(){
 }
 loadActions();
 
+// ── Next 7 days (upcoming work) ──
+async function loadUpcoming7d(){
+  const host = document.getElementById('upcoming-7d');
+  if(!host) return;
+  try{
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(start.getTime() + 7*24*60*60*1000);
+    const url = '/api/calendar/events?start=' + encodeURIComponent(start.toISOString()) + '&end=' + encodeURIComponent(end.toISOString());
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const evs = (d.events || [])
+      .filter(e => e.start)
+      .map(e => ({...e, _d: new Date(e.start)}))
+      .filter(e => e._d >= now && e._d <= end)
+      .sort((a,b) => a._d - b._d)
+      .slice(0, 7);
+    if(!evs.length){
+      host.innerHTML = '<div class="iv-empty">🟢 Нет запланированных событий</div>';
+      return;
+    }
+    const fmtDay = dt => {
+      const tomorrow = new Date(start.getTime() + 24*60*60*1000);
+      if(dt.toDateString() === start.toDateString()) return 'Сегодня';
+      if(dt.toDateString() === tomorrow.toDateString()) return 'Завтра';
+      return dt.toLocaleDateString('ru-RU', {weekday:'short', day:'numeric', month:'short'});
+    };
+    const groups = {};
+    evs.forEach(e => {
+      const k = e._d.toDateString();
+      (groups[k] = groups[k] || {label: fmtDay(e._d), items: []}).items.push(e);
+    });
+    let html = '';
+    Object.values(groups).forEach(g => {
+      html += '<div class="iv-day">' + g.label + '</div>';
+      g.items.forEach(e => {
+        const isTask = e.type === 'task';
+        const ico = isTask ? '📋' : (e.type === 'qbr' ? '📊' : e.type === 'checkup' ? '🔍' : e.type === 'kickoff' ? '🚀' : '🎥');
+        const time = e._d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+        const title = (e.title || '').replace(/^⏰\s*/, '');
+        const parts = title.split(':');
+        const client = parts.length > 1 ? parts[0].trim() : '';
+        const what = parts.length > 1 ? parts.slice(1).join(':').trim() : title;
+        html += '<a class="iv-item" href="' + (e.url || '#') + '">' +
+          '<span class="iv-ico">' + ico + '</span>' +
+          '<div class="iv-main"><div class="iv-title">' + (what || '—') + '</div>' +
+          (client ? '<div class="iv-sub">' + client + '</div>' : '') + '</div>' +
+          '<span class="iv-time">' + time + '</span></a>';
+      });
+    });
+    host.innerHTML = html;
+  }catch(e){
+    host.innerHTML = '<div class="iv-empty">Ошибка загрузки</div>';
+    if(window.showToast) window.showToast('Не удалось загрузить ближайшие события', 'err');
+  }
+}
+
+// ── At-risk clients ──
+async function loadAtRisk(){
+  const host = document.getElementById('at-risk-clients');
+  if(!host) return;
+  try{
+    const r = await fetch('/api/portfolio');
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const score = c => (c.risk === 'critical' ? 1000 : c.risk === 'warning' ? 500 : 0)
+      + (c.days_silent || 0) + (c.overdue_tasks || 0)*10 + (c.blocked_tasks || 0)*5;
+    const risky = (d.clients || [])
+      .filter(c => c.risk === 'critical' || c.risk === 'warning')
+      .sort((a,b) => score(b) - score(a))
+      .slice(0, 5);
+    if(!risky.length){
+      host.innerHTML = '<div class="iv-empty">🟢 Все клиенты в норме</div>';
+      return;
+    }
+    host.innerHTML = risky.map(c => {
+      const tags = [];
+      if(c.days_silent && c.days_silent > 14) tags.push({t:'нет контакта ' + c.days_silent + 'д', w: c.days_silent <= 30});
+      if(c.overdue_tasks) tags.push({t:'просрочено ' + c.overdue_tasks + ' задач', w:false});
+      if(c.blocked_tasks) tags.push({t:c.blocked_tasks + ' заблок.', w:true});
+      if(c.health < 60) tags.push({t:'health ' + c.health + '%', w: c.health >= 30});
+      if(c.open_tickets) tags.push({t:c.open_tickets + ' тикетов', w:true});
+      if(!tags.length) tags.push({t: c.risk === 'critical' ? 'критично' : 'внимание', w: c.risk !== 'critical'});
+      return '<a class="ir-item" href="/client/' + c.id + '">' +
+        '<span class="ir-dot ' + c.risk + '"></span>' +
+        '<div class="ir-main"><div class="ir-name">' + c.name + '</div>' +
+        '<div class="ir-reasons">' + tags.slice(0,3).map(x => '<span class="ir-tag' + (x.w?' w':'') + '">' + x.t + '</span>').join('') + '</div></div></a>';
+    }).join('');
+  }catch(e){
+    host.innerHTML = '<div class="iv-empty">Ошибка загрузки</div>';
+    if(window.showToast) window.showToast('Не удалось загрузить клиентов под риском', 'err');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadUpcoming7d(); loadAtRisk(); });
+
 // ── PWA Registration ──
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
 if('BeforeInstallPromptEvent' in window){window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window._pwaPrompt=e;});}
@@ -397,6 +494,34 @@ window.addEventListener('load',()=>{
     }
     .stream-col { max-height:none; min-width:0; }
   }
+
+  .insight-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+  @media(max-width:900px){ .insight-row{ grid-template-columns:1fr; } }
+  .insight-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px 18px; display:flex; flex-direction:column; min-height:220px; }
+  .insight-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .insight-head h4 { font-size:.88rem; font-weight:600; }
+  .insight-head .more { font-size:.72rem; color:var(--accent); text-decoration:none; }
+  .insight-body { flex:1; overflow-y:auto; max-height:260px; }
+  .iv-day { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin:8px 0 4px; font-weight:600; }
+  .iv-day:first-child { margin-top:0; }
+  .iv-item { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05); text-decoration:none; color:var(--text); }
+  .iv-item:last-child { border-bottom:none; }
+  .iv-ico { font-size:.95rem; flex-shrink:0; width:20px; text-align:center; }
+  .iv-main { flex:1; min-width:0; }
+  .iv-title { font-size:.8rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .iv-sub { font-size:.68rem; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .iv-time { font-size:.7rem; color:var(--muted); flex-shrink:0; font-variant-numeric:tabular-nums; }
+  .ir-item { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.05); text-decoration:none; color:var(--text); }
+  .ir-item:last-child { border-bottom:none; }
+  .ir-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .ir-dot.critical { background:var(--red); }
+  .ir-dot.warning { background:var(--yellow); }
+  .ir-main { flex:1; min-width:0; }
+  .ir-name { font-size:.82rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ir-reasons { display:flex; gap:6px; flex-wrap:wrap; margin-top:3px; }
+  .ir-tag { font-size:.65rem; padding:2px 6px; border-radius:4px; background:rgba(239,68,68,.12); color:#fca5a5; }
+  .ir-tag.w { background:rgba(245,158,11,.12); color:#fcd34d; }
+  .iv-empty { color:var(--muted); font-size:.78rem; padding:16px 0; text-align:center; }
 </style>
 {% endblock %}
 
@@ -501,6 +626,27 @@ window.addEventListener('load',()=>{
       </div>
       <div id="risk-clients-list" style="overflow-y:auto;max-height:160px;">
         <div style="color:var(--muted);font-size:.78rem;padding:8px 0;">Загрузка...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="insight-row">
+    <div class="insight-card">
+      <div class="insight-head">
+        <h4>🗓️ Ближайшие 7 дней</h4>
+        <a class="more" href="/calendar">Календарь →</a>
+      </div>
+      <div id="upcoming-7d" class="insight-body">
+        <div class="iv-empty">Загрузка...</div>
+      </div>
+    </div>
+    <div class="insight-card">
+      <div class="insight-head">
+        <h4>⚠️ Клиенты под риском</h4>
+        <a class="more" href="/portfolio?filter=critical">Все →</a>
+      </div>
+      <div id="at-risk-clients" class="insight-body">
+        <div class="iv-empty">Загрузка...</div>
       </div>
     </div>
   </div>

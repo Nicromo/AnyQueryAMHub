@@ -176,6 +176,7 @@ async def auth_telegram(request: Request, db: Session = Depends(get_db)):
         value=token,
         httponly=True,
         samesite="lax",
+        secure=os.getenv("ENV", "development") == "production",
         max_age=86400 * 30,
     )
     return response

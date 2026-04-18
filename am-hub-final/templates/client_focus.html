@@ -28,6 +28,23 @@
     .note-item { display:flex; align-items:start; gap:8px; padding:10px; background:var(--bg); border-radius:8px; margin-bottom:6px; }
     .note-item .pin { flex-shrink:0; }
     .theme-btn { position:fixed; top:16px; right:80px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
+    .health-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:20px; }
+    .health-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+    .health-head h2 { font-size:1rem; font-weight:600; display:flex; align-items:center; gap:10px; }
+    .health-dot { width:12px; height:12px; border-radius:50%; display:inline-block; box-shadow:0 0 0 3px rgba(255,255,255,.04); }
+    .health-dot.green { background:#22c55e; }
+    .health-dot.yellow { background:#eab308; }
+    .health-dot.red { background:#ef4444; }
+    .health-dot.gray { background:#6b7280; }
+    .health-score-pill { font-size:.72rem; padding:3px 10px; border-radius:999px; background:var(--bg); color:var(--muted); border:1px solid var(--border); }
+    .health-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; }
+    .health-item { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+    .health-item .label { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px; }
+    .health-item .value { font-size:.95rem; font-weight:600; }
+    .health-item .sub { font-size:.7rem; color:var(--muted); margin-top:2px; }
+    .health-item.ok .value { color:#22c55e; }
+    .health-item.warn .value { color:#eab308; }
+    .health-item.bad .value { color:#ef4444; }
   </style>
 </head>
 <body>
@@ -39,6 +56,44 @@
     <div>
       <h1>🎯 {{ client.name }}</h1>
       <div class="meta">{{ client.segment or '—' }} · Health: {{ (client.health_score or 0)|int * 100 }}%</div>
+    </div>
+  </div>
+
+  <div class="health-card" id="healthCard" data-client-id="{{ client.id }}"
+       data-last-meeting="{{ client.last_meeting_date.isoformat() if client.last_meeting_date else '' }}"
+       data-last-checkup="{{ client.last_checkup.isoformat() if client.last_checkup else '' }}"
+       data-next-qbr="{{ client.next_qbr_date.isoformat() if client.next_qbr_date else '' }}"
+       data-needs-checkup="{{ '1' if client.needs_checkup else '0' }}"
+       data-health-score="{{ client.health_score or 0 }}">
+    <div class="health-head">
+      <h2><span class="health-dot gray" id="healthDot"></span> Здоровье клиента</h2>
+      <span class="health-score-pill" id="healthScorePill">Health: {{ ((client.health_score or 0) * 100)|int }}%</span>
+    </div>
+    <div class="health-grid">
+      <div class="health-item" id="hi-last">
+        <div class="label">Последний контакт</div>
+        <div class="value">—</div>
+        <div class="sub"></div>
+      </div>
+      <div class="health-item" id="hi-open">
+        <div class="label">Открытые задачи</div>
+        <div class="value">…</div>
+      </div>
+      <div class="health-item" id="hi-overdue">
+        <div class="label">Просроченные</div>
+        <div class="value">…</div>
+      </div>
+      <div class="health-item" id="hi-upcoming">
+        <div class="label">Ближайшая встреча</div>
+        <div class="value">…</div>
+      </div>
+      {% if client.next_qbr_date or client.last_checkup or client.needs_checkup %}
+      <div class="health-item" id="hi-qbr">
+        <div class="label">QBR / чекап</div>
+        <div class="value">—</div>
+        <div class="sub"></div>
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -83,6 +138,121 @@
 
 <script>
 function showTab(id,btn){document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));document.getElementById('tab-'+id).classList.add('active');document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+
+(function initHealthCard(){
+  const card = document.getElementById('healthCard');
+  if (!card) return;
+  const clientId = parseInt(card.dataset.clientId, 10);
+  const lastMeetingISO = card.dataset.lastMeeting || '';
+  const nextQbrISO = card.dataset.nextQbr || '';
+  const lastCheckupISO = card.dataset.lastCheckup || '';
+  const needsCheckup = card.dataset.needsCheckup === '1';
+  const healthScore = parseFloat(card.dataset.healthScore || '0');
+  const errToast = (msg) => { if (typeof window.showToast === 'function') window.showToast(msg, 'err'); else console.error(msg); };
+  const setItem = (id, value, sub, cls) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.querySelector('.value').textContent = value;
+    const subEl = el.querySelector('.sub');
+    if (subEl) subEl.textContent = sub || '';
+    el.classList.remove('ok', 'warn', 'bad');
+    if (cls) el.classList.add(cls);
+  };
+  const daysBetween = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
+  };
+  const fmtDate = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('ru-RU', {day:'2-digit', month:'2-digit', year:'numeric'});
+  };
+
+  // Last contact
+  const lcDays = daysBetween(lastMeetingISO);
+  let lcClass = 'warn';
+  if (lcDays === null) {
+    setItem('hi-last', 'нет данных', '', null);
+    lcClass = null;
+  } else {
+    const cls = lcDays < 7 ? 'ok' : (lcDays <= 21 ? 'warn' : 'bad');
+    setItem('hi-last', lcDays + ' дн. назад', fmtDate(lastMeetingISO), cls);
+    lcClass = cls;
+  }
+
+  // QBR / checkup
+  const qbrEl = document.getElementById('hi-qbr');
+  if (qbrEl) {
+    if (needsCheckup) {
+      setItem('hi-qbr', 'требуется чекап', lastCheckupISO ? ('последний ' + fmtDate(lastCheckupISO)) : '', 'bad');
+    } else if (nextQbrISO) {
+      const dn = daysBetween(nextQbrISO);
+      const future = dn !== null && dn < 0;
+      setItem('hi-qbr', future ? ('через ' + Math.abs(dn) + ' дн.') : 'просрочен', fmtDate(nextQbrISO), future ? 'ok' : 'bad');
+    } else if (lastCheckupISO) {
+      setItem('hi-qbr', fmtDate(lastCheckupISO), 'последний чекап', 'ok');
+    } else {
+      setItem('hi-qbr', '—', '', null);
+    }
+  }
+
+  // Aggregate score signal from server health_score
+  let scoreClass = null;
+  if (healthScore > 0 || card.dataset.healthScore === '0') {
+    scoreClass = healthScore >= 0.7 ? 'ok' : (healthScore >= 0.4 ? 'warn' : 'bad');
+  }
+
+  // Tasks: fetch and compute open/overdue
+  fetch('/api/tasks/all', {credentials: 'same-origin'})
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(d => {
+      const tasks = (d.tasks || []).filter(t => t.client_id === clientId);
+      const open = tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
+      const now = Date.now();
+      const overdue = open.filter(t => t.due_date && new Date(t.due_date).getTime() < now);
+      const openCls = open.length === 0 ? 'ok' : (open.length <= 5 ? 'warn' : 'bad');
+      const ovCls = overdue.length === 0 ? 'ok' : (overdue.length <= 2 ? 'warn' : 'bad');
+      setItem('hi-open', String(open.length), '', openCls);
+      setItem('hi-overdue', String(overdue.length), '', ovCls);
+      computeDot(ovCls);
+    })
+    .catch(e => {
+      setItem('hi-open', 'н/д', '', null);
+      setItem('hi-overdue', 'н/д', '', null);
+      errToast('Не удалось загрузить задачи для здоровья клиента');
+      computeDot(null);
+    });
+
+  // Upcoming meeting from timeline (closest future meeting)
+  fetch('/api/clients/' + clientId + '/timeline', {credentials: 'same-origin'})
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(d => {
+      const now = Date.now();
+      const upcoming = (d.events || [])
+        .filter(e => e.type === 'meeting' && e.iso_date && new Date(e.iso_date).getTime() > now)
+        .sort((a,b) => new Date(a.iso_date) - new Date(b.iso_date))[0];
+      if (upcoming) {
+        const days = Math.ceil((new Date(upcoming.iso_date).getTime() - now) / 86400000);
+        setItem('hi-upcoming', 'через ' + days + ' дн.', fmtDate(upcoming.iso_date), 'ok');
+      } else {
+        setItem('hi-upcoming', 'нет запланированных', '', 'warn');
+      }
+    })
+    .catch(e => { setItem('hi-upcoming', 'н/д', '', null); });
+
+  // Aggregate dot: worst of (last contact, overdue tasks, server health score)
+  function computeDot(overdueCls) {
+    const signals = [lcClass, overdueCls, scoreClass].filter(Boolean);
+    let dotCls = 'gray';
+    if (signals.includes('bad')) dotCls = 'red';
+    else if (signals.includes('warn')) dotCls = 'yellow';
+    else if (signals.length) dotCls = 'green';
+    const dot = document.getElementById('healthDot');
+    if (dot) { dot.classList.remove('gray','green','yellow','red'); dot.classList.add(dotCls); }
+  }
+  computeDot(null);
+})();
 </script>
 </body>
 </html>

@@ -251,21 +251,27 @@ async def lifespan(app: FastAPI):
             except Exception as _e:
                 logger.warning(f"Auto-migration warning: {_e}")
 
-        # Seed default admin if no users exist
+        # Seed default admin if no users exist (only from env vars — never log plaintext passwords)
         with SessionLocal() as db:
             if db.query(User).count() == 0:
-                import secrets, string
-                random_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
-                admin = User(
-                    email="admin@company.ru",
-                    first_name="Администратор",
-                    role="admin",
-                    hashed_password=hash_password(random_password),
-                    settings={},
-                )
-                db.add(admin)
-                db.commit()
-                logger.warning(f"✅ Default admin: admin@company.ru / {random_password} — CHANGE PASSWORD!")
+                seed_email = os.getenv("INITIAL_ADMIN_EMAIL")
+                seed_password = os.getenv("INITIAL_ADMIN_PASSWORD")
+                if seed_email and seed_password:
+                    admin = User(
+                        email=seed_email,
+                        first_name=os.getenv("INITIAL_ADMIN_NAME", "Администратор"),
+                        role="admin",
+                        hashed_password=hash_password(seed_password),
+                        settings={},
+                    )
+                    db.add(admin)
+                    db.commit()
+                    logger.info(f"✅ Seeded initial admin: {seed_email}")
+                else:
+                    logger.warning(
+                        "⚠️  No users in DB and INITIAL_ADMIN_EMAIL/INITIAL_ADMIN_PASSWORD not set — "
+                        "create an admin manually via CLI or set env vars before first boot."
+                    )
 
         logger.info("✅ Database ready")
 
@@ -296,7 +302,15 @@ async def lifespan(app: FastAPI):
 # APP SETUP
 # ============================================================================
 
-app = FastAPI(title="AM Hub", version="2.0.0", lifespan=lifespan)
+_IS_PROD = os.getenv("ENV", "development") == "production"
+app = FastAPI(
+    title="AM Hub",
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url=None if _IS_PROD else "/docs",
+    redoc_url=None if _IS_PROD else "/redoc",
+    openapi_url=None if _IS_PROD else "/openapi.json",
+)
 
 # ============================================================================
 # ROUTERS
@@ -402,12 +416,24 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(ErrorHandlingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
 app.add_middleware(LoggingMiddleware)
+_CORS_ORIGINS_RAW = os.getenv("ALLOWED_ORIGINS", "" if _IS_PROD else "*")
+if _CORS_ORIGINS_RAW == "*":
+    if _IS_PROD:
+        raise RuntimeError(
+            "ALLOWED_ORIGINS must be an explicit comma-separated list in production "
+            "— wildcard '*' with credentials is unsafe."
+        )
+    _cors_kwargs = {"allow_origins": ["*"], "allow_credentials": False}
+else:
+    _cors_kwargs = {
+        "allow_origins": [o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()],
+        "allow_credentials": True,
+    }
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    **_cors_kwargs,
 )
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -448,7 +474,14 @@ async def login_submit(
 
     token = create_access_token({"sub": str(user.id)})
     response = RedirectResponse(url="/dashboard", status_code=303)
-    response.set_cookie(key="auth_token", value=token, httponly=True, samesite="lax", max_age=86400 * 30)
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=_IS_PROD,
+        max_age=86400 * 30,
+    )
     return response
 
 

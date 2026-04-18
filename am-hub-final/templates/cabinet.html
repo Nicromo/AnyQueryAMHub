@@ -28,6 +28,20 @@
 .avail-row:hover{background:var(--surface-2);}
 .avail-row:last-child{border-bottom:none;}
 .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;}
+
+/* Blocked tasks widget */
+.blk-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-top:20px;}
+.blk-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;}
+.blk-title{font-size:.82rem;font-weight:600;display:flex;align-items:center;gap:6px;}
+.blk-count{background:var(--red-bg);color:var(--red);font-size:.68rem;font-weight:600;padding:2px 7px;border-radius:10px;}
+.blk-note{font-size:.68rem;color:var(--text-muted);}
+.blk-list{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;}
+.blk-row{display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);transition:border-color var(--t);cursor:pointer;}
+.blk-row:hover{border-color:var(--red);}
+.blk-row-body{flex:1;min-width:0;}
+.blk-row-title{font-size:.78rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.blk-row-meta{font-size:.68rem;color:var(--text-muted);margin-top:2px;}
+.blk-days{font-size:.68rem;font-weight:600;color:var(--red);white-space:nowrap;flex-shrink:0;}
 </style>
 
 <!-- Stats -->
@@ -69,6 +83,15 @@
   <div class="empty" style="grid-column:1/-1">
     <div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div>
   </div>
+</div>
+
+<!-- Blocked tasks widget -->
+<div class="blk-wrap" id="blk-wrap" style="display:none">
+  <div class="blk-head">
+    <div class="blk-title">🚧 Заблокированные задачи <span class="blk-count" id="blk-count">0</span></div>
+    <div class="blk-note" id="blk-note"></div>
+  </div>
+  <div class="blk-list" id="blk-list"></div>
 </div>
 
 <!-- Add clients modal -->
@@ -285,5 +308,72 @@ async function addClient(id, btn) {
   }
 }
 
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Blocked Tasks widget — primary signal: status==='blocked'; fallback: stale (created >7d, not done) */
+(async function loadBlockedTasks() {
+  try {
+    var r = await fetch('/api/tasks/all');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var d = await r.json();
+    var tasks = d.tasks || [];
+    var now = Date.now();
+    var DAY = 86400000;
+
+    var blocked = tasks.filter(function(t){ return t.status === 'blocked'; });
+    var note = '';
+
+    if (!blocked.length) {
+      // Fallback: stale tasks (created >7d ago, not done). Task model has no updated_at/blocker fields.
+      blocked = tasks.filter(function(t){
+        if (t.status === 'done') return false;
+        if (!t.due_date) return false;
+        var due = new Date(t.due_date).getTime();
+        return !isNaN(due) && (now - due) > 7 * DAY;
+      });
+      if (blocked.length) note = 'fallback: просрочено >7 дней (нет явного флага blocker)';
+    } else {
+      note = 'status = blocked';
+    }
+
+    if (!blocked.length) return; // No signal — widget stays hidden.
+
+    // Compute "days stuck" using due_date (if past-due) else created_at proxy, take top 10
+    blocked.sort(function(a, b){
+      var da = a.due_date ? new Date(a.due_date).getTime() : 0;
+      var db = b.due_date ? new Date(b.due_date).getTime() : 0;
+      return da - db;
+    });
+    blocked = blocked.slice(0, 10);
+
+    var wrap = document.getElementById('blk-wrap');
+    var list = document.getElementById('blk-list');
+    document.getElementById('blk-count').textContent = String(blocked.length);
+    document.getElementById('blk-note').textContent = note;
+
+    list.innerHTML = blocked.map(function(t) {
+      var ref = t.due_date ? new Date(t.due_date).getTime() : 0;
+      var days = ref ? Math.max(0, Math.floor((now - ref) / DAY)) : 0;
+      var daysLbl = days > 0 ? (days + ' дн.') : '—';
+      var cname = (t.client_name || '—').replace(/</g, '&lt;');
+      var ttl = (t.title || '—').replace(/</g, '&lt;');
+      var href = '/client/' + t.client_id;
+      return '<div class="blk-row" onclick="window.location=\'' + href + '\'">'
+        + '<div class="blk-row-body">'
+        +   '<div class="blk-row-title">' + ttl + '</div>'
+        +   '<div class="blk-row-meta">' + cname + (t.priority ? ' · ' + t.priority : '') + '</div>'
+        + '</div>'
+        + '<div class="blk-days">' + daysLbl + '</div>'
+        + '</div>';
+    }).join('');
+
+    wrap.style.display = '';
+  } catch (e) {
+    if (window.showToast) window.showToast('Не удалось загрузить заблокированные задачи: ' + e.message, 'err');
+  }
+})();
 </script>
 {% endblock %}
