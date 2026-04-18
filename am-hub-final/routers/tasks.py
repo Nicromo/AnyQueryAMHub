@@ -87,6 +87,37 @@ async def api_update_task(task_id: int, request: Request, db: Session = Depends(
     return {"ok": True}
 
 
+@router.delete("/api/tasks/{task_id}")
+async def api_delete_task(task_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404)
+    db.delete(task)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/tasks/{task_id}/snooze")
+async def api_snooze_task(task_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    """Отложить задачу на N дней (по умолчанию 1)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    days = int(body.get("days", 1))
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404)
+    base = task.due_date or datetime.utcnow()
+    task.due_date = base + timedelta(days=days)
+    db.commit()
+    return {"ok": True, "new_due_date": task.due_date.isoformat() if task.due_date else None}
+
+
 # ============================================================================
 # API: AI PROCESSING
 

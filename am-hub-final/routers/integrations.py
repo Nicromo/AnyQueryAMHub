@@ -36,7 +36,7 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
-@router.get("/api/integrations/test/merchrules")
+@router.api_route("/api/integrations/test/merchrules", methods=["GET", "POST"])
 async def test_merchrules(login: str = "", password: str = ""):
     if not login or not password:
         return {"error": "Need login and password"}
@@ -55,7 +55,7 @@ async def test_merchrules(login: str = "", password: str = ""):
 
 
 
-@router.get("/api/integrations/test/ktalk")
+@router.api_route("/api/integrations/test/ktalk", methods=["GET", "POST"])
 async def test_ktalk(space: str = "", token: str = ""):
     if not space or not token:
         return {"error": "Need space and token"}
@@ -323,7 +323,7 @@ async def api_ktalk_send_dm(
 
 # ── Integration tests ────────────────────────────────────────────────────────
 
-@router.get("/api/integrations/test/airtable")
+@router.api_route("/api/integrations/test/airtable", methods=["GET", "POST"])
 async def api_test_airtable(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token: raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -347,9 +347,9 @@ async def api_test_airtable(db: Session = Depends(get_db), auth_token: Optional[
 
 
 
-@router.get("/api/integrations/test/tbank_time")
+@router.api_route("/api/integrations/test/tbank_time", methods=["GET", "POST"])
 
-@router.get("/api/integrations/test/tbank")
+@router.api_route("/api/integrations/test/tbank", methods=["GET", "POST"])
 async def api_test_tbank(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token: raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -376,7 +376,7 @@ async def api_test_tbank(db: Session = Depends(get_db), auth_token: Optional[str
 
 
 
-@router.get("/api/integrations/test/{system}")
+@router.api_route("/api/integrations/test/{system}", methods=["GET", "POST"])
 async def api_test_integration_generic(system: str, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Заглушка для остальных систем."""
     return {"ok": False, "error": f"Тест для {system} не реализован"}
@@ -384,7 +384,7 @@ async def api_test_integration_generic(system: str, db: Session = Depends(get_db
 
 # ── Import CSV ───────────────────────────────────────────────────────────────
 
-@router.get("/api/integrations/test/outlook")
+@router.api_route("/api/integrations/test/outlook", methods=["GET", "POST"])
 async def api_test_outlook():
     """Тест подключения к Outlook."""
     from integrations.outlook import test_connection

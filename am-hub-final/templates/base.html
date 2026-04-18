@@ -446,6 +446,66 @@ async function markAllRead() {
   connect();
 })();
 
+// ── Global hotkeys & filters persistence ──────────────────────────────
+(function(){
+  // Сохраняем состояние фильтров каждой страницы (select/input внутри .filters)
+  const KEY = 'amhub:filters:' + location.pathname;
+  function saveFilters(){
+    const state = {};
+    document.querySelectorAll('.filters input, .filters select').forEach(el => {
+      if (el.name || el.id) state[el.name || el.id] = el.value;
+    });
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {}
+  }
+  function restoreFilters(){
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      document.querySelectorAll('.filters input, .filters select').forEach(el => {
+        const k = el.name || el.id;
+        if (k && state[k] !== undefined) el.value = state[k];
+      });
+    } catch(e) {}
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    restoreFilters();
+    document.querySelectorAll('.filters input, .filters select').forEach(el => {
+      el.addEventListener('change', saveFilters);
+    });
+  });
+
+  // Hotkeys: g d/c/t/m/s, n, /, ?
+  let chord = null;
+  let chordT = null;
+  const GO = { d:'/dashboard', c:'/clients', t:'/tasks', m:'/meetings', s:'/sync', a:'/analytics', p:'/portfolio', i:'/inbox' };
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable || t.tagName === 'SELECT')) return;
+    if (chord === 'g' && GO[e.key]) {
+      e.preventDefault(); location.href = GO[e.key]; chord = null; return;
+    }
+    if (e.key === 'g') {
+      chord = 'g'; clearTimeout(chordT);
+      chordT = setTimeout(() => { chord = null; }, 900); return;
+    }
+    if (e.key === 'n') {
+      // новая задача — открывает /tasks?new=1 (tasks.html может обработать)
+      e.preventDefault(); location.href = '/tasks?new=1'; return;
+    }
+    if (e.key === '/' ) {
+      e.preventDefault();
+      const inp = document.getElementById('cmd-input') || document.querySelector('input[type=search]');
+      if (inp) inp.focus();
+    }
+    if (e.key === '?' && e.shiftKey) {
+      e.preventDefault();
+      alert('Горячие клавиши:\n  g d — дашборд\n  g c — клиенты\n  g t — задачи\n  g m — встречи\n  g s — синк\n  g a — аналитика\n  g p — портфель\n  g i — инбокс\n  n — новая задача\n  / — поиск\n  Ctrl+K — командная строка');
+    }
+  });
+})();
+
 </script>
 <script>
 if ("serviceWorker" in navigator) {

@@ -48,6 +48,25 @@ from ai_assistant import generate_prep_brief, generate_smart_followup, detect_ac
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# Sentry — опционально, включается только если SENTRY_DSN есть в env
+_sentry_dsn = os.environ.get("SENTRY_DSN", "").strip()
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            environment=os.environ.get("RAILWAY_ENVIRONMENT", "dev"),
+            release=os.environ.get("RAILWAY_GIT_COMMIT_SHA", "unknown")[:12],
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.05")),
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+            send_default_pii=False,
+        )
+        logger.info("🛰️  Sentry initialized")
+    except Exception as _e:
+        logger.warning(f"Sentry init skipped: {_e}")
+
 
 # ============================================================================
 # ENV HELPERS — единый источник конфигурации
@@ -204,7 +223,16 @@ async def lifespan(app: FastAPI):
         with SessionLocal() as db:
             if db.query(User).count() == 0:
                 admin_email = os.environ.get("ADMIN_EMAIL", "admin")
-                admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+                admin_password = os.environ.get("ADMIN_PASSWORD", "")
+                _is_prod = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("PRODUCTION"))
+                if not admin_password:
+                    if _is_prod:
+                        raise RuntimeError(
+                            "ADMIN_PASSWORD env var is required in production. "
+                            "Set it to a strong password before starting the app."
+                        )
+                    admin_password = "admin123"
+                    logger.warning("⚠️  Using fallback admin password 'admin123' — OK for dev, NEVER for prod")
                 admin = User(
                     email=admin_email,
                     first_name="Администратор",
@@ -820,7 +848,33 @@ async def notifications_page(request: Request, db: Session = Depends(get_db), au
 
 @app.get("/health")
 async def health():
+    """Shallow health — для Railway healthcheck, не падает если зависимости лежат."""
     return {"status": "ok", "version": "2.0.0"}
+
+
+@app.get("/health/deep")
+async def health_deep():
+    """Глубокая проверка: БД, scheduler. Ожидаема для ручного/мониторинга."""
+    out = {"status": "ok", "version": "2.0.0", "checks": {}}
+    # DB
+    try:
+        from sqlalchemy import text as _text
+        with SessionLocal() as _db:
+            _db.execute(_text("SELECT 1"))
+        out["checks"]["db"] = "ok"
+    except Exception as e:
+        out["checks"]["db"] = f"fail: {str(e)[:120]}"
+        out["status"] = "degraded"
+    # Scheduler
+    try:
+        from scheduler import _get_scheduler
+        s = _get_scheduler()
+        out["checks"]["scheduler"] = "running" if s.running else "stopped"
+        out["checks"]["scheduled_jobs"] = len(s.get_jobs())
+    except Exception as e:
+        out["checks"]["scheduler"] = f"fail: {str(e)[:120]}"
+        out["status"] = "degraded"
+    return out
 
 
 # ============================================================================

@@ -20,7 +20,20 @@ from database import SessionLocal
 from models import User, AuditLog
 
 # Constants
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+_SECRET_KEY_DEFAULT = "your-secret-key-change-in-production"
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip() or _SECRET_KEY_DEFAULT
+_IS_PROD = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("PRODUCTION"))
+if _IS_PROD and SECRET_KEY == _SECRET_KEY_DEFAULT:
+    raise RuntimeError(
+        "SECRET_KEY env var is required in production. "
+        "Generate one with `python -c 'import secrets; print(secrets.token_urlsafe(64))'` "
+        "and set it before starting the app."
+    )
+if SECRET_KEY == _SECRET_KEY_DEFAULT:
+    import logging
+    logging.getLogger(__name__).warning(
+        "⚠️  Using fallback SECRET_KEY — OK for dev, NEVER for prod"
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 

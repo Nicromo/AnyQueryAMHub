@@ -16,7 +16,19 @@ def _get_scheduler():
     global _scheduler
     if _scheduler is None:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        _scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+        jobstores = {}
+        # Persistent jobstore: джобы не теряются при рестарте приложения.
+        # Таблица создаётся автоматически при первом запуске.
+        try:
+            from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+            from database import engine as _db_engine
+            jobstores["default"] = SQLAlchemyJobStore(
+                engine=_db_engine, tablename="scheduler_jobs"
+            )
+            logger.info("📦 APScheduler: using SQLAlchemyJobStore (persistent)")
+        except Exception as e:
+            logger.warning(f"APScheduler persistent jobstore unavailable, falling back to memory: {e}")
+        _scheduler = AsyncIOScheduler(timezone="Europe/Moscow", jobstores=jobstores or None)
     return _scheduler
 
 
@@ -370,6 +382,9 @@ async def job_sync_ktalk_meetings():
                     data = resp.json()
                     events = data.get("events") or data.get("items") or []
 
+                    # Кэш клиентов: один запрос на всю пачку событий вместо N×|events|
+                    _all_clients_cache = db.query(Client).all()
+
                     for e in events:
                         ext_id = f"ktalk_{e.get('id', '')}"
                         if not e.get("id"):
@@ -396,9 +411,9 @@ async def job_sync_ktalk_meetings():
                                 mtype = mt
                                 break
 
-                        # Ищем клиента
+                        # Ищем клиента (используем кэш — без N+1)
                         client = None
-                        all_clients = db.query(Client).all()
+                        all_clients = _all_clients_cache
                         participants = e.get("participants", [])
                         for c in all_clients:
                             if c.name.lower() in title_lower:

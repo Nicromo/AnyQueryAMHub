@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip "ruff==0.6.*"
+
+      - name: Ruff check (errors only)
+        run: ruff check am-hub-final/ --exit-non-zero-on-fix false
+
+      - name: Syntax check (py_compile)
+        run: |
+          find am-hub-final -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' -print0 \
+            | xargs -0 -n 50 python -m py_compile
+
+  check-js:
+    name: Check JS syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: node --check on every JS file
+        run: |
+          find am-hub-final/static -name '*.js' \
+            -not -path '*/node_modules/*' \
+            -not -path '*/lib/jspdf*' \
+            | xargs -I{} node --check {}
+
+  check-alembic:
+    name: Check Alembic migrations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f am-hub-final/requirements.txt ]; then
+            pip install -r am-hub-final/requirements.txt
+          fi
+
+      - name: alembic check
+        continue-on-error: true
+        working-directory: am-hub-final
+        run: alembic check
