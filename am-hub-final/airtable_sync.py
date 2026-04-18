@@ -256,6 +256,9 @@ async def sync_clients_from_airtable(
     """
     from models import Client
 
+    # Must declare global before any use of the variable in this scope
+    global AIRTABLE_BASE_ID
+
     use_token = token or AIRTABLE_TOKEN
     use_base = base_id or AIRTABLE_BASE_ID
     use_table = table_id or AIRTABLE_TABLE_ID
@@ -263,9 +266,6 @@ async def sync_clients_from_airtable(
         return {"ok": False, "error": "AIRTABLE_TOKEN не задан", "created": 0, "updated": 0, "skipped": 0, "errors": []}
     if not use_base or not use_table:
         return {"ok": False, "error": "AIRTABLE_BASE_ID/AIRTABLE_TABLE_ID не заданы", "created": 0, "updated": 0, "skipped": 0, "errors": []}
-
-    # Подменяем module-level переменные для _fetch_all_records (он их использует)
-    global AIRTABLE_BASE_ID
     _saved_base = AIRTABLE_BASE_ID
     AIRTABLE_BASE_ID = use_base
     try:
