@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <script src="../vendor/jspdf.umd.min.js"></script>
+  <script src="../vendor/jspdf.umd.min.js" onerror="console.warn('jsPDF not loaded — PDF export will be unavailable')"></script>
   <style>
     /* === design tokens — "signal" aesthetic === */
     :root{
