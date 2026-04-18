@@ -6,6 +6,24 @@
   <title>Добро пожаловать — AM Hub</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <style>
+    /* Design tokens override — warm dark + signal lime (см. static/design/tokens.css).
+       Переопределяем CSS-переменные из style.css, не трогая layout. */
+    :root, [data-theme="dark"] {
+      --bg:            oklch(0.18 0.010 70);
+      --bg-1:          oklch(0.14 0.008 70);
+      --bg-2:          oklch(0.22 0.012 70);
+      --text:          oklch(0.98 0.004 88);
+      --text-dim:      oklch(0.78 0.008 82);
+      --text-muted:    oklch(0.60 0.012 80);
+      --border:        oklch(0.27 0.010 70);
+      --border-s:      oklch(0.23 0.008 70);
+      --accent:        oklch(0.87 0.18 118);
+      --accent-ring:   color-mix(in oklch, oklch(0.87 0.18 118) 40%, transparent);
+      --accent-dim:    color-mix(in oklch, oklch(0.87 0.18 118) 14%, transparent);
+      --accent-glow:   color-mix(in oklch, oklch(0.87 0.18 118) 18%, transparent);
+      --accent-l:      oklch(0.92 0.10 118);
+    }
+
     html, body {
       height: 100%;
       min-height: 100vh;
@@ -17,8 +35,8 @@
       color: var(--text);
       background:
         radial-gradient(ellipse 70% 55% at 20% 0%, var(--accent-glow), transparent 60%),
-        radial-gradient(ellipse 60% 45% at 85% 95%, rgba(179,107,255,.22), transparent 60%),
-        radial-gradient(ellipse 80% 60% at 50% 50%, rgba(76,165,255,.1), transparent 70%),
+        radial-gradient(ellipse 60% 45% at 85% 95%, rgba(212,240,63,.12), transparent 60%),
+        radial-gradient(ellipse 80% 60% at 50% 50%, rgba(212,240,63,.06), transparent 70%),
         var(--bg);
       background-attachment: fixed;
       display: flex;
@@ -52,7 +70,7 @@
       position: relative;
       width: 100%;
       max-width: 640px;
-      background: linear-gradient(180deg, rgba(19,25,36,.92), rgba(13,17,23,.92));
+      background: linear-gradient(180deg, rgba(42,37,31,.92), rgba(34,30,26,.92));
       backdrop-filter: blur(20px);
       border: 1px solid var(--border-s);
       border-radius: var(--radius-xl);
@@ -141,7 +159,7 @@
       font-weight: 700;
       letter-spacing: -0.02em;
       margin-bottom: 12px;
-      background: linear-gradient(180deg, #fff, #c9d0e6);
+      background: linear-gradient(180deg, #fff, #ebe8e3);
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -208,7 +226,7 @@
       color: var(--text);
     }
     .onb-btn.primary {
-      background: linear-gradient(180deg, var(--accent), #6c79f1);
+      background: linear-gradient(180deg, var(--accent), #a5c42d);
       border-color: transparent;
       color: #fff;
       box-shadow: 0 6px 22px -6px var(--accent-glow);
@@ -453,17 +471,32 @@
       render();
     }
   };
+  // Отмечает онбординг завершённым И на клиенте (localStorage) И на сервере
+  // (user.settings.onboarding_complete через POST /onboarding/complete) — без
+  // серверного флага redirect в pages.py:dashboard вернёт обратно на /onboarding.
+  function markOnboardingComplete(value) {
+    try { localStorage.setItem('amhub_onboarded', value); } catch(e) {}
+    return fetch('/onboarding/complete', {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(function(){ /* network error — редирект всё равно делаем */ });
+  }
+
   window.skipOnboarding = function(){
-    try { localStorage.setItem('amhub_onboarded', 'skipped'); } catch(e) {}
-    window.location.replace('/dashboard');
+    markOnboardingComplete('skipped').finally(function(){
+      // Новый UI. Старый /dashboard тоже работает, но после онбординга
+      // пользователь с большей вероятностью хочет видеть новый /design/command.
+      window.location.replace('/design/command');
+    });
   };
   window.finish = function(){
     try {
-      localStorage.setItem('amhub_onboarded', 'true');
       var notify = document.getElementById('notifyToggle');
       if (notify) localStorage.setItem('amhub_notify_tg', notify.checked ? '1' : '0');
     } catch(e) {}
-    window.location.replace('/dashboard');
+    markOnboardingComplete('true').finally(function(){
+      window.location.replace('/design/command');
+    });
   };
 
   // Keyboard navigation
