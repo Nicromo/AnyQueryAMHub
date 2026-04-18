@@ -226,6 +226,25 @@ async def lifespan(app: FastAPI):
                         db.commit()
                         logger.info(f"✅ Auto-migrated: {table}.{col}")
 
+                # Fix column type mismatches (VARCHAR → TIMESTAMP/other)
+                _type_fixes = [
+                    ("meetings", "followup_sent_at", "character varying",
+                     "ALTER TABLE meetings ALTER COLUMN followup_sent_at TYPE TIMESTAMP USING followup_sent_at::TIMESTAMP"),
+                ]
+                for table, col, wrong_type, fix_sql in _type_fixes:
+                    row = db.execute(_text(
+                        f"SELECT data_type FROM information_schema.columns "
+                        f"WHERE table_name = '{table}' AND column_name = '{col}'"
+                    )).fetchone()
+                    if row and row[0] == wrong_type:
+                        try:
+                            db.execute(_text(fix_sql))
+                            db.commit()
+                            logger.info(f"✅ Fixed column type: {table}.{col} {wrong_type}→TIMESTAMP")
+                        except Exception as _te:
+                            db.rollback()
+                            logger.warning(f"⚠️ Type fix skipped {table}.{col}: {_te}")
+
                 # Создаём новые таблицы из миграции 002 если не существуют
                 _new_tables = {
                     "revenue_entries": """CREATE TABLE IF NOT EXISTS revenue_entries (

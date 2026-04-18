@@ -781,10 +781,18 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
     reminders_data   = dm.reminders_for_user(db, user, now)      if "reminders"      in needed else []
     qbr_data         = json.dumps(dm.qbr_calendar(db, user, now)) if "qbr_data"      in needed else "[]"
 
+    # Bundle cache-busting: use file mtime as version hash
+    _bundle_path = Path(__file__).parent.parent / "static" / "design" / "dist" / "bundle.js"
+    try:
+        _bundle_hash = str(int(_bundle_path.stat().st_mtime))
+    except Exception:
+        _bundle_hash = "1"
+
     return {
         "request":        request,
         "user":           user,
         "active_page":    page_id,
+        "bundle_hash":    _bundle_hash,
         "component_name": component,
         "breadcrumbs":    breadcrumbs,
         "page_title":     title,
