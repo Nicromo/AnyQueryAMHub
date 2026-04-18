@@ -31,6 +31,8 @@ from models import (
 from auth import decode_access_token, hash_password, verify_password, log_audit
 from deps import require_user, require_admin, optional_user
 from error_handlers import log_error
+from models import CHECKUP_INTERVALS
+from redis_cache import cache_get, cache_set, cache_del
 
 logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="templates")
@@ -102,7 +104,9 @@ async def api_notifications(db: Session = Depends(get_db), auth_token: Optional[
             "client_id": t.client_id,
         })
 
-    return {"notifications": notifications}
+    result = {"notifications": notifications}
+    cache_set(ck, result, ttl=120)
+    return result
 
 
 

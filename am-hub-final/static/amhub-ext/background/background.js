@@ -88,6 +88,8 @@ setTimeout(checkForUpdate, 5000);
 // ── Message router ────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   const handlers = {
+    // ── Wake-up ping (MV3 service worker keep-alive) ─────────────────────────
+    PING:             () => ({ pong: true }),
     // ── Hub ──────────────────────────────────────────────────────────────────
     RELOAD_CONFIG:    () => loadConfig().then(() => ({ ok: true })),
     CHECK_CONNECTION: () => checkConnection(),
