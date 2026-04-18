@@ -1158,6 +1158,56 @@ function PageInternal() {
   );
 }
 
+// ── Token field: shows/copies current auth token for extension ────────────
+function TokenField() {
+  const [token, setToken] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const load = () => {
+    setLoading(true); setError(null);
+    fetch("/api/auth/me/token", { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+      .then(d => setToken(d.token))
+      .catch(e => setError(String(e)))
+      .finally(() => setLoading(false));
+  };
+
+  const copy = () => {
+    if (!token) return;
+    try {
+      navigator.clipboard.writeText(token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+
+  if (!token) {
+    return (
+      <div style={{ padding: 10, background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 12, color: "var(--ink-7)", lineHeight: 1.5 }}>
+        <div style={{ marginBottom: 8 }}>
+          Токен из cookie <code className="mono" style={{ color: "var(--ink-9)" }}>auth_token</code> — нажмите, чтобы показать и скопировать.
+        </div>
+        {error && <div style={{ color: "var(--critical)", fontSize: 11, marginBottom: 6 }}>❌ {error}</div>}
+        <Btn size="s" kind="primary" onClick={load} disabled={loading}>
+          {loading ? "Загрузка..." : "🔑 Показать мой токен"}
+        </Btn>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      <input readOnly value={token} type="password"
+        style={{ flex: 1, padding: "8px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontFamily: "var(--f-mono)", fontSize: 12, outline: "none" }}/>
+      <Btn size="s" kind={copied ? "primary" : "ghost"} icon={<I.copy size={12}/>} onClick={copy}>
+        {copied ? "скопировано" : "копия"}
+      </Btn>
+    </div>
+  );
+}
+
 // ── Extension install page ────────────────────────────────
 function PageExtInstall() {
   const EXTS   = (typeof window !== "undefined" && window.__EXTENSIONS) || [];
@@ -1293,11 +1343,7 @@ function PageExtInstall() {
 
               <div>
                 <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>AM Hub · токен</div>
-                <div style={{ padding: 10, background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 12, color: "var(--ink-7)", lineHeight: 1.5 }}>
-                  Токен берётся из cookie <code className="mono" style={{ color: "var(--ink-9)" }}>auth_token</code> этого браузера
-                  при использовании Hub-API. Для расширения — сгенерируйте отдельный API-токен в
-                  разделе <span style={{ color: "var(--signal)" }}>Мой кабинет → API</span> (скоро).
-                </div>
+                <TokenField/>
               </div>
 
               <div>

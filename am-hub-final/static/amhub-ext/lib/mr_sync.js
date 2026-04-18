@@ -8,34 +8,52 @@ import { syncAccounts } from "./hub.js";
 
 const MR_BASE = "https://merchrules.any-platform.ru";
 
+// Recursively find a token-looking string in an object (depth-limited)
+function _findToken(obj, depth = 0) {
+  if (!obj || typeof obj !== "object" || depth > 3) return null;
+  const tokenKeys = ["token", "access_token", "accessToken", "jwt", "auth_token",
+                     "authToken", "id_token", "idToken", "sessionToken",
+                     "session_token", "bearer", "apiToken", "api_token"];
+  for (const k of tokenKeys) {
+    if (typeof obj[k] === "string" && obj[k].length > 10) return obj[k];
+  }
+  // Look inside nested objects
+  for (const k of Object.keys(obj)) {
+    const nested = _findToken(obj[k], depth + 1);
+    if (nested) return nested;
+  }
+  return null;
+}
+
 async function mrAuth() {
   const attempts = [];
-  for (const field of ["email", "login", "username"]) {
+  // username first — we know MR API requires this field
+  for (const field of ["username", "email", "login"]) {
     try {
       const r = await fetch(`${MR_BASE}/backend-v2/auth/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        credentials: "include",   // allow Set-Cookie session tokens
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD }),
       });
       if (r.ok) {
         const d = await r.json();
-        const token = d.token || d.access_token || d.accessToken;
+        const token = _findToken(d);
         if (token) return token;
-        attempts.push(`${field}:ok-but-no-token`);
+        // No body token — list response keys to help diagnose
+        const keys = Object.keys(d || {}).slice(0, 10).join(",");
+        attempts.push(`${field}:200 but no token field (keys: [${keys}])`);
       } else {
-        // Try to get error body for diagnostics
         let body = "";
-        try { body = (await r.text()).slice(0, 120); } catch {}
+        try { body = (await r.text()).slice(0, 140); } catch {}
         attempts.push(`${field}:HTTP ${r.status}${body ? ` — ${body}` : ""}`);
       }
     } catch (e) {
       attempts.push(`${field}:${e.message}`);
     }
   }
-  // Build informative error: if all returned 401/403 → credentials wrong; else → other issue
   const all401 = attempts.every(a => a.includes("HTTP 401") || a.includes("HTTP 403"));
-  if (all401) {
-    throw new Error("Merchrules: неверный логин или пароль");
-  }
+  if (all401) throw new Error("Merchrules: неверный логин или пароль");
   throw new Error("Merchrules auth failed: " + attempts.join(" | "));
 }
 
