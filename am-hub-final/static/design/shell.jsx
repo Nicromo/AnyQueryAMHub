@@ -200,13 +200,22 @@ function Sidebar({ active = "command", onNav }) {
         padding: "10px 12px",
         display: "flex", alignItems: "center", gap: 10,
       }}>
-        <Avatar name="Анна Соколова" size={28} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            Анна Соколова
-          </div>
-          <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>senior am · tier 1</div>
-        </div>
+        {(() => {
+          const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+          const name = U.name || U.email || "—";
+          const role = U.role || "user";
+          return (
+            <>
+              <Avatar name={name} size={28} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {name}
+                </div>
+                <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>{role}</div>
+              </div>
+            </>
+          );
+        })()}
         <button style={{ background: "transparent", border: 0, color: "var(--ink-6)", cursor: "pointer", padding: 6 }}>
           <I.gear size={15}/>
         </button>

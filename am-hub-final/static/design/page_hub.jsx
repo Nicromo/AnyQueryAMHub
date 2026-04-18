@@ -1,6 +1,48 @@
 // page_hub.jsx — Command Center
 
+// Форматёр цифр: 1234 → "1 234"
+function _fmt(n) {
+  if (n == null || isNaN(n)) return "—";
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+// Агрегат MRR по сегменту. Возвращает { label → сумма }.
+function _aggregateMrr(clients) {
+  const buckets = { "ENT/SME+": 0, "SME": 0, "SMB": 0, "SS": 0, "NEW": 0 };
+  (clients || []).forEach((c) => {
+    const m = Number(c.gmv && c.gmv.replace ? c.gmv.replace(/[^\d.]/g, "") : 0);
+    // gmv у нас строка "₽ 5.8м" — парсим ниже из raw-поля mrr, пока просто по сегменту
+    const seg = (c.seg || "").toUpperCase();
+    const bucket =
+      seg === "ENT" || seg === "SME+" ? "ENT/SME+" :
+      seg === "SME" || seg === "SME-" ? "SME" :
+      seg === "SMB" ? "SMB" :
+      seg === "SS" ? "SS" : "NEW";
+    buckets[bucket] = (buckets[bucket] || 0) + (m || 0);
+  });
+  return buckets;
+}
+
 function PageHub() {
+  const S  = (typeof window !== "undefined" && window.__SIDEBAR_STATS)  || {};
+  const CL = (typeof window !== "undefined" && window.CLIENTS)          || [];
+
+  // Сигналы — реальные клиенты в статусе risk/warn
+  const signals = CL
+    .filter((c) => c.status === "risk" || c.status === "warn")
+    .slice(0, 4)
+    .map((c) => ({
+      id: c.id,
+      tone: c.status === "risk" ? "critical" : "warn",
+      title: c.name,
+      note:
+        c.status === "risk"
+          ? `GMV ${c.delta || "—"}, ${c.days_since != null ? `чекап ${c.days_since} дн. назад` : c.stage}`
+          : `${c.stage || "проверить"} · ${c.next || "—"}`,
+      icon: c.status === "risk" ? "flame" : "eye",
+      meta: `${c.seg || "—"} · ${c.pm || "—"}`,
+    }));
+
   return (
     <div>
       <TopBar
@@ -34,13 +76,13 @@ function PageHub() {
 
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 22 }}>
 
-        {/* ── KPI row ──────────────────────────────────────── */}
+        {/* ── KPI row ── реальные цифры из __SIDEBAR_STATS ──── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
-          <KPI label="Клиентов в портфеле" value="248" delta="+6" sub="за неделю" />
-          <KPI label="Просрочено чекапов" value="3" tone="critical" delta="−2" sub="чем в понедельник" />
-          <KPI label="Скоро чекап" value="9" tone="warn" sub="в ближайшие 7 дней" />
-          <KPI label="Открытых задач" value="37" delta="−5" sub="−12% к прошлой неделе" />
-          <KPI label="Менеджеров онлайн" value="12" unit="/ 14" sub="команда tier-1 + 2" />
+          <KPI label="Клиентов в портфеле" value={_fmt(S.clientsTotal)} sub="в вашем скоупе" />
+          <KPI label="Просрочено чекапов" value={_fmt(S.overdue)} tone={S.overdue > 0 ? "critical" : undefined} sub={S.overdue > 0 ? "требуют действий" : "всё под контролем"} />
+          <KPI label="Скоро чекап" value={_fmt(S.dueCheckup)} tone={S.dueCheckup > 0 ? "warn" : undefined} sub="в ближайшие 7 дней" />
+          <KPI label="Открытых задач" value={_fmt(S.tasksActive)} sub="plan + in_progress + blocked" />
+          <KPI label="Входящих" value={_fmt(S.inbox || 0)} sub="непрочитанных" />
         </div>
 
         {/* ── Main grid ────────────────────────────────────── */}
@@ -49,22 +91,24 @@ function PageHub() {
           {/* LEFT COLUMN */}
           <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
 
-            {/* signals board */}
+            {/* signals board — клиенты со статусом risk/warn */}
             <Card title="Сигналы — требуют внимания" action={
               <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>
-                обновлено 42с назад
+                {signals.length} {signals.length === 1 ? "сигнал" : "сигналов"}
               </span>
             }>
+              {signals.length === 0 ? (
+                <div style={{ padding: "20px 0", color: "var(--ink-6)", fontSize: 13, textAlign: "center" }}>
+                  Сейчас нет клиентов в зоне риска — всё под контролем.
+                </div>
+              ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[
-                  { tone: "critical", title: "Aura Beauty", note: "GMV −18% за 7д, чекап просрочен на 2 дня", icon: "flame", meta: "A · с 2022" },
-                  { tone: "critical", title: "Nextfood Retail", note: "3 открытые задачи в статусе blocked", icon: "alert", meta: "B+ · tier-1" },
-                  { tone: "warn", title: "Kitchen Garden", note: "Договор не подписан, стартуют 22 апр", icon: "doc", meta: "B · onboarding" },
-                  { tone: "warn", title: "Gemini Shop", note: "Клиент давно не в сети · 12 дн", icon: "eye", meta: "B+ · активный" },
-                ].map((s, i) => {
-                  const Ic = I[s.icon];
+                {signals.map((s, i) => {
+                  const Ic = I[s.icon] || I.alert;
                   return (
-                    <div key={i} style={{
+                    <div key={i}
+                      onClick={() => { if (s.id) window.location.href = "/design/client/" + s.id; }}
+                      style={{
                       padding: 14,
                       background: "var(--ink-1)",
                       border: "1px solid var(--line)",
@@ -93,6 +137,7 @@ function PageHub() {
                   );
                 })}
               </div>
+              )}
             </Card>
 
             {/* portfolio pulse — chart */}
