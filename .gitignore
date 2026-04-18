@@ -22,3 +22,8 @@ am-hub-final/data/*.db-shm
 # Файл кредов
 ~/.search-checkup-creds.json
 *.credentials.json
+
+# Scratch-файлы от локальных аудит-агентов
+am-hub-final/check_*.py
+am-hub-final/*audit*.py
+am-hub-final/scratch_*.py
