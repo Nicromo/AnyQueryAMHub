@@ -5,7 +5,7 @@
 
 import { CONFIG, loadConfig } from "../lib/config.js";
 import { checkConnection, pushTokens } from "../lib/hub.js";
-import { doSync } from "../lib/mr_sync.js";
+import { doSync, testMrAuth } from "../lib/mr_sync.js";
 import { fetchCabinet, fetchQueries, fetchMerchRules, submitCheckupResults } from "../lib/hub.js";
 import { searchDiginetica } from "../lib/diginetica.js";
 import { analyzeQuery } from "../lib/analyzer.js";
@@ -65,7 +65,7 @@ async function checkForUpdate() {
 
     chrome.notifications.create("ext_update", {
       type: "basic",
-      iconUrl: "../icons/icon48.png",
+      iconUrl: chrome.runtime.getURL("icons/icon48.png"),
       title: `AM Hub: версия ${latest} доступна`,
       message: info.changelog || "Нажмите чтобы обновить расширение",
       buttons: [{ title: "Обновить" }],
@@ -98,6 +98,10 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     // ── MR Sync ──────────────────────────────────────────────────────────────
     SYNC_NOW:     () => runMrSync(true),
     GET_SYNC_STATUS: () => ({ ...syncState }),
+    TEST_MR_AUTH: async () => {
+      try { return await testMrAuth(); }
+      catch (e) { return { ok: false, error: e.message }; }
+    },
 
     // ── Checkup ──────────────────────────────────────────────────────────────
     GET_CHECKUP_STATE:   () => ({ ...checkup }),
@@ -154,8 +158,11 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 // ── Merchrules Sync ───────────────────────────────────────────────────────────
 async function runMrSync(manual = false) {
   if (!CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD || !CONFIG.HUB_URL) {
-    syncState = { status: "error", error: "Не настроены MR или Hub", lastSync: null, lastResult: null };
-    return { ok: false };
+    const msg = !CONFIG.HUB_URL ? "Не указан Hub URL в настройках"
+              : !CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD ? "Не указан логин/пароль Merchrules"
+              : "Настройки неполные";
+    syncState = { status: "error", error: msg, lastSync: null, lastResult: null };
+    return { ok: false, error: msg };
   }
   syncState.status = "running";
   try {
@@ -164,7 +171,7 @@ async function runMrSync(manual = false) {
     syncState = { status: "ok", lastSync: now, lastResult: result, error: null };
     if (manual) {
       chrome.notifications.create({
-        type: "basic", iconUrl: "icons/icon48.png",
+        type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),
         title: "AM Hub — Sync",
         message: `✅ ${result.clients_synced || 0} клиентов, ${result.tasks_synced || 0} задач`,
       });
@@ -174,7 +181,7 @@ async function runMrSync(manual = false) {
     syncState = { status: "error", error: e.message, lastSync: syncState.lastSync, lastResult: null };
     if (manual) {
       chrome.notifications.create({
-        type: "basic", iconUrl: "icons/icon48.png",
+        type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),
         title: "AM Hub — Ошибка Sync", message: e.message.slice(0, 100),
       });
     }

@@ -9,6 +9,7 @@ import { syncAccounts } from "./hub.js";
 const MR_BASE = "https://merchrules.any-platform.ru";
 
 async function mrAuth() {
+  const attempts = [];
   for (const field of ["email", "login", "username"]) {
     try {
       const r = await fetch(`${MR_BASE}/backend-v2/auth/login`, {
@@ -19,10 +20,23 @@ async function mrAuth() {
         const d = await r.json();
         const token = d.token || d.access_token || d.accessToken;
         if (token) return token;
+        attempts.push(`${field}:ok-but-no-token`);
+      } else {
+        // Try to get error body for diagnostics
+        let body = "";
+        try { body = (await r.text()).slice(0, 120); } catch {}
+        attempts.push(`${field}:HTTP ${r.status}${body ? ` — ${body}` : ""}`);
       }
-    } catch {}
+    } catch (e) {
+      attempts.push(`${field}:${e.message}`);
+    }
   }
-  throw new Error("Merchrules: авторизация не удалась — проверьте логин/пароль");
+  // Build informative error: if all returned 401/403 → credentials wrong; else → other issue
+  const all401 = attempts.every(a => a.includes("HTTP 401") || a.includes("HTTP 403"));
+  if (all401) {
+    throw new Error("Merchrules: неверный логин или пароль");
+  }
+  throw new Error("Merchrules auth failed: " + attempts.join(" | "));
 }
 
 async function mrGet(token, path, params = {}) {
@@ -31,6 +45,19 @@ async function mrGet(token, path, params = {}) {
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!r.ok) return null;
   return r.json();
+}
+
+// Lightweight auth-only check for UI "Test connection" button
+export async function testMrAuth() {
+  if (!CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD) {
+    throw new Error("Введите логин и пароль Merchrules");
+  }
+  const token = await mrAuth();
+  // Verify token works by fetching one account
+  const accData = await mrGet(token, "/backend-v2/accounts", { limit: 1 });
+  if (accData === null) throw new Error("Merchrules: авторизация прошла, но API вернул ошибку");
+  const accounts = accData?.accounts || accData?.items || (Array.isArray(accData) ? accData : []);
+  return { ok: true, accounts_total: accounts.length };
 }
 
 export async function doSync() {

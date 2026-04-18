@@ -485,16 +485,28 @@ async function exportCSV() {
 
 // ── Test MR ───────────────────────────────────────────────────────────────────
 async function testMR() {
-  showBox("s-mr-result", "⏳ Проверяем...", "warn");
-  const res = await safeSend({ type: "SYNC_NOW" }, 30000);
+  // First save current form values so background CONFIG is up-to-date
+  const get = id => { const el = document.getElementById(id); return el ? el.value : ""; };
+  try {
+    await chrome.storage.local.set({
+      mr_login:    get("s-mr-login").trim(),
+      mr_password: get("s-mr-pass"),
+    });
+  } catch (e) { /* non-fatal */ }
+  await safeSend({ type: "RELOAD_CONFIG" }, 3000);
+
+  showBox("s-mr-result", "⏳ Проверяем Merchrules...", "warn");
+  const res = await safeSend({ type: "TEST_MR_AUTH" }, 15000);
+
   if (!res || res.error === "timeout") {
-    showBox("s-mr-result", "⏳ Синхронизация запущена в фоне, проверьте через минуту", "warn");
+    showBox("s-mr-result", "❌ Расширение не отвечает — перезагрузите popup", "err");
     return;
   }
+
   showBox("s-mr-result",
     res.ok
-      ? `✅ OK · ${res.result?.clients_synced || 0} клиентов`
-      : "❌ " + (res.error || "Ошибка"),
+      ? `✅ Merchrules OK · найдено аккаунтов: ${res.accounts_total ?? "—"}`
+      : "❌ " + (res.error || "Неизвестная ошибка"),
     res.ok ? "ok" : "err"
   );
 }
