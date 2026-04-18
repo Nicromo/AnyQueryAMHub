@@ -9,6 +9,7 @@ import { syncAccounts } from "./hub.js";
 const MR_BASE = "https://merchrules.any-platform.ru";
 
 async function mrAuth() {
+  const attempts = [];
   for (const field of ["email", "login", "username"]) {
     try {
       const r = await fetch(`${MR_BASE}/backend-v2/auth/login`, {
@@ -19,10 +20,23 @@ async function mrAuth() {
         const d = await r.json();
         const token = d.token || d.access_token || d.accessToken;
         if (token) return token;
+        attempts.push(`${field}:ok-but-no-token`);
+      } else {
+        // Try to get error body for diagnostics
+        let body = "";
+        try { body = (await r.text()).slice(0, 120); } catch {}
+        attempts.push(`${field}:HTTP ${r.status}${body ? ` — ${body}` : ""}`);
       }
-    } catch {}
+    } catch (e) {
+      attempts.push(`${field}:${e.message}`);
+    }
   }
-  throw new Error("Merchrules: авторизация не удалась — проверьте логин/пароль");
+  // Build informative error: if all returned 401/403 → credentials wrong; else → other issue
+  const all401 = attempts.every(a => a.includes("HTTP 401") || a.includes("HTTP 403"));
+  if (all401) {
+    throw new Error("Merchrules: неверный логин или пароль");
+  }
+  throw new Error("Merchrules auth failed: " + attempts.join(" | "));
 }
 
 async function mrGet(token, path, params = {}) {

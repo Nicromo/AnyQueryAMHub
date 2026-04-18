@@ -65,7 +65,7 @@ async function checkForUpdate() {
 
     chrome.notifications.create("ext_update", {
       type: "basic",
-      iconUrl: "../icons/icon48.png",
+      iconUrl: chrome.runtime.getURL("icons/icon48.png"),
       title: `AM Hub: версия ${latest} доступна`,
       message: info.changelog || "Нажмите чтобы обновить расширение",
       buttons: [{ title: "Обновить" }],
@@ -171,7 +171,7 @@ async function runMrSync(manual = false) {
     syncState = { status: "ok", lastSync: now, lastResult: result, error: null };
     if (manual) {
       chrome.notifications.create({
-        type: "basic", iconUrl: "icons/icon48.png",
+        type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),
         title: "AM Hub — Sync",
         message: `✅ ${result.clients_synced || 0} клиентов, ${result.tasks_synced || 0} задач`,
       });
@@ -181,7 +181,7 @@ async function runMrSync(manual = false) {
     syncState = { status: "error", error: e.message, lastSync: syncState.lastSync, lastResult: null };
     if (manual) {
       chrome.notifications.create({
-        type: "basic", iconUrl: "icons/icon48.png",
+        type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),
         title: "AM Hub — Ошибка Sync", message: e.message.slice(0, 100),
       });
     }
