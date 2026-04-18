@@ -668,8 +668,24 @@ async def job_morning_plan():
                     msg += f"  <i>…ещё {len(user_tasks)-5}</i>\n"
                 msg += "\n"
 
-            if overdue:
-                msg += f"<b>🔴 Просроченных чекапов: {len(overdue)}</b>\n"
+            user_overdue = overdue
+            if user.role == "manager":
+                user_overdue = [o for o in overdue if o.client and o.client.manager_email == user.email]
+            if user_overdue:
+                msg += f"<b>🔴 Просроченных чекапов: {len(user_overdue)}</b>\n"
+
+            # Health-критические клиенты
+            user_clients_q = db.query(Client)
+            if user.role == "manager":
+                user_clients_q = user_clients_q.filter(Client.manager_email == user.email)
+            critical = [c for c in user_clients_q.all() if (c.health_score or 0) < 0.4]
+            if critical:
+                msg += f"<b>⚠️ Health &lt; 40%: {len(critical)}</b>\n"
+                for c in critical[:3]:
+                    h = round((c.health_score or 0) * 100)
+                    msg += f"• {c.name} — {h}%\n"
+                if len(critical) > 3:
+                    msg += f"  <i>…ещё {len(critical)-3}</i>\n"
 
             app_url = os.environ.get("APP_URL", "/today")
             msg += f"\n<a href=\"{app_url}\">📱 Открыть AM Hub</a>"
