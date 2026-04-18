@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "AM Hub Sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Синхронизация данных из Merchrules в AM Hub",
+  "update_url": "https://raw.githubusercontent.com/Nicromo/AnyQueryAMHub/master/extension/updates.xml",
   "permissions": [
     "storage",
     "alarms",

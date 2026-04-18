@@ -1,0 +1,15 @@
+{
+  "name": "amhub-sync-extension",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AM Hub · Sync — Chrome extension build/pack scripts",
+  "scripts": {
+    "pack": "node pack.mjs",
+    "bump:patch": "node pack.mjs --bump patch",
+    "bump:minor": "node pack.mjs --bump minor"
+  },
+  "devDependencies": {
+    "crx": "^5.0.1"
+  }
+}

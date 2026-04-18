@@ -208,21 +208,52 @@ git push                 # Railway подхватит
 - Ручной resync по кнопке в header (⟲)
 - Bundled Inter Tight / JetBrains Mono (без CDN)
 
-### Пересобрать ZIP (после правок)
+### Auto-update через git (Chrome native)
+
+Расширение **самообновляется** у всех пользователей, когда вы пушите новую версию в master. Работает через стандартный Chrome-механизм `update_url` + подписанный `.crx` + `updates.xml` на raw.githubusercontent.
+
+**Первоначальная настройка (один раз):**
 
 ```bash
 cd extension
-python -c "
-import zipfile, os
-os.chdir('.')
-with zipfile.ZipFile('amhub-sync.zip', 'w', zipfile.ZIP_DEFLATED) as z:
-    for root, dirs, files in os.walk('.'):
-        for f in files:
-            if f == 'amhub-sync.zip': continue
-            p = os.path.join(root, f)
-            z.write(p, os.path.relpath(p))
-"
+npm install          # ставит crx (dev-зависимость)
+npm run pack         # генерит key.pem + amhub-sync.crx + updates.xml
 ```
+
+**⚠️ `key.pem` в `.gitignore`** — храните его безопасно (в password manager или секретном storage команды). Без него вы не сможете выпускать обновления, а **потеря ключа** сменит Extension ID — все пользователи потеряют установленное.
+
+**Выпуск новой версии:**
+
+```bash
+cd extension
+npm run bump:patch            # 1.0.1 → 1.0.2 + rebuild .crx + updates.xml
+# или
+npm run bump:minor            # 1.0.x → 1.1.0
+
+git add extension/manifest.json extension/amhub-sync.crx extension/updates.xml
+git commit -m "ext: v1.0.2 — что изменилось"
+git push
+```
+
+Через ~5 часов Chrome всех установивших пользователей опросит `updates.xml`, увидит новую версию и подтянет `.crx`.
+
+**Форсированная проверка** (у пользователя):
+- `chrome://extensions` → включить Developer mode → нажать "Обновить"
+
+**Установка для конечного пользователя** (первый раз):
+1. Скачать `extension/amhub-sync.crx` из репо
+2. Перетащить файл в `chrome://extensions` (Developer mode включён)
+3. Подтвердить установку
+4. Дальше — расширение будет обновляться само, `.zip` не нужен
+
+**Альтернатива для dev-режима** (если не хотите .crx):
+1. `git clone` репо
+2. `chrome://extensions` → Load unpacked → выбрать папку `extension/`
+3. После `git pull` — вручную нажать "Обновить"
+
+**Почему два артефакта (`.crx` и `.zip`)?**
+- `.crx` — для end-users с auto-update
+- `.zip` — для Web Store загрузки или ручной unpacked-установки без ключа
 
 ---
 
