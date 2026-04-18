@@ -2,49 +2,21 @@
  * popup.js — логика единого AM Hub popup
  */
 
-import { jsPDF } from "../lib/jspdf.umd.min.js";
+// jsPDF loaded globally via <script src="../vendor/jspdf.umd.min.js"> in popup.html
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 const TABS = ["sync","checkup","settings"];
-function switchTab(tab, btn) {
+window.switchTab = function(tab, btn) {
   TABS.forEach(t => {
     document.getElementById(`t-${t}`).classList.toggle("hidden", t !== tab);
   });
   document.querySelectorAll(".tab").forEach(b => b.classList.remove("act"));
   btn.classList.add("act");
   if (tab === "sync") refreshSyncStatus();
-}
-
-// ── Delegated click handler (MV3 CSP запрещает inline onclick) ────────────────
-const ACTIONS = {
-  "switch-tab":    (el, arg) => switchTab(arg, el),
-  "sync-now":      () => window.syncNow(),
-  "open-hub":      () => window.openHub(),
-  "open-time":     () => window.openTime(),
-  "open-ktalk":    () => window.openKtalk(),
-  "load-cabinet":  () => window.loadCabinet(),
-  "set-qtype":     (el, arg) => window.setQType(arg, el),
-  "set-product":   (el, arg) => window.setProduct(arg, el),
-  "run-check":     () => window.runCheck(),
-  "run-cal":       () => window.runCal(),
-  "gen-pdf":       () => window.genPDF(),
-  "export-csv":    () => window.exportCSV(),
-  "save-settings": () => window.saveSettings(),
-  "test-mr":       () => window.testMR(),
 };
-
-function wireActions() {
-  document.body.addEventListener("click", e => {
-    const t = e.target.closest("[data-act]");
-    if (!t) return;
-    const fn = ACTIONS[t.dataset.act];
-    if (fn) fn(t, t.dataset.arg);
-  });
-}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  wireActions();
   await loadSettings();
   checkHubConnection();
   refreshSyncStatus();
@@ -179,7 +151,7 @@ window.loadCabinet = async function() {
     const labels = { sort: "🔍 Sort", autocomplete: "⌨ Auto", recommendations: "⭐ Rec" };
     const cls    = { sort: "p-sort", autocomplete: "p-auto", recommendations: "p-rec" };
     prodEl.innerHTML = products.map((p, i) =>
-      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" data-act="set-product" data-arg="${p}">${labels[p]||p}</span>`
+      `<span class="prod-chip ${cls[p]||''} ${i===0?'prod-act':''}" onclick="setProduct('${p}',this)">${labels[p]||p}</span>`
     ).join("");
   }
 
@@ -263,18 +235,18 @@ function renderResults(results) {
         <div class="ri-top">
           <span class="badge ${BCLS[sc]}">${sc}</span>
           <div class="ri-q">${r.query}</div>
-          ${r.impressions ? `<span style="font-size:.65rem;color:#6b6860">${r.impressions}</span>` : ""}
+          ${r.impressions ? `<span style="font-size:.65rem;color:#4c567a">${r.impressions}</span>` : ""}
         </div>
         ${r.reason ? `<div class="ri-reason">${r.reason}</div>` : ""}
         ${recs||ai ? `<div class="ri-recs">${recs}${ai}</div>` : ""}
       </div>`;
-    }).join("") + (results.length > 15 ? `<div style="font-size:.7rem;color:#6b6860;text-align:center;padding:6px">...ещё ${results.length-15} запросов в отчёте</div>` : "");
+    }).join("") + (results.length > 15 ? `<div style="font-size:.7rem;color:#4c567a;text-align:center;padding:6px">...ещё ${results.length-15} запросов в отчёте</div>` : "");
 }
 
 window.genPDF = async function() {
   if (!ckResults.length) return;
   const state = await chrome.runtime.sendMessage({ type: "GET_CHECKUP_STATE" });
-  const { jsPDF: PDF } = window.jspdf || { jsPDF };
+  const { jsPDF: PDF } = window.jspdf;
   const doc = new PDF();
   let y = 20;
   doc.setFontSize(16); doc.text("AM Hub — Search Quality Checkup", 14, y); y += 8;

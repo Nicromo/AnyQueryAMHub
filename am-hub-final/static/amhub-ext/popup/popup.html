@@ -2,91 +2,123 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <script src="../vendor/jspdf.umd.min.js"></script>
   <style>
+    /* === design tokens — "signal" aesthetic === */
+    :root{
+      --ink-0:oklch(.14 .008 70);--ink-1:oklch(.18 .010 70);--ink-2:oklch(.22 .012 70);
+      --ink-3:oklch(.27 .014 72);--ink-4:oklch(.34 .015 75);--ink-5:oklch(.45 .015 78);
+      --ink-6:oklch(.60 .012 80);--ink-7:oklch(.78 .008 82);--ink-8:oklch(.92 .006 85);--ink-9:oklch(.98 .004 88);
+      --line:oklch(.27 .010 70);--line-soft:oklch(.23 .008 70);
+      --signal:oklch(.87 .18 118);--signal-dim:oklch(.55 .14 118);--signal-glow:oklch(.87 .18 118/.18);
+      --critical:oklch(.68 .22 27);--warn:oklch(.80 .15 72);--info:oklch(.72 .12 230);--ok:oklch(.78 .14 155);
+      --f-display:"Inter Tight",ui-sans-serif,system-ui,sans-serif;
+      --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+      --r-s:3px;--r-m:4px;--r-l:8px;
+    }
+
     *{box-sizing:border-box;margin:0;padding:0}
-    body{width:420px;max-height:620px;overflow-y:auto;font-family:'Segoe UI',system-ui,sans-serif;background:#1a1715;color:#ebe8e3}
-    ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#1e2840;border-radius:2px}
+    body{width:420px;max-height:640px;overflow-y:auto;font-family:var(--f-display);font-size:13px;background:var(--ink-1);color:var(--ink-8);-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
+    ::-webkit-scrollbar{width:8px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:var(--ink-3);border-radius:999px;border:2px solid var(--ink-1)}
+    .mono{font-family:var(--f-mono);font-feature-settings:"zero","ss01"}
 
     /* Header */
-    .hdr{background:#221e1a;border-bottom:1px solid rgba(255,255,255,.06);padding:12px 14px;display:flex;align-items:center;gap:10px}
-    .logo{width:30px;height:30px;background:linear-gradient(135deg,#d4f03f,#b3d43f);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:700;color:#fff;flex-shrink:0}
-    .hdr-title{font-size:.9rem;font-weight:700;letter-spacing:-.02em}
-    .hdr-sub{font-size:.68rem;color:#6b6860;margin-top:1px}
-    .hub-status{margin-left:auto;display:flex;align-items:center;gap:5px;font-size:.7rem}
-    .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-    .dot-ok{background:#23d18b;box-shadow:0 0 5px rgba(35,209,139,.5)}
-    .dot-err{background:#f0556a}
-    .dot-idle{background:#6b6860}
-    .dot-run{background:#f5a623;animation:blink .8s infinite}
+    .hdr{background:var(--ink-0);border-bottom:1px solid var(--line-soft);padding:14px 16px;display:flex;align-items:center;gap:10px}
+    .logo{width:26px;height:26px;background:var(--signal);color:var(--ink-0);border-radius:var(--r-m);display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-weight:700;font-size:13px;letter-spacing:-.5px;flex-shrink:0}
+    .hdr-title{font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--ink-9)}
+    .hdr-sub{font-family:var(--f-mono);font-size:9.5px;color:var(--ink-5);text-transform:uppercase;letter-spacing:.1em;margin-top:2px}
+    .hub-status{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink-6);font-family:var(--f-mono);text-transform:uppercase;letter-spacing:.08em}
+    .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--ink-5)}
+    .dot-ok{background:var(--ok);box-shadow:0 0 6px color-mix(in oklch,var(--ok) 50%,transparent)}
+    .dot-err{background:var(--critical)}
+    .dot-idle{background:var(--ink-5)}
+    .dot-run{background:var(--warn);animation:blink .8s infinite}
     @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 
     /* Tabs */
-    .tabs{display:flex;border-bottom:1px solid rgba(255,255,255,.06);background:#221e1a}
-    .tab{flex:1;padding:9px 6px;font-size:.72rem;font-weight:600;text-align:center;cursor:pointer;color:#6b6860;border-bottom:2px solid transparent;transition:all .14s}
-    .tab:hover{color:#9c9a94}
-    .tab.act{color:#ebe8e3;border-bottom-color:#d4f03f}
+    .tabs{display:flex;border-bottom:1px solid var(--line-soft);background:var(--ink-0)}
+    .tab{flex:1;padding:10px 6px;font-family:var(--f-mono);font-size:10.5px;font-weight:600;text-align:center;cursor:pointer;color:var(--ink-5);border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:.08em;transition:all .16s cubic-bezier(.22,1,.36,1)}
+    .tab:hover{color:var(--ink-7)}
+    .tab.act{color:var(--ink-9);border-bottom-color:var(--signal)}
 
     /* Sections */
-    .sec{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.04)}
+    .sec{padding:14px 16px;border-bottom:1px solid var(--line-soft)}
     .sec:last-child{border-bottom:none}
-    .sec-title{font-size:.68rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#6b6860;margin-bottom:8px}
+    .sec-title{font-family:var(--f-mono);font-size:9.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-5);margin-bottom:10px}
+    .sec-title::before{content:"── "}
 
-    lbl{display:block;font-size:.68rem;font-weight:600;color:#9c9a94;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
-    input,select,textarea{width:100%;background:#221e1a;border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:7px 10px;color:#ebe8e3;font-size:.8rem;font-family:inherit;outline:none;transition:border-color .14s}
-    input:focus,select:focus{border-color:rgba(212,240,63,.5)}
-    input::placeholder{color:#6b6860}
-    textarea{resize:vertical;min-height:52px}
+    lbl{display:block;font-family:var(--f-mono);font-size:9.5px;font-weight:500;color:var(--ink-5);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+    input,select,textarea{width:100%;background:var(--ink-2);border:1px solid var(--line);border-radius:var(--r-m);padding:8px 10px;color:var(--ink-8);font-size:12px;font-family:var(--f-mono);outline:none;transition:border-color .16s}
+    input:focus,select:focus,textarea:focus{border-color:var(--signal-dim)}
+    input::placeholder,textarea::placeholder{color:var(--ink-5)}
+    textarea{resize:vertical;min-height:56px}
 
-    .btn{width:100%;padding:8px;border-radius:7px;border:none;cursor:pointer;font-size:.8rem;font-weight:700;transition:all .13s;display:flex;align-items:center;justify-content:center;gap:5px}
-    .btn-p{background:#d4f03f;color:#fff}
-    .btn-p:hover{filter:brightness(1.1)}
-    .btn-p:disabled{opacity:.45;cursor:not-allowed}
-    .btn-s{background:rgba(255,255,255,.05);color:#9c9a94;border:1px solid rgba(255,255,255,.08)}
-    .btn-s:hover{background:rgba(255,255,255,.08);color:#ebe8e3}
-    .btn-g{background:#23d18b;color:#1a1715}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
-    .gap{margin-top:7px}
+    .btn{width:100%;padding:9px 12px;border-radius:var(--r-m);border:1px solid transparent;cursor:pointer;font-size:12px;font-weight:500;font-family:var(--f-display);transition:all .14s;display:flex;align-items:center;justify-content:center;gap:6px;letter-spacing:-.005em}
+    .btn-p{background:var(--signal);color:var(--ink-0);font-weight:600}
+    .btn-p:hover{filter:brightness(1.08)}
+    .btn-p:disabled{opacity:.4;cursor:not-allowed}
+    .btn-s{background:var(--ink-2);color:var(--ink-7);border-color:var(--line)}
+    .btn-s:hover{background:var(--ink-3);color:var(--ink-9)}
+    .btn-g{background:var(--ok);color:var(--ink-0);font-weight:600}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+    .gap{margin-top:8px}
 
-    /* Status card */
-    .status-card{background:#221e1a;border:1px solid rgba(255,255,255,.06);border-radius:9px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+    /* Status card — design: left-accent border + round icon slot */
+    .status-card{background:var(--ink-2);border:1px solid var(--line);border-left:2px solid var(--ink-5);border-radius:var(--r-m);padding:11px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+    .status-card.ok{border-left-color:var(--ok)}
+    .status-card.err{border-left-color:var(--critical)}
+    .status-card.run{border-left-color:var(--warn)}
     .status-info{flex:1;min-width:0}
-    .status-label{font-size:.78rem;font-weight:500}
-    .status-sub{font-size:.68rem;color:#6b6860;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .status-label{font-size:13px;font-weight:500;color:var(--ink-9);letter-spacing:-.01em}
+    .status-sub{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-5);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
     /* Result / error boxes */
-    .box{padding:8px 10px;border-radius:7px;font-size:.75rem;margin-top:8px;line-height:1.5}
-    .box-ok{background:rgba(35,209,139,.08);border:1px solid rgba(35,209,139,.2);color:#23d18b}
-    .box-err{background:rgba(240,85,106,.08);border:1px solid rgba(240,85,106,.2);color:#f0556a}
-    .box-warn{background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);color:#f5a623}
+    .box{padding:9px 11px;border-radius:var(--r-m);font-size:11.5px;margin-top:8px;line-height:1.5;font-family:var(--f-mono)}
+    .box-ok{background:color-mix(in oklch,var(--ok) 10%,transparent);border:1px solid color-mix(in oklch,var(--ok) 25%,transparent);color:var(--ok)}
+    .box-err{background:color-mix(in oklch,var(--critical) 10%,transparent);border:1px solid color-mix(in oklch,var(--critical) 25%,transparent);color:var(--critical)}
+    .box-warn{background:color-mix(in oklch,var(--warn) 10%,transparent);border:1px solid color-mix(in oklch,var(--warn) 25%,transparent);color:var(--warn)}
 
     /* Checkup specific */
-    .qtype-tabs{display:flex;gap:4px;margin-bottom:8px}
-    .qtab{flex:1;padding:5px 3px;font-size:.68rem;font-weight:700;text-align:center;border:1px solid rgba(255,255,255,.08);border-radius:5px;cursor:pointer;color:#9c9a94;background:transparent;transition:all .13s}
-    .qtab.act{background:#221e1a;color:#ebe8e3;border-color:#d4f03f}
-    .prog{height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;margin:7px 0}
-    .prog-f{height:100%;background:#d4f03f;border-radius:2px;transition:width .3s}
-    .prog-t{font-size:.68rem;color:#6b6860;text-align:center;margin-top:2px}
-    .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:9px}
-    .sc{border-radius:6px;padding:6px 4px;text-align:center}
-    .sc .n{font-size:1.1rem;font-weight:800}.sc .l{font-size:.6rem;font-weight:600;margin-top:1px}
-    .s0{background:rgba(240,85,106,.12);color:#f0556a}.s1{background:rgba(245,166,35,.12);color:#f5a623}
-    .s2{background:rgba(76,165,255,.12);color:#4ca5ff}.s3{background:rgba(35,209,139,.12);color:#23d18b}
-    .sa{background:rgba(212,240,63,.12);color:#d4f03f}
-    .ri{background:#221e1a;border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:8px 10px;margin-bottom:4px;cursor:pointer}
-    .ri:hover{border-color:rgba(212,240,63,.2)}
-    .ri-top{display:flex;align-items:center;gap:7px}
-    .ri-q{font-weight:700;font-size:.8rem;flex:1}
-    .ri-reason{font-size:.7rem;color:#9c9a94;margin-top:3px;line-height:1.35}
-    .ri-recs{margin-top:5px;padding:5px 8px;background:rgba(212,240,63,.06);border-radius:5px;border:1px solid rgba(212,240,63,.1)}
-    .ri-rec{font-size:.7rem;margin-bottom:3px;line-height:1.3;color:#9c9a94}
-    .ri-rec b{color:#ebe8e3}.ri-rec.ai{color:#b3d43f}
-    .badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;font-size:.65rem;font-weight:700}
-    .b0{background:rgba(240,85,106,.15);color:#f0556a}.b1{background:rgba(245,166,35,.15);color:#f5a623}
-    .b2{background:rgba(76,165,255,.15);color:#4ca5ff}.b3{background:rgba(35,209,139,.15);color:#23d18b}
-    .prod-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:4px;font-size:.65rem;font-weight:700;cursor:pointer;border:1px solid transparent}
-    .prod-act{border-color:rgba(212,240,63,.3)!important;background:rgba(212,240,63,.12)!important;color:#d4f03f!important}
-    .p-sort{background:rgba(35,209,139,.1);color:#23d18b}.p-auto{background:rgba(245,166,35,.1);color:#f5a623}.p-rec{background:rgba(76,165,255,.1);color:#4ca5ff}
+    .qtype-tabs{display:flex;gap:4px;margin-bottom:10px}
+    .qtab{flex:1;padding:6px 4px;font-family:var(--f-mono);font-size:10px;font-weight:500;text-align:center;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer;color:var(--ink-6);background:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;transition:all .14s}
+    .qtab.act{background:var(--ink-3);color:var(--ink-9);border-color:var(--signal-dim)}
+    .prog{height:3px;background:var(--ink-2);border-radius:2px;overflow:hidden;margin:8px 0}
+    .prog-f{height:100%;background:var(--signal);border-radius:2px;transition:width .3s}
+    .prog-t{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-5);text-align:center;margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
+    .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px;padding:10px;background:var(--ink-2);border:1px solid var(--line);border-radius:var(--r-m)}
+    .sc{text-align:center}
+    .sc .n{font-family:var(--f-mono);font-size:18px;font-weight:500;letter-spacing:-.02em}
+    .sc .l{font-family:var(--f-mono);font-size:9px;font-weight:500;margin-top:2px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-5)}
+    .s0{color:var(--critical)}.s1{color:var(--warn)}
+    .s2{color:var(--info)}.s3{color:var(--ok)}
+    .sa{color:var(--signal)}
+    .ri{background:var(--ink-2);border:1px solid var(--line);border-radius:var(--r-m);padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:border-color .14s}
+    .ri:hover{border-color:var(--signal-dim)}
+    .ri-top{display:flex;align-items:center;gap:8px}
+    .ri-q{font-weight:500;font-size:12.5px;color:var(--ink-9);flex:1;letter-spacing:-.01em}
+    .ri-reason{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-6);margin-top:4px;line-height:1.4}
+    .ri-recs{margin-top:6px;padding:7px 9px;background:var(--ink-3);border-radius:var(--r-s);border:1px solid var(--line-soft)}
+    .ri-rec{font-size:11px;margin-bottom:3px;line-height:1.35;color:var(--ink-6)}
+    .ri-rec b{color:var(--ink-8)}.ri-rec.ai{color:var(--signal)}
+    .badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:var(--r-s);font-family:var(--f-mono);font-size:9.5px;font-weight:500;text-transform:uppercase;letter-spacing:.06em}
+    .b0{background:color-mix(in oklch,var(--critical) 15%,transparent);color:var(--critical)}
+    .b1{background:color-mix(in oklch,var(--warn) 15%,transparent);color:var(--warn)}
+    .b2{background:color-mix(in oklch,var(--info) 15%,transparent);color:var(--info)}
+    .b3{background:color-mix(in oklch,var(--ok) 15%,transparent);color:var(--ok)}
+    .prod-chip{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:var(--r-s);font-family:var(--f-mono);font-size:10px;font-weight:500;cursor:pointer;border:1px solid var(--line);background:var(--ink-2);color:var(--ink-6);text-transform:uppercase;letter-spacing:.06em}
+    .prod-act{border-color:var(--signal-dim)!important;background:var(--ink-3)!important;color:var(--ink-9)!important}
+    .p-sort{color:var(--ok)}.p-auto{color:var(--warn)}.p-rec{color:var(--info)}
+
+    /* Links */
+    a{color:var(--signal);text-decoration:none}
+    a:hover{text-decoration:underline}
+
     .hidden{display:none}
+
+    ::selection{background:var(--signal);color:var(--ink-0)}
+    :focus-visible{outline:2px solid var(--signal);outline-offset:1px}
   </style>
 </head>
 <body>
@@ -106,9 +138,9 @@
 
 <!-- Tab bar -->
 <div class="tabs">
-  <div class="tab act" data-t="sync"     data-act="switch-tab" data-arg="sync">🔄 Sync</div>
-  <div class="tab"     data-t="checkup"  data-act="switch-tab" data-arg="checkup">🔍 Чекап</div>
-  <div class="tab"     data-t="settings" data-act="switch-tab" data-arg="settings">⚙️ Настройки</div>
+  <div class="tab act" data-t="sync"    onclick="switchTab('sync',this)">🔄 Sync</div>
+  <div class="tab"     data-t="checkup" onclick="switchTab('checkup',this)">🔍 Чекап</div>
+  <div class="tab"     data-t="settings"onclick="switchTab('settings',this)">⚙️ Настройки</div>
 </div>
 
 <!-- ═══════════════════ TAB: SYNC ════════════════════════════ -->
@@ -122,8 +154,8 @@
       </div>
     </div>
     <div class="row">
-      <button class="btn btn-p" data-act="sync-now">▶ Синхронизировать</button>
-      <button class="btn btn-s" data-act="open-hub">🌐 Открыть хаб</button>
+      <button class="btn btn-p" onclick="syncNow()">▶ Синхронизировать</button>
+      <button class="btn btn-s" onclick="openHub()">🌐 Открыть хаб</button>
     </div>
     <div id="sync-result" class="hidden"></div>
   </div>
@@ -137,7 +169,7 @@
         <div class="status-label">Tbank Time</div>
         <div class="status-sub" id="tk-time-sub">Не захвачен</div>
       </div>
-      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" data-act="open-time">Войти</button>
+      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" onclick="openTime()">Войти</button>
     </div>
     <div class="status-card" id="tk-ktalk">
       <div class="dot dot-idle" id="tk-ktalk-dot"></div>
@@ -145,7 +177,7 @@
         <div class="status-label">KTalk</div>
         <div class="status-sub" id="tk-ktalk-sub">Не захвачен</div>
       </div>
-      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" data-act="open-ktalk">Войти</button>
+      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" onclick="openKtalk()">Войти</button>
     </div>
     <div id="tk-hint" class="box box-warn hidden">
       Войдите в системы выше — токены будут захвачены автоматически
@@ -159,27 +191,27 @@
     <div class="sec-title">Кабинет клиента</div>
     <div style="display:flex;gap:7px;margin-bottom:7px">
       <input id="ck-cabinet" placeholder="ID кабинета (из AM Hub)" style="flex:1">
-      <button class="btn btn-p" style="width:auto;padding:7px 12px" data-act="load-cabinet">▶</button>
+      <button class="btn btn-p" style="width:auto;padding:7px 12px" onclick="loadCabinet()">▶</button>
     </div>
-    <div id="ck-client-name" style="font-size:.78rem;color:#9c9a94;margin-bottom:8px;height:16px"></div>
+    <div id="ck-client-name" style="font-size:.78rem;color:#7d8aaa;margin-bottom:8px;height:16px"></div>
 
     <!-- Продукты -->
     <div id="ck-products" style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap"></div>
 
     <!-- Тип запросов -->
     <div class="qtype-tabs" id="qtabs">
-      <div class="qtab act" data-qt="top"       data-act="set-qtype" data-arg="top">Топ</div>
-      <div class="qtab"     data-qt="random"    data-act="set-qtype" data-arg="random">Случ.</div>
-      <div class="qtab"     data-qt="zero"      data-act="set-qtype" data-arg="zero">Нулевые</div>
-      <div class="qtab"     data-qt="zeroquery" data-act="set-qtype" data-arg="zeroquery">ZeroQ</div>
+      <div class="qtab act" data-qt="top"      onclick="setQType('top',this)">Топ</div>
+      <div class="qtab"     data-qt="random"   onclick="setQType('random',this)">Случ.</div>
+      <div class="qtab"     data-qt="zero"     onclick="setQType('zero',this)">Нулевые</div>
+      <div class="qtab"     data-qt="zeroquery"onclick="setQType('zeroquery',this)">ZeroQ</div>
     </div>
 
-    <div style="font-size:.68rem;color:#6b6860;margin-bottom:4px">Запросы (один на строку)</div>
+    <div style="font-size:.68rem;color:#4c567a;margin-bottom:4px">Запросы (один на строку)</div>
     <textarea id="ck-queries" rows="4" placeholder="пуховик&#10;куртка&#10;джинсы"></textarea>
 
     <div class="row gap">
-      <button class="btn btn-p" id="ck-run" data-act="run-check">▶ Проверить</button>
-      <button class="btn btn-s" id="ck-cal" data-act="run-cal">🎯 Калибровка</button>
+      <button class="btn btn-p" id="ck-run" onclick="runCheck()">▶ Проверить</button>
+      <button class="btn btn-s" id="ck-cal" onclick="runCal()">🎯 Калибровка</button>
     </div>
     <div id="ck-alert" class="hidden" style="margin-top:7px"></div>
   </div>
@@ -197,8 +229,8 @@
       <div class="stats" id="ck-stats"></div>
       <div id="ck-result-list"></div>
       <div class="row gap">
-        <button class="btn btn-g" data-act="gen-pdf">📄 PDF-отчёт</button>
-        <button class="btn btn-s" data-act="export-csv">📥 CSV</button>
+        <button class="btn btn-g" onclick="genPDF()">📄 PDF-отчёт</button>
+        <button class="btn btn-s" onclick="exportCSV()">📥 CSV</button>
       </div>
     </div>
   </div>
@@ -214,7 +246,7 @@
     <div class="gap"><lbl>Токен (из Настройки → Аккаунт)</lbl>
       <input id="s-hub-token" type="password" placeholder="Токен авторизации"></div>
     <div class="gap">
-      <button class="btn btn-p" data-act="save-settings">💾 Сохранить</button>
+      <button class="btn btn-p" onclick="saveSettings()">💾 Сохранить</button>
     </div>
     <div id="s-result" class="hidden" style="margin-top:7px"></div>
   </div>
@@ -227,7 +259,7 @@
     <div class="gap"><lbl>Пароль</lbl>
       <input id="s-mr-pass" type="password" placeholder="••••••••"></div>
     <div class="gap">
-      <button class="btn btn-s" data-act="test-mr">Проверить соединение</button>
+      <button class="btn btn-s" onclick="testMR()">Проверить соединение</button>
     </div>
     <div id="s-mr-result" class="hidden" style="margin-top:7px"></div>
   </div>
@@ -237,8 +269,8 @@
     <div class="sec-title">AI (Groq) — для рекомендаций чекапа</div>
     <div class="gap"><lbl>Groq API Key</lbl>
       <input id="s-groq" placeholder="gsk_..." type="password"></div>
-    <div class="gap" style="font-size:.68rem;color:#6b6860">
-      Бесплатный ключ: <a href="https://console.groq.com/keys" style="color:#d4f03f" target="_blank">console.groq.com/keys</a>
+    <div class="gap" style="font-size:.68rem;color:#4c567a">
+      Бесплатный ключ: <a href="https://console.groq.com/keys" style="color:#6474ff" target="_blank">console.groq.com/keys</a>
     </div>
   </div>
 
