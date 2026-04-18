@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from models import (
     CHECKUP_INTERVALS, Meeting, Task,
     FollowupTemplate, AutoTaskRule, AuditLog, Client, User, VoiceNote,
+    RoadmapItem,
 )
 
 
@@ -764,7 +765,31 @@ def recent_files(db: Any, user: Any, limit: int = 8) -> List[Dict[str, Any]]:
     } for v in rows]
 
 
-def roadmap_data() -> List[Dict[str, Any]]:
-    """Роадмап пока без БД — возвращаем пусто.
-    Когда появится модель RoadmapItem — заменить на выборку."""
-    return []
+_ROADMAP_DEFAULT_ORDER = ["q1", "q2", "q3", "q4", "backlog"]
+
+
+def roadmap_data(db: Any) -> List[Dict[str, Any]]:
+    """Роадмап: группировка RoadmapItem по column_key в порядке Q1→Q4→Бэклог."""
+    rows = db.query(RoadmapItem).order_by(
+        RoadmapItem.column_key.asc(), RoadmapItem.order_idx.asc(), RoadmapItem.id.asc()
+    ).all()
+    if not rows:
+        return []
+    groups: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        key = r.column_key or "backlog"
+        if key not in groups:
+            groups[key] = {
+                "key":   key,
+                "title": r.column_title or key.upper(),
+                "tone":  r.tone or "neutral",
+                "items": [],
+            }
+        groups[key]["items"].append({
+            "id":    r.id,
+            "title": r.title,
+            "desc":  r.description or "",
+        })
+    ordered_keys = [k for k in _ROADMAP_DEFAULT_ORDER if k in groups] + \
+                   [k for k in groups if k not in _ROADMAP_DEFAULT_ORDER]
+    return [groups[k] for k in ordered_keys]

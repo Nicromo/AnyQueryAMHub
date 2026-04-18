@@ -544,6 +544,21 @@ class NPSEntry(Base):
     client     = relationship("Client", backref="nps_history")
 
 
+class RoadmapItem(Base):
+    """Элементы роадмапа команды. Показываются на /design/roadmap колонками."""
+    __tablename__ = "roadmap_items"
+    id         = Column(Integer, primary_key=True, index=True)
+    column_key = Column(String, nullable=False, index=True)   # q1|q2|q3|q4|backlog
+    column_title = Column(String, nullable=False)             # отображаемый заголовок
+    tone       = Column(String, default="neutral")            # ok|signal|info|warn|neutral
+    title      = Column(String, nullable=False)
+    description= Column(Text, nullable=True)
+    order_idx  = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 Index("ix_revenue_client_period", RevenueEntry.client_id, RevenueEntry.period)
 Index("ix_health_snapshots_client_date", HealthSnapshot.client_id, HealthSnapshot.calculated_at)
 Index("ix_nps_client_date", NPSEntry.client_id, NPSEntry.recorded_at)
+Index("ix_roadmap_column_order", RoadmapItem.column_key, RoadmapItem.order_idx)

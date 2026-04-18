@@ -22,7 +22,7 @@ from database import get_db
 from auth import decode_access_token
 from models import (
     Client, Task, Meeting, User,
-    AuditLog, UserClientAssignment,
+    AuditLog, UserClientAssignment, RoadmapItem,
 )
 import design_mappers as dm
 
@@ -141,6 +141,48 @@ def _client_ids_for_user(db: Session, user: User) -> Optional[List[int]]:
 @router.get("/", response_class=HTMLResponse)
 async def design_root():
     return RedirectResponse(url="/design/command", status_code=303)
+
+
+# ── Roadmap admin API ────────────────────────────────────────
+# Доступ только admin. Менеджеры только читают (через design-страницу).
+@router.post("/api/roadmap")
+async def roadmap_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user or (user.role or "") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    body = await request.json()
+    item = RoadmapItem(
+        column_key   = (body.get("column_key") or "backlog").lower(),
+        column_title = body.get("column_title") or "Бэклог",
+        tone         = body.get("tone") or "neutral",
+        title        = body.get("title") or "",
+        description  = body.get("description") or "",
+        order_idx    = int(body.get("order_idx") or 0),
+    )
+    if not item.title:
+        raise HTTPException(status_code=400, detail="title required")
+    db.add(item); db.commit(); db.refresh(item)
+    return {"ok": True, "id": item.id}
+
+
+@router.delete("/api/roadmap/{item_id}")
+async def roadmap_delete(
+    item_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _get_user(auth_token, db)
+    if not user or (user.role or "") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    it = db.query(RoadmapItem).filter(RoadmapItem.id == item_id).first()
+    if not it:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(it); db.commit()
+    return {"ok": True}
 
 
 @router.get("/{page_id}", response_class=HTMLResponse)
@@ -301,5 +343,5 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "heatmap":         dm.heatmap_activity(db, user, now, visible_ids),
         "team_response":   dm.team_response(db, now),
         "recent_files":    dm.recent_files(db, user),
-        "roadmap":         dm.roadmap_data(),
+        "roadmap":         dm.roadmap_data(db),
     }

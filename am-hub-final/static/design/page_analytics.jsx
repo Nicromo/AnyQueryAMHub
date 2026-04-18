@@ -42,7 +42,7 @@ function PageAnalytics() {
         title="Аналитика портфеля"
         subtitle={`${CL.length} клиентов в скоупе`}
         actions={<>
-          <Btn kind="ghost" size="m" icon={<I.download size={14}/>}>PDF</Btn>
+          <Btn kind="ghost" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF</Btn>
         </>}
       />
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
