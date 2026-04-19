@@ -321,6 +321,29 @@ async def sync_clients_from_airtable(
     created = updated = skipped = 0
     errors = []
 
+    # Дедуп по нормализованному имени: строка "Yves Rocher" и "yves-rocher"
+    # становятся одним ключом "yvesrocher" → один Client в БД.
+    import re as _re
+    def _name_key(s: str) -> str:
+        return _re.sub(r"[^a-zа-я0-9]", "", (s or "").lower())
+
+    # Если имя явно не похоже на клиента (длинное описание / пробелы посреди
+    # кириллических предложений), пропускаем запись. 60 символов без
+    # специальных разделителей — порог.
+    def _looks_like_real_client(n: str) -> bool:
+        n = (n or "").strip()
+        if not n or len(n) > 80:
+            return False
+        # Если больше 6 пробелов ИЛИ в имени встречается характерная лексика
+        # описательной записи — отбрасываем.
+        if n.count(" ") > 6:
+            return False
+        bad_tokens = ["лучш", "стабиль", "увеличен", "не-падение", "сервис без", "обработк"]
+        low = n.lower()
+        return not any(t in low for t in bad_tokens)
+
+    seen_keys = set()
+
     for record in records:
         fields = record.get("fields", {})
         airtable_id = record.get("id", "")
@@ -334,6 +357,18 @@ async def sync_clients_from_airtable(
                 name = (name_raw.get("name") or name_raw.get("text") or "").strip()
             else:
                 name = str(name_raw).strip() if name_raw else ""
+
+            # Мусорные имена: слишком длинные, с фразами про фичи/задачи
+            if not _looks_like_real_client(name):
+                skipped += 1
+                continue
+
+            # Дедуп: если такое имя уже видели в этом же sync — пропускаем
+            nkey = _name_key(name)
+            if nkey in seen_keys:
+                skipped += 1
+                continue
+            seen_keys.add(nkey)
 
             if not name:
                 skipped += 1

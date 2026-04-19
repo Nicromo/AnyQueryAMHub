@@ -60,6 +60,13 @@ function PageClients() {
             <Btn kind="ghost" size="m" onClick={pullFromAirtable} disabled={syncBusy}>
               {syncBusy ? "Тянем..." : "⟲ Из Airtable"}
             </Btn>
+            <Btn kind="ghost" size="m" onClick={async () => {
+              if (!window.confirm("Объединить дубли клиентов по нормализованному имени? 'Yves Rocher' и 'yves-rocher' станут одним.")) return;
+              const r = await fetch("/api/clients/auto-dedupe", {method:"POST", credentials:"include"});
+              const d = await r.json().catch(()=>({}));
+              alert(d.ok ? `Объединено: ${d.merged}` : (d.error || "Ошибка"));
+              if (d.ok) location.reload();
+            }}>⎘ Дубли</Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
               onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
             <Btn kind="primary" size="m" icon={<I.plus size={14}/>}
