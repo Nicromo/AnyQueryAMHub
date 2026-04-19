@@ -46,9 +46,31 @@ function switchTab(tab, btn) {
 window.switchTab = switchTab;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+// Показать версию + когда собрано. Читаем build-info.json из пакета расширения.
+async function showBuildInfo() {
+  const el = document.getElementById("build-info");
+  if (!el) return;
+  // Version из manifest — всегда есть.
+  const mf = chrome.runtime.getManifest();
+  let text = `v${mf.version}`;
+  try {
+    const r = await fetch(chrome.runtime.getURL("build-info.json"));
+    if (r.ok) {
+      const info = await r.json();
+      // Показываем "v3.1.0 · 19 апр 12:20" + commit в tooltip
+      const d = new Date(info.built_at);
+      const dateStr = d.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      text = `v${info.version} · ${dateStr}`;
+      el.title = `Версия: ${info.version}\nСобрано: ${info.built_at}\nCommit: ${info.commit}`;
+    }
+  } catch (e) { /* нет файла — просто покажем версию из manifest */ }
+  el.textContent = text;
+}
+
 async function init() {
   wireEvents();
   await loadSettings();
+  await showBuildInfo();
 
   // Wake the SW before doing connection check — avoids first-open hang
   await wakeUpBackground();
