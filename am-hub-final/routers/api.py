@@ -345,17 +345,9 @@ def log_job(job_id: str, status_val: str, msg: str = "") -> None:
 def _job_log(job_id: str) -> dict:
     return _job_status.get(job_id, {})
 
-    try:
-        all_tickets = []
-        for c in db.query(Client).all():
-            if c.name:
-                tickets = await get_support_tickets(c.name)
-                for t in tickets:
-                    t["client"] = c.name
-                all_tickets.extend(tickets)
-        return {"tickets": all_tickets, "total": len(all_tickets)}
-    except Exception as e:
-        return {"error": str(e), "tickets": [], "total": 0}
+# NOTE: здесь раньше был orphan-код с `await` вне async-функции — dead-code
+# после `return` выше, unreachable. Удалён, потому что `py_compile` валился
+# с SyntaxError 'await outside async function'.
 
 
 # ============================================================================
