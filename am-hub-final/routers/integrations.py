@@ -38,15 +38,14 @@ def _env_bool(key: str) -> bool:
 
 @router.api_route("/api/integrations/test/merchrules", methods=["GET", "POST"])
 async def test_merchrules(request: Request):
-    """Тест Merchrules creds. Принимает GET ?login=X&password=Y или POST JSON.
-    Использует ту же функцию auth, что и scheduler (прод-URL + разные поля/форматы)."""
+    """Тест Merchrules creds через session-cookie flow (как в legacy app.py).
+    1) POST /backend-v2/auth/login — сервер ставит session cookie.
+    2) GET /backend-v2/accounts — если JSON → auth работает."""
     login = ""
     password = ""
-    # Query (GET)
     qp = request.query_params
     login = qp.get("login", "") or login
     password = qp.get("password", "") or password
-    # JSON body (POST)
     if request.method == "POST":
         try:
             body = await request.json()
@@ -58,13 +57,39 @@ async def test_merchrules(request: Request):
         return {"error": "Укажите логин и пароль"}
 
     import httpx
-    from merchrules_sync import get_auth_token
+    MR_BASE = os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru").rstrip("/")
+    # httpx.AsyncClient с cookies=... авто-сохраняет cookies между запросами — как requests.Session().
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as hx:
-            token = await get_auth_token(hx, login=login, password=password)
-        if token:
-            return {"ok": True, "message": "Авторизация прошла"}
-        return {"error": "Merchrules не принял креды. Проверь логин/пароль и права доступа."}
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as hx:
+            # 1. Login
+            login_url = f"{MR_BASE}/backend-v2/auth/login"
+            r = await hx.post(login_url, json={"username": login, "password": password})
+            if r.status_code not in (200, 201, 204):
+                # Пробуем поле email — некоторые стенды
+                r = await hx.post(login_url, json={"email": login, "password": password})
+            if r.status_code not in (200, 201, 204):
+                # Последняя попытка — form-urlencoded с username
+                r = await hx.post(login_url, data={"username": login, "password": password})
+            if r.status_code not in (200, 201, 204):
+                return {"error": f"Login: HTTP {r.status_code} — {r.text[:200]}"}
+            # 2. Verify — GET /backend-v2/accounts с полученными cookies
+            r2 = await hx.get(f"{MR_BASE}/backend-v2/accounts", params={"limit": 1},
+                              headers={"Accept": "application/json"})
+            if r2.status_code == 200:
+                ct = r2.headers.get("content-type", "").lower()
+                if "json" in ct:
+                    try:
+                        body = r2.json()
+                        n = len(body.get("accounts") or body.get("items") or
+                                 (body if isinstance(body, list) else []))
+                        return {"ok": True, "message": f"Подключено — найдено аккаунтов: {n}"}
+                    except Exception:
+                        pass
+                # 200 но не JSON → login-страница, auth реально не прошла
+                return {"error": f"Login вернул HTTP 200, но /accounts отвечает {ct or 'без Content-Type'} — session cookie не принят"}
+            if r2.status_code in (401, 403):
+                return {"error": f"Login прошёл, но /accounts=HTTP {r2.status_code} — нет прав доступа к API"}
+            return {"error": f"/accounts: HTTP {r2.status_code} — {r2.text[:200]}"}
     except Exception as e:
         return {"error": f"Ошибка: {str(e)[:200]}"}
 
