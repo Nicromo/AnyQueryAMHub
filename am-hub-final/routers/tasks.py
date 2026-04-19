@@ -109,6 +109,15 @@ async def api_confirm_task(task_id: int, db: Session = Depends(get_db), auth_tok
     task.confirmed_at = datetime.now()
     task.confirmed_by = user.email if user else None
     db.commit()
+
+    # ── Автодействия: task_done ─────────────────────────────────────────────
+    try:
+        from auto_actions import fire_event
+        client = db.query(Client).filter(Client.id == task.client_id).first() if task.client_id else None
+        fire_event(db, "task_done", client, {"task_title": task.title or ""})
+    except Exception:
+        pass
+
     return {"ok": True}
 
 

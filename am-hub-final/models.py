@@ -373,6 +373,9 @@ class AutoTaskRule(Base):
     task_due_days   = Column(Integer, default=3)   # через N дней от триггера
     task_type       = Column(String, default="followup")
     segment_filter  = Column(JSONB, default=list)  # [] = все сегменты
+    actions            = Column(JSONB, default=list)  # [{"type":"create_task","params":{...}}, ...]
+    trigger_count      = Column(Integer, default=0)
+    last_triggered_at  = Column(DateTime, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user = relationship("User", backref="auto_task_rules")
