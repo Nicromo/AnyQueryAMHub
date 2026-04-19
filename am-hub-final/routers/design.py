@@ -365,12 +365,27 @@ async def profile_update(
     for field in ("first_name", "last_name", "telegram_id"):
         if field in body:
             setattr(user, field, body[field])
+    # Email — отдельная обработка: проверка уникальности + перепривязка клиентов
+    # (Airtable'овские CSM email'ы должны матчиться с user.email чтобы клиент
+    # попал в правильный портфель).
+    if "email" in body and isinstance(body["email"], str):
+        new_email = body["email"].strip().lower()
+        if new_email and new_email != (user.email or "").lower():
+            # Уникальность
+            existing = db.query(User).filter(User.email == new_email, User.id != user.id).first()
+            if existing:
+                raise HTTPException(status_code=409, detail="Такой email уже используется другим пользователем")
+            old_email = user.email
+            user.email = new_email
+            # Переприсваиваем все ранее синченные клиенты с этим же email'ом
+            if old_email:
+                db.query(Client).filter(Client.manager_email == old_email).update({"manager_email": new_email}, synchronize_session=False)
     if "settings" in body and isinstance(body["settings"], dict):
         cur = dict(user.settings or {})
         cur.update(body["settings"])
         user.settings = cur
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "email": user.email}
 
 
 # ── Users list (for assignments) ─────────────────────────────

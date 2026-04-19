@@ -1523,6 +1523,7 @@ function PageProfile() {
     e.preventDefault();
     setSaving(true); setMsg(null);
     const body = {
+      email: prof.email || "",
       first_name: prof.first_name || "",
       last_name: prof.last_name || "",
       telegram_id: prof.telegram_id || "",
@@ -1533,8 +1534,19 @@ function PageProfile() {
       body: JSON.stringify(body),
     });
     setSaving(false);
-    setMsg(r.ok ? "Сохранено" : "Ошибка сохранения");
-    setTimeout(() => setMsg(null), 2500);
+    if (r.ok) {
+      // Перечитываем профиль — чтобы обновились «Клиентов (по email)»,
+      // «Клиентов (assigned)» и другая статистика справа.
+      try {
+        const fresh = await fetch("/design/api/profile", { credentials: "include" }).then(x => x.ok ? x.json() : null);
+        if (fresh) setProf(fresh);
+      } catch (e) { /* non-fatal */ }
+      setMsg("Сохранено. Если клиентов (по email) всё ещё 0 — запусти ⟲ Из Airtable на /design/portfolio.");
+    } else {
+      const d = await r.json().catch(() => ({}));
+      setMsg(d.detail || d.error || "Ошибка сохранения");
+    }
+    setTimeout(() => setMsg(null), 6000);
   };
 
   if (!prof) return <div style={{ padding: 40, color: "var(--ink-6)", textAlign: "center" }}>Загружаю профиль…</div>;
@@ -1546,7 +1558,8 @@ function PageProfile() {
         <Card title="Личные данные">
           <form onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {[
-              { k: "email",       l: "Email",       readonly: true,  type: "email" },
+              { k: "email",       l: "Email",       readonly: false, type: "email",
+                hint: "Должен совпадать с CSM-email в Airtable, иначе клиенты не подтянутся" },
               { k: "first_name",  l: "Имя / инициалы", type: "text" },
               { k: "last_name",   l: "Фамилия",     type: "text" },
               { k: "telegram_id", l: "Telegram ID (chat_id)", type: "text" },
@@ -1572,12 +1585,17 @@ function PageProfile() {
               { l: "Клиентов (по email)", v: prof.clients_by_email },
               { l: "Клиентов (assigned)", v: prof.clients_assigned },
               { l: "Telegram",            v: prof.telegram_id ? "✓" : "не привязан" },
-            ].map((r, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
-                <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.l}</span>
-                <span style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{r.v || "—"}</span>
-              </div>
-            ))}
+            ].map((r, i) => {
+              // Валидные значения: строки, включая пустые; числа включая 0;
+              // только null/undefined показываем как "—".
+              const shown = r.v == null || r.v === "" ? "—" : String(r.v);
+              return (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.l}</span>
+                  <span style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{shown}</span>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
