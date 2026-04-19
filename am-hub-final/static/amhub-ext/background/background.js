@@ -72,6 +72,10 @@ function amhSetBadge(text, color) {
 // ── Heartbeat: раз в 5 мин пингуем /api/auth/me, 3 подряд 401 → алерт ────────
 let _amhAuthFailCount = 0;
 async function runHeartbeat() {
+  // На холодном старте SW config ещё не загружен — без этого шлём Bearer '' → 401.
+  if (!CONFIG.HUB_URL || !CONFIG.HUB_TOKEN) {
+    await loadConfig();
+  }
   if (!CONFIG.HUB_URL || !CONFIG.HUB_TOKEN) return;
   try {
     const r = await fetch(`${CONFIG.HUB_URL}/api/auth/me`, {
@@ -207,7 +211,12 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       runHeartbeat().catch(() => {});
       return { ok: true };
     }),
-    CHECK_CONNECTION: () => checkConnection(),
+    CHECK_CONNECTION: async () => {
+      // Гарантируем что CONFIG загружен из storage до запроса — иначе
+      // на холодном старте SW token ещё пустой и хаб отвечает 401.
+      await loadConfig();
+      return checkConnection();
+    },
     GET_FULL_STATE:   () => ({ checkup: { ...checkup }, sync: { ...syncState } }),
 
     // ── MR Sync ──────────────────────────────────────────────────────────────

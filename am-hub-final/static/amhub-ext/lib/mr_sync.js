@@ -51,12 +51,18 @@ export async function doSync() {
   if (!CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD) {
     throw new Error("Merchrules логин/пароль не настроены");
   }
+  // Site IDs: из CONFIG (строка через запятую) → массив.
+  const siteIds = (CONFIG.MR_SITE_IDS || "")
+    .split(/[,;\s]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
   const r = await fetch(`${CONFIG.HUB_URL}/api/sync/merchrules`, {
     method: "POST",
     headers: _hubHeaders(),
     body: JSON.stringify({
       login: CONFIG.MR_LOGIN,
       password: CONFIG.MR_PASSWORD,
+      site_ids: siteIds,
     }),
   });
   if (r.status === 401) throw new Error("Неверный токен AM Hub — обнови в настройках");

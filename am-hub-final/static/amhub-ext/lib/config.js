@@ -11,6 +11,7 @@ export const CONFIG = {
   // ── Merchrules Sync ─────────────────────────────────────────────
   MR_LOGIN:    "",  // из storage: mr_login
   MR_PASSWORD: "",  // из storage: mr_password
+  MR_SITE_IDS: "",  // из storage: mr_site_ids (строка через запятую)
   MR_SYNC_INTERVAL_MIN: 30,
 
   // ── Search Quality Checkup ──────────────────────────────────────
@@ -33,13 +34,14 @@ export const CONFIG = {
 export async function loadConfig() {
   return new Promise(resolve => {
     chrome.storage.local.get(
-      ["hub_url","hub_token","mr_login","mr_password",
+      ["hub_url","hub_token","mr_login","mr_password","mr_site_ids",
        "groq_api_key","cf_account_id","cf_api_token"],
       data => {
         if (data.hub_url)      CONFIG.HUB_URL   = data.hub_url.trim().replace(/\/$/, "");
         if (data.hub_token)    CONFIG.HUB_TOKEN = "Bearer " + String(data.hub_token).trim();
         if (data.mr_login)     CONFIG.MR_LOGIN    = data.mr_login;
         if (data.mr_password)  CONFIG.MR_PASSWORD = data.mr_password;
+        if (data.mr_site_ids)  CONFIG.MR_SITE_IDS = data.mr_site_ids;
         if (data.groq_api_key) CONFIG.GROQ_API_KEY = data.groq_api_key;
         if (data.cf_account_id) CONFIG.CF_ACCOUNT_ID = data.cf_account_id;
         if (data.cf_api_token)  CONFIG.CF_API_TOKEN  = data.cf_api_token;
