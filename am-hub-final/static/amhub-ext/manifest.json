@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AM Hub",
-  "version": "3.2.0",
+  "version": "3.2.3",
   "description": "Единое расширение для менеджеров AM Hub: синк Merchrules, чекап поиска, перехват токенов.",
   "permissions": [
     "storage",

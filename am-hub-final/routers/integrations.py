@@ -38,15 +38,14 @@ def _env_bool(key: str) -> bool:
 
 @router.api_route("/api/integrations/test/merchrules", methods=["GET", "POST"])
 async def test_merchrules(request: Request):
-    """Тест Merchrules creds. Принимает GET ?login=X&password=Y или POST JSON.
-    Использует ту же функцию auth, что и scheduler (прод-URL + разные поля/форматы)."""
+    """Тест Merchrules creds через session-cookie flow (как в legacy app.py).
+    1) POST /backend-v2/auth/login — сервер ставит session cookie.
+    2) GET /backend-v2/accounts — если JSON → auth работает."""
     login = ""
     password = ""
-    # Query (GET)
     qp = request.query_params
     login = qp.get("login", "") or login
     password = qp.get("password", "") or password
-    # JSON body (POST)
     if request.method == "POST":
         try:
             body = await request.json()
@@ -58,13 +57,51 @@ async def test_merchrules(request: Request):
         return {"error": "Укажите логин и пароль"}
 
     import httpx
-    from merchrules_sync import get_auth_token
+    MR_BASE = os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru").rstrip("/")
+    # httpx.AsyncClient с include cookies — как requests.Session() в legacy app.py.
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as hx:
-            token = await get_auth_token(hx, login=login, password=password)
-        if token:
-            return {"ok": True, "message": "Авторизация прошла"}
-        return {"error": "Merchrules не принял креды. Проверь логин/пароль и права доступа."}
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as hx:
+            login_url = f"{MR_BASE}/backend-v2/auth/login"
+            # Пробуем 3 варианта: username/email (JSON) + username (form) — как делал legacy
+            r = await hx.post(login_url, json={"username": login, "password": password})
+            if r.status_code not in (200, 201, 204):
+                r = await hx.post(login_url, json={"email": login, "password": password})
+            if r.status_code not in (200, 201, 204):
+                r = await hx.post(login_url, data={"username": login, "password": password})
+            if r.status_code not in (200, 201, 204):
+                return {"error": f"Login: HTTP {r.status_code} — {r.text[:200]}"}
+            # Legacy не делает verify — просто проверяет status_code. Если 200 — считает
+            # auth прошедшей и шлёт task csv / meetings с теми же cookies.
+            # Проверяем: хотя бы один cookie должен быть установлен (иначе login не настоящий).
+            if not hx.cookies:
+                return {"error": f"Login вернул HTTP {r.status_code} без Set-Cookie — auth не установил сессию"}
+            # Verify через /backend-v2/roadmap (реальный endpoint из legacy).
+            # В Merchrules API нет глобального списка аккаунтов — работа через site_id.
+            # Пытаемся перечислить задачи на site_id=1 как smoke-test auth.
+            try:
+                r2 = await hx.get(f"{MR_BASE}/backend-v2/roadmap",
+                                  params={"site_id": "1", "page_size": 1},
+                                  headers={"Accept": "application/json"})
+                ct2 = r2.headers.get("content-type", "").lower()
+                if r2.status_code == 200 and "json" in ct2:
+                    try:
+                        body = r2.json()
+                        tasks_n = len(body.get("tasks") or body.get("items") or [])
+                        total = body.get("total") or body.get("total_count")
+                        msg = f"Подключено. Задач на site_id=1: {total if total is not None else tasks_n}"
+                    except Exception:
+                        msg = "Подключено (session cookie принят)"
+                    return {"ok": True, "message": msg}
+                if r2.status_code in (401, 403):
+                    return {"error": f"Login прошёл, но roadmap=HTTP {r2.status_code} — учётка без прав API"}
+                if r2.status_code == 200:
+                    return {"error": f"Login 200, но /roadmap возвращает {ct2 or 'non-JSON'} — session cookie не работает на API"}
+                # 400/404 = валидный ответ API (неправильный site_id), значит auth ок
+                if r2.status_code in (400, 404):
+                    return {"ok": True, "message": "Подключено — API отвечает (auth принят). Добавь site_id в настройки для синка."}
+                return {"error": f"/roadmap: HTTP {r2.status_code} — {r2.text[:200]}"}
+            except Exception as ve:
+                return {"ok": True, "message": f"Login прошёл (cookies установлены). Verify упал: {ve}"}
     except Exception as e:
         return {"error": f"Ошибка: {str(e)[:200]}"}
 

@@ -273,57 +273,42 @@ async def api_sync_merchrules(
     flag_modified(user, "settings")
     db.commit()
 
-    # Пробуем авторизацию — все URL + все варианты поля логина
+    # Session-cookie auth (как legacy app.py). Merchrules НЕ отдаёт Bearer —
+    # ставит Set-Cookie. httpx.AsyncClient сохраняет cookies между запросами
+    # (не закрываем пока не закончили использовать).
     import httpx
-    urls_to_try = list(dict.fromkeys([
-        _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru"),
-        "https://merchrules.any-platform.ru",
-        "https://merchrules-qa.any-platform.ru",
-    ]))
-    login_fields = ["email", "login", "username"]
-    base_url = None
-    token = None
-    last_error = ""
+    base_url = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru").rstrip("/")
     attempts_log = []
 
-    async with httpx.AsyncClient(timeout=30) as hx:
-        outer_break = False
-        for url in urls_to_try:
-            if outer_break:
-                break
-            for field in login_fields:
-                try:
-                    resp = await hx.post(
-                        f"{url}/backend-v2/auth/login",
-                        json={field: login, "password": password},
-                        timeout=15,
-                    )
-                    attempt_info = f"{url} [{field}] → {resp.status_code}"
-                    if resp.status_code == 200:
-                        body_resp = resp.json()
-                        token = body_resp.get("token") or body_resp.get("access_token") or body_resp.get("accessToken")
-                        if token:
-                            base_url = url
-                            logger.info(f"✅ Merchrules auth OK on {url} with field={field}")
-                            outer_break = True
-                            break
-                        else:
-                            last_error = f"Нет токена в ответе ({field}): {body_resp}"
-                            attempts_log.append(attempt_info + " [no token]")
-                    else:
-                        last_error = f"HTTP {resp.status_code} [{field}]: {resp.text[:200]}"
-                        attempts_log.append(attempt_info)
-                except Exception as e:
-                    last_error = str(e)
-                    attempts_log.append(f"{url} [{field}] → error: {e}")
+    hx = httpx.AsyncClient(timeout=30, follow_redirects=True)
+    login_url = f"{base_url}/backend-v2/auth/login"
+    auth_ok = False
+    resp = None
+    for field_name in ("username", "email", "login"):
+        for mode in ("json", "form"):
+            try:
+                if mode == "form":
+                    resp = await hx.post(login_url, data={field_name: login, "password": password}, timeout=15)
+                else:
+                    resp = await hx.post(login_url, json={field_name: login, "password": password}, timeout=15)
+                attempts_log.append(f"{field_name}/{mode} → HTTP {resp.status_code}")
+                if resp.status_code in (200, 201, 204):
+                    auth_ok = True
+                    break
+            except Exception as e:
+                attempts_log.append(f"{field_name}/{mode} → EXC {e}")
+        if auth_ok:
+            break
 
-    if not token:
-        detail = " | ".join(attempts_log[-4:]) if attempts_log else last_error
-        logger.error(f"Merchrules auth failed. Attempts: {attempts_log}")
-        return {"error": f"Ошибка авторизации Merchrules. {detail}"}
+    if not auth_ok:
+        await hx.aclose()
+        return {"error": f"Ошибка авторизации Merchrules. Попытки: {' | '.join(attempts_log[-4:])}"}
+    if not hx.cookies:
+        await hx.aclose()
+        return {"error": f"Login HTTP {resp.status_code} без Set-Cookie — session не установлена. {attempts_log[-1]}"}
 
-    headers = {"Authorization": f"Bearer {token}"}
-    logger.info(f"Using Merchrules base URL: {base_url}")
+    logger.info(f"✅ Merchrules session cookies: {list(hx.cookies.keys())}")
+    headers = {"Accept": "application/json"}  # без Bearer — сессия через cookies
 
     synced_clients = 0
     synced_tasks = 0
@@ -516,6 +501,9 @@ async def api_sync_merchrules(
         db.rollback()
         logger.error(f"Merchrules sync error: {e}")
         return {"error": str(e)}
+    finally:
+        try: await hx.aclose()
+        except Exception: pass
 
 
 

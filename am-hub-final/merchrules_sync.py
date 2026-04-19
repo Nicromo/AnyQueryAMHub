@@ -29,9 +29,38 @@ def _default_creds() -> tuple[str, str]:
 
 # ── Авторизация ────────────────────────────────────────────────────────────────
 
+AUTH_PATHS = (
+    "/api/auth/login", "/api/login", "/api/v1/auth/login",
+    "/api/v2/auth/login", "/api/auth/signin",
+    "/backend-v2/auth/login", "/backend/auth/login",
+    "/auth/login", "/login",
+)
+TOKEN_KEYS = ("token", "access_token", "accessToken", "jwt", "authToken", "auth_token", "sessionId", "session_id")
+
+
+def _extract_token(body: dict) -> Optional[str]:
+    """Поиск токена во многих возможных местах JSON-ответа."""
+    if not isinstance(body, dict):
+        return None
+    for k in TOKEN_KEYS:
+        if body.get(k): return body[k]
+    for wrap in ("data", "result", "payload"):
+        inner = body.get(wrap) or {}
+        if isinstance(inner, dict):
+            for k in TOKEN_KEYS:
+                if inner.get(k): return inner[k]
+    # JWT-подобные строки
+    for k, v in body.items():
+        if isinstance(v, str) and len(v) > 40 and v.startswith("eyJ"):
+            return v
+    return None
+
+
 async def get_auth_token(client: httpx.AsyncClient,
                           login: str = "", password: str = "") -> Optional[str]:
-    """Получаем/обновляем токен авторизации для конкретного пользователя."""
+    """Auth в Merchrules. Перебирает AUTH_PATHS × fields × JSON/form.
+    Пропускает ответы text/html (SPA landing вместо API).
+    Возвращает токен или None."""
     if not login:
         login, password = _default_creds()
     if not login or not password:
@@ -43,38 +72,68 @@ async def get_auth_token(client: httpx.AsyncClient,
     if cached.get("token") and cached.get("expires_at") and now < cached["expires_at"]:
         return cached["token"]
 
-    # `username` первым — реальный prod Merchrules API по 422-error явно
-    # просит это поле. `email`/`login` — fallback для совместимости.
-    token_keys = ("token", "access_token", "accessToken", "jwt", "authToken")
-    for field in ("username", "email", "login"):
-        try:
-            resp = await client.post(
-                f"{MERCHRULES_URL}/backend-v2/auth/login",
-                json={field: login, "password": password},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                body = resp.json()
-                token = None
-                for k in token_keys:
-                    if body.get(k): token = body.get(k); break
-                # nested: {data:{token}} / {result:{...}}
-                if not token:
-                    for wrap in ("data", "result", "payload"):
-                        inner = body.get(wrap) or {}
-                        for k in token_keys:
-                            if inner.get(k): token = inner[k]; break
-                        if token: break
-                if token:
-                    _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
-                    logger.info("Merchrules auth OK for %s using field=%s", login, field)
-                    return token
-            elif resp.status_code not in (400, 401, 422):
-                logger.warning("Merchrules auth failed (%s) field=%s: %s %s", login, field, resp.status_code, resp.text[:200])
-        except Exception as exc:
-            logger.warning("Merchrules auth error (%s) field=%s: %s", login, field, exc)
+    attempts_log = []
 
-    logger.warning("Merchrules: all field variants failed for %s", login)
+    for path in AUTH_PATHS:
+        for mode in ("json", "form"):
+            for field in ("username", "email", "login"):
+                url = f"{MERCHRULES_URL}{path}"
+                try:
+                    if mode == "form":
+                        resp = await client.post(
+                            url,
+                            data={field: login, "password": password},
+                            headers={"Accept": "application/json"},
+                            timeout=8, follow_redirects=False,
+                        )
+                    else:
+                        resp = await client.post(
+                            url,
+                            json={field: login, "password": password},
+                            headers={"Accept": "application/json"},
+                            timeout=8, follow_redirects=False,
+                        )
+                except Exception as exc:
+                    attempts_log.append(f"{path}[{mode}/{field}]:EXC {exc}")
+                    continue
+
+                # 404/405 — путь мёртв, не пробуем больше fields на этом path
+                if resp.status_code in (404, 405):
+                    attempts_log.append(f"{path}:HTTP {resp.status_code}")
+                    break
+
+                # 3xx — редирект на HTML login — API не тут
+                if 300 <= resp.status_code < 400:
+                    attempts_log.append(f"{path}[{mode}/{field}]:HTTP {resp.status_code} redirect")
+                    continue
+
+                # HTML-ответ — не API
+                ct = resp.headers.get("content-type", "").lower()
+                if "text/html" in ct:
+                    attempts_log.append(f"{path}[{mode}/{field}]:HTTP {resp.status_code} HTML")
+                    continue
+
+                if resp.status_code == 200:
+                    try:
+                        body = resp.json()
+                    except Exception:
+                        attempts_log.append(f"{path}[{mode}/{field}]:200 non-JSON")
+                        continue
+                    token = _extract_token(body)
+                    if token:
+                        _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
+                        logger.info("Merchrules auth OK for %s using %s[%s/%s]", login, path, mode, field)
+                        return token
+                    attempts_log.append(f"{path}[{mode}/{field}]:200 no-token keys={list(body.keys()) if isinstance(body, dict) else 'non-dict'}")
+                elif resp.status_code == 401 or resp.status_code == 403:
+                    attempts_log.append(f"{path}[{mode}/{field}]:HTTP {resp.status_code} (bad creds?)")
+                elif resp.status_code == 422:
+                    attempts_log.append(f"{path}[{mode}/{field}]:HTTP 422 {resp.text[:200]}")
+                else:
+                    attempts_log.append(f"{path}[{mode}/{field}]:HTTP {resp.status_code} {resp.text[:150]}")
+
+    logger.warning("Merchrules auth FAILED for %s. Attempts (last 5):\n  %s",
+                   login, "\n  ".join(attempts_log[-5:]))
     return None
 
 

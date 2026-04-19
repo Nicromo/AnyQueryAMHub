@@ -179,6 +179,14 @@
       </div>
       <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" data-action="openKtalk">Войти</button>
     </div>
+    <div class="status-card" id="tk-mr">
+      <div class="dot dot-idle" id="tk-mr-dot"></div>
+      <div class="status-info">
+        <div class="status-label">Merchrules</div>
+        <div class="status-sub" id="tk-mr-sub">Не проверено</div>
+      </div>
+      <button class="btn btn-s" style="width:auto;padding:4px 10px;font-size:.7rem" data-action="testMR">Проверить</button>
+    </div>
     <div id="tk-hint" class="box box-warn hidden">
       Войдите в системы выше — токены будут захвачены автоматически
     </div>
@@ -191,8 +199,11 @@
     <div class="sec-title">Кабинет клиента</div>
     <div style="display:flex;gap:7px;margin-bottom:7px">
       <input id="ck-cabinet" placeholder="ID кабинета (из AM Hub)" style="flex:1">
-      <button class="btn btn-p" style="width:auto;padding:7px 12px" data-action="loadCabinet">▶</button>
     </div>
+    <div style="margin-top:6px;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">или напрямую</div>
+    <input id="ck-apikey" placeholder="API-ключ клиента Diginetica (sl.xxx...)" style="width:100%;margin-top:4px">
+    <input id="ck-siteurl" placeholder="URL сайта (опционально — для калибровки)" style="width:100%;margin-top:4px">
+    <button class="btn btn-p" style="width:100%;margin-top:6px" data-action="loadCabinet">▶ Загрузить</button>
     <div id="ck-client-name" style="font-size:.78rem;color:#7d8aaa;margin-bottom:8px;height:16px"></div>
 
     <!-- Продукты -->

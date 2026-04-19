@@ -227,7 +227,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       if (p) checkup.apiKey = p.apiKey;
       return { ok: true };
     },
-    LOAD_CABINET:    () => handleLoadCabinet(msg.cabinetId),
+    LOAD_CABINET:    () => handleLoadCabinet(msg.cabinetId, msg.directApiKey, msg.directSiteUrl),
     SET_API_KEY_MANUAL: () => {
       checkup.apiKey     = msg.apiKey;
       checkup.siteUrl    = msg.siteUrl    || null;
@@ -318,9 +318,29 @@ async function runMrSync(manual = false) {
 }
 
 // ── Checkup ───────────────────────────────────────────────────────────────────
-async function handleLoadCabinet(cabinetId) {
-  checkup.cabinetId = cabinetId;
+async function handleLoadCabinet(cabinetId, directApiKey, directSiteUrl) {
+  checkup.cabinetId = cabinetId || "direct";
   try {
+    // Прямой API-ключ — пропускаем вызов AM Hub, сразу настраиваем state.
+    if (directApiKey) {
+      checkup.apiKey        = directApiKey;
+      checkup.siteUrl       = directSiteUrl || "";
+      checkup.clientName    = "Прямой API-ключ";
+      checkup.products      = { sort: true };  // по умолчанию sort — остальное пусть включают калибровкой
+      checkup.activeProduct = "sort";
+      checkup.merchRules    = [];
+      return {
+        ok: true,
+        clientName: checkup.clientName,
+        apiKey: directApiKey,
+        siteUrl: checkup.siteUrl,
+        activeProduct: "sort",
+        availableProducts: ["sort"],
+        merchRulesCount: 0,
+      };
+    }
+    // Обычный путь — через AM Hub
+    if (!cabinetId) return { ok: false, error: "Нужен ID кабинета или API-ключ" };
     const data = await fetchCabinet(cabinetId);
     checkup.apiKey     = data.apiKey;
     checkup.siteUrl    = data.siteUrl;
@@ -334,6 +354,12 @@ async function handleLoadCabinet(cabinetId) {
 }
 
 async function handleLoadQueries(cabinetId, queryType) {
+  // Для режима «прямой API-ключ» (cabinetId == "direct") — пользователь
+  // сам вбивает запросы в textarea. Отдаём пустой список — не падаем.
+  if (!cabinetId || cabinetId === "direct") {
+    checkup.queries = []; checkup.queryType = queryType;
+    return { ok: true, queries: [], note: "Вбей запросы вручную в textarea ниже" };
+  }
   try {
     const queries = await fetchQueries(cabinetId, queryType);
     checkup.queries = queries; checkup.queryType = queryType;
