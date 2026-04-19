@@ -1219,6 +1219,46 @@ function PageExtInstall() {
     else alert("Ошибка отзыва: " + r.status);
   }
 
+  // Пересоздать: удалить старый токен и сразу создать новый с тем же именем.
+  // Полный токен покажется в карточке new-token-display как при обычном create.
+  async function regenerateToken(id, name) {
+    if (!window.confirm(
+      `Пересоздать токен «${name}»?\n\nСтарый будет отозван — устройства с ним ` +
+      `перестанут работать. Появится новый полный токен, который нужно будет ` +
+      `скопировать и вставить в расширение ещё раз.`
+    )) return;
+    // 1) revoke old
+    const delResp = await fetch("/api/me/api-tokens/" + encodeURIComponent(id), {
+      method: "DELETE", credentials: "include",
+    });
+    if (!delResp.ok) { alert("Не удалось отозвать старый: " + delResp.status); return; }
+    // 2) create new with same name
+    const createResp = await fetch("/api/me/api-tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ name: name || "Пересоздан" }),
+    });
+    if (!createResp.ok) { alert("Старый отозван, но новый не создался: " + createResp.status); reloadTokens(); return; }
+    const d = await createResp.json();
+    setNewToken(d.token);
+    reloadTokens();
+  }
+
+  // Копирование префикса токена (полный уже не восстановить — только хэш в БД).
+  async function copyPrefix(prefix, name) {
+    try {
+      await navigator.clipboard.writeText(prefix);
+      window.alert(
+        `Скопировал префикс: ${prefix}…\n\n` +
+        `ℹ️ Это только начало токена — полный мы не храним (только hash).\n` +
+        `Если потерян полный токен для «${name}», нажми 🔄 чтобы пересоздать.`
+      );
+    } catch (e) {
+      window.alert("Не удалось скопировать: " + e.message);
+    }
+  }
+
   // Простой clipboard helper с fallback
   function _copy(text, label) {
     try {
@@ -1369,6 +1409,10 @@ function PageExtInstall() {
                           {t.prefix}… {t.last_used_at ? "· использовался " + new Date(t.last_used_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "· не использовался"}
                         </div>
                       </div>
+                      <button onClick={() => copyPrefix(t.prefix, t.name)} title="Скопировать префикс токена"
+                        style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-6)", cursor: "pointer", padding: "3px 8px", fontSize: 11 }}>📋</button>
+                      <button onClick={() => regenerateToken(t.id, t.name)} title="Пересоздать — отзовёт старый и покажет новый полный токен"
+                        style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-6)", cursor: "pointer", padding: "3px 8px", fontSize: 11 }}>🔄</button>
                       <button onClick={() => revokeToken(t.id)} title="Отозвать"
                         style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-6)", cursor: "pointer", padding: "3px 8px", fontSize: 11 }}>✕</button>
                     </div>
