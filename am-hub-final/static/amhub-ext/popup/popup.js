@@ -260,12 +260,17 @@ function openHub() {
 // ── Token status ──────────────────────────────────────────────────────────────
 async function refreshTokenStatus() {
   try {
-    const s = await chrome.storage.local.get(["last_time_token", "last_ktalk_token"]);
+    const s = await chrome.storage.local.get([
+      "last_time_token", "last_ktalk_token",
+      "mr_login", "mr_password", "mr_last_status", "mr_last_message", "mr_last_checked_at",
+    ]);
 
     const timeDot = document.getElementById("tk-time-dot");
     const timeSub = document.getElementById("tk-time-sub");
     const ktalkDot = document.getElementById("tk-ktalk-dot");
     const ktalkSub = document.getElementById("tk-ktalk-sub");
+    const mrDot = document.getElementById("tk-mr-dot");
+    const mrSub = document.getElementById("tk-mr-sub");
     const hint = document.getElementById("tk-hint");
 
     if (timeDot && timeSub) {
@@ -285,6 +290,23 @@ async function refreshTokenStatus() {
       } else {
         ktalkDot.className = "dot dot-idle";
         ktalkSub.textContent = "Войдите в tbank.ktalk.ru";
+      }
+    }
+    // Merchrules: статус из последнего теста (кеш в storage, обновляется при testMR).
+    if (mrDot && mrSub) {
+      if (!s.mr_login || !s.mr_password) {
+        mrDot.className = "dot dot-idle";
+        mrSub.textContent = "Логин/пароль не настроены";
+      } else if (s.mr_last_status === "ok") {
+        mrDot.className = "dot dot-ok";
+        const when = s.mr_last_checked_at ? new Date(s.mr_last_checked_at).toLocaleTimeString("ru-RU", {hour:"2-digit",minute:"2-digit"}) : "";
+        mrSub.textContent = (s.mr_last_message || "Подключено") + (when ? " · " + when : "");
+      } else if (s.mr_last_status === "err") {
+        mrDot.className = "dot dot-err";
+        mrSub.textContent = s.mr_last_message || "Ошибка — нажми «Проверить»";
+      } else {
+        mrDot.className = "dot dot-idle";
+        mrSub.textContent = "Нажми «Проверить»";
       }
     }
   } catch (e) {
@@ -533,6 +555,16 @@ async function testMR() {
       : "❌ " + (res.error || "Неизвестная ошибка"),
     res.ok ? "ok" : "err"
   );
+  // Сохраняем в storage чтобы статусная карточка на вкладке Sync
+  // подхватила результат без повторного запроса.
+  try {
+    await chrome.storage.local.set({
+      mr_last_status: res.ok ? "ok" : "err",
+      mr_last_message: res.ok ? (res.message || "Подключено") : (res.error || "Ошибка"),
+      mr_last_checked_at: new Date().toISOString(),
+    });
+  } catch (e) { /* non-fatal */ }
+  refreshTokenStatus();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

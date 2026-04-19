@@ -276,8 +276,10 @@ async def dashboard(request: Request, db: Session = Depends(get_db), auth_token:
         return _login_redirect()
 
     settings = user.settings or {}
-    if not settings.get("onboarding_complete"):
-        return RedirectResponse(url="/onboarding", status_code=303)
+    # Онбординг пока отключён по запросу: пускаем сразу в дашборд.
+    # Чтобы вернуть — раскомментировать следующие 2 строки.
+    # if not settings.get("onboarding_complete"):
+    #     return RedirectResponse(url="/onboarding", status_code=303)
 
     query = db.query(Client)
     if user.role == "manager":
