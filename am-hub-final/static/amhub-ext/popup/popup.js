@@ -322,11 +322,24 @@ let ckResults = [];
 
 async function loadCabinet() {
   const cabEl = document.getElementById("ck-cabinet");
+  const keyEl = document.getElementById("ck-apikey");
+  const urlEl = document.getElementById("ck-siteurl");
   const id = cabEl ? cabEl.value.trim() : "";
-  if (!id) return;
+  const directKey = keyEl ? keyEl.value.trim() : "";
+  const directUrl = urlEl ? urlEl.value.trim() : "";
+
+  if (!id && !directKey) {
+    showAlert("Введи ID кабинета ИЛИ вставь API-ключ клиента", "warn");
+    return;
+  }
 
   showAlert("⏳ Загружаем данные кабинета...", "warn");
-  const res = await safeSend({ type: "LOAD_CABINET", cabinetId: id });
+  const res = await safeSend({
+    type: "LOAD_CABINET",
+    cabinetId: id,
+    directApiKey: directKey || null,
+    directSiteUrl: directUrl || null,
+  });
   if (!res || res.error || !res.ok) {
     showAlert("❌ " + (res?.error || "Нет ответа от расширения"), "err");
     return;
