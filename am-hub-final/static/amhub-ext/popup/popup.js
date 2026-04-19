@@ -517,8 +517,10 @@ async function testMR() {
   } catch (e) { /* non-fatal */ }
   await safeSend({ type: "RELOAD_CONFIG" }, 3000);
 
-  showBox("s-mr-result", "⏳ Проверяем Merchrules...", "warn");
-  const res = await safeSend({ type: "TEST_MR_AUTH" }, 15000);
+  showBox("s-mr-result", "⏳ Проверяем Merchrules (до минуты)...", "warn");
+  // Mr auth перебирает много комбинаций путей × режимов × полей + verify
+  // каждой успешной попытки. 60s — запас на 108+ сетевых запросов.
+  const res = await safeSend({ type: "TEST_MR_AUTH" }, 60000);
 
   if (!res || res.error === "timeout") {
     showBox("s-mr-result", "❌ Расширение не отвечает — перезагрузите popup", "err");

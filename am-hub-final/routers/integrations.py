@@ -36,22 +36,37 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
-@router.get("/api/integrations/test/merchrules")
-async def test_merchrules(login: str = "", password: str = ""):
+@router.api_route("/api/integrations/test/merchrules", methods=["GET", "POST"])
+async def test_merchrules(request: Request):
+    """Тест Merchrules creds. Принимает GET ?login=X&password=Y или POST JSON.
+    Использует ту же функцию auth, что и scheduler (прод-URL + разные поля/форматы)."""
+    login = ""
+    password = ""
+    # Query (GET)
+    qp = request.query_params
+    login = qp.get("login", "") or login
+    password = qp.get("password", "") or password
+    # JSON body (POST)
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            login = body.get("login") or body.get("username") or body.get("email") or login
+            password = body.get("password") or password
+        except Exception:
+            pass
     if not login or not password:
-        return {"error": "Need login and password"}
+        return {"error": "Укажите логин и пароль"}
+
     import httpx
+    from merchrules_sync import get_auth_token
     try:
-        async with httpx.AsyncClient(timeout=15) as hx:
-            resp = await hx.post(
-                "https://merchrules-qa.any-platform.ru/backend-v2/auth/login",
-                json={"username": login, "password": password},
-            )
-        if resp.status_code == 200:
-            return {"ok": True}
-        return {"error": f"HTTP {resp.status_code}"}
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as hx:
+            token = await get_auth_token(hx, login=login, password=password)
+        if token:
+            return {"ok": True, "message": "Авторизация прошла"}
+        return {"error": "Merchrules не принял креды. Проверь логин/пароль и права доступа."}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Ошибка: {str(e)[:200]}"}
 
 
 
