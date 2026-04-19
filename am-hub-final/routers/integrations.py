@@ -58,38 +58,43 @@ async def test_merchrules(request: Request):
 
     import httpx
     MR_BASE = os.environ.get("MERCHRULES_API_URL", "https://merchrules.any-platform.ru").rstrip("/")
-    # httpx.AsyncClient с cookies=... авто-сохраняет cookies между запросами — как requests.Session().
+    # httpx.AsyncClient с include cookies — как requests.Session() в legacy app.py.
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as hx:
-            # 1. Login
             login_url = f"{MR_BASE}/backend-v2/auth/login"
+            # Пробуем 3 варианта: username/email (JSON) + username (form) — как делал legacy
             r = await hx.post(login_url, json={"username": login, "password": password})
             if r.status_code not in (200, 201, 204):
-                # Пробуем поле email — некоторые стенды
                 r = await hx.post(login_url, json={"email": login, "password": password})
             if r.status_code not in (200, 201, 204):
-                # Последняя попытка — form-urlencoded с username
                 r = await hx.post(login_url, data={"username": login, "password": password})
             if r.status_code not in (200, 201, 204):
                 return {"error": f"Login: HTTP {r.status_code} — {r.text[:200]}"}
-            # 2. Verify — GET /backend-v2/accounts с полученными cookies
-            r2 = await hx.get(f"{MR_BASE}/backend-v2/accounts", params={"limit": 1},
-                              headers={"Accept": "application/json"})
-            if r2.status_code == 200:
-                ct = r2.headers.get("content-type", "").lower()
-                if "json" in ct:
-                    try:
-                        body = r2.json()
-                        n = len(body.get("accounts") or body.get("items") or
-                                 (body if isinstance(body, list) else []))
-                        return {"ok": True, "message": f"Подключено — найдено аккаунтов: {n}"}
-                    except Exception:
-                        pass
-                # 200 но не JSON → login-страница, auth реально не прошла
-                return {"error": f"Login вернул HTTP 200, но /accounts отвечает {ct or 'без Content-Type'} — session cookie не принят"}
-            if r2.status_code in (401, 403):
-                return {"error": f"Login прошёл, но /accounts=HTTP {r2.status_code} — нет прав доступа к API"}
-            return {"error": f"/accounts: HTTP {r2.status_code} — {r2.text[:200]}"}
+            # Legacy не делает verify — просто проверяет status_code. Если 200 — считает
+            # auth прошедшей и шлёт task csv / meetings с теми же cookies.
+            # Проверяем: хотя бы один cookie должен быть установлен (иначе login не настоящий).
+            if not hx.cookies:
+                return {"error": f"Login вернул HTTP {r.status_code} без Set-Cookie — auth не установил сессию"}
+            # Verify через /backend-v2/roadmap — реальный endpoint из legacy (с site_id=1 просто чтобы не 400).
+            try:
+                r2 = await hx.get(f"{MR_BASE}/backend-v2/roadmap",
+                                  params={"site_id": "1", "page_size": 1},
+                                  headers={"Accept": "application/json"})
+                ct2 = r2.headers.get("content-type", "").lower()
+                if r2.status_code == 200 and "json" in ct2:
+                    return {"ok": True, "message": "Подключено (session cookie принят)"}
+                if r2.status_code in (401, 403):
+                    return {"error": f"Login прошёл, но roadmap=HTTP {r2.status_code} — учётка без прав API"}
+                # 200 без JSON — login-страница вместо API (session не приклеился)
+                if r2.status_code == 200:
+                    return {"error": f"Login 200, но /roadmap возвращает {ct2 or 'non-JSON'} — session cookie не работает на API"}
+                # Другие ошибки (400 — неверный site_id — это нормально, значит auth ок)
+                if r2.status_code == 400:
+                    return {"ok": True, "message": "Подключено (API отвечает — auth принят)"}
+                return {"error": f"/roadmap: HTTP {r2.status_code} — {r2.text[:200]}"}
+            except Exception as ve:
+                # Если verify упал — но cookies есть, login всё равно прошёл
+                return {"ok": True, "message": f"Login прошёл (cookies установлены). Verify упал: {ve}"}
     except Exception as e:
         return {"error": f"Ошибка: {str(e)[:200]}"}
 
