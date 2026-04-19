@@ -36,7 +36,30 @@ function FormModal({ title, fields, onSubmit, onClose, submitLabel }) {
             return (
               <label key={f.k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{f.label}{f.required && <span style={{color:"var(--critical)"}}> *</span>}</span>
-                {f.type === "select" ? (
+                {f.type === "select" && (f.options || []).length > 10 ? (
+                  // С большим числом опций — input+datalist (нативный автокомплит
+                  // по подстроке). Пользователь начинает вводить 'yves' →
+                  // выпадают все матчи. Хранится label, перед submit превращаем
+                  // в value.
+                  (function(){
+                    const opts = f.options || [];
+                    const listId = "dl-" + f.k;
+                    const currentLabel = (opts.find(function(o){ return String(o.v) === String(vals[f.k]); }) || {}).l || vals[f.k] || "";
+                    return <>
+                      <input list={listId} placeholder={f.placeholder || "Начни печатать имя…"}
+                        defaultValue={currentLabel}
+                        onChange={function(e){
+                          const typed = e.target.value;
+                          const found = opts.find(function(o){ return o.l === typed; });
+                          setVals(function(v){ return {...v, [f.k]: found ? String(found.v) : typed}; });
+                        }}
+                        style={inputStyle}/>
+                      <datalist id={listId}>
+                        {opts.map(function(o){ return <option key={o.v} value={o.l}/>; })}
+                      </datalist>
+                    </>;
+                  })()
+                ) : f.type === "select" ? (
                   <select value={vals[f.k]} onChange={function(e){ setVals(function(v){ return {...v,[f.k]:e.target.value}; }); }} style={inputStyle}>
                     {(f.options || []).map(function(o){ return <option key={o.v} value={o.v}>{o.l}</option>; })}
                   </select>
