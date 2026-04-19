@@ -1523,6 +1523,7 @@ function PageProfile() {
     e.preventDefault();
     setSaving(true); setMsg(null);
     const body = {
+      email: prof.email || "",
       first_name: prof.first_name || "",
       last_name: prof.last_name || "",
       telegram_id: prof.telegram_id || "",
@@ -1533,8 +1534,13 @@ function PageProfile() {
       body: JSON.stringify(body),
     });
     setSaving(false);
-    setMsg(r.ok ? "Сохранено" : "Ошибка сохранения");
-    setTimeout(() => setMsg(null), 2500);
+    if (r.ok) {
+      setMsg("Сохранено. После смены email нажми «Вытянуть из Airtable» чтобы клиенты переподтянулись.");
+    } else {
+      const d = await r.json().catch(() => ({}));
+      setMsg(d.detail || d.error || "Ошибка сохранения");
+    }
+    setTimeout(() => setMsg(null), 5000);
   };
 
   if (!prof) return <div style={{ padding: 40, color: "var(--ink-6)", textAlign: "center" }}>Загружаю профиль…</div>;
@@ -1546,7 +1552,8 @@ function PageProfile() {
         <Card title="Личные данные">
           <form onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {[
-              { k: "email",       l: "Email",       readonly: true,  type: "email" },
+              { k: "email",       l: "Email",       readonly: false, type: "email",
+                hint: "Должен совпадать с CSM-email в Airtable, иначе клиенты не подтянутся" },
               { k: "first_name",  l: "Имя / инициалы", type: "text" },
               { k: "last_name",   l: "Фамилия",     type: "text" },
               { k: "telegram_id", l: "Telegram ID (chat_id)", type: "text" },
