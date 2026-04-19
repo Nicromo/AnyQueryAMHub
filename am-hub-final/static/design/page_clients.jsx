@@ -191,7 +191,10 @@ function PageClients() {
 // (роут /design/client/{id}). Фоллбек на первого из списка, если открыли
 // страницу без контекста — для отладки дизайна.
 function PageClient() {
-  const c = (typeof window !== "undefined" && window.__CURRENT_CLIENT) || CLIENTS[0];
+  // Fallbacks: server → window.__CURRENT_CLIENT; если нет — берём первого
+  // из списка window.CLIENTS; если и его нет — null (показываем заглушку).
+  const _clients = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const c = (typeof window !== "undefined" && window.__CURRENT_CLIENT) || _clients[0] || null;
   if (!c) {
     return (
       <div style={{ padding: 40, color: "var(--ink-6)" }}>
@@ -199,12 +202,23 @@ function PageClient() {
       </div>
     );
   }
+
+  // Хелперы для реальных данных из БД
+  const segment = c.segment || "—";
+  const domain = c.domain || "—";
+  const managerEmail = c.manager_email || "—";
+  const health = c.health_score != null ? Math.round(c.health_score * 100) : null;
+  const lastContact = c.last_meeting_date || c.last_checkup;
+  const lastContactStr = lastContact ? new Date(lastContact).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "никогда";
+  const gmv = c.gmv != null ? "₽ " + (c.gmv >= 1e6 ? (c.gmv/1e6).toFixed(1) + "м" : c.gmv >= 1e3 ? (c.gmv/1e3).toFixed(0) + "к" : c.gmv) : "—";
+  const openTasks = (c.tasks_open != null) ? c.tasks_open : (c.open_tasks != null ? c.open_tasks : null);
+
   return (
     <div>
       <TopBar
         breadcrumbs={["am hub", "клиенты", c.name]}
         title={c.name}
-        subtitle="Строительные материалы · МСК · c марта 2022 · Account Manager: Анна Соколова"
+        subtitle={[segment !== "—" && `Сегмент ${segment}`, domain !== "—" && domain, managerEmail !== "—" && "AM: " + managerEmail].filter(Boolean).join(" · ")}
         actions={
           <>
             <Btn kind="ghost" size="m" icon={<I.chat size={14}/>}>Заметка</Btn>
@@ -215,13 +229,13 @@ function PageClient() {
       />
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
 
-        {/* top strip */}
+        {/* top strip — реальные данные клиента */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
-          <KPI label="Клиентов всего" value={String(CL.length)} tone={CL.length ? "signal" : "neutral"} sub={CL.length ? undefined : "нажми Sync в расширении"}/>
-          <KPI label="GMV · 30д" value="₽ 4.8м" delta="+12%" sub="к предыдущему периоду"/>
-          <KPI label="Health score" value="72" tone="warn" sub="внимание: тренд падает"/>
-          <KPI label="Открытых задач" value="4" sub="1 просрочена"/>
-          <KPI label="Последний контакт" value="2д" unit="назад" sub="чекап: сегодня 14:00"/>
+          <KPI label="Сегмент" value={segment} tone={segment !== "—" ? "signal" : "neutral"}/>
+          <KPI label="GMV · 30д" value={gmv} sub={c.revenue_trend || undefined}/>
+          <KPI label="Health score" value={health != null ? String(health) : "—"} tone={health == null ? "neutral" : health < 40 ? "err" : health < 70 ? "warn" : "ok"} sub={health == null ? "данные не синкнуты" : undefined}/>
+          <KPI label="Открытых задач" value={openTasks != null ? String(openTasks) : "—"} sub={openTasks == null ? "синк не делался" : undefined}/>
+          <KPI label="Последний контакт" value={lastContactStr} sub={c.domain ? "домен: " + c.domain : undefined}/>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
