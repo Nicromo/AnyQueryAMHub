@@ -182,6 +182,23 @@ function PageClients() {
           </div>
         )}
       </div>
+      {newClientModal && (
+        <FormModal
+          title="Новый клиент"
+          fields={[{ key: "name", label: "Название клиента", type: "text", placeholder: "ООО Ромашка", required: true }]}
+          submitLabel="Создать"
+          onClose={() => setNewClientModal(false)}
+          onSubmit={(vals) =>
+            fetch("/api/clients", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: vals.name }),
+            })
+              .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+              .then(() => { setNewClientModal(false); location.reload(); })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -335,23 +352,6 @@ function PageClient() {
           </div>
         </div>
       </div>
-      {newClientModal && (
-        <FormModal
-          title="Новый клиент"
-          fields={[{ key: "name", label: "Название клиента", type: "text", placeholder: "ООО Ромашка", required: true }]}
-          submitLabel="Создать"
-          onClose={() => setNewClientModal(false)}
-          onSubmit={(vals) =>
-            fetch("/api/clients", {
-              method: "POST", credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: vals.name }),
-            })
-              .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-              .then(() => { setNewClientModal(false); location.reload(); })
-          }
-        />
-      )}
     </div>
   );
 }
