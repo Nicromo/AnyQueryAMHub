@@ -156,19 +156,58 @@
 
   function renderFollowup(m) {
     const hasFup = m.followup_text && m.followup_text.length;
+    const hasTranscript = m.transcript && m.transcript.length;
+    const hasKtalk = !!m.ktalk_event_id;
     return `
       <div class="flex items-center justify-between mb-2">
         <div><div class="text-xs text-slate-400">Прошедшая встреча</div><div class="font-bold">${esc(m.title || 'Встреча')}</div><div class="text-xs text-slate-500">${fmtDT(m.date)} · followup: ${esc(m.followup_status || 'pending')}</div></div>
         <button onclick="$('#meeting-sheet').classList.add('hidden')" class="text-slate-400">✕</button>
       </div>
-      <textarea id="fup-text" class="w-full bg-slate-800 rounded-lg p-2 text-sm" rows="6" placeholder="Текст followup...">${esc(m.followup_text || '')}</textarea>
-      <div class="flex gap-2 mt-2">
-        ${!hasFup ? `<button onclick="generateFup(${m.id})" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-sm">🤖 Сгенерировать AI</button>` : ''}
+
+      <div class="mb-3">
+        <div class="text-xs text-slate-400 mb-1">Транскрипт</div>
+        <div class="flex gap-2 mb-2 flex-wrap">
+          ${hasKtalk ? `<button onclick="pullKtalkTranscript(${m.id})" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-sm">⬇ Получить из Ktalk</button>` : ''}
+          <label class="px-3 py-1.5 rounded-lg bg-slate-700 text-sm cursor-pointer">📎 Загрузить файл<input type="file" class="hidden" accept=".txt,.vtt,.srt" onchange="loadTranscriptFile(event, ${m.id})"></label>
+        </div>
+        <textarea id="transcript-text" class="w-full bg-slate-800 rounded-lg p-2 text-xs" rows="4" placeholder="Или вставь транскрипт вручную...">${esc(m.transcript || '')}</textarea>
+        <button onclick="processTranscript(${m.id})" class="mt-2 px-3 py-1.5 rounded-lg bg-purple-600 text-sm">🤖 Разобрать через AI</button>
+      </div>
+
+      <div class="text-xs text-slate-400 mb-1">Followup</div>
+      <textarea id="fup-text" class="w-full bg-slate-800 rounded-lg p-2 text-sm" rows="6" placeholder="Текст followup (создастся автоматически из транскрипта)...">${esc(m.followup_text || '')}</textarea>
+      <div class="flex gap-2 mt-2 flex-wrap">
+        ${!hasFup ? `<button onclick="generateFup(${m.id})" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-sm">🤖 Сгенерировать по транскрипту</button>` : ''}
         <button onclick="sendFup(${m.id})" class="px-3 py-1.5 rounded-lg bg-green-600 text-sm">✅ Отправить</button>
         <button onclick="skipFup(${m.id})" class="px-3 py-1.5 rounded-lg bg-slate-700 text-sm">Пропустить</button>
         <a href="/followup/${CID}" class="ml-auto text-indigo-400 text-sm self-center">Открыть полную</a>
       </div>`;
   }
+
+  window.pullKtalkTranscript = async function (mid) {
+    try {
+      const d = await api(`/api/meetings/${mid}/transcript/pull`, {method: 'POST'});
+      $('#transcript-text').value = d.transcript || '';
+      alert('Транскрипт получен из Ktalk');
+    } catch (e) { alert('Ошибка: не удалось получить транскрипт из Ktalk (возможно, встреча не связана с Ktalk event)'); }
+  };
+
+  window.loadTranscriptFile = function (event, mid) {
+    const file = event.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => { $('#transcript-text').value = e.target.result; };
+    reader.readAsText(file);
+  };
+
+  window.processTranscript = async function (mid) {
+    const transcript = $('#transcript-text').value.trim();
+    if (!transcript) { alert('Вставь транскрипт или загрузи файл'); return; }
+    try {
+      const d = await api(`/api/meetings/${mid}/transcript/process`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({transcript})});
+      if (d.followup_text) $('#fup-text').value = d.followup_text;
+      alert('✅ Разобрано. Action items: ' + (d.action_items_count || 0));
+    } catch (e) { alert('Ошибка обработки'); }
+  };
 
   window.generatePrep = async function (mid) {
     $('#prep-result').innerHTML = '<div class="text-slate-500">Генерация...</div>';
