@@ -43,7 +43,10 @@ async def get_auth_token(client: httpx.AsyncClient,
     if cached.get("token") and cached.get("expires_at") and now < cached["expires_at"]:
         return cached["token"]
 
-    for field in ("email", "login", "username"):
+    # `username` первым — реальный prod Merchrules API по 422-error явно
+    # просит это поле. `email`/`login` — fallback для совместимости.
+    token_keys = ("token", "access_token", "accessToken", "jwt", "authToken")
+    for field in ("username", "email", "login"):
         try:
             resp = await client.post(
                 f"{MERCHRULES_URL}/backend-v2/auth/login",
@@ -52,13 +55,22 @@ async def get_auth_token(client: httpx.AsyncClient,
             )
             if resp.status_code == 200:
                 body = resp.json()
-                token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                token = None
+                for k in token_keys:
+                    if body.get(k): token = body.get(k); break
+                # nested: {data:{token}} / {result:{...}}
+                if not token:
+                    for wrap in ("data", "result", "payload"):
+                        inner = body.get(wrap) or {}
+                        for k in token_keys:
+                            if inner.get(k): token = inner[k]; break
+                        if token: break
                 if token:
                     _auth_cache[login] = {"token": token, "expires_at": now + timedelta(hours=1)}
                     logger.info("Merchrules auth OK for %s using field=%s", login, field)
                     return token
             elif resp.status_code not in (400, 401, 422):
-                logger.warning("Merchrules auth failed (%s) field=%s: %s %s", login, field, resp.status_code, resp.text[:150])
+                logger.warning("Merchrules auth failed (%s) field=%s: %s %s", login, field, resp.status_code, resp.text[:200])
         except Exception as exc:
             logger.warning("Merchrules auth error (%s) field=%s: %s", login, field, exc)
 
