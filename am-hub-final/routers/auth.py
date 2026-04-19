@@ -422,17 +422,10 @@ async def api_auth_me(
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
-    """Данные текущего пользователя. Поддерживает Cookie и Bearer токен (для расширения)."""
-    from auth import decode_access_token
-    # Bearer token из расширения
-    bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    token = bearer or auth_token
-    if not token:
-        raise HTTPException(status_code=401)
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    """Данные текущего пользователя.
+    Поддерживает cookie-JWT, Bearer-JWT и Bearer-amh_* (долгоживущий API-токен расширения)."""
+    from routers.api_tokens import resolve_user
+    user = resolve_user(db, request, auth_token)
     if not user:
         raise HTTPException(status_code=401)
     return {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
