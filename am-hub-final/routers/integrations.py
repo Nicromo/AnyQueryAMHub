@@ -36,11 +36,38 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
+def _save_mr_creds(db: Session, request: Request, auth_token_cookie: Optional[str], login: str, password: str) -> None:
+    """Сохраняет Merchrules creds в user.settings — чтобы панель интеграций
+    в хабе показывала Merchrules как online (configured=true)."""
+    try:
+        from routers.api_tokens import resolve_user
+        user = resolve_user(db, request, auth_token_cookie)
+        if not user:
+            return
+        settings = dict(user.settings or {})
+        mr = dict(settings.get("merchrules") or {})
+        mr["login"] = login
+        mr["password"] = password
+        settings["merchrules"] = mr
+        user.settings = settings
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(user, "settings")
+        db.commit()
+    except Exception as e:
+        logger.warning(f"_save_mr_creds failed: {e}")
+
+
 @router.api_route("/api/integrations/test/merchrules", methods=["GET", "POST"])
-async def test_merchrules(request: Request):
+async def test_merchrules(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
     """Тест Merchrules creds через session-cookie flow (как в legacy app.py).
     1) POST /backend-v2/auth/login — сервер ставит session cookie.
-    2) GET /backend-v2/accounts — если JSON → auth работает."""
+    2) GET /backend-v2/roadmap — если JSON → auth работает.
+    При успехе сохраняет креды в user.settings.merchrules (чтобы левая
+    панель интеграций показала Merchrules как online, а не offline)."""
     login = ""
     password = ""
     qp = request.query_params
@@ -91,6 +118,7 @@ async def test_merchrules(request: Request):
                         msg = f"Подключено. Задач на site_id=1: {total if total is not None else tasks_n}"
                     except Exception:
                         msg = "Подключено (session cookie принят)"
+                    _save_mr_creds(db, request, auth_token, login, password)
                     return {"ok": True, "message": msg}
                 if r2.status_code in (401, 403):
                     return {"error": f"Login прошёл, но roadmap=HTTP {r2.status_code} — учётка без прав API"}
@@ -98,6 +126,7 @@ async def test_merchrules(request: Request):
                     return {"error": f"Login 200, но /roadmap возвращает {ct2 or 'non-JSON'} — session cookie не работает на API"}
                 # 400/404 = валидный ответ API (неправильный site_id), значит auth ок
                 if r2.status_code in (400, 404):
+                    _save_mr_creds(db, request, auth_token, login, password)
                     return {"ok": True, "message": "Подключено — API отвечает (auth принят). Добавь site_id в настройки для синка."}
                 return {"error": f"/roadmap: HTTP {r2.status_code} — {r2.text[:200]}"}
             except Exception as ve:

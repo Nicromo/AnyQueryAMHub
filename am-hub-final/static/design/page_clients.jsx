@@ -24,6 +24,29 @@ function PageClients() {
   const activeSeg = counted.find(s => s.key === segFilter) || counted[0];
   const visibleClients = CL.filter(activeSeg.match);
 
+  // Вытянуть клиентов из Airtable прямо здесь — одна кнопка.
+  const [syncBusy, setSyncBusy] = React.useState(false);
+  async function pullFromAirtable() {
+    setSyncBusy(true);
+    try {
+      const r = await fetch("/api/sync/airtable", {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        credentials: "include", body: "{}"
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.error) {
+        alert("Airtable: " + d.error);
+      } else {
+        alert(`Готово. ${d.message || JSON.stringify(d).slice(0, 200)}`);
+        location.reload();
+      }
+    } catch (e) {
+      alert("Ошибка: " + e.message);
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   return (
     <div>
       <TopBar
@@ -32,6 +55,9 @@ function PageClients() {
         subtitle={`${P.total} клиентов · стр. ${P.page} из ${P.total_pages}`}
         actions={
           <>
+            <Btn kind="ghost" size="m" onClick={pullFromAirtable} disabled={syncBusy}>
+              {syncBusy ? "Тянем..." : "⟲ Из Airtable"}
+            </Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
               onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
             <Btn kind="primary" size="m" icon={<I.plus size={14}/>}

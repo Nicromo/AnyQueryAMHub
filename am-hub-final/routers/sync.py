@@ -258,7 +258,29 @@ async def api_sync_merchrules(
     if not login or not password:
         return {"error": "Нужны креды Merchrules"}
 
-    # Сохраняем креды
+    # Нет site_ids? → пытаемся подтянуть Airtable сначала, затем берём
+    # merchrules_account_id всех клиентов этого менеджера.
+    if not site_ids_input:
+        airtable_token = (settings.get("airtable") or {}).get("pat") or (settings.get("airtable") or {}).get("token") or _env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT")
+        airtable_base  = (settings.get("airtable") or {}).get("base_id") or _env("AIRTABLE_BASE_ID")
+        if airtable_token:
+            try:
+                from airtable_sync import sync_clients_from_airtable
+                await sync_clients_from_airtable(
+                    db=db, token=airtable_token, base_id=airtable_base,
+                    default_manager_email=user.email,
+                )
+            except Exception as _at:
+                logger.warning(f"Pre-sync Airtable fail: {_at}")
+        # Собираем site_ids из клиентов этого менеджера
+        q = db.query(Client.merchrules_account_id).filter(
+            Client.manager_email == user.email,
+            Client.merchrules_account_id.isnot(None),
+        )
+        site_ids_input = [row[0] for row in q.all() if row[0]]
+        logger.info(f"Auto-derived {len(site_ids_input)} site_ids from Airtable for {user.email}")
+
+    # Сохраняем креды и site_ids
     mr["login"] = login
     mr["password"] = password
     if site_ids_input:
