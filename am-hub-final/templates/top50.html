@@ -190,6 +190,49 @@
   {% if data.problem_cols %} · Проблемные колонки: <b>{{ data.problem_cols | join(', ') }}</b>{% endif %}
 </p>
 
+{# ─── SEARCH-QUALITY METRICS (ndcg@20_mean, precision@20_mean, precision_exact@20_mean) ─── #}
+{% if data.metrics_monthly %}
+<div class="card" style="padding:14px 16px;margin-top:18px">
+  <h3 style="font-size:1rem;margin:0 0 10px">📊 Метрики качества поиска — мои клиенты помесячно</h3>
+  <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:10px">
+    Колонки из таблицы: <b>{{ data.metric_cols | join(', ') }}</b>
+    {% if data.period_col %} · Период: <b>{{ data.period_col }}</b>{% else %} · Без разбивки по месяцам (нет колонки периода){% endif %}
+  </p>
+  <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:6px 8px">Клиент</th>
+        <th style="text-align:left;padding:6px 8px">Период</th>
+        {% for col in data.metric_cols %}
+        <th style="text-align:right;padding:6px 8px">{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in data.metrics_monthly %}
+      <tr style="border-bottom:1px solid var(--border-soft,rgba(255,255,255,.04))">
+        <td style="padding:6px 8px">{{ m.client }}</td>
+        <td style="padding:6px 8px;color:var(--text-muted)">{{ m.period }}</td>
+        {% for col in data.metric_cols %}
+        <td style="text-align:right;padding:6px 8px;font-family:monospace">
+          {% set v = m.metrics.get(col) %}
+          {% if v is none %}—
+          {% elif v is number %}{{ "%.4f" | format(v) }}
+          {% else %}{{ v }}
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif data.metric_cols %}
+<p style="color:var(--text-muted);font-size:0.82rem;margin-top:12px">
+  В таблице есть колонки метрик ({{ data.metric_cols | join(', ') }}), но для твоих клиентов данных нет.
+</p>
+{% endif %}
+
 {% endif %}
 {% endif %}
 

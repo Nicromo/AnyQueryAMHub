@@ -25,13 +25,15 @@ function PageClients() {
   const visibleClients = CL.filter(activeSeg.match);
 
   // Вытянуть клиентов из Airtable прямо здесь — одна кнопка.
+  // reset:true очищает manager_email у всех клиентов текущего юзера,
+  // потом sync переприсваивает по CSM из Airtable. Убирает «фантомных».
   const [syncBusy, setSyncBusy] = React.useState(false);
   async function pullFromAirtable() {
     setSyncBusy(true);
     try {
       const r = await fetch("/api/sync/airtable", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        credentials: "include", body: "{}"
+        credentials: "include", body: JSON.stringify({reset: true})
       });
       const d = await r.json().catch(() => ({}));
       if (d.error) {
