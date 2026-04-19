@@ -50,7 +50,8 @@ chrome.alarms.onAlarm.addListener(alarm => {
 });
 
 // ── Notifications + Badge helpers ─────────────────────────────────────────────
-const ICON_URL = "icons/icon128.png";
+// chrome.notifications требует абсолютный URL к иконке (не относительный).
+const ICON_URL = chrome.runtime.getURL("icons/icon128.png");
 function amhNotify(id, title, message) {
   try {
     chrome.notifications.clear(id, () => {

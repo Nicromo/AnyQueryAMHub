@@ -6,12 +6,19 @@
 import { CONFIG } from "./config.js";
 import { syncAccounts } from "./hub.js";
 
-// Перебираем все известные базы — prod и QA. У пользователя может быть
-// доступ только к одной, поэтому пробуем обе.
+// Только prod. QA уж точно не у этого юзера — доступ редкий, а её
+// попытка удваивает время теста (108 → 216 запросов).
 const MR_BASES = [
   "https://merchrules.any-platform.ru",
-  "https://merchrules-qa.any-platform.ru",
 ];
+
+// Per-fetch timeout — чтобы одна зависшая точка не съела весь бюджет.
+const FETCH_TIMEOUT_MS = 4000;
+function _timedFetch(url, opts = {}) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
 let MR_BASE = MR_BASES[0];     // обновляется на тот, что сработал
 let API_PREFIX = "/backend-v2"; // может быть "/api" или "/api/v1" — определяется в _verifyAuth
 
@@ -53,7 +60,7 @@ async function _tryLoginOnce(base, path, field, mode /* "json"|"form" */) {
     headers = { "Content-Type": "application/json", "Accept": "application/json" };
     body = JSON.stringify({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD });
   }
-  const r = await fetch(url, { method: "POST", headers, body, credentials: "include" });
+  const r = await _timedFetch(url, { method: "POST", headers, body, credentials: "include" });
   if (!r.ok) {
     let bodyText = "";
     try { bodyText = (await r.text()).slice(0, 400); } catch {}
@@ -113,7 +120,7 @@ async function _verifyAuth(base, authResult) {
     try {
       const headers = { "Accept": "application/json" };
       if (authResult && authResult.token) headers["Authorization"] = `Bearer ${authResult.token}`;
-      const r = await fetch(`${base}${path}?limit=1`, { headers, credentials: "include", redirect: "manual" });
+      const r = await _timedFetch(`${base}${path}?limit=1`, { headers, credentials: "include", redirect: "manual" });
       if (r.type === "opaqueredirect" || r.status === 0) continue;  // редирект на login = не auth
       if (!r.ok) continue;
       const ct = (r.headers.get("content-type") || "").toLowerCase();
@@ -192,7 +199,7 @@ async function mrGet(authResult, path, params = {}) {
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
   const headers = { "Accept": "application/json" };
   if (authResult && authResult.token) headers["Authorization"] = `Bearer ${authResult.token}`;
-  const r = await fetch(url, { headers, credentials: "include" });
+  const r = await _timedFetch(url, { headers, credentials: "include" });
   if (!r.ok) return { _err: true, status: r.status, body: await r.text().catch(() => "") };
   // Content-Type защита: HTML однозначно не API — не парсим.
   const ct = (r.headers.get("content-type") || "").toLowerCase();
