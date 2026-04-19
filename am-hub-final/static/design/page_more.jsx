@@ -1163,6 +1163,62 @@ function PageExtInstall() {
   const EXTS   = (typeof window !== "undefined" && window.__EXTENSIONS) || [];
   const HUB    = (typeof window !== "undefined" && window.__HUB_URL)    || window.location.origin;
 
+  // API tokens state
+  const [tokens, setTokens] = React.useState([]);
+  const [tokensLoading, setTokensLoading] = React.useState(true);
+  const [tokensErr, setTokensErr] = React.useState(null);
+  const [newName, setNewName] = React.useState("");
+  const [newToken, setNewToken] = React.useState(null);  // показываем сырой токен после create
+  const [creating, setCreating] = React.useState(false);
+
+  async function reloadTokens() {
+    setTokensLoading(true);
+    setTokensErr(null);
+    try {
+      const r = await fetch("/api/me/api-tokens", { credentials: "include" });
+      if (r.status === 401) { setTokensErr("Нужна авторизация"); setTokens([]); return; }
+      if (!r.ok) { setTokensErr("Ошибка " + r.status); setTokens([]); return; }
+      const d = await r.json();
+      setTokens(d.tokens || []);
+    } catch (e) {
+      setTokensErr(String(e.message || e));
+    } finally {
+      setTokensLoading(false);
+    }
+  }
+
+  React.useEffect(() => { reloadTokens(); }, []);
+
+  async function createToken() {
+    const name = (newName || "").trim();
+    if (!name) return;
+    setCreating(true);
+    try {
+      const r = await fetch("/api/me/api-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) { alert("Ошибка: " + r.status); return; }
+      const d = await r.json();
+      setNewToken(d.token);
+      setNewName("");
+      reloadTokens();
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function revokeToken(id) {
+    if (!window.confirm("Отозвать токен? Устройства с ним перестанут работать.")) return;
+    const r = await fetch("/api/me/api-tokens/" + encodeURIComponent(id), {
+      method: "DELETE", credentials: "include",
+    });
+    if (r.ok) reloadTokens();
+    else alert("Ошибка отзыва: " + r.status);
+  }
+
   // Простой clipboard helper с fallback
   function _copy(text, label) {
     try {
@@ -1292,12 +1348,61 @@ function PageExtInstall() {
               </div>
 
               <div>
-                <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>AM Hub · токен</div>
-                <div style={{ padding: 10, background: "var(--ink-1)", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 12, color: "var(--ink-7)", lineHeight: 1.5 }}>
-                  Токен берётся из cookie <code className="mono" style={{ color: "var(--ink-9)" }}>auth_token</code> этого браузера
-                  при использовании Hub-API. Для расширения — сгенерируйте отдельный API-токен в
-                  разделе <span style={{ color: "var(--signal)" }}>Мой кабинет → API</span> (скоро).
+                <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>AM Hub · токен (постоянный, отзывный)</div>
+
+                {/* Список существующих токенов */}
+                <div style={{ marginBottom: 8 }}>
+                  {tokensLoading && (
+                    <div style={{ fontSize: 11, color: "var(--ink-5)", padding: "4px 0" }}>Загрузка…</div>
+                  )}
+                  {tokensErr && (
+                    <div style={{ fontSize: 11, color: "var(--err, #f0556a)", padding: "4px 0" }}>{tokensErr}</div>
+                  )}
+                  {!tokensLoading && !tokensErr && tokens.length === 0 && (
+                    <div style={{ fontSize: 11, color: "var(--ink-5)", padding: "4px 0" }}>Нет активных токенов — создай первый ↓</div>
+                  )}
+                  {tokens.map(t => (
+                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, marginBottom: 4 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-9)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+                        <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>
+                          {t.prefix}… {t.last_used_at ? "· использовался " + new Date(t.last_used_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "· не использовался"}
+                        </div>
+                      </div>
+                      <button onClick={() => revokeToken(t.id)} title="Отозвать"
+                        style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-6)", cursor: "pointer", padding: "3px 8px", fontSize: 11 }}>✕</button>
+                    </div>
+                  ))}
                 </div>
+
+                {/* Форма создания */}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder="Название (например: Chrome на ноуте)"
+                    onKeyDown={e => { if (e.key === "Enter") createToken(); }}
+                    style={{ flex: 1, padding: "7px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontSize: 12, outline: "none" }}/>
+                  <Btn size="s" kind="primary" onClick={createToken} disabled={creating || !newName.trim()}>
+                    {creating ? "…" : "+ Создать"}
+                  </Btn>
+                </div>
+
+                {/* Показ свежесозданного токена (раз и навсегда) */}
+                {newToken && (
+                  <div style={{ marginTop: 10, padding: 10, background: "rgba(163,230,53,.10)", border: "1px solid rgba(163,230,53,.35)", borderRadius: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#a3e635", marginBottom: 6 }}>⚠️ Сохрани токен — больше не покажем</div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <code className="mono" style={{ flex: 1, fontSize: 11, color: "var(--ink-9)", wordBreak: "break-all" }}>{newToken}</code>
+                      <Btn size="s" kind="ghost" icon={<I.copy size={12}/>} onClick={() => _copy(newToken, "API token")}>копия</Btn>
+                      <button onClick={() => setNewToken(null)}
+                        style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-6)", cursor: "pointer", padding: "3px 8px", fontSize: 11 }}>✕</button>
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--ink-6)", marginTop: 6, lineHeight: 1.4 }}>
+                      Вставь в поле <b>AM HUB · TOKEN</b> расширения. Можно отозвать — устройства с этим токеном перестанут работать.
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
