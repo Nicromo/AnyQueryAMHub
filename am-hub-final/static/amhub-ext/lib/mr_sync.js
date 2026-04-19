@@ -32,7 +32,7 @@ async function _tryLoginOnce(base, path, field, mode /* "json"|"form" */) {
     headers = { "Content-Type": "application/x-www-form-urlencoded" };
     body = new URLSearchParams({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD }).toString();
   } else {
-    headers = { "Content-Type": "application/json" };
+    headers = { "Content-Type": "application/json", "Accept": "application/json" };
     body = JSON.stringify({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD });
   }
   const r = await fetch(url, { method: "POST", headers, body, credentials: "include" });
@@ -40,6 +40,14 @@ async function _tryLoginOnce(base, path, field, mode /* "json"|"form" */) {
     let bodyText = "";
     try { bodyText = (await r.text()).slice(0, 400); } catch {}
     return { ok: false, status: r.status, body: bodyText, url };
+  }
+  // Проверяем Content-Type — если HTML, это landing page/SPA fallback, а не API.
+  // Считаем такой "200" неудачей: реальный auth endpoint вернёт JSON или 401/422.
+  const ct = (r.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("text/html")) {
+    let bodyText = "";
+    try { bodyText = (await r.text()).slice(0, 200); } catch {}
+    return { ok: false, status: 200, body: `[HTML-response, не API] ${bodyText.replace(/\s+/g, " ")}`, url };
   }
   // Token может прийти в JSON, в Authorization, или как Set-Cookie (session mode).
   let token = null;
@@ -127,13 +135,24 @@ async function mrAuth() {
 async function mrGet(authResult, path, params = {}) {
   const url = new URL(`${MR_BASE}${path}`);
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-  const headers = {};
+  const headers = { "Accept": "application/json" };
   if (authResult && authResult.token) headers["Authorization"] = `Bearer ${authResult.token}`;
-  // Всегда include — chrome-extension имеет свой origin, без этого
-  // session-cookie Merchrules вообще не отправляется в запросе.
   const r = await fetch(url, { headers, credentials: "include" });
   if (!r.ok) return { _err: true, status: r.status, body: await r.text().catch(() => "") };
-  return r.json();
+  // Content-Type защита: HTML однозначно не API — не парсим.
+  const ct = (r.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("text/html")) {
+    const bodyText = await r.text().catch(() => "");
+    return { _err: true, status: r.status, body: `[HTML response, не API] ${bodyText.slice(0, 200).replace(/\s+/g, " ")}` };
+  }
+  // Для всего остального пробуем JSON с catch — некоторые API не ставят
+  // Content-Type, но тело валидный JSON.
+  try {
+    const text = await r.text();
+    return JSON.parse(text);
+  } catch (e) {
+    return { _err: true, status: r.status, body: `[JSON-parse failed: ${e.message}]` };
+  }
 }
 
 // Пробует несколько возможных путей к API-ресурсу.
