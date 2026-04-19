@@ -44,6 +44,11 @@ class Client(Base):
     nps_last = Column(Integer, nullable=True)
     nps_date = Column(DateTime, nullable=True)
 
+    # Платёжный статус (для клиентского хаба /client/{id})
+    payment_status   = Column(String, default="active")    # active | overdue | suspended | trial | unknown
+    payment_due_date = Column(DateTime, nullable=True)     # до какого числа оплачено/ожидается
+    payment_amount   = Column(Float, nullable=True)        # сумма текущего периода
+
     # План работы (JSONB)
     # { "goals": [], "actions": [], "quarterly_targets": {}, "notes": "" }
     account_plan = Column(JSONB, default=dict)
@@ -550,3 +555,69 @@ class NPSEntry(Base):
 Index("ix_revenue_client_period", RevenueEntry.client_id, RevenueEntry.period)
 Index("ix_health_snapshots_client_date", HealthSnapshot.client_id, HealthSnapshot.calculated_at)
 Index("ix_nps_client_date", NPSEntry.client_id, NPSEntry.recorded_at)
+
+
+# ── Блок 3: Клиентский хаб /client/{id} ──────────────────────────────────────
+
+class ClientContact(Base):
+    """Контакты клиента (ЛПР, технарь, финансист и т.д.)."""
+    __tablename__ = "client_contacts"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), index=True)
+    name       = Column(String, nullable=False)
+    role       = Column(String, nullable=True)          # decision_maker | tech | finance | other
+    position   = Column(String, nullable=True)          # должность свободным текстом
+    email      = Column(String, nullable=True)
+    phone      = Column(String, nullable=True)
+    telegram   = Column(String, nullable=True)
+    is_primary = Column(Boolean, default=False)
+    notes      = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client     = relationship("Client", backref="contacts")
+
+
+class ClientProduct(Base):
+    """Подключённые продукты клиента."""
+    __tablename__ = "client_products"
+    id            = Column(Integer, primary_key=True, index=True)
+    client_id     = Column(Integer, ForeignKey("clients.id"), index=True)
+    code          = Column(String, nullable=False)      # search | recommendations | banners | personalization | email | push | seo
+    name          = Column(String, nullable=False)      # "Поиск", "Рекомендации"
+    status        = Column(String, default="active")    # active | paused | trial | disabled
+    activated_at  = Column(DateTime, nullable=True)
+    extra         = Column(JSONB, default=dict)         # настройки/версия
+    client        = relationship("Client", backref="products")
+
+
+class ClientMerchRule(Base):
+    """Кэш правил мерчандайзинга из Merchrules."""
+    __tablename__ = "client_merch_rules"
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), index=True)
+    merchrules_id = Column(String, nullable=True)       # id в Merchrules
+    name         = Column(String, nullable=False)
+    rule_type    = Column(String, nullable=True)        # boost | filter | pin | synonym | redirect
+    status       = Column(String, default="active")     # active | paused | archived
+    priority     = Column(Integer, default=0)
+    config       = Column(JSONB, default=dict)
+    last_synced  = Column(DateTime, nullable=True)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client       = relationship("Client", backref="merch_rules")
+
+
+class ClientFeed(Base):
+    """Фиды клиента (каталог, наличие, цены и т.д.)."""
+    __tablename__ = "client_feeds"
+    id             = Column(Integer, primary_key=True, index=True)
+    client_id      = Column(Integer, ForeignKey("clients.id"), index=True)
+    feed_type      = Column(String, nullable=False)     # catalog | availability | price | reviews | custom
+    name           = Column(String, nullable=True)
+    url            = Column(String, nullable=True)
+    status         = Column(String, default="ok")       # ok | warning | error | disabled
+    last_updated   = Column(DateTime, nullable=True)
+    sku_count      = Column(Integer, default=0)
+    errors_count   = Column(Integer, default=0)
+    last_error     = Column(Text, nullable=True)
+    schedule       = Column(String, nullable=True)      # hourly | daily | manual
+    client         = relationship("Client", backref="feeds")
