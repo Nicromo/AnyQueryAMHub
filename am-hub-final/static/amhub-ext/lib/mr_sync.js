@@ -45,39 +45,63 @@ async function _tryLoginOnce(base, path, field, mode /* "json"|"form" */) {
   let token = null;
   const authHeader = r.headers.get("Authorization") || r.headers.get("authorization");
   if (authHeader && authHeader.startsWith("Bearer ")) token = authHeader.slice(7);
+  let jsonBody = null;
+  let jsonKeys = [];
   try {
-    const d = await r.clone().json();
-    if (!token) {
-      for (const k of TOKEN_KEYS) if (d && d[k]) { token = d[k]; break; }
-      // Может быть nested: { data: { token: ... }} или { result: { token: ... }}
+    jsonBody = await r.clone().json();
+    if (jsonBody && typeof jsonBody === "object") jsonKeys = Object.keys(jsonBody);
+    if (!token && jsonBody) {
+      for (const k of TOKEN_KEYS) if (jsonBody[k]) { token = jsonBody[k]; break; }
+      // Nested: {data: {token}} / {result: {...}} / {payload: {...}}
       for (const wrap of ["data", "result", "payload"]) {
-        if (!token && d && d[wrap]) {
-          for (const k of TOKEN_KEYS) if (d[wrap][k]) { token = d[wrap][k]; break; }
+        if (!token && jsonBody[wrap] && typeof jsonBody[wrap] === "object") {
+          for (const k of TOKEN_KEYS) if (jsonBody[wrap][k]) { token = jsonBody[wrap][k]; break; }
+        }
+      }
+      // Последний шанс: любое string-поле длиннее 40 символов, начинающееся на eyJ (JWT),
+      // чтобы хотя бы самому-маркированные JWT-токены ловить.
+      if (!token) {
+        for (const k of Object.keys(jsonBody)) {
+          const v = jsonBody[k];
+          if (typeof v === "string" && v.length > 40 && v.startsWith("eyJ")) { token = v; break; }
         }
       }
     }
   } catch { /* не JSON — возможно session-cookie login */ }
-  // Session-cookie mode: ответ 200 и браузер сам сохранил cookie.
-  // Тогда считаем auth успешным без явного токена (будем ходить с credentials: include).
-  return { ok: true, token, url, sessionMode: !token };
+  // Куки из Set-Cookie браузер сохранит сам (см. credentials: include выше).
+  // Если токен не нашёлся — считаем auth успешным в session-cookie mode.
+  const hasSetCookie = !!r.headers.get("set-cookie");
+  return {
+    ok: true, token, url, sessionMode: !token,
+    diagKeys: !token ? jsonKeys : null,  // для диагностики: что было в response body
+    hasSetCookie,
+  };
 }
 
 async function mrAuth() {
   const attempts = [];
-  // Порядок: (url, json vs form, field). `username` первым — реальный
-  // Merchrules API (prod) его требует по 422-error.
+  let firstSessionMode = null;  // первый успешный auth без токена — для диагностики
+
   for (const base of MR_BASES) {
     for (const path of AUTH_PATHS) {
       for (const mode of ["json", "form"]) {
         for (const field of ["username", "email", "login"]) {
           try {
             const res = await _tryLoginOnce(base, path, field, mode);
-            if (res.ok) {
+            if (res.ok && res.token) {
+              // Нашли явный токен → успех
               MR_BASE = base;
-              return { token: res.token, sessionMode: !!res.sessionMode, base };
+              return { token: res.token, sessionMode: false, base };
             }
+            if (res.ok && !res.token) {
+              // 200 без токена — session-cookie mode, запомним на случай если
+              // никакой другой попытки с явным токеном не будет
+              if (!firstSessionMode) firstSessionMode = { base, url: res.url, diagKeys: res.diagKeys, hasSetCookie: res.hasSetCookie };
+              // Продолжаем поиск — вдруг другая комбинация вернёт явный токен
+              continue;
+            }
+            // HTTP-ошибка
             attempts.push(`${base.split("//")[1]}${path}[${mode}/${field}]:HTTP ${res.status}${res.body ? ` — ${res.body.slice(0, 150)}` : ""}`);
-            // Если 404/405 — путь точно не тот, нет смысла перебирать field'ы
             if (res.status === 404 || res.status === 405) break;
           } catch (e) {
             attempts.push(`${base}[${mode}/${field}]:${e.message}`);
@@ -86,6 +110,13 @@ async function mrAuth() {
       }
     }
   }
+
+  // Если была хоть одна успешная auth без явного токена — fallback на session-cookie.
+  if (firstSessionMode) {
+    MR_BASE = firstSessionMode.base;
+    return { token: null, sessionMode: true, base: firstSessionMode.base };
+  }
+
   const all4xx = attempts.every(a => /HTTP 40[0-9]|HTTP 4[12][0-9]/.test(a));
   if (all4xx) {
     throw new Error("Merchrules: неверный логин или пароль, либо API изменился. Последние ответы: " + attempts.slice(-3).join(" | "));
