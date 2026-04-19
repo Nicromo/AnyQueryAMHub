@@ -223,12 +223,24 @@ async def api_sync_airtable(
     if not token:
         return {"error": "Нет токена Airtable. Укажите в Настройках → Аккаунты."}
 
+    # reset=true → сначала обнуляем manager_email у всех клиентов,
+    # привязанных к текущему пользователю. Потом sync переприсваивает
+    # их по CSM-email из Airtable. Так уходят «фантомные» 4 клиента
+    # (user: 'у меня 37, показывает 41 — откуда?').
+    if body.get("reset"):
+        n = db.query(Client).filter(Client.manager_email == user.email).update(
+            {"manager_email": None}, synchronize_session=False
+        )
+        db.commit()
+        logger.info(f"Reset manager_email for {n} clients of {user.email}")
+
     result = await sync_clients_from_airtable(
         db=db,
         token=token,
         base_id=base_id or None,
         view_id=view_id,
-        default_manager_email=user.email,
+        # НЕ передаём default_manager_email — иначе клиенты без CSM в
+        # Airtable снова улетят на текущего юзера.
     )
     return result
 

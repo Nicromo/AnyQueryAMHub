@@ -247,6 +247,7 @@ def client_to_design(
         "id": client.id,
         "name": client.name or "—",
         "seg": segment_label(client.segment),
+        "segment": client.segment or "",  # для фильтров в page_clients.jsx (_norm(c.segment))
         "pm": pm_name(client.manager_email),
         "next": compute_next_touchpoint(client, now, next_meetings_by_client),
         "status": health_to_status(

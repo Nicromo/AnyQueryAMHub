@@ -25,13 +25,15 @@ function PageClients() {
   const visibleClients = CL.filter(activeSeg.match);
 
   // Вытянуть клиентов из Airtable прямо здесь — одна кнопка.
+  // reset:true очищает manager_email у всех клиентов текущего юзера,
+  // потом sync переприсваивает по CSM из Airtable. Убирает «фантомных».
   const [syncBusy, setSyncBusy] = React.useState(false);
   async function pullFromAirtable() {
     setSyncBusy(true);
     try {
       const r = await fetch("/api/sync/airtable", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        credentials: "include", body: "{}"
+        credentials: "include", body: JSON.stringify({reset: true})
       });
       const d = await r.json().catch(() => ({}));
       if (d.error) {
@@ -58,6 +60,13 @@ function PageClients() {
             <Btn kind="ghost" size="m" onClick={pullFromAirtable} disabled={syncBusy}>
               {syncBusy ? "Тянем..." : "⟲ Из Airtable"}
             </Btn>
+            <Btn kind="ghost" size="m" onClick={async () => {
+              if (!window.confirm("Объединить дубли клиентов по нормализованному имени? 'Yves Rocher' и 'yves-rocher' станут одним.")) return;
+              const r = await fetch("/api/clients/auto-dedupe", {method:"POST", credentials:"include"});
+              const d = await r.json().catch(()=>({}));
+              alert(d.ok ? `Объединено: ${d.merged}` : (d.error || "Ошибка"));
+              if (d.ok) location.reload();
+            }}>⎘ Дубли</Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
               onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
             <Btn kind="primary" size="m" icon={<I.plus size={14}/>}
@@ -182,6 +191,23 @@ function PageClients() {
           </div>
         )}
       </div>
+      {newClientModal && (
+        <FormModal
+          title="Новый клиент"
+          fields={[{ key: "name", label: "Название клиента", type: "text", placeholder: "ООО Ромашка", required: true }]}
+          submitLabel="Создать"
+          onClose={() => setNewClientModal(false)}
+          onSubmit={(vals) =>
+            fetch("/api/clients", {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: vals.name }),
+            })
+              .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+              .then(() => { setNewClientModal(false); location.reload(); })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -335,23 +361,6 @@ function PageClient() {
           </div>
         </div>
       </div>
-      {newClientModal && (
-        <FormModal
-          title="Новый клиент"
-          fields={[{ key: "name", label: "Название клиента", type: "text", placeholder: "ООО Ромашка", required: true }]}
-          submitLabel="Создать"
-          onClose={() => setNewClientModal(false)}
-          onSubmit={(vals) =>
-            fetch("/api/clients", {
-              method: "POST", credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: vals.name }),
-            })
-              .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-              .then(() => { setNewClientModal(false); location.reload(); })
-          }
-        />
-      )}
     </div>
   );
 }

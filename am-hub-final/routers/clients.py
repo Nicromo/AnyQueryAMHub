@@ -885,6 +885,45 @@ async def api_client_churn(
 
 
 
+@router.post("/api/clients/auto-dedupe")
+async def api_clients_auto_dedupe(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Авто-дедуп клиентов текущего юзера по нормализованному имени.
+    'Yves Rocher' == 'yves-rocher' == 'YvesRocher' — сливаются в один.
+    Оставляет самый старый (минимальный id), переносит site_id и связи."""
+    import re as _re
+    def _key(s: str) -> str:
+        return _re.sub(r"[^a-zа-я0-9]", "", (s or "").lower())
+
+    q = db.query(Client).filter(Client.manager_email == user.email) if user.role != "admin" else db.query(Client)
+    groups: dict[str, list[Client]] = {}
+    for c in q.all():
+        if not c.name: continue
+        groups.setdefault(_key(c.name), []).append(c)
+
+    merged = 0
+    for key, lst in groups.items():
+        if len(lst) < 2: continue
+        lst.sort(key=lambda x: x.id)
+        keep, dupes = lst[0], lst[1:]
+        for d in dupes:
+            # Переносим merchrules_account_id и airtable_record_id если у keep нет
+            if d.merchrules_account_id and not keep.merchrules_account_id:
+                keep.merchrules_account_id = d.merchrules_account_id
+            if d.airtable_record_id and not keep.airtable_record_id:
+                keep.airtable_record_id = d.airtable_record_id
+            # Перелинкуем задачи/встречи
+            from models import Task, Meeting
+            db.query(Task).filter(Task.client_id == d.id).update({"client_id": keep.id}, synchronize_session=False)
+            db.query(Meeting).filter(Meeting.client_id == d.id).update({"client_id": keep.id}, synchronize_session=False)
+            db.delete(d)
+            merged += 1
+    db.commit()
+    return {"ok": True, "merged": merged}
+
+
 @router.get("/api/clients/duplicates")
 async def api_clients_duplicates(
     threshold: int = 75,

@@ -125,6 +125,65 @@ def find_problem_columns(rows: list[dict]) -> list[str]:
     return result or []
 
 
+# Ключевые search-quality метрики, которые пользователь выводит помесячно
+# по клиентам менеджера. Ищем по подстроке в заголовке (регистр не важен).
+METRIC_KEYWORDS = ["ndcg@20_mean", "precision@20_mean", "precision_exact@20_mean"]
+# Поля с датой/периодом (для monthly-разбивки)
+PERIOD_KEYWORDS = ["месяц", "month", "период", "period", "дата", "date"]
+
+
+def find_metric_columns(rows: list[dict]) -> list[str]:
+    """Ищет колонки с метриками качества поиска."""
+    if not rows:
+        return []
+    headers = list(rows[0].keys())
+    result = []
+    for h in headers:
+        h_low = h.lower().strip()
+        if any(kw.lower() in h_low for kw in METRIC_KEYWORDS):
+            result.append(h)
+    return result
+
+
+def find_period_column(rows: list[dict]) -> Optional[str]:
+    """Ищет колонку с месяцем/датой периода для группировки."""
+    if not rows:
+        return None
+    headers = list(rows[0].keys())
+    for h in headers:
+        h_low = h.lower().strip()
+        if any(kw in h_low for kw in PERIOD_KEYWORDS):
+            return h
+    return None
+
+
+def group_metrics_by_month(rows: list[dict], client_col: str, period_col: Optional[str],
+                            metric_cols: list[str]) -> list[dict]:
+    """Группирует строки по (клиент, месяц) и возвращает компактную структуру.
+
+    Возвращает: [{client: "X", period: "2025-03", metrics: {ndcg@20_mean: 0.82, ...}}, ...]
+    Если period_col нет, period = "all"."""
+    out = []
+    for r in rows:
+        client = (r.get(client_col) or "").strip() if client_col else ""
+        if not client:
+            continue
+        period = (r.get(period_col) or "").strip() if period_col else "all"
+        metrics = {}
+        for col in metric_cols:
+            v = r.get(col, "")
+            if v == "" or v is None:
+                continue
+            # Пробуем float; если не число — оставляем строкой
+            try:
+                metrics[col] = float(str(v).replace(",", ".").replace(" ", ""))
+            except Exception:
+                metrics[col] = v
+        if metrics:
+            out.append({"client": client, "period": period, "metrics": metrics})
+    return out
+
+
 def get_headers(rows: list[dict]) -> list[str]:
     """Возвращает список заголовков таблицы."""
     if not rows:
@@ -166,7 +225,12 @@ async def get_top50_data(
     filtered = filter_my_clients(rows, my_clients)
     client_col = find_client_column(rows)
     problem_cols = find_problem_columns(rows)
+    metric_cols = find_metric_columns(rows)
+    period_col = find_period_column(rows)
     headers = get_headers(rows)
+
+    # Группируем метрики по месяцам только по клиентам менеджера
+    metrics_monthly = group_metrics_by_month(filtered, client_col, period_col, metric_cols) if metric_cols else []
 
     return {
         "rows": rows,
@@ -174,6 +238,9 @@ async def get_top50_data(
         "headers": headers,
         "client_col": client_col,
         "problem_cols": problem_cols,
+        "metric_cols": metric_cols,       # найденные колонки метрик
+        "period_col": period_col,          # колонка с периодом/месяцем (если есть)
+        "metrics_monthly": metrics_monthly,  # [{client, period, metrics}]
         "fetched_at": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "error": None,
     }
