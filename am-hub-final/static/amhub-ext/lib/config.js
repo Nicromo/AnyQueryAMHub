@@ -36,8 +36,8 @@ export async function loadConfig() {
       ["hub_url","hub_token","mr_login","mr_password",
        "groq_api_key","cf_account_id","cf_api_token"],
       data => {
-        if (data.hub_url)      CONFIG.HUB_URL   = data.hub_url.replace(/\/$/, "");
-        if (data.hub_token)    CONFIG.HUB_TOKEN = "Bearer " + data.hub_token;
+        if (data.hub_url)      CONFIG.HUB_URL   = data.hub_url.trim().replace(/\/$/, "");
+        if (data.hub_token)    CONFIG.HUB_TOKEN = "Bearer " + String(data.hub_token).trim();
         if (data.mr_login)     CONFIG.MR_LOGIN    = data.mr_login;
         if (data.mr_password)  CONFIG.MR_PASSWORD = data.mr_password;
         if (data.groq_api_key) CONFIG.GROQ_API_KEY = data.groq_api_key;
