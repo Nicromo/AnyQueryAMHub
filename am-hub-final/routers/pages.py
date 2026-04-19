@@ -593,3 +593,19 @@ async def client_focus_page(request: Request, client_id: int, db: Session = Depe
 # AUTH: KTALK OAuth
 # ============================================================================
 
+
+
+# ============================================================================
+# EXTENSION page — скачать и получить API-токен
+# ============================================================================
+
+@router.get("/extension", response_class=HTMLResponse)
+async def extension_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    user = _get_user(auth_token, db)
+    if not user:
+        return _login_redirect()
+    hub_url = os.environ.get("APP_URL") or \
+              (("https://" + os.environ["RAILWAY_PUBLIC_DOMAIN"]) if os.environ.get("RAILWAY_PUBLIC_DOMAIN") else str(request.base_url).rstrip("/"))
+    return templates.TemplateResponse("extension.html", {
+        "request": request, "user": user, "hub_url": hub_url,
+    })

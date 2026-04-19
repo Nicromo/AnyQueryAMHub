@@ -1057,6 +1057,63 @@ async def job_renewal_alerts():
         try: db.close()
         except Exception: pass
 
+
+async def job_contract_end_alerts():
+    """Ежедневно 09:00: алерты о клиентах с истекающим контрактом за 30/14/7/1 дней."""
+    logger.info("📅 Checking contract_end...")
+    try:
+        from database import SessionLocal
+        from models import Client, User, TelegramSubscription
+        db = SessionLocal()
+        try:
+            subs = db.query(TelegramSubscription).filter(
+                TelegramSubscription.is_active == True,  # noqa: E712
+            ).all()
+            today = date.today()
+            thresholds = {30: "🟢", 14: "🟡", 7: "🟠", 1: "🔴"}
+            for sub in subs:
+                user = sub.user
+                if not user or not user.is_active:
+                    continue
+                q = db.query(Client).filter(Client.contract_end.isnot(None))
+                if user.role == "manager":
+                    q = q.filter(Client.manager_email == user.email)
+                clients = q.all()
+                buckets: dict[int, list] = {d: [] for d in thresholds}
+                for c in clients:
+                    if not c.contract_end:
+                        continue
+                    days_left = (c.contract_end - today).days
+                    if days_left in buckets:
+                        buckets[days_left].append(c)
+                # Ничего не нашли — молчим
+                total = sum(len(v) for v in buckets.values())
+                if total == 0:
+                    continue
+                lines = [f"📅 <b>Контракты заканчиваются ({total})</b>\n"]
+                for days_left in sorted(buckets.keys(), reverse=True):
+                    items = buckets[days_left]
+                    if not items:
+                        continue
+                    icon = thresholds[days_left]
+                    word = "день" if days_left == 1 else ("дней" if days_left >= 5 else "дня")
+                    lines.append(f"\n{icon} <b>Через {days_left} {word}:</b>")
+                    for c in items[:5]:
+                        seg = c.segment or "—"
+                        mrr = c.mrr or 0
+                        mrr_s = f"{mrr/1e3:.0f}K" if mrr >= 1000 else str(int(mrr))
+                        lines.append(f"  • {c.name} [{seg}] — MRR {mrr_s}₽")
+                    if len(items) > 5:
+                        lines.append(f"  <i>…ещё {len(items)-5}</i>")
+                await send_telegram(int(sub.chat_id), "\n".join(lines))
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Contract end alerts error: {e}")
+    finally:
+        try: db.close()
+        except Exception: pass
+
 def start_scheduler():
     sched = _get_scheduler()
 
@@ -1088,6 +1145,8 @@ def start_scheduler():
                   id="ktalk_sync", name="Ktalk Meeting Sync", replace_existing=True)
     sched.add_job(job_renewal_alerts, "cron", hour=9, minute=30, day_of_week="mon",
                   id="renewal_alerts", name="Weekly Renewal Alerts", replace_existing=True)
+    sched.add_job(job_contract_end_alerts, "cron", hour=9, minute=0,
+                  id="contract_end_alerts", name="Contract end 30/14/7/1 alerts", replace_existing=True)
 
     sched.start()
     logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")

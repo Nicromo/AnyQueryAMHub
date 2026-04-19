@@ -309,6 +309,8 @@ app.include_router(admin_router.router, tags=["admin"])
 app.include_router(inbox_notifications.router, tags=["inbox"])
 from routers import pdf_export
 app.include_router(pdf_export.router, tags=["pdf"])
+from routers import api_tokens as api_tokens_router
+app.include_router(api_tokens_router.router, tags=["api-tokens"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
@@ -345,6 +347,14 @@ async def get_current_user(
             token = auth_header[7:]
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    # Долгоживущий API-токен (расширение): формат "amh_..."
+    if token.startswith("amh_"):
+        from routers.api_tokens import find_user_by_api_token
+        user = find_user_by_api_token(db, token)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API token")
+        return user
+    # Обычный JWT (веб-сессия)
     from auth import decode_access_token
     payload = decode_access_token(token)
     if not payload:

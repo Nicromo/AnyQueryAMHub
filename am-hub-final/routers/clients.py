@@ -666,15 +666,22 @@ async def api_update_client(
         raise HTTPException(status_code=404)
 
     data = await request.json()
-    allowed = ("name", "segment", "domain", "health_score", "manager_email", "activity_level")
+    allowed = ("name", "segment", "domain", "health_score", "manager_email", "activity_level", "contract_end")
     changed = {}
     for field in allowed:
         if field in data:
             old_val = getattr(client, field)
             new_val = data[field]
+            # contract_end приходит строкой "YYYY-MM-DD" или null → приводим к date
+            if field == "contract_end" and new_val:
+                try:
+                    from datetime import date as _date
+                    new_val = _date.fromisoformat(str(new_val))
+                except Exception:
+                    continue
             if old_val != new_val:
                 setattr(client, field, new_val)
-                changed[field] = {"old": old_val, "new": new_val}
+                changed[field] = {"old": str(old_val), "new": str(new_val)}
 
     if changed:
         db.commit()
