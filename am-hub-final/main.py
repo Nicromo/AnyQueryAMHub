@@ -179,6 +179,12 @@ BASE_DIR = _Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.cache = None  # disable template cache entirely
 
+# Cache-bust для /static/css/style.css — меняется при каждом деплое.
+# Railway ставит RAILWAY_GIT_COMMIT_SHA, иначе — timestamp запуска.
+import time as _time
+_STATIC_VERSION = os.environ.get("RAILWAY_GIT_COMMIT_SHA", str(int(_time.time())))[:12]
+templates.env.globals["static_version"] = _STATIC_VERSION
+
 MSK = tz(timedelta(hours=3))  # Moscow timezone
 
 
