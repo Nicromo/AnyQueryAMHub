@@ -529,7 +529,7 @@ async function testMR() {
 
   showBox("s-mr-result",
     res.ok
-      ? `✅ Merchrules OK · найдено аккаунтов: ${res.accounts_total ?? "—"}`
+      ? `✅ ${res.message || "Merchrules подключён"}`
       : "❌ " + (res.error || "Неизвестная ошибка"),
     res.ok ? "ok" : "err"
   );

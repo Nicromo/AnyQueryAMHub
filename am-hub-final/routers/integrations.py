@@ -75,25 +75,32 @@ async def test_merchrules(request: Request):
             # Проверяем: хотя бы один cookie должен быть установлен (иначе login не настоящий).
             if not hx.cookies:
                 return {"error": f"Login вернул HTTP {r.status_code} без Set-Cookie — auth не установил сессию"}
-            # Verify через /backend-v2/roadmap — реальный endpoint из legacy (с site_id=1 просто чтобы не 400).
+            # Verify через /backend-v2/roadmap (реальный endpoint из legacy).
+            # В Merchrules API нет глобального списка аккаунтов — работа через site_id.
+            # Пытаемся перечислить задачи на site_id=1 как smoke-test auth.
             try:
                 r2 = await hx.get(f"{MR_BASE}/backend-v2/roadmap",
                                   params={"site_id": "1", "page_size": 1},
                                   headers={"Accept": "application/json"})
                 ct2 = r2.headers.get("content-type", "").lower()
                 if r2.status_code == 200 and "json" in ct2:
-                    return {"ok": True, "message": "Подключено (session cookie принят)"}
+                    try:
+                        body = r2.json()
+                        tasks_n = len(body.get("tasks") or body.get("items") or [])
+                        total = body.get("total") or body.get("total_count")
+                        msg = f"Подключено. Задач на site_id=1: {total if total is not None else tasks_n}"
+                    except Exception:
+                        msg = "Подключено (session cookie принят)"
+                    return {"ok": True, "message": msg}
                 if r2.status_code in (401, 403):
                     return {"error": f"Login прошёл, но roadmap=HTTP {r2.status_code} — учётка без прав API"}
-                # 200 без JSON — login-страница вместо API (session не приклеился)
                 if r2.status_code == 200:
                     return {"error": f"Login 200, но /roadmap возвращает {ct2 or 'non-JSON'} — session cookie не работает на API"}
-                # Другие ошибки (400 — неверный site_id — это нормально, значит auth ок)
-                if r2.status_code == 400:
-                    return {"ok": True, "message": "Подключено (API отвечает — auth принят)"}
+                # 400/404 = валидный ответ API (неправильный site_id), значит auth ок
+                if r2.status_code in (400, 404):
+                    return {"ok": True, "message": "Подключено — API отвечает (auth принят). Добавь site_id в настройки для синка."}
                 return {"error": f"/roadmap: HTTP {r2.status_code} — {r2.text[:200]}"}
             except Exception as ve:
-                # Если verify упал — но cookies есть, login всё равно прошёл
                 return {"ok": True, "message": f"Login прошёл (cookies установлены). Verify упал: {ve}"}
     except Exception as e:
         return {"error": f"Ошибка: {str(e)[:200]}"}
