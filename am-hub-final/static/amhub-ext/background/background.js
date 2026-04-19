@@ -194,7 +194,18 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     // ── Wake-up ping (MV3 service worker keep-alive) ─────────────────────────
     PING:             () => ({ pong: true }),
     // ── Hub ──────────────────────────────────────────────────────────────────
-    RELOAD_CONFIG:    () => loadConfig().then(() => ({ ok: true })),
+    RELOAD_CONFIG:    () => loadConfig().then(() => {
+      // Пользователь нажал 'Сохранить настройки' → поменял токен.
+      // Сбрасываем счётчик 401, убираем бейдж ⚠ — даём новому токену шанс
+      // без флэш-сообщения 'токен устарел'.
+      _amhAuthFailCount = 0;
+      chrome.action.getBadgeText({}, txt => {
+        if (txt === "⚠" || txt === "🔑") amhSetBadge("", null);
+      });
+      // Немедленный heartbeat — чтобы моментально проверить новый токен
+      runHeartbeat().catch(() => {});
+      return { ok: true };
+    }),
     CHECK_CONNECTION: () => checkConnection(),
     GET_FULL_STATE:   () => ({ checkup: { ...checkup }, sync: { ...syncState } }),
 

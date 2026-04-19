@@ -129,13 +129,25 @@ async function mrGet(authResult, path, params = {}) {
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
   const headers = {};
   if (authResult && authResult.token) headers["Authorization"] = `Bearer ${authResult.token}`;
-  const r = await fetch(url, {
-    headers,
-    // Если auth был session-cookie, здесь тоже credentials include
-    credentials: authResult && authResult.sessionMode ? "include" : "same-origin",
-  });
-  if (!r.ok) return null;
+  // Всегда include — chrome-extension имеет свой origin, без этого
+  // session-cookie Merchrules вообще не отправляется в запросе.
+  const r = await fetch(url, { headers, credentials: "include" });
+  if (!r.ok) return { _err: true, status: r.status, body: await r.text().catch(() => "") };
   return r.json();
+}
+
+// Пробует несколько возможных путей к API-ресурсу.
+async function mrGetAny(authResult, paths, params = {}) {
+  const tries = [];
+  for (const p of paths) {
+    const res = await mrGet(authResult, p, params);
+    if (!res || !res._err) return { data: res, path: p };
+    tries.push(`${p}:HTTP ${res.status}${res.body ? ` — ${res.body.slice(0, 120)}` : ""}`);
+    // 404 — путь точно не тот; 401 — token/session не подходят, дальше тоже
+    // нет смысла (одинаковый результат).
+    if (res.status === 401 || res.status === 403) break;
+  }
+  return { data: null, path: null, tries };
 }
 
 // Lightweight auth-only check for UI "Test connection" button
@@ -143,12 +155,22 @@ export async function testMrAuth() {
   if (!CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD) {
     throw new Error("Введите логин и пароль Merchrules");
   }
-  const token = await mrAuth();
-  // Verify token works by fetching one account
-  const accData = await mrGet(token, "/backend-v2/accounts", { limit: 1 });
-  if (accData === null) throw new Error("Merchrules: авторизация прошла, но API вернул ошибку");
+  const auth = await mrAuth();
+  const authLabel = auth.sessionMode ? "session-cookie" : "Bearer-token";
+  // Verify auth works by fetching one account — пробуем несколько путей
+  const r = await mrGetAny(auth, [
+    "/backend-v2/accounts", "/backend/accounts", "/api/accounts", "/accounts",
+  ], { limit: 1 });
+  if (!r.data) {
+    const tried = (r.tries || []).join(" | ");
+    throw new Error(
+      `Merchrules: auth=${authLabel} прошла, но API вернул ошибку. ` +
+      `Пробовал пути: ${tried || "—"}. Проверь права учётки или напиши это сообщение админу.`
+    );
+  }
+  const accData = r.data;
   const accounts = accData?.accounts || accData?.items || (Array.isArray(accData) ? accData : []);
-  return { ok: true, accounts_total: accounts.length };
+  return { ok: true, accounts_total: accounts.length, path: r.path, authMode: authLabel };
 }
 
 export async function doSync() {
@@ -157,12 +179,20 @@ export async function doSync() {
 
   const token = await mrAuth();
 
-  // Получаем аккаунты и сайты
-  const [accData, siteData] = await Promise.all([
+  // Получаем аккаунты и сайты. mrGet теперь возвращает {_err,status,body}
+  // при HTTP-ошибке — нужен explicit guard чтобы не принять ошибку за пустой ответ.
+  const [accDataRaw, siteDataRaw] = await Promise.all([
     mrGet(token, "/backend-v2/accounts", { limit: 500 }),
     mrGet(token, "/backend-v2/sites",    { limit: 500 }),
   ]);
-
+  if (accDataRaw && accDataRaw._err) {
+    throw new Error(`Merchrules /accounts: HTTP ${accDataRaw.status}${accDataRaw.body ? " — " + accDataRaw.body.slice(0, 200) : ""}`);
+  }
+  if (siteDataRaw && siteDataRaw._err) {
+    throw new Error(`Merchrules /sites: HTTP ${siteDataRaw.status}${siteDataRaw.body ? " — " + siteDataRaw.body.slice(0, 200) : ""}`);
+  }
+  const accData = accDataRaw;
+  const siteData = siteDataRaw;
   const accounts = accData?.accounts || accData?.items || (Array.isArray(accData) ? accData : []);
   const sites    = siteData?.sites    || siteData?.items || (Array.isArray(siteData) ? siteData : []);
 
@@ -176,10 +206,13 @@ export async function doSync() {
       const siteId = String(site.id || site.site_id || "");
       if (!siteId) return null;
 
-      const [tasksData, meetingsData] = await Promise.all([
+      const [tasksRaw, meetingsRaw] = await Promise.all([
         mrGet(token, "/backend-v2/tasks", { site_id: siteId, status: "plan,in_progress,blocked", limit: 100 }),
         mrGet(token, "/backend-v2/meetings", { site_id: siteId, limit: 20 }),
       ]);
+      // Игнорируем _err на уровне отдельного сайта — просто пустой результат
+      const tasksData = tasksRaw && tasksRaw._err ? null : tasksRaw;
+      const meetingsData = meetingsRaw && meetingsRaw._err ? null : meetingsRaw;
 
       const tasks    = tasksData?.tasks    || tasksData?.items    || [];
       const meetings = meetingsData?.meetings || meetingsData?.items || [];
