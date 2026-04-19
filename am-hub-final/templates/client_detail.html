@@ -1,1891 +1,275 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ client.name }} — AM Hub</title>
-  <style>
-    /* theme vars from style.css */
-    [data-theme="light"] { --bg:#f1f5f9; --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
-    
-    
-    .main { max-width:1100px; margin:0 auto; padding:24px; }
-    
-    .back { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.82rem; margin-bottom:16px; }
-    .back:hover { color:var(--text); }
-    .header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:12px; }
-    .header h1 { font-size:1.5rem; font-weight:700; }
-    .header-meta { display:flex; gap:8px; align-items:center; margin-top:4px; flex-wrap:wrap; }
-    .seg-badge { padding:3px 10px; border-radius:20px; font-size:.72rem; font-weight:700; background:rgba(99,102,241,.15); color:#818cf8; }
-    .health-bar { height:6px; border-radius:3px; background:var(--border); width:80px; overflow:hidden; }
-    .health-fill { height:100%; border-radius:3px; }
-    .action-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:24px; }
-    .tabs { display:flex; gap:6px; margin-bottom:20px; border-bottom:1px solid var(--border); }
-    .tab { padding:8px 16px; border-radius:8px 8px 0 0; font-size:.82rem; cursor:pointer; border:1px solid transparent; background:transparent; color:var(--muted); transition:all .15s; border-bottom:none; position:relative; bottom:-1px; }
-    .tab.active { background:var(--card); border-color:var(--border); border-bottom-color:var(--card); color:var(--text); font-weight:600; }
-    .tab-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; border-radius:9px; font-size:.65rem; font-weight:700; background:var(--accent); color:#fff; padding:0 5px; margin-left:6px; }
-    .tab-content { display:none; }
-    .tab-content.active { display:block; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:8px; transition:border-color .15s; }
-    .card:hover { border-color:rgba(99,102,241,.3); }
-    .card h3 { font-size:.88rem; font-weight:600; margin-bottom:4px; }
-    .meta { font-size:.72rem; color:var(--muted); margin-top:6px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.68rem; font-weight:700; }
-    .b-plan { background:rgba(59,130,246,.15); color:#60a5fa; }
-    .b-in-progress { background:rgba(168,85,247,.15); color:#c084fc; }
-    .b-review { background:rgba(234,179,8,.15); color:#fbbf24; }
-    .b-done { background:rgba(34,197,94,.15); color:#4ade80; }
-    .b-blocked { background:rgba(239,68,68,.15); color:#f87171; }
-    
-    
-    
-    .btn-p:hover { opacity:.9; color:#fff; }
-    
-    .btn-ghost { background:transparent; border-color:transparent; color:var(--muted); }
-    .theme-btn { position:fixed; top:16px; right:16px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:1rem; z-index:200; }
-    /* Tasks */
-    .task-row { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:6px; transition:all .15s; }
-    .task-row:hover { border-color:rgba(99,102,241,.3); }
-    .task-status-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-    .dot-plan { background:#60a5fa; }
-    .dot-in_progress { background:#c084fc; }
-    .dot-review { background:#fbbf24; }
-    .dot-done { background:#4ade80; }
-    .dot-blocked { background:#f87171; box-shadow:0 0 6px #f87171; }
-    .task-title { flex:1; font-size:.85rem; font-weight:500; }
-    .task-title.done-strike { text-decoration:line-through; opacity:.5; }
-    .task-actions { display:flex; gap:6px; opacity:0; transition:opacity .15s; }
-    .task-row:hover .task-actions { opacity:1; }
-    .status-select { font-size:.72rem; border:1px solid var(--border); background:var(--bg); color:var(--text); border-radius:6px; padding:3px 6px; cursor:pointer; }
-    .task-updating { opacity:.5; pointer-events:none; }
-    /* Quick note */
-    .quick-note-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:16px; }
-    .quick-note-wrap textarea { width:100%; min-height:60px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:.85rem; resize:vertical; outline:none; font-family:inherit; transition:border-color .15s; }
-    .quick-note-wrap textarea:focus { border-color:var(--accent); }
-    .quick-note-actions { display:flex; gap:8px; margin-top:8px; align-items:center; }
-    /* Notes */
-    .note-card { display:flex; gap:12px; padding:12px 14px; background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:6px; transition:border-color .15s; }
-    .note-card:hover { border-color:rgba(99,102,241,.3); }
-    .note-card.pinned { border-left:3px solid var(--yellow); }
-    .note-body { flex:1; }
-    .note-text { font-size:.84rem; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
-    .note-footer { display:flex; gap:10px; margin-top:6px; align-items:center; }
-    .note-actions { display:flex; gap:4px; opacity:0; transition:opacity .15s; }
-    .note-card:hover .note-actions { opacity:1; }
-    /* Timeline */
-    .timeline-filters { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
-    .tl-filter { padding:4px 12px; border-radius:20px; font-size:.75rem; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); transition:all .15s; }
-    .tl-filter.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-    .tl-item { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid rgba(30,42,58,.6); }
-    .tl-item:last-child { border-bottom:none; }
-    .tl-left { display:flex; flex-direction:column; align-items:center; min-width:52px; }
-    .tl-date { font-size:.68rem; color:var(--muted); text-align:center; line-height:1.3; }
-    .tl-dot { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.9rem; margin-top:4px; }
-    .tl-line { flex:1; width:1px; background:var(--border); margin-top:4px; min-height:16px; }
-    .tl-body { flex:1; padding-bottom:4px; }
-    .tl-title { font-size:.84rem; font-weight:600; margin-bottom:3px; }
-    .tl-desc { font-size:.76rem; color:var(--muted); line-height:1.5; }
-    /* Meetings */
-    .meeting-card { background:var(--card); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:10px; padding:12px 14px; margin-bottom:8px; }
-    /* Empty */
-    .empty { text-align:center; padding:48px 20px; color:var(--muted); }
-    .empty-icon { font-size:2.5rem; margin-bottom:12px; }
-    /* Toast */
-    .toast { position:fixed; bottom:24px; right:24px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 18px; font-size:.84rem; z-index:9999; box-shadow:0 8px 24px rgba(0,0,0,.3); transition:opacity .3s; }
-    .toast.ok { border-color:var(--green); color:var(--green); }
-    .toast.err { border-color:var(--red); color:var(--red); }
+{% extends "base.html" %}
 
-    /* ── Mobile ── */
-    @media (max-width: 768px) {
-      .layout { flex-direction: column; }
-      .sidebar { display: none; }
-      .main { padding: 12px; margin-left: 0 !important; }
-      .cc-header { flex-direction: column; gap: 10px; }
-      .cc-actions { flex-wrap: wrap; }
-      .cc-actions .btn { flex: 1; min-width: 120px; text-align: center; }
-      .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
-      .tab { font-size: .75rem; padding: 6px 12px; }
-      .task-row { flex-wrap: wrap; gap: 6px; }
-      .task-row select { width: 100%; }
-      #new-task-title, #new-meeting-title { width: 100%; min-width: unset; }
-      .kpi-row { gap: 8px; }
-      .kpi { min-width: calc(50% - 4px); flex: 1; padding: 10px 12px; }
-      .cc-grid { grid-template-columns: 1fr !important; }
-      .note-chip-actions { opacity: 1; }
-      .tl-item { font-size: .82rem; }
-    }
-    @media (max-width: 480px) {
-      .main { padding: 8px; }
-      .kpi .v { font-size: 1.2rem; }
-      .tab-badge { display: none; }
-    }
+{% block title %}{{ client.name }}{% endblock %}
 
-    /* Mobile */
-    @media (max-width: 768px) {
-      .main { padding:12px; }
-      .header { flex-direction:column; gap:8px; }
-      .header h1 { font-size:1.2rem; }
-      .kpi-row { grid-template-columns: repeat(2, 1fr); gap:8px; }
-      .action-buttons { flex-wrap:wrap; }
-      .action-buttons a, .action-buttons button { flex:1; min-width:120px; text-align:center; font-size:.78rem; padding:8px 10px; }
-      .tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; padding-bottom:4px; }
-      .tab { padding:7px 12px; font-size:.78rem; }
-      .task-row { flex-wrap:wrap; gap:6px; }
-      .task-row select { font-size:.75rem; padding:4px 6px; }
-      #new-task-title, #new-meeting-title { min-width:100%; }
-      .note-chip { padding:10px; }
-      .tl-item { gap:8px; }
-    }
-    @media (max-width: 480px) {
-      .kpi-row { grid-template-columns: 1fr 1fr; }
-      .seg-badge, .health-wrap { display:none; }
-    }
-  </style>
-</head>
-<body>
-<button class="theme-btn" onclick="toggleTheme()">🌓</button>
-<div class="main">
-  <a href="/clients" class="back">← Клиенты</a>
-  <!-- ══════════ HERO BLOCK ══════════ -->
-  <div id="hero-block" style="
-    background: linear-gradient(135deg, rgba(99,102,241,.08) 0%, rgba(6,182,212,.05) 100%);
-    border: 1px solid rgba(99,102,241,.2);
-    border-radius: 16px;
-    padding: 20px 22px;
-    margin: 12px 0 20px;
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 16px;
-    align-items: center;
-  ">
-    <!-- Avatar -->
-    <div id="hero-avatar" style="
-      width: 52px; height: 52px;
-      border-radius: 14px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.15rem; font-weight: 800;
-      background: linear-gradient(135deg, #6366f1, #06b6d4);
-      flex-shrink: 0;
-    ">{{ client.name[:2].upper() }}</div>
+{% block content %}
+<div class="max-w-[1400px] mx-auto px-4 py-4" data-client-id="{{ client.id }}">
 
-    <!-- Main info -->
-    <div style="min-width:0;">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-        <span style="font-size:1.15rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ client.name }}</span>
-        {% if client.segment %}
-        <span style="font-size:.7rem;padding:2px 8px;border-radius:6px;background:rgba(99,102,241,.15);color:#818cf8;font-weight:700;">{{ client.segment }}</span>
-        {% endif %}
-        <span id="hero-risk-badge" style="font-size:.7rem;padding:2px 8px;border-radius:6px;font-weight:700;"></span>
+  <!-- STICKY HEADER -->
+  <div class="sticky top-0 z-20 bg-slate-900/95 backdrop-blur rounded-xl border border-slate-700 p-4 mb-4">
+    <div class="flex items-start gap-4">
+      <div class="w-12 h-12 rounded-lg bg-indigo-600 flex items-center justify-center text-xl font-bold">{{ client.name[:1] }}</div>
+      <div class="flex-1">
+        <h1 class="text-xl font-bold">{{ client.name }}</h1>
+        <div class="text-sm text-slate-400">{{ client.domain or '—' }} · {{ client.segment or '—' }} · {{ client.manager_email or '—' }}</div>
       </div>
-
-      <!-- Health bar -->
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-        <span style="font-size:.68rem;color:var(--muted);white-space:nowrap;">Health</span>
-        <div style="flex:1;max-width:160px;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;">
-          <div id="hero-health-bar" style="height:100%;border-radius:3px;transition:width .6s;"></div>
-        </div>
-        <span id="hero-health-val" style="font-size:.82rem;font-weight:700;min-width:34px;">
-          {{ (client.health_score * 100)|int if client.health_score else 0 }}%
-        </span>
-      </div>
-
-      <!-- Quick metrics -->
-      <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        <div style="font-size:.76rem;color:var(--muted);">
-          💰 MRR: <strong id="hero-mrr" style="color:var(--text);">—</strong>
-        </div>
-        <div style="font-size:.76rem;color:var(--muted);">
-          ⭐ NPS: <strong id="hero-nps" style="color:var(--text);">{{ client.nps_last if client.nps_last else '—' }}</strong>
-        </div>
-        <div style="font-size:.76rem;color:var(--muted);">
-          📅 Контакт: <strong id="hero-contact" style="color:var(--text);">
-            {% if client.last_meeting_date %}
-              {{ ((now - client.last_meeting_date).days) }} дн. назад
-            {% else %}нет данных{% endif %}
-          </strong>
-        </div>
-        <div style="font-size:.76rem;color:var(--muted);">
-          🎫 Тикеты: <strong id="hero-tickets" style="color:var(--text);">{{ client.open_tickets or 0 }}</strong>
-        </div>
+      <div class="flex gap-2">
+        <button onclick="openAIChat()" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm">🤖 AI</button>
+        <button onclick="openNewNote()" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">📝 Заметка</button>
+        <button onclick="newTask()" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">+ Задача</button>
+        <button onclick="toggleTimeline()" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">⏱ Хроника</button>
       </div>
     </div>
 
-    <!-- Action buttons -->
-    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0;">
-      <a href="/prep/{{ client.id }}" class="btn btn-sm btn-p" style="white-space:nowrap;">📋 Подготовка</a>
-      <a href="/followup/{{ client.id }}" class="btn btn-sm" style="white-space:nowrap;">✍️ Фолоуап</a>
-      <a href="/client/{{ client.id }}/qbr" class="btn btn-sm" style="white-space:nowrap;">📊 QBR</a>
+    <!-- Метрики: 6 карточек -->
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-2 mt-4" id="hdr-metrics">
+      <div class="bg-slate-800 rounded-lg p-2"><div class="text-xs text-slate-400">Health</div><div class="text-lg font-bold" id="m-health">—</div></div>
+      <div class="bg-slate-800 rounded-lg p-2"><div class="text-xs text-slate-400">MRR</div><div class="text-lg font-bold" id="m-mrr">—</div></div>
+      <div class="bg-slate-800 rounded-lg p-2"><div class="text-xs text-slate-400">Оплата</div><div class="text-sm font-bold" id="m-pay">—</div></div>
+      <div class="bg-slate-800 rounded-lg p-2"><div class="text-xs text-slate-400">Чекап</div><div class="text-sm font-bold" id="m-checkup">—</div></div>
+      <div class="bg-slate-800 rounded-lg p-2"><div class="text-xs text-slate-400">След. встреча</div><div class="text-sm font-bold" id="m-next">—</div></div>
+      <div class="bg-slate-800 rounded-lg p-2"><div class="text-xs text-slate-400">Контакт</div><div class="text-sm font-bold" id="m-last">—</div></div>
     </div>
 
-    <!-- AI-подсказка (загружается асинхронно) -->
-    <div id="hero-ai-hint" style="
-      grid-column: 1 / -1;
-      display: none;
-      background: rgba(99,102,241,.06);
-      border: 1px solid rgba(99,102,241,.15);
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: .8rem;
-      line-height: 1.5;
-    ">
-      <span style="color:#818cf8;font-weight:600;margin-right:6px;">🤖 AI:</span>
-      <span id="hero-ai-text"></span>
-    </div>
+    <!-- Продукты -->
+    <div class="mt-3 flex flex-wrap gap-1.5" id="products-chips"></div>
+
+    <!-- Актуальность -->
+    <div class="mt-2 text-xs text-slate-500" id="last-sync">Данные актуальны: —</div>
   </div>
-  <!-- ══════════ END HERO ══════════ -->
 
-
-  <div class="header">
-    <div>
-      <h1 id="client-name-display">{{ client.name }}
-        <button onclick="toggleEdit()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--muted);margin-left:6px;" title="Редактировать">✏️</button>
-      </h1>
-      <!-- Форма редактирования (скрыта) -->
-      <div id="edit-form" style="display:none;margin-top:8px;background:var(--surface-2,rgba(255,255,255,.04));border:1px solid var(--border);border-radius:10px;padding:12px;">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <input id="edit-name" value="{{ client.name }}" placeholder="Название" style="flex:1;min-width:150px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-          <select id="edit-segment" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
-            <option value="">— Сегмент —</option>
-            {% for seg in ['SS','SMB','SME','SME+','SME-','ENT'] %}
-            <option value="{{ seg }}" {% if client.segment == seg %}selected{% endif %}>{{ seg }}</option>
-            {% endfor %}
-          </select>
-          <input id="edit-domain" value="{{ client.domain or '' }}" placeholder="domain.ru" style="flex:1;min-width:120px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
-          <input id="edit-health" type="number" min="0" max="100" value="{{ (client.health_score * 100)|int if client.health_score else 0 }}" placeholder="Health%" style="width:80px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
-        </div>
-        <div style="display:flex;gap:6px;">
-          <button class="btn btn-sm" onclick="saveClientEdit()">💾 Сохранить</button>
-          <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text);" onclick="toggleEdit()">Отмена</button>
-          <span id="edit-result" style="font-size:.78rem;align-self:center;display:none;"></span>
-        </div>
-      </div>
-      <div class="header-meta">
-        {% if client.segment %}<span class="seg-badge">{{ client.segment }}</span>{% endif %}
-        {% if client.manager_email %}<span style="color:var(--muted);font-size:.78rem;">{{ client.manager_email }}</span>{% endif %}
-        {% if client.health_score %}
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:.75rem;color:var(--muted);">Health</span>
-          <div class="health-bar"><div class="health-fill" style="width:{{ (client.health_score * 100)|int }}%;background:{% if client.health_score > 0.7 %}var(--green){% elif client.health_score > 0.4 %}var(--yellow){% else %}var(--red){% endif %}"></div></div>
-          <span style="font-size:.75rem;color:var(--muted);">{{ (client.health_score * 100)|int }}%</span>
-        </div>
-        {% endif %}
-        {% if client.last_meeting_date %}
-        <span style="font-size:.75rem;color:var(--muted);">Контакт: {{ client.last_meeting_date.strftime('%d.%m.%Y') }}</span>
-        {% endif %}
-      </div>
-    </div>
-    <div class="action-bar">
-      <a href="/prep/{{ client.id }}" class="btn btn-p">📋 Prep</a>
-      <a href="/followup/{{ client.id }}" class="btn">✍️ Followup</a>
-      <a href="/client/{{ client.id }}/plan" class="btn">📐 План</a>
-      <a href="/client/{{ client.id }}/qbr" class="btn">📊 QBR</a>
-      {% if client.segment in ["SS","SMB"] or not client.last_meeting_date %}
-      <a href="/onboarding/{{ client.id }}" class="btn" style="background:rgba(249,115,22,.12);color:#fb923c;border:1px solid rgba(249,115,22,.3);">🚀 Онбординг</a>
-      {% endif %}
-      {% if client.segment in ['ENT','SME+','SME'] or meetings|length == 0 %}
-      <a href="/onboarding/{{ client.id }}" class="btn" style="background:rgba(249,115,22,.12);color:#fb923c;border:1px solid rgba(249,115,22,.3);">🚀 Онбординг</a>
-      {% endif %}
-      <button class="btn" style="background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);font-size:.8rem;" onclick="toggleEditClient()">✏️ Изменить</button>
-      <a href="/api/clients/{{ client.id }}/export/pdf" class="btn" style="background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.25);" target="_blank">📄 PDF</a>
+  <!-- PINNED NOTE -->
+  <div id="pinned-note-wrap" class="hidden bg-amber-900/30 border border-amber-700 rounded-lg p-3 mb-3">
+    <div class="flex items-start gap-2">
+      <span class="text-amber-400">📌</span>
+      <div class="flex-1" id="pinned-note-text"></div>
+      <button onclick="unpinNote()" class="text-xs text-slate-400 hover:text-slate-200">открепить</button>
     </div>
   </div>
 
-  <!-- Быстрая заметка -->
-  <!-- ══ Комбо-график: MRR + Health ══ -->
-  <div id="combo-chart-block" style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-      <div style="font-size:.85rem;font-weight:600;">📈 Динамика MRR &amp; Health Score</div>
-      <div style="display:flex;gap:12px;font-size:.72rem;color:var(--muted);">
-        <span><span style="display:inline-block;width:10px;height:3px;background:#6366f1;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>MRR</span>
-        <span><span style="display:inline-block;width:10px;height:3px;background:#22c55e;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Health %</span>
-      </div>
-      <div style="display:flex;gap:6px;">
-        <button onclick="setComboRange(3,this)" class="btn btn-sm" style="padding:4px 10px;font-size:.72rem;">3м</button>
-        <button onclick="setComboRange(6,this)" class="btn btn-sm active" style="padding:4px 10px;font-size:.72rem;">6м</button>
-        <button onclick="setComboRange(12,this)" class="btn btn-sm" style="padding:4px 10px;font-size:.72rem;">12м</button>
-      </div>
-    </div>
-    <div style="position:relative;height:200px;"><canvas id="combo-chart"></canvas></div>
-  </div>
-
-  <div class="quick-note-wrap">
-    <textarea id="quick-note-input" placeholder="💬 Быстрая заметка… (Ctrl+Enter для сохранения)"></textarea>
-    <div class="quick-note-actions">
-      <button class="btn btn-p btn-sm" onclick="addQuickNote()">💾 Сохранить</button>
-      <label style="display:flex;align-items:center;gap:5px;font-size:.76rem;color:var(--muted);cursor:pointer;">
-        <input type="checkbox" id="quick-note-pin"> 📌 Закрепить
-      </label>
-      <span id="quick-note-saved" style="font-size:.76rem;color:var(--green);display:none;">✅ Сохранено</span>
-    </div>
-    <a href="/api/clients/{{ client.id }}/export/pdf" download
-       style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid var(--border);color:var(--muted);font-size:.8rem;text-decoration:none;background:var(--surface-2,rgba(255,255,255,.03));"
-       title="Скачать PDF-отчёт">
-      📄 PDF
-    </a>
-  </div>
-
-  <!-- Форма редактирования клиента -->
-  <div id="edit-client-form" style="display:none;background:var(--surface-2,var(--card));border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
-    <div style="font-size:.88rem;font-weight:600;margin-bottom:12px;">✏️ Редактировать клиента</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex-wrap:wrap;">
-      <div>
-        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Название</label>
-        <input id="edit-name" value="{{ client.name }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
-      </div>
-      <div>
-        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Сегмент</label>
-        <select id="edit-segment" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
-          <option value="">— Не задан —</option>
-          {% for seg in ["ENT","SME+","SME","SME-","SMB","SS"] %}
-          <option value="{{ seg }}" {% if client.segment == seg %}selected{% endif %}>{{ seg }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Домен</label>
-        <input id="edit-domain" value="{{ client.domain or '' }}" placeholder="company.ru" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
-      </div>
-      <div>
-        <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px;">Health Score (0–1)</label>
-        <input id="edit-health" type="number" min="0" max="1" step="0.05" value="{{ client.health_score or 0 }}" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:12px;">
-      <button class="btn btn-sm" onclick="saveClient()">💾 Сохранить</button>
-      <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text);" onclick="toggleEditClient()">Отмена</button>
-      <span id="edit-client-result" style="font-size:.8rem;align-self:center;display:none;"></span>
+  <!-- CONTACTS STRIP -->
+  <div class="bg-slate-800 rounded-xl p-3 mb-3">
+    <div class="flex items-center gap-3 flex-wrap" id="contacts-row">
+      <span class="text-xs text-slate-400">👥 Контакты:</span>
+      <span class="text-sm text-slate-500">загрузка...</span>
     </div>
   </div>
 
-  <div class="tabs">
-    <button class="tab active" onclick="showTab('tasks',this)">✅ Задачи <span class="tab-badge">{{ tasks|length }}</span></button>
-    <button class="tab" onclick="showTab('meetings',this)">📅 Встречи <span class="tab-badge">{{ meetings|length }}</span></button>
-    <button class="tab" onclick="showTab('notes',this)">📝 Заметки <span class="tab-badge" id="badge-notes">0</span></button>
-    <button class="tab" onclick="showTab('finance',this);loadFinance()">💰 Финансы</button>
-    <button class="tab" onclick="showTab('health-tab',this);loadHealthHistory()">❤️ Health</button>
-    <button class="tab" onclick="showTab('ai-insights',this);loadAIInsights()">🤖 AI</button>
-    <button class="tab" onclick="showTab('exec-summary',this);loadExecSummary()">📋 Summary</button>
-    <button class="tab" onclick="showTab('timeline',this)">📜 История</button>
-    <button class="tab" onclick="showTab('tickets',this)">🎫 Тикеты</button>
-    <button class="tab" onclick="showTab('checkup-config',this);loadCheckupConfig()">🔍 Чекап</button>
-    <button class="tab" onclick="showTab('onboarding',this)">🚀 Онбординг</button>
-  </div>
+  <!-- CHARTS ROW (сворачиваемый) -->
+  <details class="bg-slate-800 rounded-xl p-3 mb-3" open>
+    <summary class="cursor-pointer text-sm font-semibold mb-2">📊 Динамика (последние 12 мес.)</summary>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+      <div class="bg-slate-900 rounded-lg p-2"><div class="text-xs text-slate-400 mb-1">MRR</div><canvas id="chart-mrr" height="100"></canvas></div>
+      <div class="bg-slate-900 rounded-lg p-2"><div class="text-xs text-slate-400 mb-1">Health</div><canvas id="chart-health" height="100"></canvas></div>
+      <div class="bg-slate-900 rounded-lg p-2"><div class="text-xs text-slate-400 mb-1">NPS + чекапы</div><canvas id="chart-nps" height="100"></canvas></div>
+      <div class="bg-slate-900 rounded-lg p-2"><div class="text-xs text-slate-400 mb-1">Встречи/задачи</div><canvas id="chart-activity" height="100"></canvas></div>
+    </div>
+  </details>
 
-  <!-- ══ БЛОК 1: ФИНАНСЫ ══ -->
-  <div id="tab-finance" class="tab-content">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
-        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Текущий MRR</div>
-        <div id="fin-mrr" style="font-size:1.8rem;font-weight:700;">—</div>
-        <div id="fin-mrr-trend" style="font-size:.78rem;color:var(--muted);margin-top:2px;"></div>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
-        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">ARR</div>
-        <div id="fin-arr" style="font-size:1.8rem;font-weight:700;">—</div>
-        <div id="fin-pipeline" style="font-size:.78rem;color:var(--green);margin-top:2px;"></div>
-      </div>
-    </div>
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <div style="font-size:.85rem;font-weight:600;">📈 История MRR</div>
-        <button onclick="showAddRevenue()" class="btn btn-sm">+ Добавить</button>
-      </div>
-      <div style="position:relative;height:180px;"><canvas id="mrr-chart"></canvas></div>
-    </div>
-    <div id="add-revenue-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;">
-      <div style="font-size:.84rem;font-weight:600;margin-bottom:10px;">Добавить MRR</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
-        <div>
-          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Период (YYYY-MM)</label>
-          <input id="rev-period" placeholder="2026-04" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-        </div>
-        <div>
-          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">MRR (руб.)</label>
-          <input id="rev-mrr" type="number" placeholder="150000" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-        </div>
-        <div>
-          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Заметка</label>
-          <input id="rev-note" placeholder="Продление, апсейл..." style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button onclick="saveRevenue()" class="btn btn-sm btn-p">Сохранить</button>
-        <button onclick="document.getElementById('add-revenue-form').style.display='none'" class="btn btn-sm">Отмена</button>
-      </div>
-    </div>
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <div style="font-size:.85rem;font-weight:600;">🎯 Апсейл / Даунсейл</div>
-        <button onclick="showAddUpsell()" class="btn btn-sm">+ Событие</button>
-      </div>
-      <div id="upsell-list"><div style="color:var(--muted);font-size:.82rem;padding:8px 0;">Загрузка...</div></div>
-      <div id="add-upsell-form" style="display:none;border-top:1px solid var(--border);margin-top:12px;padding-top:12px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-          <div>
-            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Тип</label>
-            <select id="upsell-type" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-              <option value="upsell">🔼 Апсейл</option>
-              <option value="downsell">🔽 Даунсейл</option>
-              <option value="expansion">📦 Расширение</option>
-              <option value="churn_risk">⚠️ Риск оттока</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Статус</label>
-            <select id="upsell-status" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-              <option value="identified">Выявлен</option>
-              <option value="in_progress">В работе</option>
-              <option value="won">✅ Выигран</option>
-              <option value="lost">❌ Проигран</option>
-              <option value="postponed">⏳ Отложен</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">MRR до (руб.)</label>
-            <input id="upsell-before" type="number" placeholder="100000" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-          </div>
-          <div>
-            <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">MRR после (руб.)</label>
-            <input id="upsell-after" type="number" placeholder="150000" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-          </div>
-        </div>
-        <div style="margin-bottom:8px;">
-          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Описание</label>
-          <input id="upsell-desc" placeholder="Что именно продаём/теряем..." style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button onclick="saveUpsell()" class="btn btn-sm btn-p">Сохранить</button>
-          <button onclick="document.getElementById('add-upsell-form').style.display='none'" class="btn btn-sm">Отмена</button>
-        </div>
-      </div>
+  <!-- TABS -->
+  <div class="bg-slate-800 rounded-xl overflow-hidden">
+    <nav class="flex border-b border-slate-700 overflow-x-auto">
+      <button data-tab="notes"    class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">📝 Заметки</button>
+      <button data-tab="roadmap"  class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">🗺 Роадмап</button>
+      <button data-tab="qbr"      class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">📊 QBR</button>
+      <button data-tab="meetings" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">📅 Встречи</button>
+      <button data-tab="rules"    class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">⚙️ Мерч-правила</button>
+      <button data-tab="feeds"    class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">📦 Фиды</button>
+    </nav>
+
+    <div class="p-4">
+      <div id="tab-notes"    class="tab-pane"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
+      <div id="tab-roadmap"  class="tab-pane hidden"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
+      <div id="tab-qbr"      class="tab-pane hidden"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
+      <div id="tab-meetings" class="tab-pane hidden"><div id="calendar"></div><div id="meeting-sheet" class="hidden"></div></div>
+      <div id="tab-rules"    class="tab-pane hidden"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
+      <div id="tab-feeds"    class="tab-pane hidden"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
     </div>
   </div>
-
-  <!-- ══ БЛОК 2: HEALTH ══ -->
-  <div id="tab-health-tab" class="tab-content">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px;">
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center;">
-        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">Health Score</div>
-        <div id="hs-score" style="font-size:2.2rem;font-weight:700;">—%</div>
-        <div id="hs-level" style="font-size:.78rem;margin-top:4px;"></div>
-        <button onclick="recalcHealth()" class="btn btn-sm" style="margin-top:10px;">🔄 Пересчитать</button>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center;">
-        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">NPS</div>
-        <div id="hs-nps" style="font-size:2.2rem;font-weight:700;">—</div>
-        <div id="hs-nps-date" style="font-size:.78rem;color:var(--muted);margin-top:4px;"></div>
-        <button onclick="showAddNPS()" class="btn btn-sm" style="margin-top:10px;">+ Оценка</button>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
-        <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Компоненты</div>
-        <div id="hs-components"></div>
-      </div>
-    </div>
-    <div id="add-nps-form" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;">
-      <div style="font-size:.84rem;font-weight:600;margin-bottom:10px;">Добавить NPS / CSAT</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-        <div>
-          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Тип</label>
-          <select id="nps-type" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-            <option value="nps">NPS (-100 до 100)</option>
-            <option value="csat">CSAT (1–10)</option>
-          </select>
-        </div>
-        <div>
-          <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Оценка</label>
-          <input id="nps-score" type="number" placeholder="75" style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-        </div>
-      </div>
-      <div style="margin-bottom:8px;">
-        <label style="font-size:.72rem;color:var(--muted);display:block;margin-bottom:3px;">Комментарий</label>
-        <input id="nps-comment" placeholder="Что клиент сказал..." style="width:100%;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.84rem;">
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button onclick="saveNPS()" class="btn btn-sm btn-p">Сохранить</button>
-        <button onclick="document.getElementById('add-nps-form').style.display='none'" class="btn btn-sm">Отмена</button>
-      </div>
-    </div>
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
-      <div style="font-size:.85rem;font-weight:600;margin-bottom:12px;">📊 Динамика Health Score (6 мес.)</div>
-      <div style="position:relative;height:180px;"><canvas id="health-chart"></canvas></div>
-    </div>
-  </div>
-
-  <!-- ══ БЛОК 4: AI ИНСАЙТЫ ══ -->
-  <div id="tab-ai-insights" class="tab-content">
-    <div id="ai-loading" style="text-align:center;padding:32px;color:var(--muted);">
-      <div style="font-size:1.4rem;margin-bottom:8px;">🤖</div>
-      <div>Анализирую аккаунт...</div>
-    </div>
-    <div id="ai-content" style="display:none;">
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:8px;">💡 Состояние аккаунта</div>
-        <div id="ai-summary" style="font-size:.84rem;line-height:1.6;"></div>
-        <div id="ai-verdict" style="display:inline-block;margin-top:8px;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600;"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
-        <div style="background:var(--card);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:16px;">
-          <div style="font-size:.85rem;font-weight:600;color:#f87171;margin-bottom:10px;">⚠️ Риски</div>
-          <div id="ai-risks"></div>
-        </div>
-        <div style="background:var(--card);border:1px solid rgba(34,197,94,.3);border-radius:12px;padding:16px;">
-          <div style="font-size:.85rem;font-weight:600;color:#4ade80;margin-bottom:10px;">🚀 Возможности</div>
-          <div id="ai-opportunities"></div>
-        </div>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">🎯 Рекомендуемые действия</div>
-        <div id="ai-actions"></div>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">🎭 Тональность встреч</div>
-        <div id="ai-sentiment"></div>
-      </div>
-    </div>
-    <div id="ai-error" style="display:none;text-align:center;padding:24px;color:var(--muted);font-size:.84rem;"></div>
-  </div>
-
-  <!-- ══ БЛОК 5: EXECUTIVE SUMMARY ══ -->
-  <div id="tab-exec-summary" class="tab-content">
-    <div id="exec-loading" style="text-align:center;padding:32px;color:var(--muted);">
-      <div style="font-size:1.4rem;margin-bottom:8px;">📋</div>
-      <div>Формирую executive summary...</div>
-    </div>
-    <div id="exec-content" style="display:none;">
-      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-        <button onclick="generateAISummary()" class="btn btn-sm btn-p">🤖 AI-текст</button>
-        <button onclick="copyExecSummary()" class="btn btn-sm">📋 Скопировать</button>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
-        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">MRR</div>
-          <div id="ex-mrr" style="font-size:1.3rem;font-weight:700;">—</div>
-        </div>
-        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">Health</div>
-          <div id="ex-health" style="font-size:1.3rem;font-weight:700;">—%</div>
-        </div>
-        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">NPS</div>
-          <div id="ex-nps" style="font-size:1.3rem;font-weight:700;">—</div>
-        </div>
-        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">Задач</div>
-          <div id="ex-tasks" style="font-size:1.3rem;font-weight:700;">—</div>
-        </div>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">⚠️ Ключевые риски</div>
-        <div id="ex-risks"></div>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">✅ Следующие шаги</div>
-        <div id="ex-steps"></div>
-      </div>
-      <div id="exec-ai-text-block" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:10px;">📝 AI Executive Summary</div>
-        <div id="exec-ai-text" style="font-size:.84rem;line-height:1.7;white-space:pre-wrap;"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ЗАДАЧИ -->
-  <div id="tab-tasks" class="tab-content active">
-    <!-- Форма создания задачи -->
-    <div style="background:var(--surface-2,var(--card));border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="new-task-title" placeholder="Новая задача... (Ctrl+Enter)" style="flex:1;min-width:180px;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
-        <select id="new-task-priority" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
-          <option value="medium">Средний</option>
-          <option value="high">Высокий</option>
-          <option value="low">Низкий</option>
-        </select>
-        <input type="date" id="new-task-due" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
-        <button class="btn btn-sm" onclick="addTask()">➕ Задача</button>
-        <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:var(--accent,#6366f1);border:1px solid rgba(99,102,241,.3);" onclick="showMeetingForm()">📅 Встреча</button>
-      </div>
-      <!-- Форма встречи (скрыта по умолчанию) -->
-      <div id="meeting-form" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <input id="new-meeting-title" placeholder="Тема встречи..." style="flex:1;min-width:180px;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.84rem;">
-          <select id="new-meeting-type" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
-            <option value="meeting">Встреча</option>
-            <option value="checkup">Чекап</option>
-            <option value="qbr">QBR</option>
-            <option value="onboarding">Онбординг</option>
-            <option value="upsell">Апсейл</option>
-            <option value="sync">Синк</option>
-          </select>
-          <input type="datetime-local" id="new-meeting-date" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.8rem;">
-          <button class="btn btn-sm" onclick="addMeeting()">💾 Сохранить</button>
-          <button class="btn btn-sm" style="background:transparent;border:1px solid var(--border);color:var(--text);" onclick="document.getElementById('meeting-form').style.display='none'">✕</button>
-        </div>
-      </div>
-      <div id="add-result" style="margin-top:6px;font-size:.78rem;display:none;"></div>
-    </div>
-    {% if tasks %}
-    {% for t in tasks %}
-    <div class="task-row" id="task-{{ t.id }}" data-status="{{ t.status }}">
-      <div class="task-status-dot dot-{{ t.status }}"></div>
-      <div class="task-title {% if t.status == 'done' %}done-strike{% endif %}">
-        {{ t.title }}
-        {% if t.team %}<span style="font-size:.68rem;color:var(--muted);margin-left:6px;">[{{ t.team }}]</span>{% endif %}
-      </div>
-      {% if t.due_date %}
-      <span style="font-size:.72rem;color:var(--muted);">{{ t.due_date.strftime('%d.%m') }}</span>
-      {% endif %}
-      <div class="task-actions">
-        <select class="status-select" onchange="updateTaskStatus({{ t.id }}, this.value, this)">
-          <option value="plan" {% if t.status=='plan' %}selected{% endif %}>📝 Plan</option>
-          <option value="in_progress" {% if t.status=='in_progress' %}selected{% endif %}>🔄 In Progress</option>
-          <option value="review" {% if t.status=='review' %}selected{% endif %}>👀 Review</option>
-          <option value="done" {% if t.status=='done' %}selected{% endif %}>✅ Done</option>
-          <option value="blocked" {% if t.status=='blocked' %}selected{% endif %}>🔴 Blocked</option>
-        </select>
-        {% if not t.pushed_to_roadmap and client.merchrules_account_id %}
-        <button class="btn btn-sm btn-ghost" onclick="pushToRoadmap({{ t.id }}, this)" title="Push в Merchrules">🚀</button>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-    {% else %}
-    <div class="empty"><div class="empty-icon">✅</div><div class="empty-text">Задач нет</div></div>
-    {% endif %}
-  </div>
-
-  <!-- ВСТРЕЧИ -->
-  <div id="tab-meetings" class="tab-content">
-    {% if meetings %}
-    {% for m in meetings %}
-    <div class="meeting-card" style="border-left-color:{% if m.type=='qbr' %}#6366f1{% elif m.type=='checkup' %}#22c55e{% elif m.type=='kickoff' %}#f97316{% else %}#64748b{% endif %}">
-      <div style="display:flex;justify-content:space-between;align-items:start;">
-        <div>
-          <div style="font-size:.88rem;font-weight:600;">{{ m.title or m.type|upper }}</div>
-          <div style="font-size:.75rem;color:var(--muted);margin-top:2px;">📅 {{ m.date.strftime('%d.%m.%Y %H:%M') if m.date else '—' }} · <span class="badge b-plan">{{ m.type }}</span></div>
-        </div>
-      </div>
-      {% if m.summary %}<p style="margin-top:8px;font-size:.82rem;color:var(--muted);">{{ m.summary[:200] }}</p>{% endif %}
-
-      <!-- Прогресс-трек встречи -->
-      <div style="display:flex;align-items:center;gap:0;margin:10px 0 8px;font-size:.72rem;">
-        <a href="/prep/{{ client.id }}" style="display:flex;align-items:center;gap:4px;padding:5px 10px;border-radius:6px 0 0 6px;border:1px solid var(--border);text-decoration:none;background:rgba(99,102,241,.1);color:#818cf8;font-weight:500;">
-          📋 Prep
-        </a>
-        <div style="padding:5px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--card);color:var(--muted);">→</div>
-        <div style="padding:5px 10px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--card);color:var(--text);font-weight:500;">
-          {% if m.date and m.date > now %}⏳{% else %}✅{% endif %} Встреча
-        </div>
-        <div style="padding:5px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--card);color:var(--muted);">→</div>
-        {% if m.followup_status == 'sent' %}
-        <div style="padding:5px 10px;border-radius:0 6px 6px 0;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.1);color:var(--green);font-weight:500;">✅ Фолоуап</div>
-        {% elif m.followup_status == 'skipped' %}
-        <div style="padding:5px 10px;border-radius:0 6px 6px 0;border:1px solid var(--border);background:var(--card);color:var(--muted);">⏭ Пропущен</div>
-        {% else %}
-        <a href="/followup/{{ client.id }}" style="padding:5px 10px;border-radius:0 6px 6px 0;border:1px solid rgba(234,179,8,.4);background:rgba(234,179,8,.1);color:#ca8a04;text-decoration:none;font-weight:500;">✍️ Фолоуап</a>
-        {% endif %}
-      </div>
-
-      <!-- Доп. кнопки -->
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        {% if m.recording_url %}
-        <a href="{{ m.recording_url }}" target="_blank" class="btn btn-sm" style="font-size:.72rem;padding:4px 10px;">▶️ Запись</a>
-        {% endif %}
-        {% if m.type == 'qbr' %}
-        <a href="/client/{{ client.id }}/qbr" class="btn btn-sm" style="font-size:.72rem;padding:4px 10px;background:rgba(139,92,246,.12);color:#a78bfa;border:1px solid rgba(139,92,246,.25);">📊 QBR</a>
-        {% endif %}
-        {% if m.followup_status == 'pending' %}
-        <button onclick="generateFollowup({{ m.id }})" class="btn btn-sm" style="font-size:.72rem;padding:4px 10px;background:rgba(99,102,241,.1);color:#818cf8;border:1px solid rgba(99,102,241,.3);">🤖 AI фолоуап</button>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-    {% else %}
-    <div class="empty"><div class="empty-icon">📅</div><div class="empty-text">Встреч нет</div></div>
-    {% endif %}
-  </div>
-
-  <!-- ЗАМЕТКИ -->
-  <div id="tab-notes" class="tab-content">
-    <div id="notes-list">
-      <div class="empty"><div class="empty-icon">📝</div><div class="empty-text">Загрузка…</div></div>
-    </div>
-  </div>
-
-  <!-- ОНБОРДИНГ -->
-  <div id="tab-onboarding" class="tab-content">
-    <div id="onboarding-list" style="padding:4px 0;"></div>
-  </div>
-
-  <!-- ТИКЕТЫ Tbank Time -->
-  <div id="tab-tickets" class="tab-content">
-
-  <div id="tab-checkup-config" class="tab-content">
-    <div id="checkup-config-wrap">
-      <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
-    </div>
-  </div>
-
-    <div id="tickets-list">
-      <div style="text-align:center;padding:30px;color:var(--muted);font-size:.85rem;">
-        ⏳ Загрузка тикетов...
-      </div>
-    </div>
-  </div>
-
-  <!-- ИСТОРИЯ (TIMELINE) -->
-  <div id="tab-timeline" class="tab-content">
-    <div class="timeline-filters">
-      <button class="tl-filter active" onclick="filterTimeline('all',this)">Все</button>
-      <button class="tl-filter" onclick="filterTimeline('meeting',this)">📅 Встречи</button>
-      <button class="tl-filter" onclick="filterTimeline('task',this)">✅ Задачи</button>
-      <button class="tl-filter" onclick="filterTimeline('note',this)">📝 Заметки</button>
-    </div>
-    <div id="timeline-list">
-      <div class="empty"><div class="empty-icon">📜</div><div class="empty-text">Загрузка…</div></div>
-    </div>
-  </div>
-
 </div>
 
+<!-- TIMELINE DRAWER -->
+<aside id="timeline-drawer" class="fixed right-0 top-0 h-full w-96 bg-slate-900 border-l border-slate-700 transform translate-x-full transition-transform z-40 overflow-y-auto">
+  <div class="p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-semibold">⏱ Хроника клиента</h3>
+      <button onclick="toggleTimeline()" class="text-slate-400 hover:text-white">✕</button>
+    </div>
+    <div id="timeline-list"></div>
+  </div>
+</aside>
+
+<!-- AI CHAT MODAL -->
+<div id="ai-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-2xl max-h-[80vh] flex flex-col">
+    <div class="flex items-center justify-between p-4 border-b border-slate-700">
+      <h3 class="font-semibold">🤖 AI по клиенту</h3>
+      <button onclick="closeAIChat()" class="text-slate-400">✕</button>
+    </div>
+    <div id="ai-log" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+    <div class="p-4 border-t border-slate-700 flex gap-2">
+      <input id="ai-input" class="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm" placeholder="Спросить про клиента...">
+      <button onclick="sendAI()" class="px-4 py-2 rounded-lg bg-indigo-600">→</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+
 <script>
-const clientId = {{ client.id }};
+const CID = document.querySelector('[data-client-id]').dataset.clientId;
+const api = (p, o={}) => fetch(p, {credentials:'include', ...o}).then(r => r.ok ? r.json() : Promise.reject(r));
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const fmtDate = d => d ? new Date(d).toLocaleDateString('ru') : '—';
+const fmtMoney = n => n ? new Intl.NumberFormat('ru').format(Math.round(n)) + ' ₽' : '—';
 
-function toggleTheme(){const h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='light'?'dark':'light');localStorage.setItem('theme',h.getAttribute('data-theme'));}
-const _t=localStorage.getItem('theme');if(_t)document.documentElement.setAttribute('data-theme',_t);
-
-function showTab(id,btn){
-  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
-  document.getElementById('tab-'+id).classList.add('active');
-  btn.classList.add('active');
-  if(id==='notes') loadNotes();
-  if(id==='timeline') loadTimeline();
-}
-
-function toast(msg,type='ok'){
-  const el=document.createElement('div');
-  el.className='toast '+type;el.textContent=msg;
-  document.body.appendChild(el);
-  setTimeout(()=>el.style.opacity='0',2500);
-  setTimeout(()=>el.remove(),3000);
-}
-
-function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-
-// Быстрая заметка
-document.getElementById('quick-note-input').addEventListener('keydown',e=>{
-  if(e.ctrlKey&&e.key==='Enter') addQuickNote();
-});
-
-async function addQuickNote(){
-  const content=document.getElementById('quick-note-input').value.trim();
-  if(!content) return;
-  const pinned=document.getElementById('quick-note-pin').checked;
-  try{
-    const r=await fetch('/api/clients/'+clientId+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,pinned})});
-    if(r.ok){
-      document.getElementById('quick-note-input').value='';
-      document.getElementById('quick-note-pin').checked=false;
-      const s=document.getElementById('quick-note-saved');s.style.display='inline';setTimeout(()=>s.style.display='none',2000);
-      if(document.getElementById('tab-notes').classList.contains('active')) loadNotes();
-      loadNotesBadge();
-    }
-  }catch(e){toast('Ошибка','err');}
-}
-
-// Задачи real-time
-async function updateTaskStatus(taskId,newStatus,sel){
-  const row=document.getElementById('task-'+taskId);
-  row.classList.add('task-updating');
-  try{
-    const r=await fetch('/api/tasks/'+taskId+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})});
-    if(r.ok){
-      row.querySelector('.task-status-dot').className='task-status-dot dot-'+newStatus;
-      row.dataset.status=newStatus;
-      const title=row.querySelector('.task-title');
-      if(newStatus==='done') title.classList.add('done-strike'); else title.classList.remove('done-strike');
-      toast(newStatus==='done'?'✅ Задача выполнена':'🔄 Статус обновлён');
-    } else {sel.value=row.dataset.status;toast('Ошибка','err');}
-  }catch(e){sel.value=row.dataset.status;toast('Ошибка','err');}
-  row.classList.remove('task-updating');
-}
-
-async function pushToRoadmap(taskId,btn){
-  btn.disabled=true;btn.textContent='⏳';
-  try{
-    const r=await fetch('/api/tasks/'+taskId+'/push-roadmap',{method:'POST'});
-    const d=await r.json();
-    if(d.ok){btn.textContent='✅';toast('Отправлено в Roadmap');}
-    else{btn.textContent='❌';toast(d.error||'Ошибка','err');}
-  }catch(e){btn.textContent='❌';}
-}
-
-// Polling задач каждые 30 сек
-async function pollTasks(){
-  try{
-    const r=await fetch('/api/clients/'+clientId+'/tasks-status');
-    if(!r.ok) return;
-    const d=await r.json();
-    for(const t of (d.tasks||[])){
-      const row=document.getElementById('task-'+t.id);
-      if(!row||row.dataset.status===t.status) continue;
-      row.querySelector('.task-status-dot').className='task-status-dot dot-'+t.status;
-      row.dataset.status=t.status;
-      const sel=row.querySelector('.status-select');if(sel) sel.value=t.status;
-      const title=row.querySelector('.task-title');
-      if(t.status==='done') title.classList.add('done-strike'); else title.classList.remove('done-strike');
-    }
-  }catch(e){}
-  setTimeout(pollTasks,30000);
-}
-pollTasks();
-
-// Заметки
-async function loadNotes(){
-  try{
-    const r=await fetch('/api/clients/'+clientId+'/notes');
-    const d=await r.json();
-    const notes=d.notes||[];
-    document.getElementById('badge-notes').textContent=notes.length;
-    const el=document.getElementById('notes-list');
-    if(!notes.length){el.innerHTML='<div class="empty"><div class="empty-icon">📝</div><div class="empty-text">Заметок нет. Используйте поле выше.</div></div>';return;}
-    el.innerHTML=notes.map(n=>`
-      <div class="note-card ${n.pinned?'pinned':''}">
-        <div class="note-body">
-          <div class="note-text">${n.pinned?'📌 ':''}${escHtml(n.content)}</div>
-          <div class="note-footer">
-            <span style="font-size:.7rem;color:var(--muted);">${n.created_at||''}</span>
-            <div class="note-actions">
-              <button class="btn btn-sm btn-ghost" onclick="togglePin(${n.id},${n.pinned})">${n.pinned?'📌':'📍'}</button>
-              <button class="btn btn-sm btn-ghost" onclick="delNote(${n.id})">✕</button>
-            </div>
-          </div>
-        </div>
-      </div>`).join('');
-  }catch(e){console.error(e);}
-}
-
-async function loadNotesBadge(){
-  try{const r=await fetch('/api/clients/'+clientId+'/notes');const d=await r.json();document.getElementById('badge-notes').textContent=(d.notes||[]).length;}catch(e){}
-}
-
-async function togglePin(id,pinned){
-  try{await fetch('/api/clients/notes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_pinned:!pinned})});loadNotes();}catch(e){}
-}
-
-async function delNote(id){
-  if(!confirm('Удалить заметку?')) return;
-  try{await fetch('/api/clients/notes/'+id,{method:'DELETE'});loadNotes();}catch(e){}
-}
-
-// Timeline
-let tlData=[],tlFilter='all';
-const TL_DOTS={'meeting':'rgba(99,102,241,.2)','checkup':'rgba(34,197,94,.2)','qbr':'rgba(99,102,241,.3)','task':'rgba(59,130,246,.2)','note':'rgba(234,179,8,.15)'};
-
-async function loadTimeline(){
-  if(tlData.length){renderTl();return;}
-  try{
-    const r=await fetch('/api/clients/'+clientId+'/timeline');
-    const d=await r.json();
-    tlData=d.events||[];
-    renderTl();
-  }catch(e){document.getElementById('timeline-list').innerHTML='<div class="empty">Ошибка загрузки</div>';}
-}
-
-function filterTimeline(type,btn){
-  tlFilter=type;
-  document.querySelectorAll('.tl-filter').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  renderTl();
-}
-
-function renderTl(){
-  const el=document.getElementById('timeline-list');
-  const filtered=tlFilter==='all'?tlData:tlData.filter(e=>(e.type||'').startsWith(tlFilter));
-  if(!filtered.length){el.innerHTML='<div class="empty"><div class="empty-icon">📜</div><div class="empty-text">Нет событий</div></div>';return;}
-  el.innerHTML=filtered.map((e,i)=>`
-    <div class="tl-item">
-      <div class="tl-left">
-        <div class="tl-date">${(e.date||'').split('.').join('<br>')}</div>
-        <div class="tl-dot" style="background:${TL_DOTS[e.type]||'rgba(100,116,139,.15)'}">${e.icon||'📌'}</div>
-        ${i<filtered.length-1?'<div class="tl-line"></div>':''}
-      </div>
-      <div class="tl-body">
-        <div class="tl-title">${escHtml(e.title||'')}</div>
-        ${e.desc?`<div class="tl-desc">${escHtml(e.desc)}</div>`:''}
-      </div>
-    </div>`).join('');
-}
-
-loadNotesBadge();
-// ── ОНБОРДИНГ ЧЕКЛИСТ ────────────────────────────────────────────────────
-const ONBOARDING_ICONS = {meeting:'📅', followup:'✍️', admin:'⚙️', ktalk:'💬', check:'🔍'};
-
-async function loadOnboarding() {
+// LOAD OVERVIEW
+async function loadOverview() {
   try {
-    const r = await fetch('/api/clients/' + clientId + '/onboarding');
-    const d = await r.json();
-    const list = document.getElementById('onboarding-list');
-    const items = d.checklist || [];
-    const done_count = items.filter(i => i.done).length;
-    const pct = Math.round(done_count / items.length * 100);
+    const d = await api(`/api/clients/${CID}/overview`);
+    const h = d.health || {};
+    $('#m-health').textContent = (h.score != null ? h.score.toFixed(2) : '—') + ' ' + ({up:'↑',down:'↓',flat:'→'}[h.trend] || '');
+    const m = d.mrr || {};
+    $('#m-mrr').innerHTML = fmtMoney(m.current) + (m.delta_pct ? ` <span class="text-xs ${m.delta_pct>0?'text-green-400':'text-red-400'}">${m.delta_pct>0?'+':''}${m.delta_pct}%</span>` : '');
+    const pay = d.payment_status || 'unknown';
+    const payMap = {active:'✅ Активен', overdue:'⚠️ Долг', suspended:'⛔ Приост.', trial:'🆓 Триал', unknown:'—'};
+    $('#m-pay').textContent = payMap[pay] || pay;
+    const cu = d.last_checkup || {};
+    $('#m-checkup').textContent = cu.score != null ? `★ ${cu.score.toFixed(1)}` : (cu.date ? fmtDate(cu.date) : '—');
+    const nm = d.next_meeting;
+    $('#m-next').textContent = nm ? fmtDate(nm.date) : '—';
+    $('#m-last').textContent = d.last_contact_days != null ? d.last_contact_days + ' дн назад' : '—';
 
-    let html = '<div style="margin-bottom:12px;">';
-    html += '<div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:4px;">';
-    html += '<span>Прогресс онбординга</span><span style="font-weight:600;">' + done_count + '/' + items.length + '</span></div>';
-    html += '<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">';
-    html += '<div style="height:100%;width:' + pct + '%;background:var(--accent);border-radius:3px;transition:width .3s;"></div></div></div>';
+    // products
+    const prods = d.products || [];
+    $('#products-chips').innerHTML = prods.length
+      ? prods.map(p => `<span class="text-xs px-2 py-1 rounded-full bg-slate-700">${esc(p.name)} · ${esc(p.status)}</span>`).join('')
+      : '<span class="text-xs text-slate-500">Продукты не указаны</span>';
 
-    items.forEach(item => {
-      const icon = ONBOARDING_ICONS[item.type] || '📋';
-      html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:4px;background:' + (item.done ? 'rgba(34,197,94,.06)' : 'var(--surface-2,rgba(255,255,255,.02))') + ';border:1px solid var(--border);">';
-      html += '<input type="checkbox" ' + (item.done ? 'checked' : '') + ' onchange="toggleOnboarding(' + item.id + ', this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent);">';
-      html += '<span style="font-size:.9rem;">' + icon + '</span>';
-      html += '<div style="flex:1;"><div style="font-size:.84rem;' + (item.done ? 'text-decoration:line-through;color:var(--muted);' : '') + '">' + item.title + '</div>';
-      html += '<div style="font-size:.72rem;color:var(--muted);">день ' + item.day + '</div></div></div>';
+    // last sync
+    const ls = d.last_sync || {};
+    $('#last-sync').textContent = `Данные актуальны: Merchrules ${ls.merchrules ? fmtDate(ls.merchrules) : '—'} · Ktalk ${ls.ktalk ? fmtDate(ls.ktalk) : '—'} · Time ${ls.tbank_time ? fmtDate(ls.tbank_time) : '—'}`;
+
+    // pinned note
+    if (d.pinned_note && d.pinned_note.content) {
+      $('#pinned-note-wrap').classList.remove('hidden');
+      $('#pinned-note-text').textContent = d.pinned_note.content;
+      $('#pinned-note-wrap').dataset.noteId = d.pinned_note.id;
+    }
+
+    // contacts
+    const cs = d.contacts_summary || {};
+    const primary = cs.primary;
+    let row = '<span class="text-xs text-slate-400">👥 Контакты:</span>';
+    if (primary) row += `<span class="text-sm px-2 py-1 rounded-lg bg-indigo-900/40">${esc(primary.name)} · ${esc(primary.role || '')}</span>`;
+    row += `<span class="text-xs text-slate-500">всего: ${cs.total || 0}</span>`;
+    row += `<button onclick="openTab('contacts')" class="ml-auto text-xs text-indigo-400">управлять →</button>`;
+    $('#contacts-row').innerHTML = row;
+  } catch(e) { console.error('overview', e); }
+}
+
+// CHARTS
+async function loadCharts() {
+  try {
+    const d = await api(`/api/clients/${CID}/charts?months=12`);
+    const mk = (id, label, data, color) => new Chart($(id), {
+      type: 'line',
+      data: {labels: d.months, datasets: [{label, data, borderColor: color, backgroundColor: color+'33', tension: 0.3, fill: true}]},
+      options: {plugins:{legend:{display:false}}, scales:{y:{beginAtZero:false}}}
     });
-
-    list.innerHTML = html;
-  } catch(e) { console.error(e); }
-}
-
-async function toggleOnboarding(itemId, done) {
-  try {
-    await fetch('/api/clients/' + clientId + '/onboarding/' + itemId, {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({done})
+    mk('#chart-mrr', 'MRR', d.mrr || [], '#6366f1');
+    mk('#chart-health', 'Health', d.health || [], '#22c55e');
+    mk('#chart-nps', 'NPS', d.nps || [], '#eab308');
+    new Chart($('#chart-activity'), {
+      type: 'bar',
+      data: {labels: d.months, datasets: [
+        {label:'Встречи', data: d.meetings_count || [], backgroundColor:'#6366f1'},
+        {label:'Закрыто задач', data: d.tasks_closed || [], backgroundColor:'#22c55e'}
+      ]},
+      options: {plugins:{legend:{display:true, labels:{boxWidth:10}}}, scales:{y:{beginAtZero:true}}}
     });
-    await loadOnboarding();
-  } catch(e) {}
+  } catch(e) { console.error('charts', e); }
 }
 
-
-// ── РЕДАКТИРОВАНИЕ КЛИЕНТА ──────────────────────────────────────────────
-function toggleEditClient() {
-  const f = document.getElementById('edit-client-form');
-  f.style.display = f.style.display === 'none' ? 'block' : 'none';
-}
-
-async function saveClient() {
-  const el = document.getElementById('edit-client-result');
-  const data = {
-    name: document.getElementById('edit-name').value.trim(),
-    segment: document.getElementById('edit-segment').value,
-    domain: document.getElementById('edit-domain').value.trim(),
-    health_score: parseFloat(document.getElementById('edit-health').value) || 0,
-  };
-  try {
-    const r = await fetch('/api/clients/' + clientId, {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(data)
-    });
-    const d = await r.json();
-    if (d.ok) {
-      el.style.display = 'inline';
-      el.style.color = 'var(--green)';
-      el.textContent = '✅ Сохранено';
-      setTimeout(() => { el.style.display='none'; location.reload(); }, 1200);
-    } else {
-      el.style.display = 'inline';
-      el.style.color = 'var(--red)';
-      el.textContent = '❌ ' + (d.error || 'Ошибка');
-    }
-  } catch(e) {
-    el.style.display = 'inline';
-    el.style.color = 'var(--red)';
-    el.textContent = '❌ ' + e.message;
-  }
-}
-
-// ── КОММЕНТАРИИ К ЗАДАЧАМ ─────────────────────────────────────────────────
-async function loadTaskComments(taskId) {
-  const el = document.getElementById('comments-' + taskId);
-  if (!el) return;
-  try {
-    const r = await fetch('/api/tasks/' + taskId + '/comments');
-    const d = await r.json();
-    const comments = d.comments || [];
-    if (!comments.length) {
-      el.innerHTML = '<div style="font-size:.75rem;color:var(--muted);padding:4px 0;">Нет комментариев</div>';
-      return;
-    }
-    el.innerHTML = comments.map(c => `
-      <div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
-        <div style="flex:1;font-size:.78rem;">${c.content.replace(/</g,'&lt;')}</div>
-        <div style="font-size:.68rem;color:var(--muted);white-space:nowrap;">${c.created_at || ''}</div>
-        <button onclick="deleteTaskComment(${taskId},${c.id})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;">✕</button>
-      </div>`).join('');
-  } catch(e) {}
-}
-
-async function addTaskComment(taskId) {
-  const input = document.getElementById('comment-input-' + taskId);
-  const text = input?.value.trim();
-  if (!text) return;
-  try {
-    const r = await fetch('/api/tasks/' + taskId + '/comments', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: text})
-    });
-    if (r.ok) {
-      input.value = '';
-      await loadTaskComments(taskId);
-    }
-  } catch(e) {}
-}
-
-async function deleteTaskComment(taskId, commentId) {
-  try {
-    await fetch('/api/tasks/' + taskId + '/comments/' + commentId, {method: 'DELETE'});
-    await loadTaskComments(taskId);
-  } catch(e) {}
-}
-
-// Показываем комментарии под задачей при клике
-function toggleComments(taskId) {
-  const wrap = document.getElementById('comment-wrap-' + taskId);
-  if (!wrap) return;
-  if (wrap.style.display === 'none') {
-    wrap.style.display = 'block';
-    loadTaskComments(taskId);
-  } else {
-    wrap.style.display = 'none';
-  }
-}
-
-// Расширяем renderTasks чтобы добавить кнопку комментариев
-const _origRenderTasks = renderTasks;
-function renderTasks(tasks) {
-  _origRenderTasks(tasks);
-  // После рендера добавляем кнопки комментариев к каждой задаче
-  tasks.forEach(t => {
-    const card = document.getElementById('task-' + t.id);
-    if (!card) return;
-    const existing = card.querySelector('.comment-btn');
-    if (existing) return;
-    const btn = document.createElement('button');
-    btn.className = 'comment-btn';
-    btn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--muted);cursor:pointer;font-size:.72rem;padding:3px 8px;border-radius:5px;margin-top:6px;';
-    btn.textContent = '💬 Комментарии';
-    btn.onclick = () => toggleComments(t.id);
-    const wrap = document.createElement('div');
-    wrap.id = 'comment-wrap-' + t.id;
-    wrap.style.display = 'none';
-    wrap.style.marginTop = '8px';
-    wrap.innerHTML = `
-      <div id="comments-${t.id}" style="margin-bottom:6px;"></div>
-      <div style="display:flex;gap:6px;">
-        <input id="comment-input-${t.id}" placeholder="Добавить комментарий..." style="flex:1;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg,var(--surface));color:var(--text);font-size:.78rem;">
-        <button onclick="addTaskComment(${t.id})" style="padding:5px 10px;border-radius:6px;border:none;background:var(--accent,#6366f1);color:#fff;cursor:pointer;font-size:.75rem;">+</button>
-      </div>`;
-    card.appendChild(btn);
-    card.appendChild(wrap);
+// TABS
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('border-indigo-500', b.dataset.tab === name);
+    b.classList.toggle('text-indigo-300', b.dataset.tab === name);
   });
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('hidden', p.id !== `tab-${name}`));
+  location.hash = name;
+  const loaders = {notes: loadNotes, roadmap: loadRoadmap, qbr: loadQBR, meetings: loadMeetings, rules: loadRules, feeds: loadFeeds};
+  if (loaders[name] && !loaders[name]._done) { loaders[name](); loaders[name]._done = true; }
 }
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
-// ── ТИКЕТЫ TBANK TIME ────────────────────────────────────────────────────
-async function loadTickets() {
-  const el = document.getElementById('tickets-list');
-  if (!el) return;
+// STUBS — будут дозаполнены вторым агентом
+async function loadNotes()    { $('#tab-notes').innerHTML    = '<div class="text-slate-500">Заметки (TODO)</div>'; }
+async function loadRoadmap()  { $('#tab-roadmap').innerHTML  = '<div class="text-slate-500">Роадмап (TODO)</div>'; }
+async function loadQBR()      { $('#tab-qbr').innerHTML      = '<div class="text-slate-500">QBR (TODO)</div>'; }
+async function loadMeetings() { $('#tab-meetings').innerHTML = '<div class="text-slate-500">Встречи (TODO)</div>'; }
+async function loadRules()    { $('#tab-rules').innerHTML    = '<div class="text-slate-500">Правила (TODO)</div>'; }
+async function loadFeeds()    { $('#tab-feeds').innerHTML    = '<div class="text-slate-500">Фиды (TODO)</div>'; }
+
+// TIMELINE
+async function loadTimeline() {
   try {
-    const r = await fetch('/api/tbank/tickets/' + encodeURIComponent('{{ client.name }}'));
-    const d = await r.json();
-    if (d.error) {
-      el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">⚠️ ' + d.error + '</div>';
-      return;
-    }
-    const tickets = d.tickets || [];
-    if (!tickets.length) {
-      el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">✅ Открытых тикетов нет</div>';
-      return;
-    }
-    const STATUS_COLOR = {open:'#ef4444', in_progress:'#eab308', resolved:'#22c55e', closed:'#64748b'};
-    el.innerHTML = '<div style="margin-bottom:8px;font-size:.78rem;color:var(--muted);">Найдено тикетов: ' + tickets.length + '</div>' +
-      tickets.map(t => `
-        <div style="background:var(--surface-2,var(--card));border:1px solid var(--border);border-left:3px solid ${STATUS_COLOR[t.status]||'#64748b'};border-radius:8px;padding:10px 14px;margin-bottom:6px;">
-          <div style="display:flex;justify-content:space-between;align-items:start;">
-            <div style="font-size:.84rem;font-weight:500;flex:1;">${t.title||'Без темы'}</div>
-            <span style="font-size:.7rem;color:${STATUS_COLOR[t.status]||'#64748b'};font-weight:600;margin-left:8px;">${t.status||''}</span>
-          </div>
-          <div style="font-size:.72rem;color:var(--muted);margin-top:4px;">
-            ${t.priority ? '⚡ ' + t.priority + ' · ' : ''}
-            ${t.created_at ? '📅 ' + new Date(t.created_at).toLocaleDateString('ru') : ''}
-            ${t.messages_count ? ' · 💬 ' + t.messages_count : ''}
-          </div>
-        </div>`).join('');
-  } catch(e) {
-    el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">❌ Ошибка загрузки тикетов</div>';
-  }
-}
-
-// Загружаем тикеты при открытии вкладки
-const _origShowTab = showTab;
-function showTab(id, btn) {
-  _origShowTab(id, btn);
-  if (id === 'tickets') loadTickets();
-}
-
-// Обновляем бейдж заметок
-async function updateNotesBadge() {
-  try {
-    const r = await fetch('/api/clients/' + clientId + '/notes');
-    const d = await r.json();
-    const badge = document.getElementById('badge-notes');
-    if (badge && d.notes) badge.textContent = d.notes.length;
-  } catch(e) {}
-}
-updateNotesBadge();
-
-async function loadCheckupConfig() {
-  const el = document.getElementById('checkup-config-wrap');
-  if (!el || el.dataset.loaded) return;
-  el.dataset.loaded = '1';
-
-  const clientId = {{ client.id }};
-  try {
-    const d = await fetch(`/api/clients/${clientId}/checkup-info`).then(r => r.json());
-    const isAdmin = d.is_admin;
-    const hasKey  = d.has_api_key;
-    const qs = d.checkup_queries || {};
-
-    el.innerHTML = `
-      <div class="section" style="margin-bottom:12px">
-        <h3>🔍 Diginetica Search API</h3>
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-          <div style="font-size:.8rem;color:var(--text-dim)">API Key:</div>
-          ${hasKey ? `
-            <div style="display:flex;align-items:center;gap:6px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-family:var(--font-mono);font-size:.78rem;color:var(--accent);max-width:340px;overflow:hidden">
-              <span id="api-key-display" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.api_key_display}</span>
-              <button onclick="copyApiKey()" class="btn btn-ghost" style="padding:1px 5px;font-size:.7rem;min-width:unset" title="Копировать">⎘</button>
-            </div>
-            <span class="badge badge-accent">✅ Настроен</span>
-          ` : `
-            <span class="badge" style="background:var(--red-bg);color:var(--red);border:1px solid rgba(240,85,106,.2)">⚠ Не настроен</span>
-            ${isAdmin ? '' : '<span style="font-size:.76rem;color:var(--text-muted)">Обратитесь к администратору</span>'}
-          `}
-        </div>
-        ${isAdmin ? `
-          <div class="field-row">
-            <div class="field">
-              <label>API Key (только admin)</label>
-              <input type="text" id="admin-key-input" class="form-control"
-                     style="font-family:var(--font-mono);font-size:.8rem"
-                     value="${d.api_key_full || ''}"
-                     placeholder="Diginetica apiKey клиента">
-            </div>
-            <div class="field">
-              <label>URL сайта</label>
-              <input type="text" id="admin-url-input" class="form-control"
-                     value="${d.site_url || ''}" placeholder="https://client.ru">
-            </div>
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="saveApiKey(${clientId})">💾 Сохранить</button>
-          <span id="save-key-result" style="font-size:.78rem;margin-left:8px"></span>
-        ` : ''}
-      </div>
-
-      <div class="section" style="margin-bottom:12px">
-        <h3>📋 Запросы для чекапа</h3>
-        ${Object.keys(qs).length ? `
-          ${Object.entries(qs).map(([type, queries]) => `
-            <div style="margin-bottom:10px">
-              <div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:5px">${type}</div>
-              <div style="display:flex;gap:4px;flex-wrap:wrap">
-                ${Array.isArray(queries) ? queries.map(q => `<span class="badge badge-neutral" style="font-size:.7rem">${q}</span>`).join('') : ''}
-              </div>
-            </div>
-          `).join('')}
-        ` : `<div class="empty" style="padding:20px 0"><div class="empty-text">Запросы не настроены — добавьте в <a href="/admin" style="color:var(--accent)">Администраторе</a> или загрузите Excel</div></div>`}
-      </div>
-
-      <div class="section">
-        <h3>📊 История чекапов</h3>
-        <div id="checkup-history-list">
-          <div style="font-size:.78rem;color:var(--text-muted)">Загрузка...</div>
+    const d = await api(`/api/clients/${CID}/timeline?limit=50`);
+    const icons = {meeting:'📅', task_done:'✅', note:'📝', checkup:'🩺', history:'⚙️', qbr:'📊'};
+    $('#timeline-list').innerHTML = (d.events || []).map(e => `
+      <div class="py-2 border-b border-slate-800 flex gap-2">
+        <div>${icons[e.type]||'•'}</div>
+        <div class="flex-1">
+          <div class="text-xs text-slate-500">${fmtDate(e.date)}</div>
+          <div class="text-sm">${esc(e.title || e.content || e.field || e.type)}</div>
         </div>
       </div>
-    `;
-
-    // Сохраняем api_key_full для копирования
-    window._checkup_api_key = d.api_key_full || d.api_key_display || '';
-
-    // Загружаем историю чекапов
-    loadCheckupHistory(clientId);
-
-  } catch(e) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">❌</div><div class="empty-text">${e.message}</div></div>`;
-  }
+    `).join('') || '<div class="text-slate-500 text-sm">Событий нет</div>';
+  } catch(e) { console.error('timeline', e); }
+}
+function toggleTimeline() {
+  const el = $('#timeline-drawer');
+  el.classList.toggle('translate-x-full');
+  if (!el.classList.contains('translate-x-full')) loadTimeline();
 }
 
-function copyApiKey() {
-  const key = window._checkup_api_key || document.getElementById('api-key-display')?.textContent || '';
-  navigator.clipboard.writeText(key).then(() => {
-    const t = document.createElement('div');
-    t.className = 'toast success'; t.textContent = 'API Key скопирован';
-    document.body.appendChild(t); setTimeout(() => t.remove(), 2500);
-  });
+// UNPIN NOTE
+async function unpinNote() {
+  const nid = $('#pinned-note-wrap').dataset.noteId;
+  if (!nid) return;
+  await api(`/api/clients/${CID}/notes/${nid}/pin`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pinned: false})});
+  $('#pinned-note-wrap').classList.add('hidden');
 }
 
-async function saveApiKey(clientId) {
-  const key = document.getElementById('admin-key-input')?.value.trim();
-  const url = document.getElementById('admin-url-input')?.value.trim();
-  const el  = document.getElementById('save-key-result');
-  el.style.color = 'var(--text-muted)'; el.textContent = '⏳';
-  const r = await fetch(`/api/admin/clients/${clientId}/api-key`, {
-    method: 'PATCH', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({diginetica_api_key: key, site_url: url})
-  });
-  if (r.ok) {
-    el.style.color = 'var(--green)'; el.textContent = '✅ Сохранено';
-    window._checkup_api_key = key;
-  } else {
-    el.style.color = 'var(--red)'; el.textContent = '❌ Ошибка';
-  }
+// AI CHAT (заглушка)
+function openAIChat() { $('#ai-modal').classList.remove('hidden'); $('#ai-input').focus(); }
+function closeAIChat() { $('#ai-modal').classList.add('hidden'); }
+async function sendAI() {
+  const q = $('#ai-input').value.trim(); if (!q) return;
+  const log = $('#ai-log');
+  log.innerHTML += `<div class="p-2 rounded-lg bg-slate-800 ml-auto max-w-[80%]">${esc(q)}</div>`;
+  $('#ai-input').value = '';
+  // TODO: POST /api/ai/chat {client_id, message}
+  log.innerHTML += `<div class="p-2 rounded-lg bg-indigo-900/40 max-w-[80%]">AI отвечает... (заглушка — подключить POST /api/ai/chat)</div>`;
+  log.scrollTop = log.scrollHeight;
 }
 
-async function loadCheckupHistory(clientId) {
-  const el = document.getElementById('checkup-history-list');
-  if (!el) return;
-  try {
-    const d = await fetch(`/api/checkup/${clientId}/history?limit=5`).then(r => r.json());
-    const items = d.results || [];
-    if (!items.length) {
-      el.innerHTML = '<div class="empty" style="padding:16px 0"><div class="empty-text">Чекапов ещё не было. Запустите расширение!</div></div>';
-      return;
-    }
-    const qLabels = {top:'Топ',random:'Случайн.',zero:'Нулевые',zeroquery:'ZeroQ'};
-    el.innerHTML = items.map(r => {
-      const avg = r.avg_score != null ? r.avg_score.toFixed(2) : '—';
-      const col = r.avg_score == null ? 'var(--text-muted)'
-                : r.avg_score >= 2.5 ? 'var(--green)'
-                : r.avg_score >= 1.5 ? 'var(--yellow)' : 'var(--red)';
-      const dt = r.created_at ? new Date(r.created_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
-      return `<div class="task-row" onclick="window.location='/checkup/result/${r.id}'" style="cursor:pointer">
-        <div style="font-size:.82rem;color:var(--accent);font-weight:700;font-family:var(--font-mono)">${avg}</div>
-        <div style="flex:1;font-size:.81rem">${r.total_queries} запросов · ${qLabels[r.query_type]||r.query_type}${r.mode?' · '+r.mode:''}</div>
-        <div style="font-size:.71rem;color:var(--text-muted)">${dt}</div>
-        <span class="badge badge-neutral" style="font-size:.65rem">→</span>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    el.innerHTML = `<div style="font-size:.76rem;color:var(--text-muted)">${e.message}</div>`;
-  }
-}
+// UTILS
+function openNewNote() { alert('TODO: модалка новой заметки'); }
+function newTask() { window.location.href = '/tasks?client_id=' + CID; }
+function openTab(name) { alert('TODO: вкладка контактов (' + name + ')'); }
 
-
-// ── Missing functions (Agent 2 fix) ──────────────────────────
-async function addMeeting() {
-  // Открываем форму создания встречи
-  var modal = document.getElementById('meeting-modal');
-  if (modal) { modal.style.display = 'flex'; return; }
-  // Fallback: переходим на страницу с хешем
-  window.location.href = window.location.pathname + '#meetings';
-}
-
-function showMeetingForm() {
-  var form = document.getElementById('meeting-form');
-  if (form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; return; }
-  addMeeting();
-}
-
-async function addTask() {
-  var titleEl = document.getElementById('new-task-title') || document.getElementById('task-title-input');
-  if (!titleEl || !titleEl.value.trim()) {
-    var t = prompt('Название задачи:');
-    if (!t) return;
-    titleEl = { value: t };
-  }
-  var clientId = window.__clientId || parseInt(window.location.pathname.split('/').pop());
-  var r = await fetch('/api/tasks', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ client_id: clientId, title: titleEl.value.trim(), status: 'plan', priority: 'medium' })
-  });
-  var d = await r.json();
-  if (d.ok || d.id) { toast('✅ Задача создана'); if (typeof pollTasks === 'function') pollTasks(); }
-  else toast('❌ ' + (d.detail || d.error || 'Ошибка'));
-}
-
-function toggleEdit() {
-  // Псевдоним для toggleEditClient
-  if (typeof toggleEditClient === 'function') toggleEditClient();
-}
-
-function saveClientEdit() {
-  // Псевдоним для saveClient
-  if (typeof saveClient === 'function') saveClient();
-}
-
-function generateFollowup() {
-  // Переходим на страницу фолоуапа
-  var clientId = window.__clientId || parseInt(window.location.pathname.split('/').pop());
-  window.location.href = '/followup/' + clientId;
-}
-
-
-// ═══════════════════════════════════════════════════════
-// БЛОК 1: ФИНАНСЫ
-// ═══════════════════════════════════════════════════════
-let mrrChart = null;
-
-async function loadFinance() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  try {
-    const r = await fetch(`/api/clients/${clientId}/revenue/history?months=12`);
-    const d = await r.json();
-
-    // KPI
-    const mrr = d.current_mrr || 0;
-    const arr = d.current_arr || 0;
-    document.getElementById('fin-mrr').textContent = mrr.toLocaleString('ru-RU') + ' ₽';
-    document.getElementById('fin-arr').textContent = arr.toLocaleString('ru-RU') + ' ₽';
-
-    const trendEl = document.getElementById('fin-mrr-trend');
-    const trendIcon = d.trend === 'up' ? '↑' : d.trend === 'down' ? '↓' : '→';
-    const trendColor = d.trend === 'up' ? 'var(--green)' : d.trend === 'down' ? 'var(--red)' : 'var(--muted)';
-    trendEl.innerHTML = `<span style="color:${trendColor}">${trendIcon} ${d.trend_pct > 0 ? '+' : ''}${d.trend_pct}% к пред. мес.</span>`;
-
-    // MRR chart
-    if (d.history && d.history.length > 0) {
-      const labels = d.history.map(h => h.period);
-      const values = d.history.map(h => h.mrr);
-      const ctx = document.getElementById('mrr-chart');
-      if (ctx) {
-        if (mrrChart) mrrChart.destroy();
-        mrrChart = new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels,
-            datasets: [{
-              label: 'MRR',
-              data: values,
-              backgroundColor: 'rgba(99,102,241,.6)',
-              borderColor: 'rgba(99,102,241,1)',
-              borderRadius: 5,
-              borderWidth: 1,
-            }]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              y: { beginAtZero: true, ticks: { color: '#64748b', callback: v => v.toLocaleString('ru-RU') + ' ₽' }, grid: { color: 'rgba(255,255,255,.05)' } },
-              x: { ticks: { color: '#64748b' }, grid: { display: false } }
-            }
-          }
-        });
-      }
-    }
-
-    // Upsell pipeline
-    const r2 = await fetch(`/api/clients/${clientId}/upsell`);
-    const d2 = await r2.json();
-    renderUpsellList(d2.events || []);
-
-    const pipeline = (d2.events || []).filter(e => e.delta > 0 && ['identified','in_progress'].includes(e.status)).reduce((s,e) => s + (e.delta||0), 0);
-    const downsell = (d2.events || []).filter(e => e.delta < 0 && ['identified','in_progress'].includes(e.status)).reduce((s,e) => s + Math.abs(e.delta||0), 0);
-    const pipeEl = document.getElementById('fin-pipeline');
-    let pipeHtml = '';
-    if (pipeline > 0) pipeHtml += `<span style="color:var(--green)">↑ Pipeline: +${pipeline.toLocaleString('ru-RU')} ₽</span> `;
-    if (downsell > 0) pipeHtml += `<span style="color:var(--red)">↓ Риск: -${downsell.toLocaleString('ru-RU')} ₽</span>`;
-    pipeEl.innerHTML = pipeHtml;
-
-  } catch(e) { console.error('Finance load error:', e); }
-}
-
-function renderUpsellList(events) {
-  const el = document.getElementById('upsell-list');
-  if (!events.length) { el.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:8px 0;">Нет активных событий</div>'; return; }
-  const typeLabels = { upsell: '🔼 Апсейл', downsell: '🔽 Даунсейл', expansion: '📦 Расширение', churn_risk: '⚠️ Риск оттока' };
-  const statusColors = { identified: '#60a5fa', in_progress: '#facc15', won: '#4ade80', lost: '#f87171', postponed: '#94a3b8' };
-  el.innerHTML = events.map(e => `
-    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;">
-      <div style="flex:1;">
-        <div style="font-size:.84rem;font-weight:500;">${typeLabels[e.type] || e.type}</div>
-        <div style="font-size:.76rem;color:var(--muted);">${e.description || ''}</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="font-size:.84rem;font-weight:600;color:${(e.delta||0)>=0?'var(--green)':'var(--red)'};">${e.delta>=0?'+':''}${(e.delta||0).toLocaleString('ru-RU')} ₽</div>
-        <div style="font-size:.72rem;padding:2px 7px;border-radius:10px;background:${statusColors[e.status]||'#94a3b8'}22;color:${statusColors[e.status]||'#94a3b8'};margin-top:2px;">${e.status}</div>
-      </div>
-    </div>`).join('');
-}
-
-function showAddRevenue() {
-  document.getElementById('add-revenue-form').style.display = 'block';
-  const now = new Date();
-  document.getElementById('rev-period').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-}
-
-async function saveRevenue() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  const period = document.getElementById('rev-period').value.trim();
-  const mrr = parseFloat(document.getElementById('rev-mrr').value);
-  const note = document.getElementById('rev-note').value.trim();
-  if (!period || !mrr) { toast('⚠️ Укажите период и MRR'); return; }
-  const r = await fetch('/api/revenue/entry', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ client_id: clientId, period, mrr, note })
-  });
-  const d = await r.json();
-  if (d.ok) { toast('✅ MRR сохранён'); document.getElementById('add-revenue-form').style.display='none'; loadFinance(); }
-  else toast('❌ ' + (d.detail || 'Ошибка'));
-}
-
-function showAddUpsell() {
-  document.getElementById('add-upsell-form').style.display = 'block';
-}
-
-async function saveUpsell() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  const r = await fetch('/api/upsell/event', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({
-      client_id: clientId,
-      event_type: document.getElementById('upsell-type').value,
-      status: document.getElementById('upsell-status').value,
-      amount_before: parseFloat(document.getElementById('upsell-before').value)||0,
-      amount_after: parseFloat(document.getElementById('upsell-after').value)||0,
-      description: document.getElementById('upsell-desc').value.trim(),
-    })
-  });
-  const d = await r.json();
-  if (d.ok) { toast(`✅ Событие сохранено (delta: ${d.delta>=0?'+':''}${d.delta.toLocaleString('ru-RU')} ₽)`); document.getElementById('add-upsell-form').style.display='none'; loadFinance(); }
-  else toast('❌ ' + (d.detail || 'Ошибка'));
-}
-
-// ═══════════════════════════════════════════════════════
-// БЛОК 2: HEALTH
-// ═══════════════════════════════════════════════════════
-let healthChart = null;
-
-async function loadHealthHistory() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  try {
-    // Текущий health + компоненты (пересчитываем)
-    const r = await fetch(`/api/clients/${clientId}/health/recalc`, { method: 'POST' });
-    const d = await r.json();
-    const levelColors = { excellent: '#4ade80', good: '#60a5fa', warning: '#facc15', critical: '#f87171' };
-    const levelLabels = { excellent: 'Отличный', good: 'Хороший', warning: 'Внимание', critical: 'Критичный' };
-    document.getElementById('hs-score').textContent = d.score_pct + '%';
-    document.getElementById('hs-score').style.color = levelColors[d.level] || '#e2e8f0';
-    document.getElementById('hs-level').innerHTML = `<span style="color:${levelColors[d.level]}">${levelLabels[d.level]||d.level}</span>`;
-
-    // Компоненты
-    const compLabels = { meetings: '📅 Встречи', tasks: '✅ Задачи', tickets: '🎫 Тикеты', nps: '⭐ NPS', checkups: '🔍 Чекапы' };
-    const compEl = document.getElementById('hs-components');
-    compEl.innerHTML = Object.entries(d.components || {}).map(([k, v]) => `
-      <div style="margin-bottom:6px;">
-        <div style="display:flex;justify-content:space-between;font-size:.76rem;margin-bottom:2px;">
-          <span style="color:var(--muted)">${compLabels[k]||k}</span>
-          <span style="font-weight:600">${Math.round(v*100)}%</span>
-        </div>
-        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
-          <div style="height:100%;width:${Math.round(v*100)}%;background:${v>0.7?'var(--green)':v>0.4?'var(--yellow)':'var(--red)'};border-radius:2px;transition:width .5s"></div>
-        </div>
-      </div>`).join('');
-
-    // NPS
-    const r2 = await fetch(`/api/clients/${clientId}/nps`);
-    const d2 = await r2.json();
-    if (d2.latest) {
-      document.getElementById('hs-nps').textContent = d2.latest.score;
-      document.getElementById('hs-nps-date').textContent = d2.latest.date.slice(0,10) + ' (' + d2.latest.type.toUpperCase() + ')';
-    } else {
-      document.getElementById('hs-nps').textContent = '—';
-    }
-
-    // Health history chart
-    const r3 = await fetch(`/api/clients/${clientId}/health/history?months=6`);
-    const d3 = await r3.json();
-    if (d3.history && d3.history.length > 0) {
-      const ctx = document.getElementById('health-chart');
-      if (ctx) {
-        if (healthChart) healthChart.destroy();
-        healthChart = new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels: d3.history.map(h => h.period),
-            datasets: [{
-              label: 'Health Score',
-              data: d3.history.map(h => h.score),
-              borderColor: '#6366f1',
-              backgroundColor: 'rgba(99,102,241,.1)',
-              fill: true,
-              tension: 0.4,
-              pointRadius: 4,
-            }]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              y: { min: 0, max: 100, ticks: { color: '#64748b', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,.05)' } },
-              x: { ticks: { color: '#64748b' }, grid: { display: false } }
-            }
-          }
-        });
-      }
-    }
-  } catch(e) { console.error('Health load error:', e); }
-}
-
-async function recalcHealth() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  toast('🔄 Пересчитываю...');
-  await loadHealthHistory();
-  toast('✅ Health Score обновлён');
-}
-
-function showAddNPS() {
-  document.getElementById('add-nps-form').style.display = 'block';
-}
-
-async function saveNPS() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  const score = parseInt(document.getElementById('nps-score').value);
-  if (isNaN(score)) { toast('⚠️ Укажите оценку'); return; }
-  const r = await fetch('/api/nps/entry', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({
-      client_id: clientId,
-      score,
-      type: document.getElementById('nps-type').value,
-      comment: document.getElementById('nps-comment').value.trim(),
-    })
-  });
-  const d = await r.json();
-  if (d.ok) { toast('✅ NPS сохранён'); document.getElementById('add-nps-form').style.display='none'; loadHealthHistory(); }
-  else toast('❌ ' + (d.detail || 'Ошибка'));
-}
-
-// ═══════════════════════════════════════════════════════
-// БЛОК 4: AI ИНСАЙТЫ
-// ═══════════════════════════════════════════════════════
-async function loadAIInsights() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  document.getElementById('ai-loading').style.display = 'block';
-  document.getElementById('ai-content').style.display = 'none';
-  document.getElementById('ai-error').style.display = 'none';
-  try {
-    const [r1, r2] = await Promise.all([
-      fetch(`/api/clients/${clientId}/ai/summary`),
-      fetch(`/api/clients/${clientId}/ai/sentiment`)
-    ]);
-    const ai = await r1.json();
-    const sent = await r2.json();
-
-    document.getElementById('ai-summary').textContent = ai.summary || '';
-
-    const verdictColors = { 'отличный':'#4ade80','хороший':'#60a5fa','требует внимания':'#facc15','критичный':'#f87171' };
-    const v = ai.health_verdict || '';
-    document.getElementById('ai-verdict').textContent = v;
-    document.getElementById('ai-verdict').style.background = (verdictColors[v] || '#94a3b8') + '22';
-    document.getElementById('ai-verdict').style.color = verdictColors[v] || '#94a3b8';
-
-    document.getElementById('ai-risks').innerHTML = (ai.risks||[]).map(r =>
-      `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;font-size:.82rem;"><span>⚠️</span><span>${r}</span></div>`).join('') || '<div style="color:var(--muted);font-size:.82rem;">Рисков не обнаружено</div>';
-
-    document.getElementById('ai-opportunities').innerHTML = (ai.opportunities||[]).map(o =>
-      `<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;font-size:.82rem;"><span>💡</span><span>${o}</span></div>`).join('') || '<div style="color:var(--muted);font-size:.82rem;">Нет данных</div>';
-
-    const prioColors = { high: '#f87171', medium: '#facc15', low: '#60a5fa' };
-    document.getElementById('ai-actions').innerHTML = (ai.next_best_actions||[]).map(a =>
-      `<div style="display:flex;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;">
-        <div style="width:8px;height:8px;border-radius:50%;background:${prioColors[a.priority]||'#94a3b8'};margin-top:5px;flex-shrink:0;"></div>
-        <div>
-          <div style="font-size:.84rem;font-weight:500;">${a.action}</div>
-          <div style="font-size:.76rem;color:var(--muted);">${a.reason} · ${a.deadline}</div>
-        </div>
-      </div>`).join('');
-
-    // Тональность
-    const sentColors = { positive: '#4ade80', neutral: '#94a3b8', negative: '#f87171' };
-    const sentLabels = { positive: 'Позитивная', neutral: 'Нейтральная', negative: 'Негативная' };
-    document.getElementById('ai-sentiment').innerHTML =
-      `<div style="margin-bottom:10px;font-size:.82rem;">Общая тональность: <span style="color:${sentColors[sent.overall_sentiment]};font-weight:600;">${sentLabels[sent.overall_sentiment]||sent.overall_sentiment}</span></div>` +
-      (sent.meetings||[]).map(m =>
-        `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border-radius:7px;margin-bottom:5px;font-size:.8rem;">
-          <div style="width:8px;height:8px;border-radius:50%;background:${sentColors[m.sentiment]||'#94a3b8'};flex-shrink:0;"></div>
-          <div style="flex:1;">${m.title} · ${(m.date||'').slice(0,10)}</div>
-          <div style="color:${sentColors[m.sentiment]||'#94a3b8'}">${sentLabels[m.sentiment]||m.sentiment}</div>
-        </div>`).join('');
-
-    document.getElementById('ai-loading').style.display = 'none';
-    document.getElementById('ai-content').style.display = 'block';
-  } catch(e) {
-    document.getElementById('ai-loading').style.display = 'none';
-    document.getElementById('ai-error').style.display = 'block';
-    document.getElementById('ai-error').textContent = '❌ Ошибка загрузки: ' + e.message;
-  }
-}
-
-// ═══════════════════════════════════════════════════════
-// БЛОК 5: EXECUTIVE SUMMARY
-// ═══════════════════════════════════════════════════════
-let _execData = null;
-
-async function loadExecSummary() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  document.getElementById('exec-loading').style.display = 'block';
-  document.getElementById('exec-content').style.display = 'none';
-  try {
-    const r = await fetch(`/api/clients/${clientId}/executive-summary`);
-    const d = await r.json();
-    _execData = d;
-
-    document.getElementById('ex-mrr').textContent = (d.finance?.current_mrr||0).toLocaleString('ru-RU') + ' ₽';
-    document.getElementById('ex-health').textContent = (d.health?.score||0) + '%';
-    document.getElementById('ex-nps').textContent = d.health?.nps?.score ?? '—';
-    document.getElementById('ex-tasks').textContent = d.activity?.tasks?.total || 0;
-
-    const riskColors = { critical: '#f87171', high: '#fb923c', medium: '#facc15', low: '#60a5fa' };
-    document.getElementById('ex-risks').innerHTML = (d.risks||[]).map(r =>
-      `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border-radius:7px;margin-bottom:5px;font-size:.82rem;">
-        <div style="width:8px;height:8px;border-radius:50%;background:${riskColors[r.level]||'#94a3b8'};flex-shrink:0;"></div>
-        <span>${r.text}</span>
-      </div>`).join('') || '<div style="color:var(--muted);font-size:.82rem;">Критичных рисков нет</div>';
-
-    const stepIcons = { meeting: '📅', upsell: '💰', tasks: '✅', checkup: '🔍' };
-    const stepColors = { high: '#f87171', medium: '#facc15', low: '#60a5fa' };
-    document.getElementById('ex-steps').innerHTML = (d.next_steps||[]).map(s =>
-      `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;">
-        <span style="font-size:1rem;">${stepIcons[s.type]||'▸'}</span>
-        <div style="flex:1;font-size:.84rem;">${s.action}</div>
-        <div style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:${stepColors[s.priority]||'#94a3b8'}22;color:${stepColors[s.priority]||'#94a3b8'};">${s.priority}</div>
-      </div>`).join('');
-
-    document.getElementById('exec-loading').style.display = 'none';
-    document.getElementById('exec-content').style.display = 'block';
-  } catch(e) {
-    document.getElementById('exec-loading').style.display = 'none';
-    document.getElementById('exec-content').innerHTML = '<div style="color:var(--muted);text-align:center;padding:24px;">❌ Ошибка: ' + e.message + '</div>';
-    document.getElementById('exec-content').style.display = 'block';
-  }
-}
-
-async function generateAISummary() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  const btn = event.target;
-  btn.disabled = true; btn.textContent = '⏳ Генерирую...';
-  try {
-    const r = await fetch(`/api/clients/${clientId}/executive-summary/ai`, { method: 'POST' });
-    const d = await r.json();
-    document.getElementById('exec-ai-text').textContent = d.text;
-    document.getElementById('exec-ai-text-block').style.display = 'block';
-    toast('✅ AI summary готов');
-  } catch(e) { toast('❌ Ошибка AI'); }
-  finally { btn.disabled = false; btn.textContent = '🤖 AI-текст'; }
-}
-
-function copyExecSummary() {
-  if (!_execData) return;
-  const d = _execData;
-  const text = [
-    `EXECUTIVE SUMMARY: ${d.client?.name}`,
-    `Дата: ${new Date().toLocaleDateString('ru-RU')}`,
-    `Менеджер: ${d.client?.manager || '—'}`,
-    '',
-    `ФИНАНСЫ`,
-    `MRR: ${(d.finance?.current_mrr||0).toLocaleString('ru-RU')} ₽`,
-    `ARR: ${(d.finance?.current_arr||0).toLocaleString('ru-RU')} ₽`,
-    `Тренд: ${d.finance?.mrr_trend} (${d.finance?.mrr_trend_pct > 0 ? '+' : ''}${d.finance?.mrr_trend_pct}%)`,
-    '',
-    `ЗДОРОВЬЕ`,
-    `Health Score: ${d.health?.score}% (${d.health?.level})`,
-    `NPS: ${d.health?.nps?.score ?? '—'}`,
-    `Последний контакт: ${d.health?.days_no_contact} дн. назад`,
-    '',
-    `РИСКИ`,
-    ...(d.risks||[]).map(r => `• [${r.level.toUpperCase()}] ${r.text}`),
-    '',
-    `СЛЕДУЮЩИЕ ШАГИ`,
-    ...(d.next_steps||[]).map(s => `• [${s.priority.toUpperCase()}] ${s.action}`),
-    '',
-    (document.getElementById('exec-ai-text')?.textContent || ''),
-  ].join('\n');
-  navigator.clipboard.writeText(text).then(() => toast('📋 Скопировано'));
-}
-
-// ── Hero block init ──────────────────────────────────────────────────────
-(async function initHero() {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  const healthPct = parseInt(document.getElementById('hero-health-val')?.textContent) || 0;
-
-  // Health bar
-  const hc = healthPct >= 75 ? '#22c55e' : healthPct >= 50 ? '#60a5fa' : healthPct >= 30 ? '#f59e0b' : '#ef4444';
-  const bar = document.getElementById('hero-health-bar');
-  if (bar) { bar.style.width = healthPct + '%'; bar.style.background = hc; }
-  const hv = document.getElementById('hero-health-val');
-  if (hv) hv.style.color = hc;
-
-  // Risk badge
-  const risk = healthPct >= 70 ? {label:'🟢 Норма', bg:'rgba(34,197,94,.12)', color:'#4ade80'}
-             : healthPct >= 40 ? {label:'🟡 Внимание', bg:'rgba(245,158,11,.12)', color:'#fbbf24'}
-             :                   {label:'🔴 Критично', bg:'rgba(239,68,68,.12)', color:'#f87171'};
-  const badge = document.getElementById('hero-risk-badge');
-  if (badge) { badge.textContent = risk.label; badge.style.background = risk.bg; badge.style.color = risk.color; }
-
-  // MRR
-  try {
-    const r = await fetch(`/api/clients/${clientId}/revenue/history?months=1`);
-    const d = await r.json();
-    const mrr = d.current_mrr || 0;
-    const mrrEl = document.getElementById('hero-mrr');
-    if (mrrEl) {
-      mrrEl.textContent = mrr > 0
-        ? (mrr >= 1e6 ? (mrr/1e6).toFixed(1)+'M' : mrr >= 1e3 ? (mrr/1e3).toFixed(0)+'K' : mrr.toLocaleString('ru-RU')) + ' ₽'
-        : '—';
-      if (d.trend === 'up') mrrEl.innerHTML += ' <span style="color:#4ade80;font-size:.7rem;">↑'+d.trend_pct+'%</span>';
-      if (d.trend === 'down') mrrEl.innerHTML += ' <span style="color:#f87171;font-size:.7rem;">↓'+Math.abs(d.trend_pct)+'%</span>';
-    }
-  } catch(e) {}
-
-  // AI hint (загружаем в фоне, показываем если есть данные)
-  try {
-    const r = await fetch(`/api/clients/${clientId}/ai/summary`);
-    const d = await r.json();
-    if (d.next_best_actions && d.next_best_actions.length > 0) {
-      const top = d.next_best_actions[0];
-      const hint = document.getElementById('hero-ai-hint');
-      const text = document.getElementById('hero-ai-text');
-      if (hint && text) {
-        text.textContent = top.action + ' — ' + top.reason;
-        hint.style.display = 'block';
-      }
-    }
-  } catch(e) {}
-})();
-
-// ── Комбо-график MRR + Health ────────────────────────────────────────────
-let comboChart = null;
-let comboMonths = 6;
-
-async function loadComboChart(months) {
-  const clientId = window.__clientId || parseInt(window.location.pathname.split('/')[2]);
-  try {
-    const [r1, r2] = await Promise.all([
-      fetch(`/api/clients/${clientId}/revenue/history?months=${months}`),
-      fetch(`/api/clients/${clientId}/health/history?months=${months}`)
-    ]);
-    const rev = await r1.json();
-    const health = await r2.json();
-
-    // Строим общую ось времени
-    const allPeriods = new Set([
-      ...(rev.history||[]).map(h => h.period),
-      ...(health.history||[]).map(h => h.period),
-    ]);
-    const periods = Array.from(allPeriods).sort();
-
-    const mrrMap = Object.fromEntries((rev.history||[]).map(h => [h.period, h.mrr]));
-    const healthMap = Object.fromEntries((health.history||[]).map(h => [h.period, h.score]));
-
-    const mrrData   = periods.map(p => mrrMap[p]   ?? null);
-    const healthData = periods.map(p => healthMap[p] ?? null);
-
-    const ctx = document.getElementById('combo-chart');
-    if (!ctx) return;
-    if (comboChart) comboChart.destroy();
-
-    comboChart = new Chart(ctx, {
-      data: {
-        labels: periods,
-        datasets: [
-          {
-            type: 'bar',
-            label: 'MRR (₽)',
-            data: mrrData,
-            backgroundColor: 'rgba(99,102,241,.4)',
-            borderColor: 'rgba(99,102,241,.8)',
-            borderWidth: 1,
-            borderRadius: 4,
-            yAxisID: 'yMrr',
-          },
-          {
-            type: 'line',
-            label: 'Health (%)',
-            data: healthData,
-            borderColor: '#22c55e',
-            backgroundColor: 'rgba(34,197,94,.1)',
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: '#22c55e',
-            yAxisID: 'yHealth',
-          }
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: ctx => {
-                if (ctx.dataset.yAxisID === 'yMrr') return ' MRR: ' + (ctx.raw||0).toLocaleString('ru-RU') + ' ₽';
-                return ' Health: ' + (ctx.raw||0) + '%';
-              }
-            }
-          }
-        },
-        scales: {
-          yMrr: {
-            type: 'linear', position: 'left',
-            ticks: { color: '#818cf8', callback: v => v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v },
-            grid: { color: 'rgba(255,255,255,.04)' },
-          },
-          yHealth: {
-            type: 'linear', position: 'right', min: 0, max: 100,
-            ticks: { color: '#4ade80', callback: v => v + '%' },
-            grid: { display: false },
-          },
-          x: { ticks: { color: '#64748b' }, grid: { display: false } }
-        }
-      }
-    });
-
-    // Обновляем кнопки
-    document.querySelectorAll('[onclick*="setComboRange"]').forEach(b => b.classList.remove('active'));
-  } catch(e) { console.error('Combo chart error:', e); }
-}
-
-function setComboRange(months, btn) {
-  comboMonths = months;
-  document.querySelectorAll('[onclick*="setComboRange"]').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  loadComboChart(months);
-}
-
-// Загружаем при старте
-loadComboChart(6);
-
-// ── Lazy loading для вкладок ────────────────────────────────────────────────
-const _tabLoaded = {};
-const _tabLoaders = {
-  'finance':      () => typeof loadFinance === 'function' && loadFinance(),
-  'health-tab':   () => typeof loadHealthHistory === 'function' && loadHealthHistory(),
-  'ai-insights':  () => typeof loadAIInsights === 'function' && loadAIInsights(),
-  'exec-summary': () => typeof loadExecSummary === 'function' && loadExecSummary(),
-  'timeline':     () => typeof loadTimeline === 'function' && loadTimeline(),
-  'tickets':      () => typeof loadTickets === 'function' && loadTickets(),
-};
-
-// Переопределяем showTab чтобы добавить lazy loading
-const _origShowTab = window.showTab;
-window.showTab = function(tabId, btn) {
-  if (typeof _origShowTab === 'function') _origShowTab(tabId, btn);
-  // Запускаем loader только при первом открытии вкладки
-  if (!_tabLoaded[tabId] && _tabLoaders[tabId]) {
-    _tabLoaded[tabId] = true;
-    _tabLoaders[tabId]();
-  }
-};
-
+// INIT
+loadOverview();
+loadCharts();
+const initialTab = (location.hash || '#notes').slice(1);
+switchTab(['notes','roadmap','qbr','meetings','rules','feeds'].includes(initialTab) ? initialTab : 'notes');
 </script>
-</body>
-</html>
+<script src="/static/js/client_hub_tabs.js"></script>
+{% endblock %}
