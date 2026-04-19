@@ -31,14 +31,117 @@ loadConfig().then(() => {
   // version check in background after 5s (moved here, removed duplicate below)
 });
 
+// ── Side Panel (Chrome 114+): клик по иконке открывает боковую панель ────────
+if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch(err => console.warn("[AM Hub] sidePanel.setPanelBehavior:", err));
+}
+
 // ── Alarms ────────────────────────────────────────────────────────────────────
 chrome.alarms.create("mr_sync",       { periodInMinutes: 30 });
 chrome.alarms.create("version_check", { periodInMinutes: 360 }); // every 6h
+chrome.alarms.create("heartbeat",     { periodInMinutes: 5 });   // проверка токена
 
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === "mr_sync")       runMrSync(false);
   if (alarm.name === "version_check") checkForUpdate();
+  if (alarm.name === "heartbeat")     runHeartbeat();
 });
+
+// ── Notifications + Badge helpers ─────────────────────────────────────────────
+const ICON_URL = "icons/icon128.png";
+function amhNotify(id, title, message) {
+  try {
+    chrome.notifications.clear(id, () => {
+      chrome.notifications.create(id, {
+        type: "basic", iconUrl: ICON_URL,
+        title, message: String(message || "").slice(0, 300),
+      });
+    });
+  } catch (e) { /* noop */ }
+}
+function amhSetBadge(text, color) {
+  try {
+    chrome.action.setBadgeText({ text: text || "" });
+    if (text && color) chrome.action.setBadgeBackgroundColor({ color });
+  } catch (e) { /* noop */ }
+}
+
+// ── Heartbeat: раз в 5 мин пингуем /api/auth/me, 3 подряд 401 → алерт ────────
+let _amhAuthFailCount = 0;
+async function runHeartbeat() {
+  if (!CONFIG.HUB_URL || !CONFIG.HUB_TOKEN) return;
+  try {
+    const r = await fetch(`${CONFIG.HUB_URL}/api/auth/me`, {
+      headers: { "Authorization": CONFIG.HUB_TOKEN }
+    });
+    if (r.status === 401) {
+      _amhAuthFailCount++;
+      if (_amhAuthFailCount >= 3) {
+        amhSetBadge("⚠", "#f0b429");
+        amhNotify("amhub_auth_stale", "⚠️ Токен AM Hub устарел",
+          "Обнови токен в настройках расширения");
+      }
+    } else if (r.ok) {
+      _amhAuthFailCount = 0;
+      // Убираем ⚠ если висел — но не трогаем ! (ошибка синка)
+      chrome.action.getBadgeText({}, txt => {
+        if (txt === "⚠") amhSetBadge("", null);
+      });
+    }
+  } catch (e) {
+    // network errors — счётчик не трогаем
+  }
+}
+
+// ── Token auto-push: получаем TOKEN_CAPTURED от content script → шлём в хаб ──
+async function pushTokenToHub(tokenType, rawToken) {
+  if (!CONFIG.HUB_URL || !CONFIG.HUB_TOKEN || !rawToken) return;
+  // Дедуп по простому хэшу, чтобы не спамить при каждом fetch'е страницы
+  const hashKey = `last_pushed_${tokenType}_hash`;
+  let h = 0;
+  for (let i = 0; i < rawToken.length; i++) { h = ((h << 5) - h) + rawToken.charCodeAt(i); h |= 0; }
+  const sig = String(h);
+  const prev = await chrome.storage.local.get(hashKey);
+  if (prev[hashKey] === sig) return; // уже отправляли этот же токен
+
+  try {
+    const r = await fetch(`${CONFIG.HUB_URL}/api/auth/tokens/push`, {
+      method: "POST",
+      headers: { "Authorization": CONFIG.HUB_TOKEN, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: tokenType, token: rawToken, ts: Date.now() })
+    });
+    if (r.ok) {
+      await chrome.storage.local.set({ [hashKey]: sig });
+      amhNotify("amhub_token", `🔑 Токен ${tokenType} обновлён`,
+        "Токен автоматически отправлен в AM Hub");
+      amhSetBadge("🔑", "#23d18b");
+      setTimeout(() => {
+        chrome.action.getBadgeText({}, txt => {
+          if (txt === "🔑") amhSetBadge("", null);
+        });
+      }, 5000);
+    } else {
+      console.warn("[AM Hub] pushTokenToHub: HTTP", r.status);
+    }
+  } catch (e) {
+    console.warn("[AM Hub] pushTokenToHub:", e);
+  }
+}
+
+// ── Notifications click → открыть side panel ─────────────────────────────────
+if (chrome.notifications && chrome.notifications.onClicked) {
+  chrome.notifications.onClicked.addListener(async (notifId) => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && chrome.sidePanel && chrome.sidePanel.open) {
+        try { await chrome.sidePanel.open({ tabId: tab.id }); } catch {}
+      }
+    } catch {}
+    try { chrome.notifications.clear(notifId); } catch {}
+  });
+}
 
 // ── Auto-update: check hub for new version ────────────────────────────────────
 const CURRENT_VERSION = chrome.runtime.getManifest().version;
@@ -145,6 +248,17 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 
     // ── Token capture (from content script) ─────────────────────────────────
     CAPTURE_TOKENS: () => handleCaptureTokens(msg.system, msg.url, sender.tab?.id),
+    TOKEN_CAPTURED: async () => {
+      // content script сообщает: «я поймал токен» → сохраняем + пушим в хаб
+      const keyByType = { ktalk: "last_ktalk_token", tbank: "last_time_token" };
+      const storeKey = keyByType[msg.tokenType];
+      if (storeKey && msg.token) {
+        await chrome.storage.local.set({ [storeKey]: msg.token });
+        try { await pushTokenToHub(msg.tokenType, msg.token); }
+        catch (e) { console.warn("[AM Hub] pushTokenToHub failed:", e); }
+      }
+      return { ok: true };
+    },
   };
 
   const handler = handlers[msg.type];
@@ -169,6 +283,7 @@ async function runMrSync(manual = false) {
     const result = await doSync();
     const now = new Date().toLocaleString("ru-RU");
     syncState = { status: "ok", lastSync: now, lastResult: result, error: null };
+    amhSetBadge("", null);  // убираем ! при успехе
     if (manual) {
       chrome.notifications.create({
         type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),
@@ -179,6 +294,7 @@ async function runMrSync(manual = false) {
     return { ok: true, result };
   } catch (e) {
     syncState = { status: "error", error: e.message, lastSync: syncState.lastSync, lastResult: null };
+    amhSetBadge("!", "#f0556a");  // ! при ошибке
     if (manual) {
       chrome.notifications.create({
         type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),

@@ -66,15 +66,45 @@
       <span style="width:6px;height:6px;border-radius:50%;background:#23d18b;flex-shrink:0"></span>
       AM Hub: токен получен
     `;
-    document.body.appendChild(badge);
-    setTimeout(() => badge.remove(), 3000);
+    if (document.body) {
+      document.body.appendChild(badge);
+      setTimeout(() => badge.remove(), 3000);
+    }
   }
 
-  // Проверяем сразу и при изменениях DOM
-  tryCapture();
-  const observer = new MutationObserver(tryCapture);
-  observer.observe(document.body, { childList: true, subtree: true });
-  
-  // Останавливаем наблюдение через 30 сек
-  setTimeout(() => observer.disconnect(), 30000);
+  // Side-channel: некоторые токены живут в localStorage/sessionStorage
+  // (особенно KTalk). Забираем сразу — пусть background пушит в хаб.
+  function extractAndNotifyFromLocalStorage() {
+    try {
+      const keys = ["ktalk_token", "access_token", "token", "auth_token"];
+      for (const k of keys) {
+        const v = localStorage.getItem(k) || sessionStorage.getItem(k);
+        if (v && v.length > 20) {
+          const tokenType = system === "ktalk" ? "ktalk" : "tbank";
+          chrome.runtime.sendMessage({
+            type: "TOKEN_CAPTURED",
+            tokenType, token: v, url: window.location.origin, ts: Date.now()
+          });
+          return true;
+        }
+      }
+    } catch (e) { /* noop */ }
+    return false;
+  }
+
+  // Ждём document.body (run_at: document_idle не гарантирует полный DOM на SPA)
+  function startObserving() {
+    if (!document.body) { setTimeout(startObserving, 200); return; }
+    tryCapture();
+    extractAndNotifyFromLocalStorage();
+    const observer = new MutationObserver(() => {
+      tryCapture();
+      if (!window.__amhubLsChecked) {
+        if (extractAndNotifyFromLocalStorage()) window.__amhubLsChecked = true;
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => observer.disconnect(), 60000);
+  }
+  startObserving();
 })();

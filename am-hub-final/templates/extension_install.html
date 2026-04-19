@@ -566,6 +566,29 @@
           </div>
         </li>
       </ul>
+
+      <!-- ── Постоянные API-токены (amh_*): новый механизм, рекомендуется ── -->
+      <div style="margin-top:20px;padding:14px;background:rgba(163,230,53,.06);border:1px solid rgba(163,230,53,.25);border-radius:10px;">
+        <div style="font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+          🔑 Постоянные API-токены <span style="background:rgba(163,230,53,.2);color:#a3e635;padding:1px 8px;border-radius:10px;font-size:.65rem;">RECOMMENDED</span>
+        </div>
+        <div style="font-size:.82rem;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
+          JWT выше действителен 30 дней и привязан к текущей веб-сессии. Для расширения лучше сгенерировать <b>постоянный токен</b> — его можно отозвать в любой момент, не влияя на вашу веб-сессию.
+        </div>
+        <div id="api-tokens-list" style="margin-bottom:10px;"></div>
+        <div style="display:flex;gap:6px;">
+          <input id="new-token-name" placeholder="Название (например: Chrome на ноуте)" style="flex:1;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem;">
+          <button class="btn btn-sm" onclick="createApiToken()" style="white-space:nowrap;">+ Создать</button>
+        </div>
+        <div id="new-token-display" style="display:none;margin-top:10px;padding:10px;background:rgba(163,230,53,.1);border:1px solid rgba(163,230,53,.3);border-radius:8px;">
+          <div style="font-size:.72rem;color:#a3e635;font-weight:700;margin-bottom:4px;">⚠️ Сохрани этот токен — он больше не будет показан</div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <code id="new-token-value" style="flex:1;font-family:monospace;font-size:.76rem;word-break:break-all;"></code>
+            <button class="btn btn-sm" onclick="copyNewToken(this)">📋</button>
+          </div>
+        </div>
+      </div>
+
       <div class="ext-tip" style="margin-top:12px">
         💡 После сохранения настроек расширение автоматически начнёт синхронизацию.
         Первый сеанс может занять 1–2 минуты.
@@ -671,5 +694,77 @@
     }
   }, 900);
 })();
+
+// ── API tokens management (amh_*) ─────────────────────────────────────────────
+async function loadApiTokens() {
+  const el = document.getElementById('api-tokens-list');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/me/api-tokens');
+    if (r.status === 401) {
+      el.innerHTML = '<div style="color:#f5a623;font-size:.78rem;padding:4px 0;">Нужна авторизация — <a href="/login" style="color:var(--accent)">войдите</a></div>';
+      return;
+    }
+    if (!r.ok) {
+      el.innerHTML = '<div style="color:#f0556a;font-size:.78rem;">Ошибка загрузки (HTTP ' + r.status + ')</div>';
+      return;
+    }
+    const d = await r.json();
+    const tokens = d.tokens || [];
+    if (!tokens.length) {
+      el.innerHTML = '<div style="color:var(--text-dim);font-size:.78rem;padding:4px 0;">Нет активных токенов — создай первый ↓</div>';
+      return;
+    }
+    el.innerHTML = tokens.map(t => {
+      const name = (t.name || '').replace(/[<>&"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+      const prefix = (t.prefix || '').replace(/[<>&"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+      const last = t.last_used_at ? new Date(t.last_used_at).toLocaleDateString('ru-RU', {day:'numeric',month:'short'}) : '—';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg);border-radius:7px;margin-bottom:4px;border:1px solid var(--border);">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:600;font-size:.82rem;">' + name + '</div>' +
+          '<div style="font-family:monospace;font-size:.7rem;color:var(--text-dim);">' + prefix + '… · ' + last + '</div>' +
+        '</div>' +
+        '<button class="btn btn-sm" onclick="revokeApiToken(\'' + t.id + '\')" title="Отозвать">✕</button>' +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<div style="color:#f0556a;font-size:.78rem;">Не удалось загрузить список</div>';
+  }
+}
+
+async function createApiToken() {
+  const input = document.getElementById('new-token-name');
+  const name = (input && input.value || '').trim();
+  if (!name) { if (input) input.focus(); return; }
+  try {
+    const r = await fetch('/api/me/api-tokens', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name})
+    });
+    if (!r.ok) { alert('Ошибка: HTTP ' + r.status); return; }
+    const d = await r.json();
+    document.getElementById('new-token-value').textContent = d.token;
+    document.getElementById('new-token-display').style.display = 'block';
+    input.value = '';
+    loadApiTokens();
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+async function revokeApiToken(id) {
+  if (!confirm('Отозвать токен? Устройства с ним перестанут работать.')) return;
+  const r = await fetch('/api/me/api-tokens/' + encodeURIComponent(id), {method:'DELETE'});
+  if (r.ok) loadApiTokens();
+  else alert('Ошибка отзыва: HTTP ' + r.status);
+}
+
+function copyNewToken(btn) {
+  const v = document.getElementById('new-token-value').textContent;
+  navigator.clipboard.writeText(v).then(() => {
+    btn.textContent = '✓';
+    setTimeout(() => btn.textContent = '📋', 1500);
+  });
+}
+
+loadApiTokens();
 </script>
 {% endblock %}
