@@ -196,14 +196,10 @@ async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
 async def api_sync_airtable(
     request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
 ):
-    """Синхронизация клиентов из Airtable → локальная БД."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    """Синхронизация клиентов из Airtable → локальная БД.
+    Auth: cookie JWT / Bearer JWT / Bearer amh_* (для расширения)."""
+    from routers.api_tokens import resolve_user
+    user = resolve_user(db, request, auth_token)
     if not user:
         raise HTTPException(status_code=401)
 

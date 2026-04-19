@@ -127,13 +127,15 @@ function wireEvents() {
 async function loadSettings() {
   try {
     const s = await chrome.storage.local.get([
-      "hub_url", "hub_token", "mr_login", "mr_password", "groq_api_key", "managerName"
+      "hub_url", "hub_token", "mr_login", "mr_password", "mr_site_ids",
+      "groq_api_key", "managerName"
     ]);
     const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
     set("s-hub-url",   s.hub_url);
     set("s-hub-token", s.hub_token);
     set("s-mr-login",  s.mr_login);
     set("s-mr-pass",   s.mr_password);
+    set("s-mr-sites",  s.mr_site_ids);
     set("s-groq",      s.groq_api_key);
     set("s-manager",   s.managerName);
   } catch (e) {
@@ -148,6 +150,7 @@ async function saveSettings() {
     hub_token:    get("s-hub-token").trim(),
     mr_login:     get("s-mr-login").trim(),
     mr_password:  get("s-mr-pass"),
+    mr_site_ids:  get("s-mr-sites").trim(),
     groq_api_key: get("s-groq").trim(),
     managerName:  get("s-manager").trim(),
   };
