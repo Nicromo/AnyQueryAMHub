@@ -37,6 +37,32 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
+
+# ────────────────────────────────────────────────────────────────────────────
+# Общие хелперы авторизации для клиентского хаба /client/{id}
+
+def _require_user(auth_token, db):
+    """Извлекает пользователя из cookie или бросает 401."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
+
+def _require_client(client_id, user, db):
+    """Проверяет, что клиент есть и пользователь имеет к нему доступ."""
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+    if user.role == "manager" and client.manager_email != user.email:
+        raise HTTPException(status_code=403)
+    return client
+
 @router.get("/api/clients/{client_id}/qbr")
 async def api_get_qbr(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Получить QBR данные клиента."""
