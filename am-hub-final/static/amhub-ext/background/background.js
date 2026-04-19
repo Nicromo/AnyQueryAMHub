@@ -11,6 +11,17 @@ import { searchDiginetica } from "../lib/diginetica.js";
 import { analyzeQuery } from "../lib/analyzer.js";
 import { getAiRecommendations } from "../lib/ai.js";
 
+// ── Constants ────────────────────────────────────────────────────────────────
+const ICON_URL = "icons/icon128.png";
+const NOTIF_SYNC_OK    = "amhub_sync_ok";
+const NOTIF_SYNC_ERR   = "amhub_sync_err";
+const NOTIF_TOKEN      = "amhub_token";
+const NOTIF_AUTH_STALE = "amhub_auth_stale";
+
+const BADGE_COLOR_ERR  = "#f0556a";
+const BADGE_COLOR_WARN = "#f0b429";
+const BADGE_COLOR_OK   = "#23d18b";
+
 // ── Checkup state ─────────────────────────────────────────────────────────────
 let checkup = {
   cabinetId: null, apiKey: null, products: {}, activeProduct: "sort",
@@ -21,6 +32,10 @@ let checkup = {
 
 // ── Sync state ────────────────────────────────────────────────────────────────
 let syncState = { status: "idle", lastSync: null, error: null, lastResult: null };
+
+// ── Heartbeat state (in-memory; restart OK) ──────────────────────────────────
+let authFailCount = 0;
+let tokenBadgeTimer = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadConfig().then(() => {
@@ -41,10 +56,29 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
 
 // ── Alarms ────────────────────────────────────────────────────────────────────
 chrome.alarms.create("mr_sync", { periodInMinutes: 30 });
+chrome.alarms.create("heartbeat", { periodInMinutes: 5 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === "mr_sync") runMrSync(false);
+  if (alarm.name === "mr_sync")   runMrSync(false);
+  if (alarm.name === "heartbeat") runHeartbeat();
 });
+
+// ── Notifications: click opens side panel / popup ────────────────────────────
+if (chrome.notifications && chrome.notifications.onClicked) {
+  chrome.notifications.onClicked.addListener(async (notifId) => {
+    try {
+      // Side Panel нельзя открыть без активного жеста пользователя в некоторых
+      // случаях; попытаемся открыть панель на текущей вкладке, иначе — popup окно.
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && chrome.sidePanel && chrome.sidePanel.open) {
+        try { await chrome.sidePanel.open({ tabId: tab.id }); } catch {}
+      }
+    } catch (e) {
+      console.warn("[AM Hub] notif click handler:", e);
+    }
+    try { chrome.notifications.clear(notifId); } catch {}
+  });
+}
 
 // ── Message router ────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
@@ -55,7 +89,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     GET_FULL_STATE:   () => ({ checkup: { ...checkup }, sync: { ...syncState } }),
 
     // ── MR Sync ──────────────────────────────────────────────────────────────
-    SYNC_NOW:     () => runMrSync(true),
+    SYNC_NOW:     () => runMrSync(true, { full: msg.full === true }),
     GET_SYNC_STATUS: () => ({ ...syncState }),
 
     // ── Checkup ──────────────────────────────────────────────────────────────
@@ -99,43 +133,99 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     ),
 
     // ── Token capture (from content script) ─────────────────────────────────
-    CAPTURE_TOKENS: () => handleCaptureTokens(msg.system, msg.url, sender.tab?.id),
+    CAPTURE_TOKENS:  () => handleCaptureTokens(msg.system, msg.url, sender.tab?.id),
+    TOKEN_CAPTURED:  () => handleTokenCaptured(msg.tokenType, msg.token, msg.ts),
   };
 
   const handler = handlers[msg.type];
   if (!handler) return;
   const result = handler();
-  if (result instanceof Promise) { result.then(respond); return true; }
+  if (result instanceof Promise) { result.then(respond, (e) => respond({ ok: false, error: e?.message || String(e) })); return true; }
   respond(result);
   return true;
 });
 
+// ── Hashing helper (simple non-crypto hash для сравнения токенов) ────────────
+function simpleHash(s) {
+  if (!s) return "";
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return String(h);
+}
+
+// ── Notifications helpers ────────────────────────────────────────────────────
+function notify(id, title, message) {
+  try {
+    chrome.notifications.clear(id, () => {
+      chrome.notifications.create(id, {
+        type: "basic",
+        iconUrl: ICON_URL,
+        title,
+        message: String(message || "").slice(0, 300),
+      });
+    });
+  } catch (e) {
+    console.warn("[AM Hub] notify error:", e);
+  }
+}
+
+// ── Badge helpers ────────────────────────────────────────────────────────────
+function setBadge(text, color) {
+  try {
+    chrome.action.setBadgeText({ text: text || "" });
+    if (text && color) chrome.action.setBadgeBackgroundColor({ color });
+  } catch (e) { /* noop */ }
+}
+function clearBadge() { setBadge("", null); }
+
+function flashTokenBadge() {
+  setBadge("🔑", BADGE_COLOR_OK);
+  if (tokenBadgeTimer) clearTimeout(tokenBadgeTimer);
+  tokenBadgeTimer = setTimeout(() => {
+    // снимаем только если сейчас всё ещё ключик
+    chrome.action.getBadgeText({}, (t) => { if (t === "🔑") clearBadge(); });
+  }, 5000);
+}
+
 // ── Merchrules Sync ───────────────────────────────────────────────────────────
-async function runMrSync(manual = false) {
+async function runMrSync(manual = false, opts = {}) {
   if (!CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD || !CONFIG.HUB_URL) {
     syncState = { status: "error", error: "Не настроены MR или Hub", lastSync: null, lastResult: null };
+    if (manual) {
+      setBadge("!", BADGE_COLOR_ERR);
+      notify(NOTIF_SYNC_ERR, "AM Hub — Ошибка Sync", syncState.error);
+    }
     return { ok: false };
   }
   syncState.status = "running";
   try {
-    const result = await doSync();
+    // Прокидываем флаг полного resync'а, если doSync умеет его принимать.
+    const result = (doSync.length >= 1)
+      ? await doSync({ full: opts.full === true })
+      : await doSync();
     const now = new Date().toLocaleString("ru-RU");
     syncState = { status: "ok", lastSync: now, lastResult: result, error: null };
-    if (manual) {
-      chrome.notifications.create({
-        type: "basic", iconUrl: "icons/icon48.png",
-        title: "AM Hub — Sync",
-        message: `✅ ${result.clients_synced || 0} клиентов, ${result.tasks_synced || 0} задач`,
-      });
+
+    const clients = result?.clients_synced || 0;
+    const tasks   = result?.tasks_synced   || 0;
+
+    clearBadge();
+    if (manual && (clients > 0 || tasks > 0)) {
+      notify(
+        NOTIF_SYNC_OK,
+        "AM Hub — Sync",
+        `✅ Синк завершён: ${clients} клиентов, ${tasks} задач`
+      );
     }
     return { ok: true, result };
   } catch (e) {
     syncState = { status: "error", error: e.message, lastSync: syncState.lastSync, lastResult: null };
+    setBadge("!", BADGE_COLOR_ERR);
     if (manual) {
-      chrome.notifications.create({
-        type: "basic", iconUrl: "icons/icon48.png",
-        title: "AM Hub — Ошибка Sync", message: e.message.slice(0, 100),
-      });
+      notify(NOTIF_SYNC_ERR, "AM Hub — Ошибка Sync", `❌ Ошибка синка: ${e.message}`);
     }
     return { ok: false, error: e.message };
   }
@@ -235,20 +325,20 @@ async function handleRunCheck() {
   return { ok: true, results: checkup.results };
 }
 
-// ── Token capture ─────────────────────────────────────────────────────────────
+// ── Token capture: legacy path (куки через background) ──────────────────────
 async function handleCaptureTokens(system, url, tabId) {
   if (!CONFIG.HUB_URL || !CONFIG.HUB_TOKEN) return { ok: false, error: "Hub не настроен" };
 
   try {
     const cookies = await chrome.cookies.getAll({ url });
-    const tokens = {};
+    let captured = null;      // { type, token }
 
     if (system === "tbank_time") {
       const mm = cookies.find(c => c.name === "MMAUTHTOKEN");
-      if (mm) tokens.tbank_time_token = mm.value;
+      if (mm) captured = { type: "tbank", token: mm.value };
     }
     if (system === "ktalk") {
-      // KTalk использует localStorage для access_token — достаём через scripting
+      // KTalk — сначала пробуем localStorage/sessionStorage через scripting
       if (tabId) {
         try {
           const results = await chrome.scripting.executeScript({
@@ -259,7 +349,6 @@ async function handleCaptureTokens(system, url, tabId) {
                 const v = localStorage.getItem(k);
                 if (v) return { key: k, value: v };
               }
-              // Пробуем sessionStorage
               for (const k of keys) {
                 const v = sessionStorage.getItem(k);
                 if (v) return { key: k, value: v };
@@ -268,24 +357,129 @@ async function handleCaptureTokens(system, url, tabId) {
             },
           });
           const found = results?.[0]?.result;
-          if (found?.value) tokens.ktalk_token = found.value;
+          if (found?.value) captured = { type: "ktalk", token: found.value };
         } catch {}
       }
-      // Также проверяем cookies KTalk
-      const ktCookies = cookies.filter(c => c.name.toLowerCase().includes("token") || c.name.toLowerCase().includes("auth"));
-      if (ktCookies.length) tokens.ktalk_cookie = ktCookies[0].value;
+      if (!captured) {
+        const ktCookie = cookies.find(c =>
+          c.name.toLowerCase().includes("token") || c.name.toLowerCase().includes("auth")
+        );
+        if (ktCookie) captured = { type: "ktalk", token: ktCookie.value };
+      }
     }
 
-    if (!Object.keys(tokens).length) return { ok: false, error: "Токен не найден в cookies/storage" };
+    if (!captured) return { ok: false, error: "Токен не найден в cookies/storage" };
 
-    const result = await pushTokens(tokens);
-    return { ok: result.ok || false };
+    const pushed = await pushTokenToHub(captured.type, captured.token);
+    return { ok: pushed };
   } catch (e) {
+    console.warn("[AM Hub] handleCaptureTokens error:", e);
     return { ok: false, error: e.message };
+  }
+}
+
+// ── Token capture: новый путь — от content script уже приходит токен ─────────
+async function handleTokenCaptured(tokenType, token, ts) {
+  if (!tokenType || !token) return { ok: false, error: "empty token" };
+  if (tokenType !== "ktalk" && tokenType !== "tbank") return { ok: false, error: "unknown type" };
+
+  const pushed = await pushTokenToHub(tokenType, token, ts);
+  return { ok: pushed };
+}
+
+/**
+ * Сохраняет в storage + пушит в AM Hub с защитой от спама.
+ * Возвращает true, если отправили (или считаем отправленным: нечего слать — токен не менялся).
+ */
+async function pushTokenToHub(type, token, ts) {
+  if (!token) return false;
+
+  // 1. Сохранить локально (полная копия)
+  const storageKey = type === "ktalk" ? "last_ktalk_token" : "last_time_token";
+  const hashKey    = type === "ktalk" ? "last_pushed_ktalk_hash" : "last_pushed_tbank_hash";
+  const hash = simpleHash(token);
+
+  try {
+    await chrome.storage.local.set({ [storageKey]: token });
+  } catch (e) {
+    console.warn("[AM Hub] storage.set token:", e);
+  }
+
+  // 2. Получить предыдущий hash, сравнить
+  let prevHash = "";
+  try {
+    const d = await chrome.storage.local.get([hashKey]);
+    prevHash = d[hashKey] || "";
+  } catch {}
+
+  if (prevHash === hash) {
+    // токен не поменялся с прошлого раза — молча пропускаем
+    return true;
+  }
+
+  // 3. Проверить наличие настроек хаба
+  if (!CONFIG.HUB_URL || !CONFIG.HUB_TOKEN) {
+    console.log("[AM Hub] HUB не настроен — токен сохранён локально, но не отправлен");
+    return false;
+  }
+
+  // 4. POST /api/auth/tokens/push
+  try {
+    const r = await fetch(`${CONFIG.HUB_URL}/api/auth/tokens/push`, {
+      method: "POST",
+      headers: {
+        "Authorization": CONFIG.HUB_TOKEN,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ type, token, ts: ts || Date.now() }),
+    });
+    if (!r.ok) {
+      console.warn(`[AM Hub] tokens/push HTTP ${r.status}`);
+      return false;
+    }
+
+    // 5. запомнить hash успешной отправки
+    try { await chrome.storage.local.set({ [hashKey]: hash }); } catch {}
+
+    // 6. UX: нотификация + бейдж
+    notify(NOTIF_TOKEN, "AM Hub", `🔑 Токен ${type} обновлён`);
+    flashTokenBadge();
+    return true;
+  } catch (e) {
+    console.warn("[AM Hub] pushTokenToHub fetch error:", e);
+    return false;
+  }
+}
+
+// ── Heartbeat: раз в 5 минут проверяем /api/auth/me ──────────────────────────
+async function runHeartbeat() {
+  if (!CONFIG.HUB_URL || !CONFIG.HUB_TOKEN) return;
+  try {
+    const r = await fetch(`${CONFIG.HUB_URL}/api/auth/me`, {
+      headers: { "Authorization": CONFIG.HUB_TOKEN },
+    });
+    if (r.status === 401) {
+      authFailCount += 1;
+      if (authFailCount >= 3) {
+        setBadge("⚠", BADGE_COLOR_WARN);
+        notify(NOTIF_AUTH_STALE, "AM Hub", "Токен устарел, обнови в настройках");
+      }
+    } else if (r.ok) {
+      if (authFailCount > 0) {
+        authFailCount = 0;
+        // снимаем предупреждающий бейдж, если он был поставлен хартбитом
+        chrome.action.getBadgeText({}, (t) => { if (t === "⚠") clearBadge(); });
+      }
+    }
+    // Прочие коды (5xx, сетевые ошибки) не трогают счётчик — это не про токен.
+  } catch (e) {
+    // сетевая ошибка — не считаем это "токен протух"
+    console.log("[AM Hub] heartbeat network error:", e?.message);
   }
 }
 
 // Инициализация при установке
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create("mr_sync", { periodInMinutes: 30 });
+  chrome.alarms.create("mr_sync",   { periodInMinutes: 30 });
+  chrome.alarms.create("heartbeat", { periodInMinutes: 5 });
 });
