@@ -6,17 +6,19 @@ function PageClients() {
   const [segFilter, setSegFilter] = React.useState("all");
   const [newClientModal, setNewClientModal] = React.useState(false);
 
-  // Сегменты из реальных клиентов
+  // Сегменты — реальные из models.py (ENT, SME+, SME, SME-, SMB, SS).
+  // Плюс виртуальные: NEW (недавно добавлен) и RISK (churn).
   const _norm = (s) => (s || "").toUpperCase().replace(/\s+/g, "");
   const segments = [
     { key: "all",    label: "все",         match: () => true },
-    { key: "A+",     label: "A+",          match: (c) => _norm(c.segment) === "A+" },
-    { key: "A",      label: "A",           match: (c) => _norm(c.segment) === "A" },
-    { key: "B+",     label: "B+",          match: (c) => _norm(c.segment) === "B+" },
-    { key: "B",      label: "B",           match: (c) => _norm(c.segment) === "B" },
-    { key: "C",      label: "C",           match: (c) => _norm(c.segment) === "C" },
-    { key: "NEW",    label: "NEW",         match: (c) => _norm(c.segment) === "NEW" || c.is_new },
-    { key: "RISK",   label: "churn-риск",  match: (c) => c.status === "risk" },
+    { key: "ENT",    label: "ENT",         match: (c) => _norm(c.segment) === "ENT" },
+    { key: "SME+",   label: "SME+",        match: (c) => _norm(c.segment) === "SME+" },
+    { key: "SME",    label: "SME",         match: (c) => _norm(c.segment) === "SME" },
+    { key: "SME-",   label: "SME-",        match: (c) => _norm(c.segment) === "SME-" },
+    { key: "SMB",    label: "SMB",         match: (c) => _norm(c.segment) === "SMB" },
+    { key: "SS",     label: "SS",          match: (c) => _norm(c.segment) === "SS" },
+    { key: "NEW",    label: "NEW",         match: (c) => c.is_new || (c.days_since_added != null && c.days_since_added <= 14) },
+    { key: "RISK",   label: "churn-риск",  match: (c) => c.status === "risk" || (c.health_score != null && c.health_score < 0.4) },
   ];
   const counted = segments.map(s => ({ ...s, n: CL.filter(s.match).length }));
   const activeSeg = counted.find(s => s.key === segFilter) || counted[0];
@@ -189,7 +191,7 @@ function PageClient() {
 
         {/* top strip */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
-          <KPI label="Сегмент" value="A+" tone="signal"/>
+          <KPI label="Клиентов всего" value={String(CL.length)} tone={CL.length ? "signal" : "neutral"} sub={CL.length ? undefined : "нажми Sync в расширении"}/>
           <KPI label="GMV · 30д" value="₽ 4.8м" delta="+12%" sub="к предыдущему периоду"/>
           <KPI label="Health score" value="72" tone="warn" sub="внимание: тренд падает"/>
           <KPI label="Открытых задач" value="4" sub="1 просрочена"/>
