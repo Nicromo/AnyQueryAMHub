@@ -248,13 +248,14 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 
     // ── Token capture (from content script) ─────────────────────────────────
     CAPTURE_TOKENS: () => handleCaptureTokens(msg.system, msg.url, sender.tab?.id),
-    TOKEN_CAPTURED: () => {
+    TOKEN_CAPTURED: async () => {
       // content script сообщает: «я поймал токен» → сохраняем + пушим в хаб
       const keyByType = { ktalk: "last_ktalk_token", tbank: "last_time_token" };
       const storeKey = keyByType[msg.tokenType];
       if (storeKey && msg.token) {
-        chrome.storage.local.set({ [storeKey]: msg.token });
-        pushTokenToHub(msg.tokenType, msg.token);
+        await chrome.storage.local.set({ [storeKey]: msg.token });
+        try { await pushTokenToHub(msg.tokenType, msg.token); }
+        catch (e) { console.warn("[AM Hub] pushTokenToHub failed:", e); }
       }
       return { ok: true };
     },

@@ -701,6 +701,14 @@ async function loadApiTokens() {
   if (!el) return;
   try {
     const r = await fetch('/api/me/api-tokens');
+    if (r.status === 401) {
+      el.innerHTML = '<div style="color:#f5a623;font-size:.78rem;padding:4px 0;">Нужна авторизация — <a href="/login" style="color:var(--accent)">войдите</a></div>';
+      return;
+    }
+    if (!r.ok) {
+      el.innerHTML = '<div style="color:#f0556a;font-size:.78rem;">Ошибка загрузки (HTTP ' + r.status + ')</div>';
+      return;
+    }
     const d = await r.json();
     const tokens = d.tokens || [];
     if (!tokens.length) {
