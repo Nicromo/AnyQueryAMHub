@@ -656,13 +656,24 @@ async def top50_page(request: Request, db: Session = Depends(get_db), auth_token
     if not payload: return RedirectResponse(url="/login", status_code=303)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user: return RedirectResponse(url="/login", status_code=303)
-    # Загружаем данные Top-50
+    # Загружаем данные Top-50 — фильтруем по клиентам текущего менеджера.
     try:
         from sheets import get_top50_data
         mode = request.query_params.get("mode", "weekly")
-        top50_data = await get_top50_data(user_email=user.email)
-        data = top50_data if top50_data and not top50_data.get("error") else None
-    except Exception:
+        # Имена клиентов менеджера для фильтра Google Sheet
+        my_client_names = [
+            c.name for c in db.query(Client).filter(Client.manager_email == user.email).all()
+            if c.name
+        ]
+        top50_data = await get_top50_data(my_clients=my_client_names)
+        # В data кладём filtered_rows (только мои клиенты) как основной rows
+        if top50_data and not top50_data.get("error"):
+            filtered = top50_data.get("filtered_rows") or []
+            data = {**top50_data, "rows": filtered, "my_clients_count": len(my_client_names)}
+        else:
+            data = top50_data  # вернём ошибку чтобы шаблон показал её
+    except Exception as _e:
+        logger.warning(f"top50 page error: {_e}")
         data = None
         mode = "weekly"
     sheets_id = os.environ.get("SHEETS_SPREADSHEET_ID", "")
