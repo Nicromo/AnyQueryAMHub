@@ -1535,12 +1535,18 @@ function PageProfile() {
     });
     setSaving(false);
     if (r.ok) {
-      setMsg("Сохранено. После смены email нажми «Вытянуть из Airtable» чтобы клиенты переподтянулись.");
+      // Перечитываем профиль — чтобы обновились «Клиентов (по email)»,
+      // «Клиентов (assigned)» и другая статистика справа.
+      try {
+        const fresh = await fetch("/design/api/profile", { credentials: "include" }).then(x => x.ok ? x.json() : null);
+        if (fresh) setProf(fresh);
+      } catch (e) { /* non-fatal */ }
+      setMsg("Сохранено. Если клиентов (по email) всё ещё 0 — запусти ⟲ Из Airtable на /design/portfolio.");
     } else {
       const d = await r.json().catch(() => ({}));
       setMsg(d.detail || d.error || "Ошибка сохранения");
     }
-    setTimeout(() => setMsg(null), 5000);
+    setTimeout(() => setMsg(null), 6000);
   };
 
   if (!prof) return <div style={{ padding: 40, color: "var(--ink-6)", textAlign: "center" }}>Загружаю профиль…</div>;
@@ -1579,12 +1585,17 @@ function PageProfile() {
               { l: "Клиентов (по email)", v: prof.clients_by_email },
               { l: "Клиентов (assigned)", v: prof.clients_assigned },
               { l: "Telegram",            v: prof.telegram_id ? "✓" : "не привязан" },
-            ].map((r, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
-                <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.l}</span>
-                <span style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{r.v || "—"}</span>
-              </div>
-            ))}
+            ].map((r, i) => {
+              // Валидные значения: строки, включая пустые; числа включая 0;
+              // только null/undefined показываем как "—".
+              const shown = r.v == null || r.v === "" ? "—" : String(r.v);
+              return (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.l}</span>
+                  <span style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{shown}</span>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
