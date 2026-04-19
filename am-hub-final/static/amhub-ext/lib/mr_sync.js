@@ -72,10 +72,22 @@ export async function doSync() {
   }
   const d = await r.json();
   if (d.error) throw new Error(d.error);
-  // Нормализуем форму ответа к тому, что popup ожидает
+
+  // После Merchrules — также синкаем Airtable (клиенты → по CSM email
+  // раскидываются по менеджерам). Не критично если упал — основной
+  // результат от Merchrules уже есть.
+  let atRes = null;
+  try {
+    const ar = await fetch(`${CONFIG.HUB_URL}/api/sync/airtable`, {
+      method: "POST", headers: _hubHeaders(), body: "{}",
+    });
+    if (ar.ok) atRes = await ar.json().catch(() => null);
+  } catch (e) { /* non-fatal */ }
+
   return {
-    clients_synced: d.accounts_total || d.clients_synced || 0,
+    clients_synced: (d.clients_synced || 0) + (atRes && atRes.clients_synced ? atRes.clients_synced : 0),
     tasks_synced: d.tasks_synced || 0,
     message: d.message || "Синхронизация выполнена",
+    airtable: atRes && !atRes.error ? (atRes.message || `Airtable: ${atRes.clients_synced || 0} клиентов`) : null,
   };
 }
