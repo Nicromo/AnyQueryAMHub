@@ -1,255 +1,279 @@
 {% extends "base.html" %}
 {% block title %}Автозадачи — AM Hub{% endblock %}
 {% block page_title %}Автозадачи{% endblock %}
-{% block page_subtitle %}<div class="page-subtitle">Правила автоматического создания задач по триггерам</div>{% endblock %}
+{% block page_subtitle %}<div class="page-subtitle">Правила "если → то": при событии создаётся задача/заметка/уведомление</div>{% endblock %}
 {% block page_actions %}
-<button class="btn btn-primary btn-sm" onclick="openNew()">+ Новое правило</button>
+<button class="btn btn-primary btn-sm" onclick="openEditor()">+ Новое правило</button>
 {% endblock %}
 
 {% block content %}
 <style>
-.rule-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:10px;transition:border-color var(--t);}
-.rule-card.inactive{opacity:.55;}
-.rule-card:hover{border-color:var(--border-s);}
-.rule-top{display:flex;align-items:flex-start;gap:12px;}
-.rule-icon{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;}
-.rule-name{font-size:.88rem;font-weight:600;}
-.rule-desc{font-size:.76rem;color:var(--text-dim);margin-top:2px;line-height:1.5;}
-.rule-footer{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);}
-.trigger-badge{font-size:.65rem;font-weight:600;padding:2px 8px;border-radius:4px;}
-.t-health{background:var(--red-bg);color:var(--red);}
-.t-contact{background:var(--yellow-bg);color:var(--yellow);}
-.t-meeting{background:var(--blue-bg);color:var(--blue);}
-.t-followup{background:var(--purple-bg);color:var(--purple);}
-.t-checkup{background:var(--green-bg);color:var(--green);}
-.toggle-wrap{display:flex;align-items:center;gap:6px;}
-.toggle{width:34px;height:18px;border-radius:9px;border:none;cursor:pointer;position:relative;transition:background .15s;flex-shrink:0;}
-.toggle.on{background:var(--green);}
-.toggle.off{background:var(--surface-4);}
-.toggle::after{content:'';position:absolute;width:12px;height:12px;border-radius:50%;background:#fff;top:3px;transition:left .15s;}
-.toggle.on::after{left:19px;}
-.toggle.off::after{left:3px;}
-.config-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.rule-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px}
+.rule-card.inactive{opacity:.5}
+.rule-title{font-weight:600;font-size:.95rem}
+.rule-meta{font-size:.78rem;color:var(--text-dim);margin-top:4px}
+.rule-actions-list{margin-top:8px;font-size:.82rem}
+.rule-actions-list li{margin-left:14px;list-style:disc;color:var(--text-dim)}
+.rule-footer{display:flex;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:.76rem;color:var(--text-dim);align-items:center}
+.rule-footer .ctrl{margin-left:auto;display:flex;gap:6px}
+.btn-mini{padding:4px 8px;border-radius:6px;font-size:.75rem;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text)}
+.toggle{width:36px;height:20px;border-radius:10px;border:none;cursor:pointer;position:relative;flex-shrink:0}
+.toggle.on{background:#22c55e}
+.toggle.off{background:var(--surface-4)}
+.toggle::after{content:'';position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:3px;transition:left .15s}
+.toggle.on::after{left:19px}
+.toggle.off::after{left:3px}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+.modal-bg.show{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:720px;width:100%;max-height:90vh;overflow-y:auto}
+.section{margin-bottom:16px}
+.section-label{font-size:.7rem;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field input,.field select,.field textarea{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:.85rem;color:var(--text)}
+.field textarea{min-height:60px;resize:vertical;font-family:inherit}
+.field-label{font-size:.72rem;color:var(--text-dim);margin-bottom:3px}
+.action-block{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;position:relative}
+.action-ctrl{position:absolute;top:8px;right:8px;display:flex;gap:4px}
+.action-ctrl button{background:transparent;border:none;color:var(--text-dim);cursor:pointer;padding:2px 4px;font-size:.9rem}
+.segment-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;margin:2px;border-radius:14px;border:1px solid var(--border);cursor:pointer;font-size:.78rem;user-select:none}
+.segment-chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.var-chip{display:inline-block;padding:2px 7px;margin:2px;border-radius:4px;background:var(--surface-3);border:1px solid var(--border);font-size:.72rem;cursor:pointer;font-family:monospace}
+.var-chip:hover{background:var(--accent);color:#fff}
 </style>
 
-<!-- Trigger explanation -->
-<div class="section" style="margin-bottom:20px;background:var(--accent-dim);border-color:var(--accent-ring)">
-  <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:.78rem;color:var(--text-dim)">
-    <span>🔴 <strong style="color:var(--text)">Падение Health</strong> — создаёт задачу когда health падает ниже порога</span>
-    <span>🟡 <strong style="color:var(--text)">Нет контакта</strong> — через N дней без встречи/фолоуапа</span>
-    <span>🔵 <strong style="color:var(--text)">После встречи</strong> — автоматически создаёт задачи после определённых типов встреч</span>
-    <span>🟣 <strong style="color:var(--text)">После фолоуапа</strong> — если клиент не ответил через N дней</span>
-    <span>🟢 <strong style="color:var(--text)">Чекап</strong> — когда подходит срок чекапа по сегменту</span>
-  </div>
-</div>
+<div id="rules-list"><div class="empty" style="text-align:center;padding:30px;color:var(--text-dim)">Загрузка...</div></div>
 
-<div id="rules-list">
-  <div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Загрузка...</div></div>
-</div>
+<div id="modal-bg" class="modal-bg" onclick="if(event.target.id==='modal-bg')closeEditor()">
+  <div class="modal">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 style="font-size:1rem;font-weight:600" id="mod-title">Новое правило</h3>
+      <button onclick="closeEditor()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1.2rem">✕</button>
+    </div>
 
-<!-- Modal -->
-<div class="modal-overlay" id="ruleModal" style="display:none" onclick="if(event.target===this)closeModal()">
-  <div class="modal" style="max-width:560px">
-    <div class="modal-header">
-      <span class="modal-title" id="modal-title">Новое правило</span>
-      <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="section">
+      <div class="section-label">Название</div>
+      <input id="f-name" placeholder="Например: Звонок при падении health">
     </div>
-    <div class="modal-body">
-      <div class="field">
-        <label>Название правила</label>
-        <input type="text" id="r-name" class="form-control" placeholder="Например: Задача после чекапа Enterprise">
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Триггер</label>
-          <select id="r-trigger" class="form-control" onchange="renderTriggerConfig()">
-            <option value="health_drop">Падение Health Score</option>
-            <option value="days_no_contact">Нет контакта N дней</option>
-            <option value="meeting_done">После завершения встречи</option>
-            <option value="followup_sent">После отправки фолоуапа</option>
-            <option value="checkup_due">Подходит срок чекапа</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Сегменты (пусто = все)</label>
-          <select id="r-segments" class="form-control" multiple style="height:72px">
-            <option value="Enterprise">Enterprise</option>
-            <option value="SMB">SMB</option>
-            <option value="SME">SME</option>
-            <option value="SS">SS</option>
-            <option value="Partner">Partner</option>
-          </select>
-        </div>
-      </div>
-      <div id="trigger-config" style="margin-bottom:12px"></div>
-      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:2px">
-        <div style="font-size:.78rem;font-weight:600;margin-bottom:10px">Создаваемая задача:</div>
-        <div class="config-grid">
-          <div class="field">
-            <label>Название задачи</label>
-            <input type="text" id="r-task-title" class="form-control" placeholder="Проверить статус клиента">
-          </div>
-          <div class="field">
-            <label>Срок (через N дней)</label>
-            <input type="number" id="r-due-days" class="form-control" value="3" min="0" max="30">
-          </div>
-        </div>
-        <div class="config-grid">
-          <div class="field">
-            <label>Приоритет</label>
-            <select id="r-priority" class="form-control">
-              <option value="high">Высокий</option>
-              <option value="medium" selected>Средний</option>
-              <option value="low">Низкий</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Тип</label>
-            <select id="r-type" class="form-control">
-              <option value="followup">Фолоуап</option>
-              <option value="call">Звонок</option>
-              <option value="analysis">Анализ</option>
-              <option value="meeting">Встреча</option>
-            </select>
-          </div>
-        </div>
-        <div class="field">
-          <label>Описание задачи (необязательно)</label>
-          <textarea id="r-desc" class="form-control" rows="2" placeholder="Детали и контекст..."></textarea>
-        </div>
-      </div>
+
+    <div class="section">
+      <div class="section-label">Когда (триггер)</div>
+      <select id="f-trigger" onchange="renderTriggerConfig()"></select>
+      <div id="trigger-config" style="margin-top:8px"></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn" onclick="closeModal()">Отмена</button>
-      <button class="btn btn-primary" onclick="saveRule()">💾 Сохранить</button>
+
+    <div class="section">
+      <div class="section-label">У кого (сегменты — пусто = все)</div>
+      <div id="f-segments"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Что делать</div>
+      <div id="actions-list"></div>
+      <button onclick="addAction()" class="btn-mini" style="margin-top:6px">+ Добавить действие</button>
+    </div>
+
+    <div class="section" style="font-size:.72rem;color:var(--text-dim)">
+      Подсказка: в текстовых полях можно использовать переменные — кликни по чипу чтобы вставить:
+      <div id="var-chips" style="margin-top:6px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeEditor()" class="btn-mini">Отмена</button>
+      <button onclick="saveRule()" class="btn btn-primary btn-sm">Сохранить</button>
     </div>
   </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
-var allRules = []; var editId = null;
-var TRIGGER_LABELS = {health_drop:'Падение Health',days_no_contact:'Нет контакта',meeting_done:'После встречи',followup_sent:'После фолоуапа',checkup_due:'Чекап'};
-var TRIGGER_ICONS  = {health_drop:'🔴',days_no_contact:'🟡',meeting_done:'🔵',followup_sent:'🟣',checkup_due:'🟢'};
-var TRIGGER_CLS    = {health_drop:'t-health',days_no_contact:'t-contact',meeting_done:'t-meeting',followup_sent:'t-followup',checkup_due:'t-checkup'};
-var TRIGGER_BG     = {health_drop:'var(--red-bg)',days_no_contact:'var(--yellow-bg)',meeting_done:'var(--blue-bg)',followup_sent:'var(--purple-bg)',checkup_due:'var(--green-bg)'};
+let META = null, RULES = [], EDIT = null;
+const SEGS = ['ENT','SME+','SME-','SME','SMB','SS'];
 
-(async function load(){
-  var d = await fetch('/api/auto-tasks/rules').then(function(r){return r.json();}).catch(function(){return{rules:[]};});
-  allRules = d.rules||[];
-  if(!allRules.length) seedDefaults();
-  else render(allRules);
-})();
-
-function seedDefaults(){
-  var defaults=[
-    {name:'Фолоуап после чекапа Enterprise',trigger:'meeting_done',trigger_config:{meeting_types:['checkup']},segment_filter:['Enterprise'],task_title:'Отправить фолоуап после чекапа',task_priority:'high',task_due_days:1,task_type:'followup',is_active:true},
-    {name:'Задача при низком Health Score',trigger:'health_drop',trigger_config:{threshold:50,drop_pct:0},segment_filter:[],task_title:'Проверить ситуацию у клиента — падение Health',task_priority:'high',task_due_days:2,task_type:'call',is_active:true},
-    {name:'Нет контакта 30 дней (ENT)',trigger:'days_no_contact',trigger_config:{days:30},segment_filter:['Enterprise'],task_title:'Инициировать контакт — нет активности 30 дней',task_priority:'medium',task_due_days:3,task_type:'call',is_active:true},
-    {name:'Задача при подходящем чекапе',trigger:'checkup_due',trigger_config:{},segment_filter:[],task_title:'Запланировать чекап',task_priority:'medium',task_due_days:7,task_type:'meeting',is_active:false},
-  ];
-  Promise.all(defaults.map(function(r){return fetch('/api/auto-tasks/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(r)});}))
-    .then(async function(){var d=await fetch('/api/auto-tasks/rules').then(function(r){return r.json();});allRules=d.rules||[];render(allRules);});
+async function init() {
+  try {
+    META = await fetch('/api/auto-tasks/meta',{credentials:'include'}).then(r=>r.json());
+  } catch(e){ META = {triggers:[],actions:[],variables:[]}; }
+  await loadRules();
 }
 
-function render(list){
-  var el=document.getElementById('rules-list');
-  if(!list.length){el.innerHTML='<div class="empty"><div class="empty-icon">🤖</div><div class="empty-title">Нет правил</div><div class="empty-text">Создайте первое правило автозадачи</div></div>';return;}
-  el.innerHTML=list.map(function(r){
-    var cfg=r.trigger_config||{};
-    var cfgStr='';
-    if(r.trigger==='health_drop') cfgStr='Health < '+cfg.threshold+'%';
-    else if(r.trigger==='days_no_contact') cfgStr=cfg.days+' дней без контакта';
-    else if(r.trigger==='meeting_done') cfgStr='Типы: '+(cfg.meeting_types||[]).join(', ')||'любая';
-    else if(r.trigger==='followup_sent') cfgStr=(cfg.delay_days||3)+' дней без ответа';
-    var segs=r.segment_filter&&r.segment_filter.length?r.segment_filter.join(', '):'все сегменты';
-    return '<div class="rule-card'+(r.is_active?'':' inactive')+'" id="rule-'+r.id+'">'
-      +'<div class="rule-top">'
-      +'  <div class="rule-icon" style="background:'+TRIGGER_BG[r.trigger]+'">'+TRIGGER_ICONS[r.trigger]+'</div>'
-      +'  <div style="flex:1;min-width:0">'
-      +'    <div class="rule-name">'+r.name+'</div>'
-      +'    <div class="rule-desc">'
-      +'      <span class="trigger-badge '+TRIGGER_CLS[r.trigger]+'">'+TRIGGER_LABELS[r.trigger]+'</span>'
-      +'      '+(cfgStr?'· '+cfgStr:'')
-      +'      · <em>'+segs+'</em>'
-      +'    </div>'
-      +'    <div style="margin-top:5px;font-size:.74rem;color:var(--text-muted)">'
-      +'      Задача: <strong style="color:var(--text)">'+r.task_title+'</strong>'
-      +'      · через '+r.task_due_days+' дн. · '+{high:'🔴',medium:'🟡',low:'🔵'}[r.task_priority||'medium']+' приоритет'
-      +'    </div>'
-      +'  </div>'
-      +'  <div style="display:flex;gap:4px;flex-shrink:0">'
-      +'    <button class="btn btn-ghost btn-sm btn-icon" onclick="openEdit('+r.id+')" title="Редактировать">✏️</button>'
-      +'    <button class="btn btn-ghost btn-sm btn-icon" onclick="delRule('+r.id+')" title="Удалить">✕</button>'
-      +'  </div>'
-      +'</div>'
-      +'<div class="rule-footer">'
-      +'  <div class="toggle-wrap">'
-      +'    <button class="toggle '+(r.is_active?'on':'off')+'" onclick="toggleRule('+r.id+',this)"></button>'
-      +'    <span style="font-size:.75rem;color:var(--text-dim)">'+(r.is_active?'Активно':'Отключено')+'</span>'
-      +'  </div>'
-      +'  <button class="btn btn-sm btn-ghost" onclick="testRule('+r.id+')">▶ Тест</button>'
-      +'  <span id="rule-test-'+r.id+'" style="font-size:.74rem;color:var(--text-muted)"></span>'
-      +'</div>'
-      +'</div>';
+async function loadRules() {
+  try {
+    const d = await fetch('/api/auto-tasks/rules',{credentials:'include'}).then(r=>r.json());
+    RULES = d.rules || [];
+  } catch(e){ RULES = []; }
+  renderList();
+}
+
+function triggerLabel(code){ return (META.triggers||[]).find(t=>t.code===code)?.label || code; }
+function actionLabel(code){ return (META.actions||[]).find(a=>a.code===code)?.label || code; }
+
+function renderList() {
+  const host = document.getElementById('rules-list');
+  if (!RULES.length) { host.innerHTML = '<div class="empty" style="text-align:center;padding:40px;color:var(--text-dim)">Правил пока нет. Нажми "+ Новое правило"</div>'; return; }
+  host.innerHTML = RULES.map(r => {
+    const actions = (r.actions && r.actions.length ? r.actions : (r.task_title ? [{type:'create_task',params:{title:r.task_title}}] : [])).map(a => {
+      const p = a.params || {};
+      const summary = a.type === 'create_task' ? `Задача: «${p.title||'—'}» (${p.priority||'medium'}, +${p.due_days||3} дн)` :
+                      a.type === 'create_note' ? `Заметка: «${(p.content||'').slice(0,60)}»` :
+                      a.type === 'notify' ? `Уведомление (${p.channel||'inapp'}): «${(p.message||'').slice(0,60)}»` :
+                      a.type;
+      return `<li>${esc(summary)}</li>`;
+    }).join('');
+    const segs = (r.segment_filter||[]).join(', ') || 'все сегменты';
+    const lastTrig = r.last_triggered_at ? `· посл. ${new Date(r.last_triggered_at).toLocaleDateString('ru')}` : '';
+    return `<div class="rule-card ${r.is_active?'':'inactive'}">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <button class="toggle ${r.is_active?'on':'off'}" onclick="toggleRule(${r.id}, ${!r.is_active})"></button>
+        <div style="flex:1">
+          <div class="rule-title">${esc(r.name)}</div>
+          <div class="rule-meta">🎯 ${esc(triggerLabel(r.trigger))} · 👥 ${esc(segs)}</div>
+          <ul class="rule-actions-list">${actions || '<li style="color:var(--text-dim)">Действия не настроены</li>'}</ul>
+        </div>
+      </div>
+      <div class="rule-footer">
+        <span>Сработало: ${r.trigger_count||0} раз ${lastTrig}</span>
+        <div class="ctrl">
+          <button onclick="testRule(${r.id})" class="btn-mini">🧪 Тест</button>
+          <button onclick="openEditor(${r.id})" class="btn-mini">✏️</button>
+          <button onclick="deleteRule(${r.id})" class="btn-mini">🗑</button>
+        </div>
+      </div>
+    </div>`;
   }).join('');
 }
 
-function renderTriggerConfig(){
-  var t=document.getElementById('r-trigger').value;
-  var el=document.getElementById('trigger-config');
-  var html='';
-  if(t==='health_drop') html='<div class="config-grid"><div class="field"><label>Порог Health (%)</label><input type="number" id="cfg-threshold" class="form-control" value="50" min="0" max="100"></div><div class="field"><label>Падение на (%)</label><input type="number" id="cfg-drop" class="form-control" value="15" min="0" max="100"><div class="help">0 = только ниже порога</div></div></div>';
-  else if(t==='days_no_contact') html='<div class="field"><label>Дней без контакта</label><input type="number" id="cfg-days" class="form-control" value="30" min="1" max="180"></div>';
-  else if(t==='meeting_done') html='<div class="field"><label>Типы встреч</label><select id="cfg-meeting-types" class="form-control" multiple style="height:64px"><option value="checkup">Чекап</option><option value="qbr">QBR</option><option value="kickoff">Кикофф</option><option value="demo">Демо</option></select></div>';
-  else if(t==='followup_sent') html='<div class="field"><label>Дней без ответа</label><input type="number" id="cfg-delay" class="form-control" value="3" min="1" max="30"></div>';
-  el.innerHTML=html;
+function openEditor(id) {
+  EDIT = id ? JSON.parse(JSON.stringify(RULES.find(r=>r.id===id))) : {id:null,name:'',trigger:(META.triggers[0]?.code||'manual'),trigger_config:{},segment_filter:[],actions:[{type:'create_task',params:{title:'',priority:'medium',due_days:3}}],is_active:true};
+  // Если старое правило без actions — собери из task_title
+  if (id && (!EDIT.actions || !EDIT.actions.length) && EDIT.task_title) {
+    EDIT.actions = [{type:'create_task', params:{title:EDIT.task_title,description:EDIT.task_description||'',priority:EDIT.task_priority||'medium',due_days:EDIT.task_due_days||3,task_type:EDIT.task_type||'followup'}}];
+  }
+  document.getElementById('mod-title').textContent = id ? 'Редактирование' : 'Новое правило';
+  document.getElementById('f-name').value = EDIT.name || '';
+  const trSel = document.getElementById('f-trigger');
+  trSel.innerHTML = (META.triggers||[]).map(t => `<option value="${t.code}" ${t.code===EDIT.trigger?'selected':''}>${esc(t.label)}</option>`).join('');
+  renderTriggerConfig();
+  renderSegments();
+  renderActions();
+  renderVarChips();
+  document.getElementById('modal-bg').classList.add('show');
 }
 
-function openNew(){editId=null;document.getElementById('modal-title').textContent='Новое правило';document.getElementById('r-name').value='';document.getElementById('r-trigger').value='health_drop';renderTriggerConfig();document.getElementById('r-task-title').value='';document.getElementById('r-due-days').value=3;document.getElementById('r-priority').value='medium';document.getElementById('r-type').value='followup';document.getElementById('r-desc').value='';document.getElementById('ruleModal').style.display='flex';}
+function closeEditor(){ document.getElementById('modal-bg').classList.remove('show'); EDIT=null; }
 
-function openEdit(id){var r=allRules.find(function(r){return r.id===id;});if(!r)return;editId=id;document.getElementById('modal-title').textContent='Редактировать';document.getElementById('r-name').value=r.name;document.getElementById('r-trigger').value=r.trigger;renderTriggerConfig();document.getElementById('r-task-title').value=r.task_title;document.getElementById('r-due-days').value=r.task_due_days||3;document.getElementById('r-priority').value=r.task_priority||'medium';document.getElementById('r-type').value=r.task_type||'followup';document.getElementById('r-desc').value=r.task_description||'';document.getElementById('ruleModal').style.display='flex';}
+function renderTriggerConfig() {
+  const code = document.getElementById('f-trigger').value;
+  EDIT.trigger = code;
+  const trig = (META.triggers||[]).find(t=>t.code===code);
+  const cfg = trig?.config || [];
+  const host = document.getElementById('trigger-config');
+  if (!cfg.length){ host.innerHTML = '<div style="font-size:.74rem;color:var(--text-dim)">Дополнительных параметров нет</div>'; return; }
+  host.innerHTML = '<div class="field-grid">' + cfg.map(c => {
+    const v = EDIT.trigger_config?.[c.key] ?? c.default ?? '';
+    if (c.type === 'multiselect'){
+      return `<div class="field"><div class="field-label">${esc(c.label)}</div><select multiple data-tcfg="${c.key}" onchange="onTCfgMS(this)" size="4">${(c.options||[]).map(o=>`<option value="${o}" ${(EDIT.trigger_config?.[c.key]||[]).includes(o)?'selected':''}>${o}</option>`).join('')}</select></div>`;
+    }
+    return `<div class="field"><div class="field-label">${esc(c.label)}</div><input type="${c.type==='number'?'number':'text'}" data-tcfg="${c.key}" oninput="onTCfg(this)" value="${v}"></div>`;
+  }).join('') + '</div>';
+}
+function onTCfg(el){ if(!EDIT.trigger_config)EDIT.trigger_config={}; const v=el.value; EDIT.trigger_config[el.dataset.tcfg]=(el.type==='number'?Number(v):v); }
+function onTCfgMS(el){ if(!EDIT.trigger_config)EDIT.trigger_config={}; EDIT.trigger_config[el.dataset.tcfg]=Array.from(el.selectedOptions).map(o=>o.value); }
 
-function closeModal(){document.getElementById('ruleModal').style.display='none';}
+function renderSegments() {
+  const host = document.getElementById('f-segments');
+  host.innerHTML = SEGS.map(s => `<span class="segment-chip ${(EDIT.segment_filter||[]).includes(s)?'on':''}" onclick="toggleSeg('${s}')">${s}</span>`).join('');
+}
+function toggleSeg(s){ EDIT.segment_filter = EDIT.segment_filter||[]; const i = EDIT.segment_filter.indexOf(s); if (i<0) EDIT.segment_filter.push(s); else EDIT.segment_filter.splice(i,1); renderSegments(); }
 
-function getTriggerConfig(){
-  var t=document.getElementById('r-trigger').value;
-  if(t==='health_drop')return{threshold:parseInt(document.getElementById('cfg-threshold')?.value||50),drop_pct:parseInt(document.getElementById('cfg-drop')?.value||0)};
-  if(t==='days_no_contact')return{days:parseInt(document.getElementById('cfg-days')?.value||30)};
-  if(t==='meeting_done'){var opts=document.getElementById('cfg-meeting-types');return{meeting_types:opts?Array.from(opts.selectedOptions).map(function(o){return o.value;}):['checkup']};}
-  if(t==='followup_sent')return{delay_days:parseInt(document.getElementById('cfg-delay')?.value||3)};
-  return{};
+function renderActions() {
+  const host = document.getElementById('actions-list');
+  host.innerHTML = (EDIT.actions||[]).map((a,idx) => {
+    const aMeta = (META.actions||[]).find(m=>m.code===a.type) || {params:[]};
+    const paramsHtml = aMeta.params.map(p => {
+      const v = a.params?.[p.key] ?? p.default ?? '';
+      let input;
+      if (p.type==='textarea') input = `<textarea data-idx="${idx}" data-k="${p.key}" oninput="onParam(this)">${esc(v)}</textarea>`;
+      else if (p.type==='select') input = `<select data-idx="${idx}" data-k="${p.key}" onchange="onParam(this)">${(p.options||[]).map(o=>`<option value="${o}" ${o==v?'selected':''}>${o}</option>`).join('')}</select>`;
+      else input = `<input data-idx="${idx}" data-k="${p.key}" type="${p.type==='number'?'number':'text'}" oninput="onParam(this)" value="${esc(v)}" placeholder="${esc(p.hint||'')}">`;
+      return `<div class="field"><div class="field-label">${esc(p.label)}${p.required?' *':''}</div>${input}</div>`;
+    }).join('');
+    return `<div class="action-block">
+      <div class="action-ctrl">
+        ${idx>0?`<button onclick="moveAction(${idx},-1)" title="Выше">↑</button>`:''}
+        ${idx<(EDIT.actions.length-1)?`<button onclick="moveAction(${idx},1)" title="Ниже">↓</button>`:''}
+        <button onclick="removeAction(${idx})" title="Удалить">✕</button>
+      </div>
+      <div class="field-label">Тип</div>
+      <select data-idx="${idx}" onchange="changeActionType(this)">
+        ${(META.actions||[]).map(m=>`<option value="${m.code}" ${m.code===a.type?'selected':''}>${esc(m.label)}</option>`).join('')}
+      </select>
+      <div class="field-grid" style="margin-top:8px">${paramsHtml}</div>
+    </div>`;
+  }).join('');
+}
+function changeActionType(sel){ const idx=+sel.dataset.idx; EDIT.actions[idx]={type:sel.value, params:{}}; renderActions(); }
+function onParam(el){ const idx=+el.dataset.idx; EDIT.actions[idx].params=EDIT.actions[idx].params||{}; const v = el.type==='number'? Number(el.value) : el.value; EDIT.actions[idx].params[el.dataset.k]=v; }
+function addAction(){ EDIT.actions.push({type:(META.actions[0]?.code||'create_task'),params:{}}); renderActions(); }
+function removeAction(idx){ EDIT.actions.splice(idx,1); if(!EDIT.actions.length)addAction(); else renderActions(); }
+function moveAction(idx, dir){ const j=idx+dir; if(j<0||j>=EDIT.actions.length)return; const t=EDIT.actions[idx]; EDIT.actions[idx]=EDIT.actions[j]; EDIT.actions[j]=t; renderActions(); }
+
+function renderVarChips() {
+  const host = document.getElementById('var-chips');
+  host.innerHTML = (META.variables||[]).map(v => `<span class="var-chip" onclick="insertVar('{${v}}')">{${v}}</span>`).join('');
+}
+function insertVar(v) {
+  const el = document.activeElement;
+  if (!el || !['TEXTAREA','INPUT'].includes(el.tagName)) return;
+  const s = el.selectionStart||0, e = el.selectionEnd||0;
+  el.value = el.value.slice(0,s) + v + el.value.slice(e);
+  el.selectionStart = el.selectionEnd = s + v.length;
+  el.dispatchEvent(new Event('input'));
 }
 
-async function saveRule(){
-  var segs=Array.from(document.getElementById('r-segments').selectedOptions).map(function(o){return o.value;});
-  var body={name:document.getElementById('r-name').value.trim(),trigger:document.getElementById('r-trigger').value,trigger_config:getTriggerConfig(),segment_filter:segs,task_title:document.getElementById('r-task-title').value.trim(),task_due_days:parseInt(document.getElementById('r-due-days').value)||3,task_priority:document.getElementById('r-priority').value,task_type:document.getElementById('r-type').value,task_description:document.getElementById('r-desc').value,is_active:true};
-  if(!body.name||!body.task_title)return;
-  var url=editId?'/api/auto-tasks/rules/'+editId:'/api/auto-tasks/rules';
-  var r=await fetch(url,{method:editId?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r.ok){closeModal();var d=await fetch('/api/auto-tasks/rules').then(function(r){return r.json();});allRules=d.rules||[];render(allRules);showToast('Правило сохранено');}
+async function saveRule() {
+  EDIT.name = document.getElementById('f-name').value.trim();
+  if (!EDIT.name) { alert('Введите название'); return; }
+  if (!EDIT.actions?.length) { alert('Добавьте хотя бы одно действие'); return; }
+  // backward-compat: дублируем первое create_task в task_*
+  const first = EDIT.actions[0];
+  const body = {name:EDIT.name,trigger:EDIT.trigger,trigger_config:EDIT.trigger_config||{},segment_filter:EDIT.segment_filter||[],actions:EDIT.actions,is_active:EDIT.is_active!==false};
+  if (first.type === 'create_task'){
+    const p = first.params||{};
+    body.task_title = p.title || EDIT.name;
+    body.task_description = p.description || '';
+    body.task_priority = p.priority || 'medium';
+    body.task_due_days = p.due_days || 3;
+    body.task_type = p.task_type || 'followup';
+  } else {
+    body.task_title = body.task_title || EDIT.name;
+  }
+  const url = EDIT.id ? `/api/auto-tasks/rules/${EDIT.id}` : '/api/auto-tasks/rules';
+  const method = EDIT.id ? 'PATCH' : 'POST';
+  const r = await fetch(url, {method, headers:{'Content-Type':'application/json'}, credentials:'include', body:JSON.stringify(body)});
+  if (!r.ok) { alert('Ошибка сохранения'); return; }
+  closeEditor(); loadRules();
 }
 
-async function toggleRule(id,btn){
-  var rule=allRules.find(function(r){return r.id===id;});if(!rule)return;
-  var newVal=!rule.is_active;
-  await fetch('/api/auto-tasks/rules/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active:newVal})});
-  rule.is_active=newVal;
-  btn.className='toggle '+(newVal?'on':'off');
-  btn.nextElementSibling.textContent=newVal?'Активно':'Отключено';
-  document.getElementById('rule-'+id).classList.toggle('inactive',!newVal);
+async function toggleRule(id, active) {
+  await fetch(`/api/auto-tasks/rules/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({is_active:active})});
+  loadRules();
+}
+async function deleteRule(id) {
+  if (!confirm('Удалить правило?')) return;
+  await fetch(`/api/auto-tasks/rules/${id}`,{method:'DELETE',credentials:'include'});
+  loadRules();
+}
+async function testRule(id) {
+  const r = await fetch(`/api/auto-tasks/rules/${id}/test`,{method:'POST',credentials:'include'});
+  if (!r.ok) { alert('Ошибка теста'); return; }
+  const d = await r.json();
+  alert(`Совпало клиентов: ${d.triggered||0}\nСоздано задач: ${d.created||0}`);
+  loadRules();
 }
 
-async function testRule(id){
-  var el=document.getElementById('rule-test-'+id);
-  el.textContent='⏳ Тестируем...';
-  var r=await fetch('/api/auto-tasks/rules/'+id+'/test',{method:'POST'});
-  var d=await r.json();
-  el.textContent=d.ok?'✅ Создано '+d.created+' задач':'❌ '+(d.error||'?');
-  setTimeout(function(){el.textContent='';},5000);
-}
+function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-async function delRule(id){if(!confirm('Удалить правило?'))return;await fetch('/api/auto-tasks/rules/'+id,{method:'DELETE'});allRules=allRules.filter(function(r){return r.id!==id;});render(allRules);}
-
-function showToast(msg){var t=document.createElement('div');t.className='toast success';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove();},3000);}
+init();
 </script>
 {% endblock %}
