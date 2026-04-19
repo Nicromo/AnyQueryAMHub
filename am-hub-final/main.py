@@ -375,6 +375,10 @@ app.include_router(admin_router.router, tags=["admin"])
 app.include_router(inbox_notifications.router, tags=["inbox"])
 from routers import pdf_export
 app.include_router(pdf_export.router, tags=["pdf"])
+from routers import api_tokens as api_tokens_router
+app.include_router(api_tokens_router.router, tags=["api-tokens"])
+from routers import extension_api
+app.include_router(extension_api.router, tags=["extension"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])
 
 from routers import airtable as airtable_router

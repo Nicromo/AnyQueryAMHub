@@ -4,7 +4,7 @@ Workflow: встречи → фолоуап → задачи → roadmaps → QB
 """
 import json
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
@@ -35,6 +35,7 @@ class Client(Base):
     last_ticket_date = Column(DateTime, nullable=True)
     last_sync_at = Column(DateTime, nullable=True)
     integration_metadata = Column(JSONB, default=dict)
+    contract_end = Column(Date, nullable=True, index=True)  # для алертов 30/14/7 дней
 
     # QBR
     last_qbr_date = Column(DateTime, nullable=True)
