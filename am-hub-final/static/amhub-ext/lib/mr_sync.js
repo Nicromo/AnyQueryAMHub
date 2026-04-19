@@ -10,7 +10,10 @@ const MR_BASE = "https://merchrules.any-platform.ru";
 
 async function mrAuth() {
   const attempts = [];
-  for (const field of ["email", "login", "username"]) {
+  // Пробуем `username` первым — реальный Merchrules API в 422-ошибке
+  // явно просит именно это поле. `email`/`login` — fallback на случай
+  // старых версий бэкенда.
+  for (const field of ["username", "email", "login"]) {
     try {
       const r = await fetch(`${MR_BASE}/backend-v2/auth/login`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -22,19 +25,19 @@ async function mrAuth() {
         if (token) return token;
         attempts.push(`${field}:ok-but-no-token`);
       } else {
-        // Try to get error body for diagnostics
+        // Полный текст ошибки — иначе диагностика невозможна
         let body = "";
-        try { body = (await r.text()).slice(0, 120); } catch {}
+        try { body = (await r.text()).slice(0, 400); } catch {}
         attempts.push(`${field}:HTTP ${r.status}${body ? ` — ${body}` : ""}`);
       }
     } catch (e) {
       attempts.push(`${field}:${e.message}`);
     }
   }
-  // Build informative error: if all returned 401/403 → credentials wrong; else → other issue
-  const all401 = attempts.every(a => a.includes("HTTP 401") || a.includes("HTTP 403"));
-  if (all401) {
-    throw new Error("Merchrules: неверный логин или пароль");
+  // Все три попытки с правильными полями → значит пароль неверный
+  const all4xx = attempts.every(a => /HTTP 40[01134]|HTTP 422/.test(a));
+  if (all4xx) {
+    throw new Error("Merchrules: неверный логин или пароль (проверь credentials)");
   }
   throw new Error("Merchrules auth failed: " + attempts.join(" | "));
 }
