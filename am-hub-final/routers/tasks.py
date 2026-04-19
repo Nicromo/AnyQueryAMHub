@@ -70,12 +70,27 @@ async def api_create_task(
 async def api_update_task(task_id: int, request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token:
         raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
     data = await request.json()
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404)
+    # Ownership: только менеджер клиента или админ могут редактировать задачу.
+    if user.role != "admin" and task.client_id:
+        client = db.query(Client).filter(Client.id == task.client_id).first()
+        if client and client.manager_email and client.manager_email != user.email:
+            raise HTTPException(status_code=403, detail="Задача принадлежит другому менеджеру")
+    # Белый список полей — блокируем перезапись служебных (id, client_id, roadmap_*).
+    allowed = {"title", "description", "status", "priority", "due_date",
+               "team", "task_type", "source"}
     for k, v in data.items():
-        if hasattr(task, k):
+        if k in allowed and hasattr(task, k):
             setattr(task, k, v)
     db.commit()
     return {"ok": True}

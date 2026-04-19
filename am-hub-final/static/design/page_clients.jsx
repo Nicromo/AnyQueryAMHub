@@ -247,9 +247,22 @@ function PageClient() {
         subtitle={[segment !== "—" && `Сегмент ${segment}`, domain !== "—" && domain, managerEmail !== "—" && "AM: " + managerEmail].filter(Boolean).join(" · ")}
         actions={
           <>
-            <Btn kind="ghost" size="m" icon={<I.chat size={14}/>}>Заметка</Btn>
-            <Btn kind="ghost" size="m" icon={<I.cal size={14}/>}>Запланировать</Btn>
-            <Btn kind="primary" size="m" icon={<I.lightning size={14}/>}>Follow-up</Btn>
+            <Btn kind="ghost" size="m" icon={<I.chat size={14}/>} onClick={async () => {
+              const txt = window.prompt("Новая заметка по клиенту:");
+              if (!txt) return;
+              const r = await fetch(`/api/clients/${c.id}/notes`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: txt }),
+              });
+              if (r.ok) window.location.reload();
+              else alert("Не удалось сохранить заметку");
+            }}>Заметка</Btn>
+            <Btn kind="ghost" size="m" icon={<I.cal size={14}/>} onClick={() => {
+              window.location.href = `/design/meetings?client_id=${c.id}`;
+            }}>Запланировать</Btn>
+            <Btn kind="primary" size="m" icon={<I.lightning size={14}/>} onClick={() => {
+              window.location.href = `/design/followup?client_id=${c.id}`;
+            }}>Follow-up</Btn>
           </>
         }
       />

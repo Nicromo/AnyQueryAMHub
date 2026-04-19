@@ -243,26 +243,46 @@ def client_to_design(
     now: datetime,
     next_meetings_by_client: Dict[int, datetime],
 ) -> Dict[str, Any]:
+    lm_date = getattr(client, "last_meeting_date", None)
+    lc_date = getattr(client, "last_checkup", None)
+    contract_end = getattr(client, "contract_end", None)
+    created_at = getattr(client, "created_at", None) or getattr(client, "last_sync_at", None)
+    days_since_added = (
+        (now.date() - created_at.date()).days if created_at else None
+    )
     return {
         "id": client.id,
         "name": client.name or "—",
         "seg": segment_label(client.segment),
         "segment": client.segment or "",  # для фильтров в page_clients.jsx (_norm(c.segment))
         "pm": pm_name(client.manager_email),
+        "manager_email": client.manager_email or "",
+        "domain": getattr(client, "domain", "") or "",
         "next": compute_next_touchpoint(client, now, next_meetings_by_client),
         "status": health_to_status(
             client.health_score,
             needs_checkup=bool(client.needs_checkup),
-            last_meeting_date=client.last_meeting_date,
+            last_meeting_date=lm_date,
             now=now,
         ),
+        "health_score": client.health_score,
+        "needs_checkup": bool(getattr(client, "needs_checkup", False)),
         "gmv": format_gmv(client.mrr),
+        "gmv_raw": client.mrr,
+        "mrr": client.mrr,
         "delta": format_delta(client.revenue_trend),
         "trend": parse_trend(client.revenue_trend),
+        "revenue_trend": client.revenue_trend,
         "days_since": (
-            (now.date() - client.last_meeting_date.date()).days
-            if client.last_meeting_date else None
+            (now.date() - lm_date.date()).days if lm_date else None
         ),
+        "last_meeting_date": lm_date.isoformat() if lm_date else None,
+        "last_checkup": lc_date.isoformat() if lc_date else None,
+        "contract_end": contract_end.isoformat() if contract_end else None,
+        "open_tickets": getattr(client, "open_tickets", 0) or 0,
+        "nps_last": getattr(client, "nps_last", None),
+        "days_since_added": days_since_added,
+        "is_new": (days_since_added is not None and days_since_added <= 14),
         "stage": stage_label(client, now),
     }
 

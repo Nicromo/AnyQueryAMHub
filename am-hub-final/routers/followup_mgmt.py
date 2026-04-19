@@ -132,9 +132,19 @@ async def api_delete_followup_template(tpl_id: int, db: Session = Depends(get_db
     """Удалить шаблон."""
     if not auth_token:
         raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
     tpl = db.query(FollowupTemplate).filter(FollowupTemplate.id == tpl_id).first()
     if not tpl:
         raise HTTPException(status_code=404)
+    # Ownership: только автор или админ.
+    if user.role != "admin" and tpl.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Шаблон принадлежит другому пользователю")
     db.delete(tpl)
     db.commit()
     return {"ok": True}
