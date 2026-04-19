@@ -6,46 +6,103 @@
 import { CONFIG } from "./config.js";
 import { syncAccounts } from "./hub.js";
 
-const MR_BASE = "https://merchrules.any-platform.ru";
+// Перебираем все известные базы — prod и QA. У пользователя может быть
+// доступ только к одной, поэтому пробуем обе.
+const MR_BASES = [
+  "https://merchrules.any-platform.ru",
+  "https://merchrules-qa.any-platform.ru",
+];
+let MR_BASE = MR_BASES[0];  // обновляется на тот, что сработал
+
+// Куда принимать токен из ответа (может называться по-разному у разных бэков).
+const TOKEN_KEYS = ["token", "access_token", "accessToken", "jwt", "authToken", "auth_token", "sessionId", "session_id"];
+
+// Возможные пути auth-эндпоинта. Добавляем варианты — вдруг сменили.
+const AUTH_PATHS = [
+  "/backend-v2/auth/login",
+  "/backend/auth/login",
+  "/api/auth/login",
+  "/auth/login",
+];
+
+async function _tryLoginOnce(base, path, field, mode /* "json"|"form" */) {
+  const url = `${base}${path}`;
+  let headers, body;
+  if (mode === "form") {
+    headers = { "Content-Type": "application/x-www-form-urlencoded" };
+    body = new URLSearchParams({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD }).toString();
+  } else {
+    headers = { "Content-Type": "application/json" };
+    body = JSON.stringify({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD });
+  }
+  const r = await fetch(url, { method: "POST", headers, body, credentials: "include" });
+  if (!r.ok) {
+    let bodyText = "";
+    try { bodyText = (await r.text()).slice(0, 400); } catch {}
+    return { ok: false, status: r.status, body: bodyText, url };
+  }
+  // Token может прийти в JSON, в Authorization, или как Set-Cookie (session mode).
+  let token = null;
+  const authHeader = r.headers.get("Authorization") || r.headers.get("authorization");
+  if (authHeader && authHeader.startsWith("Bearer ")) token = authHeader.slice(7);
+  try {
+    const d = await r.clone().json();
+    if (!token) {
+      for (const k of TOKEN_KEYS) if (d && d[k]) { token = d[k]; break; }
+      // Может быть nested: { data: { token: ... }} или { result: { token: ... }}
+      for (const wrap of ["data", "result", "payload"]) {
+        if (!token && d && d[wrap]) {
+          for (const k of TOKEN_KEYS) if (d[wrap][k]) { token = d[wrap][k]; break; }
+        }
+      }
+    }
+  } catch { /* не JSON — возможно session-cookie login */ }
+  // Session-cookie mode: ответ 200 и браузер сам сохранил cookie.
+  // Тогда считаем auth успешным без явного токена (будем ходить с credentials: include).
+  return { ok: true, token, url, sessionMode: !token };
+}
 
 async function mrAuth() {
   const attempts = [];
-  // Пробуем `username` первым — реальный Merchrules API в 422-ошибке
-  // явно просит именно это поле. `email`/`login` — fallback на случай
-  // старых версий бэкенда.
-  for (const field of ["username", "email", "login"]) {
-    try {
-      const r = await fetch(`${MR_BASE}/backend-v2/auth/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: CONFIG.MR_LOGIN, password: CONFIG.MR_PASSWORD }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        const token = d.token || d.access_token || d.accessToken;
-        if (token) return token;
-        attempts.push(`${field}:ok-but-no-token`);
-      } else {
-        // Полный текст ошибки — иначе диагностика невозможна
-        let body = "";
-        try { body = (await r.text()).slice(0, 400); } catch {}
-        attempts.push(`${field}:HTTP ${r.status}${body ? ` — ${body}` : ""}`);
+  // Порядок: (url, json vs form, field). `username` первым — реальный
+  // Merchrules API (prod) его требует по 422-error.
+  for (const base of MR_BASES) {
+    for (const path of AUTH_PATHS) {
+      for (const mode of ["json", "form"]) {
+        for (const field of ["username", "email", "login"]) {
+          try {
+            const res = await _tryLoginOnce(base, path, field, mode);
+            if (res.ok) {
+              MR_BASE = base;
+              return { token: res.token, sessionMode: !!res.sessionMode, base };
+            }
+            attempts.push(`${base.split("//")[1]}${path}[${mode}/${field}]:HTTP ${res.status}${res.body ? ` — ${res.body.slice(0, 150)}` : ""}`);
+            // Если 404/405 — путь точно не тот, нет смысла перебирать field'ы
+            if (res.status === 404 || res.status === 405) break;
+          } catch (e) {
+            attempts.push(`${base}[${mode}/${field}]:${e.message}`);
+          }
+        }
       }
-    } catch (e) {
-      attempts.push(`${field}:${e.message}`);
     }
   }
-  // Все три попытки с правильными полями → значит пароль неверный
-  const all4xx = attempts.every(a => /HTTP 40[01134]|HTTP 422/.test(a));
+  const all4xx = attempts.every(a => /HTTP 40[0-9]|HTTP 4[12][0-9]/.test(a));
   if (all4xx) {
-    throw new Error("Merchrules: неверный логин или пароль (проверь credentials)");
+    throw new Error("Merchrules: неверный логин или пароль, либо API изменился. Последние ответы: " + attempts.slice(-3).join(" | "));
   }
-  throw new Error("Merchrules auth failed: " + attempts.join(" | "));
+  throw new Error("Merchrules auth failed (" + attempts.length + " попыток): " + attempts.slice(-3).join(" | "));
 }
 
-async function mrGet(token, path, params = {}) {
+async function mrGet(authResult, path, params = {}) {
   const url = new URL(`${MR_BASE}${path}`);
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const headers = {};
+  if (authResult && authResult.token) headers["Authorization"] = `Bearer ${authResult.token}`;
+  const r = await fetch(url, {
+    headers,
+    // Если auth был session-cookie, здесь тоже credentials include
+    credentials: authResult && authResult.sessionMode ? "include" : "same-origin",
+  });
   if (!r.ok) return null;
   return r.json();
 }
