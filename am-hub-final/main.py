@@ -209,6 +209,7 @@ async def lifespan(app: FastAPI):
                     ("clients", "next_qbr_date","ALTER TABLE clients ADD COLUMN next_qbr_date TIMESTAMP"),
                     ("clients", "airtable_site_id", "ALTER TABLE clients ADD COLUMN airtable_site_id VARCHAR"),
                     ("clients", "gmv",         "ALTER TABLE clients ADD COLUMN gmv FLOAT DEFAULT 0"),
+                    ("clients", "contract_end", "ALTER TABLE clients ADD COLUMN contract_end DATE"),
                     # QBR columns — required for /design/qbr page
                     ("qbrs", "manager_email",      "ALTER TABLE qbrs ADD COLUMN manager_email VARCHAR"),
                     ("qbrs", "airtable_record_id",  "ALTER TABLE qbrs ADD COLUMN airtable_record_id VARCHAR"),
