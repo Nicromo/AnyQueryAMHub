@@ -378,8 +378,12 @@ async def api_test_tbank(db: Session = Depends(get_db), auth_token: Optional[str
 
 @router.get("/api/integrations/test/{system}")
 async def api_test_integration_generic(system: str, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Заглушка для остальных систем."""
-    return {"ok": False, "error": f"Тест для {system} не реализован"}
+    """Fallback: если попросили тестить систему, которой нет в списке — 404 с подсказкой."""
+    supported = ["airtable", "merchrules", "ktalk", "tbank", "tbank_time", "outlook"]
+    raise HTTPException(
+        status_code=404,
+        detail=f"Тест для '{system}' не поддерживается. Доступные: {', '.join(supported)}"
+    )
 
 
 # ── Import CSV ───────────────────────────────────────────────────────────────
