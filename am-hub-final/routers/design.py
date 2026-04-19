@@ -93,7 +93,7 @@ PAGES_DATA_MAP = {
     "analytics":  ["clients", "meetings", "heatmap", "team_response", "kpi_weekly"],
     "ai":         ["clients", "activity"],
     "kanban":     ["tasks", "clients"],
-    "kpi":        ["kpi_weekly", "day_kpi"],
+    "kpi":        ["kpi_weekly", "day_kpi", "clients", "sidebar_stats"],
     "qbr":        ["clients", "qbr_data"],
     "cabinet":    ["reminders"],
     "templates":  ["templates"],
