@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{width:420px;max-height:620px;overflow-y:auto;font-family:'Segoe UI',system-ui,sans-serif;background:#07090f;color:#e8ecf4}
+    /* В popup — фиксированная ширина; в side panel — заполняем всю доступную */
+    html,body{margin:0;padding:0}
+    body{min-width:320px;max-width:500px;width:100%;min-height:100vh;overflow-y:auto;font-family:'Segoe UI',system-ui,sans-serif;background:#07090f;color:#e8ecf4}
+    @media (max-width: 420px) { body { width: 100vw; } }
     ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#1e2840;border-radius:2px}
 
     /* Header */

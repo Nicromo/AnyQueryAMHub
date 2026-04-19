@@ -10,7 +10,8 @@
     "tabs",
     "activeTab",
     "scripting",
-    "cookies"
+    "cookies",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://*/*",
@@ -21,12 +22,15 @@
     "type": "module"
   },
   "action": {
-    "default_popup": "popup/popup.html",
     "default_icon": {
       "16":  "icons/icon16.png",
       "48":  "icons/icon48.png",
       "128": "icons/icon128.png"
-    }
+    },
+    "default_title": "AM Hub"
+  },
+  "side_panel": {
+    "default_path": "popup/popup.html"
   },
   "content_scripts": [
     {

@@ -30,6 +30,15 @@ loadConfig().then(() => {
   });
 });
 
+// ── Side Panel ────────────────────────────────────────────────────────────────
+// Клик по иконке расширения открывает боковую панель, а не popup.
+// Панель остаётся открытой при смене вкладок и при клике вне — как у Claude.
+if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((err) => console.warn("[AM Hub] sidePanel setPanelBehavior:", err));
+}
+
 // ── Alarms ────────────────────────────────────────────────────────────────────
 chrome.alarms.create("mr_sync", { periodInMinutes: 30 });
 

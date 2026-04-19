@@ -42,20 +42,23 @@ async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
     Приём данных синхронизации от Chrome-расширения AM Hub Sync.
     Авторизация через Bearer токен (JWT) в заголовке Authorization.
     """
-    # Авторизация через Bearer header (расширение не использует cookie)
+    # Авторизация через Bearer header: поддерживаем и постоянный amh_* токен, и JWT
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.removeprefix("Bearer ").strip()
     if not token:
         raise HTTPException(status_code=401, detail="Bearer token required")
 
-    from auth import decode_access_token
-    payload_jwt = decode_access_token(token)
-    if not payload_jwt:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.id == int(payload_jwt.get("sub"))).first()
+    user = None
+    if token.startswith("amh_"):
+        from routers.api_tokens import find_user_by_api_token
+        user = find_user_by_api_token(db, token)
+    else:
+        from auth import decode_access_token
+        payload_jwt = decode_access_token(token)
+        if payload_jwt:
+            user = db.query(User).filter(User.id == int(payload_jwt.get("sub"))).first()
     if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise HTTPException(status_code=401, detail="Invalid token or user not found")
 
     data = await request.json()
     accounts = data.get("accounts", [])

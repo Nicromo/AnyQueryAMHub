@@ -71,6 +71,45 @@ def _current_user_from_cookie(db: Session, auth_token: Optional[str]) -> User:
     return user
 
 
+def resolve_user(db: Session, request, auth_token_cookie: Optional[str]) -> Optional[User]:
+    """
+    Единая функция авторизации для эндпоинтов, которые могут вызываться
+    и из браузера (cookie JWT), и из расширения (Bearer amh_... или JWT).
+    Возвращает User или None (пусть вызывающий сам решает 401).
+    """
+    # 1) Cookie JWT
+    if auth_token_cookie:
+        try:
+            from auth import decode_access_token
+            payload = decode_access_token(auth_token_cookie)
+            if payload:
+                u = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+                if u and u.is_active:
+                    return u
+        except Exception:
+            pass
+    # 2) Authorization: Bearer <token>
+    if request is not None:
+        auth_header = request.headers.get("Authorization", "") if hasattr(request, "headers") else ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+            if token.startswith(TOKEN_PREFIX):
+                u = find_user_by_api_token(db, token)
+                if u:
+                    return u
+            else:
+                try:
+                    from auth import decode_access_token
+                    payload = decode_access_token(token)
+                    if payload:
+                        u = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+                        if u and u.is_active:
+                            return u
+                except Exception:
+                    pass
+    return None
+
+
 def _sanitize(tok: dict) -> dict:
     """То что безопасно показать в списке (без хэша и без сырого токена)."""
     return {

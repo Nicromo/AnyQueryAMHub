@@ -418,17 +418,13 @@ async def api_ktalk_save_token(
 
 @router.get("/api/auth/me")
 async def api_auth_me(
+    request: Request,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
-    """Данные текущего пользователя (роль, имя)."""
-    if not auth_token:
-        raise HTTPException(status_code=401)
-    from auth import decode_access_token
-    payload = decode_access_token(auth_token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    """Данные текущего пользователя (роль, имя). Принимает cookie JWT, Bearer JWT или Bearer amh_*."""
+    from routers.api_tokens import resolve_user
+    user = resolve_user(db, request, auth_token)
     if not user:
         raise HTTPException(status_code=401)
     return {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
@@ -462,11 +458,16 @@ async def api_tokens_push(
     # Ищем пользователя по hub_token (сохранён в user.settings.hub_token)
     user = None
     if bearer:
-        from auth import decode_access_token
-        # Пробуем как JWT токен хаба
-        payload = decode_access_token(bearer)
-        if payload:
-            user = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+        # Новый путь: постоянный API-токен вида amh_*
+        if bearer.startswith("amh_"):
+            from routers.api_tokens import find_user_by_api_token
+            user = find_user_by_api_token(db, bearer)
+        else:
+            from auth import decode_access_token
+            # Пробуем как JWT токен хаба
+            payload = decode_access_token(bearer)
+            if payload:
+                user = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
 
         # Fallback: ищем по статическому hub_token в settings
         if not user:
