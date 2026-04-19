@@ -1038,6 +1038,29 @@ def job_auto_task_rules():
         db.close()
 
 
+def job_qbr_auto_collect():
+    """Квартальный автосбор QBR по всем активным клиентам."""
+    from database import SessionLocal
+    from models import Client
+    from qbr_auto_collect import collect_and_save, current_quarter
+    import asyncio
+    db = SessionLocal()
+    try:
+        q = current_quarter()
+        clients = db.query(Client).all()
+        loop = asyncio.new_event_loop()
+        try:
+            for c in clients:
+                try:
+                    loop.run_until_complete(collect_and_save(db, c, quarter=q, overwrite_text=False))
+                except Exception:
+                    logger.exception("qbr auto-collect client=%s failed", c.id)
+        finally:
+            loop.close()
+    finally:
+        db.close()
+
+
 def start_scheduler():
     sched = _get_scheduler()
 
@@ -1073,6 +1096,10 @@ def start_scheduler():
     # Автодействия по плановым триггерам (health_drop, days_no_contact, checkup_due, payment_overdue, nps_low)
     sched.add_job(job_auto_task_rules, "interval", hours=1,
                   id="auto_task_rules", name="Auto Task Rules (planned triggers)", replace_existing=True)
+
+    # Квартальный автосбор QBR: первого числа каждого месяца в 06:00
+    sched.add_job(job_qbr_auto_collect, "cron", day=1, hour=6,
+                  id="qbr_auto_collect", name="QBR Auto Collect (quarterly metrics)", replace_existing=True)
 
     sched.start()
     logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")

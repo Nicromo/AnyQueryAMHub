@@ -74,16 +74,55 @@
   };
 
   // ──────── QBR ────────
+  function renderQbrMetricsTable(m) {
+    const deltas = (m.deltas && m.deltas.per_product) || {};
+    const rows = Object.entries(m.per_product || {}).map(([code, pm]) => {
+      const d = deltas[code] || {};
+      const metricKeys = Object.keys(pm).filter(k => typeof pm[k] === 'number');
+      return metricKeys.map(k => {
+        const dv = d[k];
+        const dStr = dv == null ? '—' : (dv > 0 ? `+${dv}%` : `${dv}%`);
+        const color = dv == null ? 'text-slate-500' : (dv > 0 ? 'text-green-400' : (dv < 0 ? 'text-red-400' : 'text-slate-400'));
+        return `<tr class="border-t border-slate-700"><td class="p-2">${esc(code)}</td><td class="p-2">${esc(k)}</td><td class="p-2">${pm[k]}</td><td class="p-2 ${color}">${dStr}</td></tr>`;
+      }).join('');
+    }).join('');
+    return `<div class="bg-slate-900 rounded-lg p-3 mb-3">
+      <div class="text-xs text-slate-400 mb-2">📊 Метрики за ${esc(m.period || '—')}</div>
+      <table class="w-full text-sm"><thead class="text-xs text-slate-400"><tr><th class="text-left p-2">Продукт</th><th class="text-left p-2">Метрика</th><th class="text-left p-2">Значение</th><th class="text-left p-2">Δ к прошлому</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4" class="p-4 text-center text-slate-500">Нет числовых метрик</td></tr>'}</tbody></table>
+    </div>`;
+  }
+
+  window.qbrAutoCollect = async function () {
+    if (!confirm('Собрать метрики за текущий квартал из Merchrules?')) return;
+    try {
+      const d = await api(`/api/clients/${CID}/qbr/auto-collect`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})});
+      alert('✅ Собрано: ' + (d.quarter || ''));
+      loadQBR();
+    } catch (e) { alert('Ошибка автосбора'); }
+  };
+
   window.loadQBR = async function () {
     const c = $('#tab-qbr');
     try {
       const d = await api(`/api/clients/${CID}/qbr`);
       const q = d.current_qbr;
+      const metrics = (q && q.metrics) || null;
+      const headerControls = `
+        <div class="flex items-center gap-2 mb-3">
+          <button onclick="qbrAutoCollect()" class="px-3 py-1.5 rounded-lg bg-purple-600 text-sm">🔄 Автосбор данных</button>
+          <span class="text-xs text-slate-500">
+            ${metrics && metrics.collected_at ? `Собрано: ${fmtDate(metrics.collected_at)} · ${Object.keys(metrics.per_product||{}).length} продуктов` : 'Данные ещё не собраны'}
+          </span>
+        </div>
+        ${metrics && metrics.per_product ? renderQbrMetricsTable(metrics) : ''}
+      `;
       if (!q) {
-        c.innerHTML = `<div class="text-center py-6"><div class="text-slate-400 mb-3">QBR ещё не создан</div><a href="/client/${CID}/qbr" class="px-4 py-2 rounded-lg bg-indigo-600">Создать QBR</a></div>`;
+        c.innerHTML = `${headerControls}<div class="text-center py-6"><div class="text-slate-400 mb-3">QBR ещё не создан</div><a href="/client/${CID}/qbr" class="px-4 py-2 rounded-lg bg-indigo-600">Создать QBR</a></div>`;
         return;
       }
       c.innerHTML = `
+        ${headerControls}
         <div class="space-y-4">
           <div class="flex items-center justify-between">
             <div><div class="text-xs text-slate-400">Квартал</div><div class="font-bold">${esc(q.quarter || '—')}</div></div>

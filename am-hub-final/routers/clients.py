@@ -1934,3 +1934,22 @@ async def api_client_timeline(
         ev.pop("_sort", None)
 
     return {"events": events[:limit], "total": len(events[:limit])}
+
+
+@router.post("/api/clients/{client_id}/qbr/auto-collect")
+async def api_qbr_auto_collect(client_id: int, request: Request,
+                                db: Session = Depends(get_db),
+                                auth_token: Optional[str] = Cookie(None)):
+    user = _require_user(auth_token, db)
+    client = _require_client(client_id, user, db)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    quarter = body.get("quarter")
+    overwrite = bool(body.get("overwrite_text", False))
+    from qbr_auto_collect import collect_and_save
+    import asyncio
+    result = await collect_and_save(db, client, quarter=quarter, overwrite_text=overwrite)
+    return result
