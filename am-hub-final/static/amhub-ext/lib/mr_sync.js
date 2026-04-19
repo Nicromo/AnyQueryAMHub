@@ -12,17 +12,35 @@ const MR_BASES = [
   "https://merchrules.any-platform.ru",
   "https://merchrules-qa.any-platform.ru",
 ];
-let MR_BASE = MR_BASES[0];  // обновляется на тот, что сработал
+let MR_BASE = MR_BASES[0];     // обновляется на тот, что сработал
+let API_PREFIX = "/backend-v2"; // может быть "/api" или "/api/v1" — определяется в _verifyAuth
 
 // Куда принимать токен из ответа (может называться по-разному у разных бэков).
 const TOKEN_KEYS = ["token", "access_token", "accessToken", "jwt", "authToken", "auth_token", "sessionId", "session_id"];
 
-// Возможные пути auth-эндпоинта. Добавляем варианты — вдруг сменили.
+// Возможные пути auth-эндпоинта. Пробуем от наиболее "правильного"
+// для Spring Boot API (/api/*) к более старым variantам.
+// Реальный GET возвращает 401 на /api/accounts — значит API под /api/,
+// поэтому auth-endpoint тоже скорее всего /api/auth/login или /api/login.
 const AUTH_PATHS = [
+  "/api/auth/login",
+  "/api/login",
+  "/api/v1/auth/login",
+  "/api/v2/auth/login",
+  "/api/auth/signin",
   "/backend-v2/auth/login",
   "/backend/auth/login",
-  "/api/auth/login",
   "/auth/login",
+  "/login",
+];
+
+// Путь для проверки что auth действительно установил сессию.
+// Spring Boot с Security обычно 401 если не auth'ed — это и нужно.
+const VERIFY_PATHS = [
+  "/api/accounts",
+  "/api/v1/accounts",
+  "/api/auth/me",
+  "/api/me",
 ];
 
 async function _tryLoginOnce(base, path, field, mode /* "json"|"form" */) {
@@ -86,9 +104,32 @@ async function _tryLoginOnce(base, path, field, mode /* "json"|"form" */) {
   };
 }
 
+// Быстрая проверка что auth действительно установил сессию.
+// Возвращает {ok, prefix} где prefix — тот из которого начинался путь
+// (например "/api" из "/api/accounts"). Этот prefix потом используется
+// для всех последующих data-запросов (sync).
+async function _verifyAuth(base, authResult) {
+  for (const path of VERIFY_PATHS) {
+    try {
+      const headers = { "Accept": "application/json" };
+      if (authResult && authResult.token) headers["Authorization"] = `Bearer ${authResult.token}`;
+      const r = await fetch(`${base}${path}?limit=1`, { headers, credentials: "include", redirect: "manual" });
+      if (r.type === "opaqueredirect" || r.status === 0) continue;  // редирект на login = не auth
+      if (!r.ok) continue;
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      if (ct.includes("text/html")) continue;
+      // Вытаскиваем prefix — всё до последнего "/X" в path.
+      // "/api/accounts" → "/api", "/api/v1/accounts" → "/api/v1", "/api/me" → "/api"
+      const idx = path.lastIndexOf("/");
+      const prefix = idx > 0 ? path.slice(0, idx) : "";
+      return { ok: true, verifyPath: path, prefix };
+    } catch { /* network error — пробуем следующий */ }
+  }
+  return { ok: false };
+}
+
 async function mrAuth() {
   const attempts = [];
-  let firstSessionMode = null;  // первый успешный auth без токена — для диагностики
 
   for (const base of MR_BASES) {
     for (const path of AUTH_PATHS) {
@@ -97,15 +138,27 @@ async function mrAuth() {
           try {
             const res = await _tryLoginOnce(base, path, field, mode);
             if (res.ok && res.token) {
-              // Нашли явный токен → успех
-              MR_BASE = base;
-              return { token: res.token, sessionMode: false, base };
+              // Нашли явный токен — проверим что он реально работает на VERIFY_PATH
+              const verified = await _verifyAuth(base, { token: res.token });
+              if (verified.ok) {
+                MR_BASE = base;
+                API_PREFIX = verified.prefix;
+                return { token: res.token, sessionMode: false, base, prefix: verified.prefix };
+              }
+              attempts.push(`${base.split("//")[1]}${path}[${mode}/${field}]:token-not-verified`);
+              continue;
             }
             if (res.ok && !res.token) {
-              // 200 без токена — session-cookie mode, запомним на случай если
-              // никакой другой попытки с явным токеном не будет
-              if (!firstSessionMode) firstSessionMode = { base, url: res.url, diagKeys: res.diagKeys, hasSetCookie: res.hasSetCookie };
-              // Продолжаем поиск — вдруг другая комбинация вернёт явный токен
+              // 200 без токена — session-cookie. Проверим что cookie реально
+              // авторизует следующий запрос (иначе "успех" фальшивый — HTML
+              // login-страницы тоже возвращают 200).
+              const verified = await _verifyAuth(base, {});
+              if (verified.ok) {
+                MR_BASE = base;
+                API_PREFIX = verified.prefix;
+                return { token: null, sessionMode: true, base, prefix: verified.prefix };
+              }
+              attempts.push(`${base.split("//")[1]}${path}[${mode}/${field}]:session-cookie-not-verified`);
               continue;
             }
             // HTTP-ошибка
@@ -119,15 +172,17 @@ async function mrAuth() {
     }
   }
 
-  // Если была хоть одна успешная auth без явного токена — fallback на session-cookie.
-  if (firstSessionMode) {
-    MR_BASE = firstSessionMode.base;
-    return { token: null, sessionMode: true, base: firstSessionMode.base };
-  }
-
+  // Все попытки исчерпаны — ни одна verify-auth не прошла.
   const all4xx = attempts.every(a => /HTTP 40[0-9]|HTTP 4[12][0-9]/.test(a));
   if (all4xx) {
     throw new Error("Merchrules: неверный логин или пароль, либо API изменился. Последние ответы: " + attempts.slice(-3).join(" | "));
+  }
+  const verifyIssues = attempts.filter(a => /not-verified/.test(a)).slice(-2);
+  if (verifyIssues.length) {
+    throw new Error(
+      "Merchrules: login проходит, но API требует auth которого у нас нет " +
+      "(устаревший способ или права учётки). Последние: " + verifyIssues.join(" | ")
+    );
   }
   throw new Error("Merchrules auth failed (" + attempts.length + " попыток): " + attempts.slice(-3).join(" | "));
 }
@@ -146,9 +201,11 @@ async function mrGet(authResult, path, params = {}) {
     return { _err: true, status: r.status, body: `[HTML response, не API] ${bodyText.slice(0, 200).replace(/\s+/g, " ")}` };
   }
   // Для всего остального пробуем JSON с catch — некоторые API не ставят
-  // Content-Type, но тело валидный JSON.
+  // Content-Type, но тело валидный JSON. 204 No Content тоже ok.
+  if (r.status === 204) return {};
   try {
     const text = await r.text();
+    if (!text) return {};
     return JSON.parse(text);
   } catch (e) {
     return { _err: true, status: r.status, body: `[JSON-parse failed: ${e.message}]` };
@@ -176,20 +233,15 @@ export async function testMrAuth() {
   }
   const auth = await mrAuth();
   const authLabel = auth.sessionMode ? "session-cookie" : "Bearer-token";
-  // Verify auth works by fetching one account — пробуем несколько путей
-  const r = await mrGetAny(auth, [
-    "/backend-v2/accounts", "/backend/accounts", "/api/accounts", "/accounts",
-  ], { limit: 1 });
-  if (!r.data) {
-    const tried = (r.tries || []).join(" | ");
+  // После mrAuth() API_PREFIX уже знаем. Используем его.
+  const r = await mrGet(auth, `${API_PREFIX}/accounts`, { limit: 1 });
+  if (r && r._err) {
     throw new Error(
-      `Merchrules: auth=${authLabel} прошла, но API вернул ошибку. ` +
-      `Пробовал пути: ${tried || "—"}. Проверь права учётки или напиши это сообщение админу.`
+      `Merchrules ${API_PREFIX}/accounts: auth=${authLabel} прошла, HTTP ${r.status}${r.body ? " — " + r.body.slice(0, 200) : ""}`
     );
   }
-  const accData = r.data;
-  const accounts = accData?.accounts || accData?.items || (Array.isArray(accData) ? accData : []);
-  return { ok: true, accounts_total: accounts.length, path: r.path, authMode: authLabel };
+  const accounts = r?.accounts || r?.items || (Array.isArray(r) ? r : []);
+  return { ok: true, accounts_total: accounts.length, prefix: API_PREFIX, authMode: authLabel };
 }
 
 export async function doSync() {
@@ -201,8 +253,8 @@ export async function doSync() {
   // Получаем аккаунты и сайты. mrGet теперь возвращает {_err,status,body}
   // при HTTP-ошибке — нужен explicit guard чтобы не принять ошибку за пустой ответ.
   const [accDataRaw, siteDataRaw] = await Promise.all([
-    mrGet(token, "/backend-v2/accounts", { limit: 500 }),
-    mrGet(token, "/backend-v2/sites",    { limit: 500 }),
+    mrGet(token, `${API_PREFIX}/accounts`, { limit: 500 }),
+    mrGet(token, `${API_PREFIX}/sites`,    { limit: 500 }),
   ]);
   if (accDataRaw && accDataRaw._err) {
     throw new Error(`Merchrules /accounts: HTTP ${accDataRaw.status}${accDataRaw.body ? " — " + accDataRaw.body.slice(0, 200) : ""}`);
@@ -226,8 +278,8 @@ export async function doSync() {
       if (!siteId) return null;
 
       const [tasksRaw, meetingsRaw] = await Promise.all([
-        mrGet(token, "/backend-v2/tasks", { site_id: siteId, status: "plan,in_progress,blocked", limit: 100 }),
-        mrGet(token, "/backend-v2/meetings", { site_id: siteId, limit: 20 }),
+        mrGet(token, `${API_PREFIX}/tasks`, { site_id: siteId, status: "plan,in_progress,blocked", limit: 100 }),
+        mrGet(token, `${API_PREFIX}/meetings`, { site_id: siteId, limit: 20 }),
       ]);
       // Игнорируем _err на уровне отдельного сайта — просто пустой результат
       const tasksData = tasksRaw && tasksRaw._err ? null : tasksRaw;
