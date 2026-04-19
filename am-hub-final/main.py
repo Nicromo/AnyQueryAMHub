@@ -252,6 +252,7 @@ app = FastAPI(title="AM Hub", version="2.0.0", lifespan=lifespan)
 # ============================================================================
 from routers import ai, tasks, meetings, clients, sync, settings, auth, integrations, analytics, misc
 from routers import account_dashboard
+from routers import client_hub
 
 app.include_router(auth.router, tags=["auth"])
 app.include_router(settings.router, tags=["settings"])
@@ -279,6 +280,7 @@ app.include_router(inbox_notifications.router, tags=["inbox"])
 from routers import pdf_export
 app.include_router(pdf_export.router, tags=["pdf"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])
+app.include_router(client_hub.router, tags=["client-hub"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router
