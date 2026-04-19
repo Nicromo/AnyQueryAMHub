@@ -111,11 +111,16 @@ async function pushTokenToHub(tokenType, rawToken) {
   const prev = await chrome.storage.local.get(hashKey);
   if (prev[hashKey] === sig) return; // уже отправляли этот же токен
 
+  // Backend схема /api/auth/tokens/push ожидает поля time_token / ktalk_token,
+  // а не {type, token}. Маппим по tokenType (tbank_time/tbank/ktalk).
+  const body = {};
+  if (tokenType === "ktalk") body.ktalk_token = rawToken;
+  else body.time_token = rawToken;
   try {
     const r = await fetch(`${CONFIG.HUB_URL}/api/auth/tokens/push`, {
       method: "POST",
       headers: { "Authorization": CONFIG.HUB_TOKEN, "Content-Type": "application/json" },
-      body: JSON.stringify({ type: tokenType, token: rawToken, ts: Date.now() })
+      body: JSON.stringify(body)
     });
     if (r.ok) {
       await chrome.storage.local.set({ [hashKey]: sig });
@@ -152,6 +157,10 @@ if (chrome.notifications && chrome.notifications.onClicked) {
 const CURRENT_VERSION = chrome.runtime.getManifest().version;
 
 async function checkForUpdate() {
+  // Ensure CONFIG is populated — loadConfig may not have finished at startup timeout.
+  if (!CONFIG.HUB_URL) {
+    try { await loadConfig(); } catch {}
+  }
   if (!CONFIG.HUB_URL) return;
   try {
     const resp = await fetch(`${CONFIG.HUB_URL}/api/extension/version`, {
