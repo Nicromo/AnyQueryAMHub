@@ -14,6 +14,15 @@ const EXTERNAL_URLS = {
 function _buildNav() {
   const s = _stats();
   const num = (v) => (v == null ? undefined : String(v));
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  const isAdmin = (U.role || "") === "admin";
+  const settingsItems = [
+    { id: "integrations", label: "Интеграции", icon: "link" },
+    { id: "profile",      label: "Мой профиль", icon: "users" },
+  ];
+  if (isAdmin) {
+    settingsItems.push({ id: "assignments", label: "Назначения", icon: "folder" });
+  }
   return [
     { group: "", items: [
       { id: "command",  label: "Командный центр", icon: "command", badge: num(s.inbox) },
@@ -39,11 +48,7 @@ function _buildNav() {
       { id: "auto",      label: "Автозадачи", icon: "spark" },
       { id: "cabinet",   label: "Мои заметки", icon: "doc" },
     ]},
-    { group: "Настройки", items: [
-      { id: "integrations", label: "Интеграции", icon: "link" },
-      { id: "profile",      label: "Мой профиль", icon: "users" },
-      { id: "assignments",  label: "Назначения",  icon: "folder" },
-    ]},
+    { group: "Настройки", items: settingsItems },
   ];
 }
 
