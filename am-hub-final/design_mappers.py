@@ -477,6 +477,8 @@ def meeting_to_design(meeting: Any, now: datetime) -> Dict[str, Any]:
     client_seg = segment_label(meeting.client.segment) if meeting.client else "—"
     mood = meeting.mood or ("risk" if meeting.sentiment_score and meeting.sentiment_score < 0.3 else "ok")
 
+    is_past = bool(meeting.date and meeting.date < now)
+
     return {
         "when": when,
         "day": day_label,
@@ -484,6 +486,7 @@ def meeting_to_design(meeting: Any, now: datetime) -> Dict[str, Any]:
         "type": meeting.type or "sync",
         "seg": client_seg,
         "mood": mood,
+        "is_past": is_past,
     }
 
 

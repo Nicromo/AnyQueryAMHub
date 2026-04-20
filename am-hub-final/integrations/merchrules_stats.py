@@ -34,11 +34,11 @@ async def fetch_queries(
         raise ValueError(f"unknown kind: {kind}")
     endpoint, randomizer = KIND_TO_ENDPOINT[kind]
 
-    # Default: последние 7 дней.
+    # Default: последние 30 дней.
     if not date_to:
         date_to = date.today().isoformat()
     if not date_from:
-        date_from = (date.today() - timedelta(days=7)).isoformat()
+        date_from = (date.today() - timedelta(days=30)).isoformat()
 
     params = {
         "site_id":    site_id,
