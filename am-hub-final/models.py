@@ -769,3 +769,31 @@ class CheckupQuery(Base):
     created_at     = Column(DateTime, default=datetime.utcnow)
 
     checkup = relationship("CheckupV2", backref="queries")
+
+
+# ── Partner log — история коммуникаций и изменений по партнёру ──────────────
+
+class PartnerLog(Base):
+    """Единая история по партнёру: создание мерч-правил, синонимов, вайтлистов,
+    коммуникаций, заметок. Для аудита и AI-анализа прошлой истории."""
+    __tablename__ = "partner_logs"
+    id          = Column(Integer, primary_key=True, index=True)
+    client_id   = Column(Integer, ForeignKey("clients.id"), index=True)
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    event_type  = Column(String, nullable=False, index=True)
+    # Типы:
+    #   merch_rule_created | merch_rule_updated | merch_rule_removed
+    #   synonym_added | synonym_removed
+    #   whitelist_added | whitelist_removed
+    #   communication | note | meeting_summary | call | email
+    #   manual (общая запись)
+    title       = Column(String, nullable=True)
+    body        = Column(Text, nullable=True)
+    # Свободный JSON: changed fields, rule_id, параметры, ссылки, вложения.
+    payload     = Column(JSONB, default=dict)
+    source      = Column(String, default="manual")  # manual | merchrules | telegram | email | api
+    created_at  = Column(DateTime, default=datetime.utcnow, index=True)
+    created_by  = Column(String, nullable=True)
+
+    client = relationship("Client", backref="partner_logs")
+    user   = relationship("User")

@@ -350,6 +350,16 @@ async def lifespan(app: FastAPI):
                         response_time_ms INTEGER, results_count INTEGER DEFAULT 0,
                         has_correction BOOLEAN DEFAULT FALSE,
                         checked_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())""",
+                    "partner_logs": """CREATE TABLE IF NOT EXISTS partner_logs (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        user_id INTEGER REFERENCES users(id),
+                        event_type VARCHAR NOT NULL,
+                        title VARCHAR, body TEXT,
+                        payload JSONB DEFAULT '{}'::jsonb,
+                        source VARCHAR DEFAULT 'manual',
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        created_by VARCHAR)""",
                 }
                 for tname, tsql in _new_tables.items():
                     db.execute(_text(tsql))

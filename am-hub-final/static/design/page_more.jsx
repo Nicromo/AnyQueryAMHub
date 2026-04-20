@@ -2202,3 +2202,196 @@ function PageQBR() {
 }
 
 Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PageAI, PageKanban, PageKPI, PageCabinet, PageTemplates, PageAuto, PageRoadmap, PageInternal, PageExtInstall, PageHelp, PageProfile, PageAssignments, PageQBR });
+
+
+// ── PageIntegrations — единая страница всех интеграций ─────────────────────
+
+function PageIntegrations() {
+  const [status, setStatus] = React.useState(null);
+  const [tab, setTab] = React.useState("overview");
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/me/integrations", { credentials: "include" });
+        if (!r.ok) { if (!cancelled) setStatus({}); return; }
+        const d = await r.json();
+        if (!cancelled) setStatus(d || {});
+      } catch (_) { if (!cancelled) setStatus({}); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const TABS = [
+    { k: "overview",   l: "Обзор" },
+    { k: "merchrules", l: "Merchrules" },
+    { k: "airtable",   l: "Airtable" },
+    { k: "time",       l: "Tbank Time" },
+    { k: "ktalk",      l: "Ktalk" },
+    { k: "telegram",   l: "Telegram" },
+    { k: "diginetica", l: "Diginetica" },
+    { k: "extension",  l: "Расширение" },
+    { k: "help",       l: "Помощь" },
+  ];
+
+  const dotSpan = (on) => React.createElement("span", {
+    style: { width: 8, height: 8, borderRadius: 999,
+              background: on ? "var(--ok)" : "var(--ink-4)",
+              boxShadow: on ? "0 0 6px var(--ok)" : "none",
+              display: "inline-block" },
+  });
+
+  function Row(props) {
+    return React.createElement("div", {
+      style: { display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+                background: "var(--ink-2)", border: "1px solid var(--line)",
+                borderRadius: 6, marginBottom: 8 },
+    },
+      dotSpan(props.ok),
+      React.createElement("div", { style: { flex: 1 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 500, color: "var(--ink-9)" } }, props.label),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } }, props.ok ? "подключено" : "не настроено"),
+      ),
+      props.children,
+    );
+  }
+
+  const renderOverview = () => React.createElement("div", null,
+    React.createElement(Row, { label: "Merchrules", ok: status && status.merchrules },
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: () => setTab("merchrules") }, "Настроить"),
+    ),
+    React.createElement(Row, { label: "Airtable", ok: status && status.airtable },
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: () => setTab("airtable") }, "Настроить"),
+    ),
+    React.createElement(Row, { label: "Tbank Time (тикеты)", ok: status && status.tbank_time },
+      React.createElement(Btn, { kind: "primary", size: "s", onClick: () => { window.location.href = "/auth/time/login"; } }, status && status.tbank_time ? "Переподключить" : "Войти"),
+    ),
+    React.createElement(Row, { label: "Ktalk", ok: status && status.ktalk },
+      React.createElement(Btn, { kind: "primary", size: "s", onClick: () => { window.location.href = "/auth/ktalk"; } }, status && status.ktalk ? "Переподключить" : "Войти"),
+    ),
+    React.createElement(Row, { label: "Telegram", ok: status && status.telegram },
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: () => { window.location.href = "/design/profile"; } }, "Привязать"),
+    ),
+    React.createElement(Row, { label: "Diginetica (чекапы поиска)", ok: false },
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: () => setTab("diginetica") }, "Настроить"),
+    ),
+    React.createElement(Row, { label: "Chrome-расширение", ok: true },
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: () => setTab("extension") }, "Скачать"),
+    ),
+  );
+
+  const renderTime = () => React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 14 } },
+    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)" } },
+      "Подключение к time.tbank.ru → any-team-support через OAuth 2.0. Токен хранится на сервере, авторефреш.",
+    ),
+    React.createElement(Row, { label: "Статус OAuth", ok: status && status.tbank_time },
+      React.createElement(Btn, { kind: "primary", size: "m",
+        onClick: () => { window.location.href = "/auth/time/login"; }},
+        status && status.tbank_time ? "🔄 Переподключить" : "🔑 Войти через OAuth"),
+    ),
+    React.createElement(Btn, { kind: "ghost", size: "m", onClick: async () => {
+      try {
+        const r = await fetch("/api/tickets/sync", { method: "POST", credentials: "include" });
+        const d = await r.json();
+        appToast(d.ok ? `Тикетов: новых ${d.ingested || 0}, обновлено ${d.updated || 0}` : ("Ошибка: " + (d.error || "—")), d.ok ? "ok" : "error");
+      } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    } }, "▶ Синхронизировать тикеты"),
+  );
+
+  const renderMr = () => React.createElement("div", null,
+    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } },
+      "Креды Merchrules — в Настройках. Плановый синк раз в час + кнопка на Командном центре."),
+    React.createElement(Btn, { kind: "primary", size: "m", onClick: async () => {
+      try {
+        const r = await fetch("/api/sync/merchrules", { method: "POST", credentials: "include", headers: {"Content-Type": "application/json"}, body: "{}" });
+        const d = await r.json();
+        appToast(d.error ? ("❌ " + d.error) : (`✅ Клиентов: ${d.clients_synced || 0}, задач: ${d.tasks_synced || 0}`), d.error ? "error" : "ok");
+      } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    } }, "▶ Синхронизировать сейчас"),
+  );
+
+  const renderAt = () => React.createElement("div", null,
+    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } },
+      "Airtable PAT — в Settings. База appEAS1rPKpevoIel."),
+    React.createElement(Btn, { kind: "primary", size: "m", onClick: async () => {
+      try {
+        const r = await fetch("/api/sync/airtable", { method: "POST", credentials: "include", headers: {"Content-Type": "application/json"}, body: "{}" });
+        const d = await r.json();
+        appToast(d.error ? ("❌ " + d.error) : (`✅ Клиентов: ${d.synced || 0}, оплат: ${d.payment_updated || 0}`), d.error ? "error" : "ok");
+      } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    } }, "▶ Синхронизировать сейчас"),
+  );
+
+  const renderDig = () => React.createElement("div", null,
+    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } },
+      "Diginetica Search API — для чекапов качества поиска. apiKey задаётся на клиенте (Client.diginetica_api_key)."),
+    React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)" } }, "Запуск — с вкладки «Чекапы» на странице клиента."),
+  );
+
+  const renderKt = () => React.createElement("div", null,
+    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } },
+      "Контур.Толк (Ktalk) — встречи, транскрипции, слоты."),
+    React.createElement(Btn, { kind: "primary", size: "m", onClick: () => { window.location.href = "/auth/ktalk"; } },
+      status && status.ktalk ? "Переподключить Ktalk" : "Войти в Ktalk"),
+  );
+
+  const renderTg = () => React.createElement("div", null,
+    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } },
+      "Telegram-бот для утренних планов и алертов."),
+    React.createElement(Btn, { kind: "ghost", size: "m", onClick: () => { window.location.href = "/design/profile"; } }, "Привязать Telegram"),
+  );
+
+  const renderExt = () => React.createElement("div", null,
+    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } }, "Chrome-расширение AM Hub — синк Merchrules, чекап Diginetica."),
+    React.createElement(Btn, { kind: "primary", size: "m", onClick: () => { window.open("/static/amhub-ext.zip", "_blank"); } }, "⬇ Скачать .zip"),
+  );
+
+  const renderHelp = () => React.createElement("div", { style: { fontSize: 13, lineHeight: 1.6, color: "var(--ink-7)" } },
+    React.createElement("h3", { style: { fontSize: 15, color: "var(--ink-9)", marginBottom: 8 } }, "FAQ"),
+    React.createElement("p", null, "• Time-тикеты не тянутся — проверь OAuth (Войти)."),
+    React.createElement("p", null, "• Клиенты Airtable не обновляются — проверь AIRTABLE_TOKEN в Railway."),
+    React.createElement("p", null, "• Merchrules 401 — обнови логин/пароль в Settings."),
+  );
+
+  const content = ({
+    overview: renderOverview,
+    merchrules: renderMr,
+    airtable: renderAt,
+    time: renderTime,
+    ktalk: renderKt,
+    telegram: renderTg,
+    diginetica: renderDig,
+    extension: renderExt,
+    help: renderHelp,
+  })[tab]();
+
+  return React.createElement("div", null,
+    React.createElement(TopBar, {
+      breadcrumbs: ["am hub", "интеграции"],
+      title: "Интеграции",
+      subtitle: "Все внешние сервисы в одном месте",
+    }),
+    React.createElement("div", { style: { padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "200px 1fr", gap: 22 } },
+      React.createElement("div", null,
+        TABS.map(t =>
+          React.createElement("button", {
+            key: t.k,
+            onClick: () => setTab(t.k),
+            style: {
+              display: "block", width: "100%", textAlign: "left",
+              padding: "9px 12px", marginBottom: 2,
+              background: tab === t.k ? "var(--signal)" : "transparent",
+              color: tab === t.k ? "var(--ink-0)" : "var(--ink-7)",
+              border: 0, borderRadius: 4, cursor: "pointer",
+              fontFamily: "var(--f-mono)", fontSize: 11,
+              textTransform: "uppercase", letterSpacing: "0.08em",
+            },
+          }, t.l)
+        ),
+      ),
+      React.createElement(Card, { title: (TABS.find(x => x.k === tab) || {}).l || "Интеграции" }, content),
+    ),
+  );
+}
+window.PageIntegrations = PageIntegrations;
