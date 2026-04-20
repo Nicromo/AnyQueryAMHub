@@ -157,13 +157,17 @@ function PageHub() {
 
                 const atLine = atRes.error
                   ? `❌ Airtable: ${atRes.error}`
-                  : `✅ Airtable: создано ${atRes.created || 0}, обновлено ${atRes.updated || 0}, пропущено ${atRes.skipped || 0}${atRes.payment_updated != null ? `, оплата ${atRes.payment_updated}` : ""}`;
+                  : `✅ Airtable: создано ${atRes.created || 0}, обновлено ${atRes.updated || 0}, пропущено ${atRes.skipped || 0}${atRes.payment_updated != null ? `, оплата ${atRes.payment_updated}` : ""} (всего в ответе: ${atRes.total ?? "?"})`;
                 const mrLine = mrRes.error
                   ? `❌ Merchrules: ${mrRes.error}`
                   : `✅ Merchrules: клиентов ${mrRes.clients_synced || mrRes.synced || 0}, задач ${mrRes.tasks_synced || 0}`;
-                const tone = (atRes.error && mrRes.error) ? "error" : "ok";
-                appToast(`${atLine}\n${mrLine}`, { tone, duration: 8000 });
-                if (!atRes.error || !mrRes.error) setTimeout(() => location.reload(), 1500);
+                const atSynced = (atRes.created || 0) + (atRes.updated || 0);
+                const mrSynced = mrRes.clients_synced || mrRes.synced || 0;
+                const hasError = atRes.error || mrRes.error;
+                const tone = hasError ? "error" : (atSynced + mrSynced > 0 ? "ok" : "warn");
+                appToast(`${atLine}\n${mrLine}`, { tone, duration: 12000 });
+                // Reload только если хоть что-то реально засинкалось, иначе оставляем тост.
+                if (atSynced + mrSynced > 0) setTimeout(() => location.reload(), 2500);
               }}
             >Синхронизировать</Btn>
           </>
