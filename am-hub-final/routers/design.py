@@ -102,6 +102,7 @@ PAGES_DATA_MAP = {
     "internal":   ["tasks", "internal_tasks"],
     "help":       [],
     "extension":  [],
+    "integrations": [],
     "profile":    [],
     "assignments": ["clients"],
 }
@@ -128,6 +129,7 @@ PAGES = {
     "internal":  ("PageInternal",   ["am hub", "инструменты", "внутр."],   "Внутренние задачи"),
     "help":      ("PageHelp",       ["am hub", "интеграции", "помощь"],    "Помощь"),
     "extension": ("PageExtInstall", ["am hub", "интеграции", "расширение"], "Расширение"),
+    "integrations": ("PageIntegrations", ["am hub", "интеграции"], "Интеграции"),
     "profile":   ("PageProfile",    ["am hub", "профиль"],                 "Мой профиль"),
     "assignments":("PageAssignments",["am hub", "админ", "назначения"],    "Назначения клиентов"),
 }

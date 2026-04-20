@@ -41,10 +41,7 @@ function _buildNav() {
       { id: "internal",  label: "Внутренние задачи", icon: "lock" },
     ]},
     { group: "Интеграции", items: [
-      { id: "ktalk",      label: "KTalk",      icon: "video",  external: true },
-      { id: "merchrules", label: "Merchrules", icon: "link",   external: true },
-      { id: "extension",  label: "Расширение", icon: "puzzle", status: "ok" },
-      { id: "help",       label: "Помощь",     icon: "help" },
+      { id: "integrations", label: "Интеграции", icon: "link" },
     ]},
     { group: "Администрирование", items: [
       { id: "profile",     label: "Мой профиль",     icon: "users" },

@@ -256,20 +256,50 @@ def _parse_top50_matrix(matrix: list[list[str]]) -> dict:
 
     # Сопоставление: "ndcg@20_mean" → [(col_idx, month_label), ...]
     metric_columns: dict[str, list[tuple[int, str]]] = {m: [] for m in METRIC_GROUPS}
+    # Маппинг русских месяцев → YYYY-MM (для «Конверсия апрель» без года)
+    ru_months = {
+        "январь": "01", "янв": "01", "february": "02", "февраль": "02", "фев": "02",
+        "март": "03", "мар": "03", "апрель": "04", "апр": "04", "май": "05",
+        "июнь": "06", "июн": "06", "июль": "07", "июл": "07", "август": "08", "авг": "08",
+        "сентябрь": "09", "сен": "09", "октябрь": "10", "окт": "10",
+        "ноябрь": "11", "ноя": "11", "декабрь": "12", "дек": "12",
+    }
+    def _ru_month_from(text: str) -> str | None:
+        t = (text or "").lower()
+        for ru, num in ru_months.items():
+            if ru in t:
+                return num
+        return None
+
+    # Проход 1: у Konversii метрика+месяц в ОДНОЙ ячейке ("Конверсия апрель").
+    # Детектим такие случаи в row 0 И row 1 и собираем отдельно.
+    for i, cell0 in enumerate(groups_row):
+        v0 = (cell0 or "").strip()
+        v1 = (months_row[i] if i < len(months_row) else "").strip()
+        # Составленный текст — "Конверсия апрель" могло лежать и в row0 и в row1
+        combined = (v0 + " " + v1).strip()
+        combined_low = combined.lower()
+        if "конверс" in combined_low and _ru_month_from(combined_low):
+            mnum = _ru_month_from(combined_low)
+            # Год — пока ставим 2025 (шаблон из скрина; при необходимости
+            # можно достать из соседних колонок других метрик по соответствию).
+            month_label = f"2025-{mnum}"
+            metric_columns["Конверсия"].append((i, month_label))
+
+    # Проход 2: обычный случай — метрика в объединённой ячейке row0, месяц в row1.
     for i, g in enumerate(filled_groups):
-        # Приводим имя группы к lower для матча
         g_low = g.lower().strip()
         for metric in METRIC_GROUPS:
+            if metric == "Конверсия":
+                continue  # уже обработали в проходе 1
             m_low = metric.lower().strip()
             if m_low in g_low:
                 month = (months_row[i] if i < len(months_row) else "").strip()
-                # Пропускаем служебные столбцы (абс/отн изменения, тренд, sparkline)
                 if not month:
                     continue
                 low_m = month.lower()
                 if any(kw in low_m for kw in ("изменен", "трен", "sparkl", "рост", "мин", "%")):
                     continue
-                # Храним только месяцы формата YYYY-MM или даты
                 metric_columns[metric].append((i, month))
 
     # Найти колонку с именем клиента — первая колонка с непустым текстом в months_row,

@@ -170,9 +170,6 @@ function PageHub() {
                 if (atSynced + mrSynced > 0) setTimeout(() => location.reload(), 2500);
               }}
             >Синхронизировать</Btn>
-            <Btn kind="primary" size="m"
-              onClick={() => { window.location.href = "/auth/time/login"; }}
-            >🔑 Войти в Time</Btn>
           </>
         }
       />
