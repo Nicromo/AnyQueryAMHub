@@ -18,6 +18,9 @@ from models import (
     Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
     Notification, QBR, AccountPlan, ClientNote, TaskComment,
     FollowupTemplate, VoiceNote,
+    RevenueEntry, HealthSnapshot, NPSEntry, CheckupResult,
+    ClientHistory, ClientContact, ClientProduct,
+    ClientMerchRule, ClientFeed, SupportTicket, TicketComment,
 )
 from auth import (
     authenticate_user, create_user, create_access_token,

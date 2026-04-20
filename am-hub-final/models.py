@@ -51,6 +51,11 @@ class Client(Base):
     # { "goals": [], "actions": [], "quarterly_targets": {}, "notes": "" }
     account_plan = Column(JSONB, default=dict)
 
+    # Статус оплаты — для триггера payment_overdue и шапки клиентского хаба
+    payment_status   = Column(String, default="active")
+    payment_due_date = Column(DateTime, nullable=True)
+    payment_amount   = Column(Float, nullable=True)
+
     tasks = relationship("Task", back_populates="client", cascade="all, delete-orphan")
     meetings = relationship("Meeting", back_populates="client", cascade="all, delete-orphan")
     checkups = relationship("CheckUp", back_populates="client", cascade="all, delete-orphan")
@@ -374,6 +379,14 @@ class AutoTaskRule(Base):
     segment_filter  = Column(JSONB, default=list)  # [] = все сегменты
     created_at      = Column(DateTime, default=datetime.utcnow)
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Расширенная модель: список действий (create_task / create_note / notify)
+    # и метрики срабатываний. Legacy-поля task_* сохраняются для обратной
+    # совместимости, auto_actions.execute_actions() умеет читать оба формата.
+    actions            = Column(JSONB, default=list)
+    trigger_count      = Column(Integer, default=0)
+    last_triggered_at  = Column(DateTime, nullable=True)
+
     user = relationship("User", backref="auto_task_rules")
 
 class ClientHistory(Base):
@@ -602,3 +615,103 @@ Index("ix_revenue_client_period", RevenueEntry.client_id, RevenueEntry.period)
 Index("ix_health_snapshots_client_date", HealthSnapshot.client_id, HealthSnapshot.calculated_at)
 Index("ix_nps_client_date", NPSEntry.client_id, NPSEntry.recorded_at)
 Index("ix_roadmap_column_order", RoadmapItem.column_key, RoadmapItem.order_idx)
+
+
+# ── Unified client hub: tickets, contacts, products, merch-rules, feeds ──────
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+    id                   = Column(Integer, primary_key=True, index=True)
+    client_id            = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    source               = Column(String, default="tbank_time")
+    external_id          = Column(String, unique=True, index=True)
+    external_url         = Column(String, nullable=True)
+    channel_id           = Column(String, nullable=True)
+    title                = Column(String, nullable=True)
+    body                 = Column(Text, nullable=True)
+    status               = Column(String, default="open")
+    priority             = Column(String, default="normal")
+    author               = Column(String, nullable=True)
+    author_name          = Column(String, nullable=True)
+    external_client_id   = Column(String, nullable=True, index=True)
+    comments_count       = Column(Integer, default=0)
+    last_comment_at      = Column(DateTime, nullable=True)
+    last_comment_snippet = Column(Text, nullable=True)
+    opened_at            = Column(DateTime, nullable=True, index=True)
+    updated_at           = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    resolved_at          = Column(DateTime, nullable=True)
+    raw                  = Column(JSONB, default=dict)
+    client = relationship("Client", backref="support_tickets")
+
+
+class TicketComment(Base):
+    __tablename__ = "ticket_comments"
+    id           = Column(Integer, primary_key=True, index=True)
+    ticket_id    = Column(Integer, ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True)
+    external_id  = Column(String, unique=True, index=True)
+    author       = Column(String, nullable=True)
+    author_name  = Column(String, nullable=True)
+    body         = Column(Text, nullable=True)
+    posted_at    = Column(DateTime, nullable=True)
+    raw          = Column(JSONB, default=dict)
+    ticket       = relationship("SupportTicket", backref="comments")
+
+
+class ClientContact(Base):
+    __tablename__ = "client_contacts"
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, ForeignKey("clients.id"), index=True)
+    name       = Column(String, nullable=False)
+    role       = Column(String, nullable=True)
+    position   = Column(String, nullable=True)
+    email      = Column(String, nullable=True)
+    phone      = Column(String, nullable=True)
+    telegram   = Column(String, nullable=True)
+    is_primary = Column(Boolean, default=False)
+    notes      = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client     = relationship("Client", backref="contacts")
+
+
+class ClientProduct(Base):
+    __tablename__ = "client_products"
+    id            = Column(Integer, primary_key=True, index=True)
+    client_id     = Column(Integer, ForeignKey("clients.id"), index=True)
+    code          = Column(String, nullable=False)
+    name          = Column(String, nullable=False)
+    status        = Column(String, default="active")
+    activated_at  = Column(DateTime, nullable=True)
+    extra         = Column(JSONB, default=dict)
+    client        = relationship("Client", backref="products")
+
+
+class ClientMerchRule(Base):
+    __tablename__ = "client_merch_rules"
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), index=True)
+    merchrules_id = Column(String, nullable=True)
+    name         = Column(String, nullable=False)
+    rule_type    = Column(String, nullable=True)
+    status       = Column(String, default="active")
+    priority     = Column(Integer, default=0)
+    config       = Column(JSONB, default=dict)
+    last_synced  = Column(DateTime, nullable=True)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client       = relationship("Client", backref="merch_rules")
+
+
+class ClientFeed(Base):
+    __tablename__ = "client_feeds"
+    id             = Column(Integer, primary_key=True, index=True)
+    client_id      = Column(Integer, ForeignKey("clients.id"), index=True)
+    feed_type      = Column(String, nullable=False)
+    name           = Column(String, nullable=True)
+    url            = Column(String, nullable=True)
+    status         = Column(String, default="ok")
+    last_updated   = Column(DateTime, nullable=True)
+    sku_count      = Column(Integer, default=0)
+    errors_count   = Column(Integer, default=0)
+    last_error     = Column(Text, nullable=True)
+    schedule       = Column(String, nullable=True)
+    client         = relationship("Client", backref="feeds")
