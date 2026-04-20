@@ -345,29 +345,32 @@ async def api_test_ktalk(request: Request, auth_token: Optional[str] = Cookie(No
 
 @router.get("/auth/ktalk", response_class=HTMLResponse)
 async def ktalk_oauth_start(request: Request, auth_token: Optional[str] = Cookie(None)):
-    """
-    Запускает OIDC авторизацию через браузер.
-    Редиректит пользователя на страницу входа KTalk (SSO Т-Банка с SMS).
-    """
+    """Запускает OIDC авторизацию. ВАЖНО: tbank.ktalk.ru не выставляет стандартный
+    OIDC /connect/authorize endpoint — он даёт 404. Поэтому по умолчанию мы просто
+    редиректим пользователя на ktalk.ru в новой вкладке — расширение AM Hub
+    перехватит токен при авторизации. Если корпоративный OIDC-client настроен и
+    задан реальный endpoint через KTALK_OIDC_AUTHORIZE_URL — запустим OIDC flow."""
     if not auth_token:
         return RedirectResponse(url="/login")
-    import secrets, urllib.parse
 
-    # client_id можно переопределить через env если у вас корпоративный OIDC клиент
+    authorize_url = _env("KTALK_OIDC_AUTHORIZE_URL", "")
+    if not authorize_url:
+        # Нет корпоративного OIDC → отправляем на главную Ktalk, расширение
+        # подхватит токен из localStorage/cookies.
+        return RedirectResponse(url="https://tbank.ktalk.ru/")
+
+    import secrets, urllib.parse
     client_id = _env("KTALK_OIDC_CLIENT_ID", "KTalk")
     redirect_uri = _env("KTALK_REDIRECT_URI") or (str(request.base_url).rstrip("/") + "/auth/ktalk/callback")
-
     params = urllib.parse.urlencode({
         "client_id": client_id,
-        "response_type": "id_token token",  # implicit flow — токен сразу в hash
+        "response_type": "id_token token",
         "scope": "profile email allatclaims",
         "redirect_uri": redirect_uri,
         "nonce": secrets.token_urlsafe(16),
         "state": secrets.token_urlsafe(16),
     })
-    return RedirectResponse(
-        url=f"https://tbank.ktalk.ru/api/authorize/oidc/connect/authorize?{params}"
-    )
+    return RedirectResponse(url=f"{authorize_url}?{params}")
 
 
 

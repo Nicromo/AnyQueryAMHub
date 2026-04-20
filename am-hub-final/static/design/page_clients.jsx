@@ -281,7 +281,7 @@ function PageClient() {
               window.location.href = `/design/meetings?client_id=${c.id}`;
             }}>Запланировать</Btn>
             <Btn kind="primary" size="m" icon={<I.lightning size={14}/>} onClick={() => {
-              window.location.href = `/design/followup?client_id=${c.id}`;
+              window.location.href = `/design/client/${c.id}`;
             }}>Follow-up</Btn>
           </>
         }
@@ -396,7 +396,7 @@ function ClientAIBrief({ clientId }) {
     !err && text && React.createElement("div", { style: { fontSize: 13.5, color: "var(--ink-8)", lineHeight: 1.6, whiteSpace: "pre-wrap" } }, text),
     React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" } },
       React.createElement(Btn, { size: "s", kind: "ghost", onClick: reload }, "Обновить"),
-      React.createElement(Btn, { size: "s", kind: "ghost", onClick: () => { window.location.href = `/prep/${clientId}`; } }, "Открыть полный prep"),
+      React.createElement(Btn, { size: "s", kind: "ghost", onClick: () => { window.location.href = "/design/client/" + clientId; } }, "Открыть полный prep"),
     )
   );
 }
