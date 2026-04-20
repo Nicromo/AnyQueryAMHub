@@ -738,18 +738,25 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
 
     # ── Tasks ─────────────────────────────────────────────────
     if "tasks" in needed:
-        tasks_q_base = tasks_base.filter(Task.status.in_(["plan", "in_progress", "blocked"]))
-        # Split task streams: /design/tasks — только клиентские задачи;
-        # /design/internal — только внутренние (без client_id) или source='internal'.
-        if page_id == "tasks":
-            tasks_q_base = tasks_q_base.filter(Task.client_id.isnot(None))
-        elif page_id == "internal":
+        # Split task streams:
+        #   /design/tasks     — только клиентские задачи (Task.client_id IS NOT NULL),
+        #                       ограниченные visible_ids менеджера.
+        #   /design/internal  — только внутренние: Task.client_id IS NULL ИЛИ source='internal'.
+        #                       visible_ids не применяем — внутренние задачи принадлежат команде,
+        #                       а не конкретному клиенту (иначе IN-list отфильтрует NULL-записи).
+        if page_id == "internal":
+            tasks_q_base = db.query(Task).options(joinedload(Task.client)) \
+                             .filter(Task.status.in_(["plan", "in_progress", "blocked"]))
             try:
                 tasks_q_base = tasks_q_base.filter(
                     (Task.client_id.is_(None)) | (Task.source == "internal")
                 )
             except Exception:
                 tasks_q_base = tasks_q_base.filter(Task.client_id.is_(None))
+        else:
+            tasks_q_base = tasks_base.filter(Task.status.in_(["plan", "in_progress", "blocked"]))
+            if page_id == "tasks":
+                tasks_q_base = tasks_q_base.filter(Task.client_id.isnot(None))
         tasks_q = tasks_q_base.order_by(Task.due_date.asc()).limit(200).all()
     else:
         tasks_q = []

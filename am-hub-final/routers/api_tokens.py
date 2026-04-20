@@ -205,3 +205,33 @@ async def revoke_api_token(
     flag_modified(user, "settings")
     db.commit()
     return {"ok": True}
+
+
+@router.get("/api/me/integrations")
+async def api_me_integrations(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Статус подключённых внешних интеграций для текущего пользователя.
+
+    Возвращает bool-флаги: есть ли у юзера сохранённые токены/креды для
+    Ktalk, Tbank Time, Merchrules, Airtable и привязка Telegram.
+
+    Фронту этого достаточно, чтобы показать «Подключено / Войти».
+    """
+    user = resolve_user(db, request, auth_token)
+    if not user:
+        raise HTTPException(status_code=401)
+    s = user.settings or {}
+    kt  = s.get("ktalk") or {}
+    tb  = s.get("tbank_time") or {}
+    mr  = s.get("merchrules") or {}
+    at  = s.get("airtable") or {}
+    return {
+        "ktalk":      bool(kt.get("access_token")),
+        "tbank_time": bool(tb.get("mmauthtoken") or tb.get("session_cookie") or tb.get("access_token")),
+        "merchrules": bool(mr.get("login") or mr.get("username")),
+        "airtable":   bool(at.get("pat") or at.get("token") or at.get("api_key")),
+        "telegram":   bool(getattr(user, "telegram_id", None)),
+    }
