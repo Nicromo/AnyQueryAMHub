@@ -746,3 +746,57 @@ async def api_test_integration(
 # ============================================================================
 # CHROME EXTENSION — push токенов Time и Ktalk
 
+
+
+@router.get("/api/top50/metrics")
+async def api_top50_metrics(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Метрики качества поиска по клиентам менеджера из Google Sheets.
+
+    Возвращает структуру:
+      {
+        "fetched_at": "20.04.2026 07:30",
+        "months": ["2025-04","2025-07",...,"2026-3"],
+        "metrics": ["ndcg@20_mean","precision@20_mean","precision_exact@20_mean","Конверсия"],
+        "clients": [
+          {"name": "cdek.shopping", "metrics": {"ndcg@20_mean": {"2025-04": 0.97, ...}, ...}},
+          ...
+        ],
+        "error": null
+      }
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    # Имена клиентов менеджера
+    q = db.query(Client)
+    if (user.role or "") != "admin":
+        q = q.filter(Client.manager_email == user.email)
+    my_names = [c.name for c in q.all() if c.name]
+
+    from sheets import get_top50_data
+    data = await get_top50_data(my_clients=my_names)
+    if data.get("error"):
+        return {
+            "error": data["error"],
+            "fetched_at": data.get("fetched_at"),
+            "months": [], "metrics": [], "clients": [],
+        }
+    structured = data.get("structured") or {}
+    return {
+        "fetched_at": data.get("fetched_at"),
+        "months": structured.get("months") or [],
+        "metrics": structured.get("metrics") or [],
+        "clients": structured.get("clients") or [],
+        "error": None,
+    }

@@ -94,73 +94,115 @@ function _pg(str) {
 }
 
 function PageTop50() {
-  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
-  const [showFilter, setShowFilter] = React.useState(false);
-  // Сортировка по убыванию GMV, топ-50
-  const rows = CL
-    .slice()
-    .map((c, idx) => ({
-      rk: idx + 1,  // временный, перезапишем после сортировки
-      id: c.id,
-      name: c.name,
-      seg: c.seg,
-      gmv: c.gmv,
-      gmvRub: _pg(c.gmv),
-      growth: c.delta || "—",
-      // health — грубая оценка: status ok=85, warn=60, risk=35
-      health: c.status === "risk" ? 35 : c.status === "warn" ? 60 : 85,
-      pm: c.pm,
-    }))
-    .sort((a, b) => b.gmvRub - a.gmvRub)
-    .slice(0, 50)
-    .map((r, i) => ({ ...r, rk: i + 1 }));
+  // Живые данные из Google Sheets (лист «Актуальные метрики и список топ 50»).
+  // Эндпоинт /api/top50/metrics возвращает {months, metrics, clients}.
+  const [data, setData] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  const [metricIdx, setMetricIdx] = React.useState(0);
 
-  // Агрегаты для KPI
-  const totalRub = rows.reduce((s, r) => s + r.gmvRub, 0);
-  const avgHealth = rows.length ? Math.round(rows.reduce((s, r) => s + r.health, 0) / rows.length) : 0;
-  const atRisk = rows.filter(r => r.health < 55).length;
-  const growing = rows.filter(r => (r.growth || "").startsWith("+")).length;
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/top50/metrics", { credentials: "include" });
+        const d = await r.json();
+        if (cancelled) return;
+        if (d.error) setErr(d.error);
+        else setData(d);
+      } catch (e) { if (!cancelled) setErr(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const loading = !data && !err;
+  const months = (data && data.months) || [];
+  const metrics = (data && data.metrics) || [];
+  const clients = (data && data.clients) || [];
+  const activeMetric = metrics[metricIdx] || metrics[0] || "";
+
+  // Форматер балла: 0.9753 → "0.975"
+  const fmt = v => (v == null ? "—" : (typeof v === "number" ? v.toFixed(3).replace(/\.?0+$/, "") : String(v)));
+  const toneOf = v => (v == null ? "neutral" : v >= 0.9 ? "ok" : v >= 0.75 ? "warn" : "critical");
+
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","top-50"]} title="Top-50 · приоритетный портфель"
-        subtitle="Клиенты, формирующие 78% GMV команды"
-        actions={<><Btn kind={showFilter ? "primary" : "ghost"} size="m" icon={<I.filter size={14}/>} onClick={() => setShowFilter(v => !v)}>Фильтр</Btn><Btn kind="primary" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF-отчёт</Btn></>}/>
+      <TopBar breadcrumbs={["am hub","top-50"]} title="Top-50 · метрики качества поиска"
+        subtitle={data ? `Лист «Актуальные метрики и список топ 50» · ${clients.length} клиентов · обновлено ${data.fetched_at}` : "Загрузка из Google Sheets…"}
+        actions={<Btn kind="primary" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF-отчёт</Btn>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
-          <KPI label={`Top-${rows.length} · GMV`} value={totalRub >= 1_000_000 ? `₽ ${(totalRub/1_000_000).toFixed(1)}м` : totalRub >= 1000 ? `₽ ${Math.round(totalRub/1000)}к` : `₽ ${Math.round(totalRub)}`} sub={`${rows.length} клиентов`} big/>
-          <KPI label="Средний health" value={avgHealth} tone={avgHealth>=75?"ok":avgHealth>=55?"warn":"critical"}/>
-          <KPI label="Под риском" value={atRisk} tone={atRisk>0?"critical":undefined} sub={`из ${rows.length}`}/>
-          <KPI label="Растут" value={growing} tone="ok" sub="клиентов"/>
-        </div>
+        {err && <div style={{ padding: 16, background: "rgba(240,70,58,.08)", border: "1px solid var(--critical-dim)", borderLeft: "3px solid var(--critical)", borderRadius: 4, color: "var(--critical)", fontSize: 12.5 }}>
+          Ошибка загрузки: {err}
+        </div>}
+        {loading && <div style={{ padding: 24, textAlign: "center", color: "var(--ink-6)" }}>Загрузка метрик…</div>}
 
-        <Card title="Рейтинг · апрель 2026">
-          <div style={{ background: "var(--ink-2)", borderRadius: 4 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "50px 1.6fr 70px 110px 90px 1fr 110px", gap: 14, padding: "10px 10px", background: "var(--ink-1)", borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-5)" }}>
-              <span>#</span><span>клиент</span><span>seg</span><span>gmv 30д</span><span>Δ</span><span>health</span><span>am</span>
+        {!loading && !err && (
+          <>
+            {/* Переключатель метрики */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {metrics.map((m, i) => (
+                <button key={m} onClick={() => setMetricIdx(i)} style={{
+                  padding: "7px 12px",
+                  background: i === metricIdx ? "var(--signal)" : "var(--ink-2)",
+                  color: i === metricIdx ? "var(--ink-0)" : "var(--ink-7)",
+                  border: `1px solid ${i === metricIdx ? "var(--signal)" : "var(--line)"}`,
+                  borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11,
+                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                }}>{m}</button>
+              ))}
             </div>
-            {rows.length === 0 && (
-              <div style={{ padding: "28px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
-                Нет клиентов в скоупе. После первой синхронизации с Merchrules — они появятся здесь.
+
+            <Card title={`${activeMetric} · по месяцам`}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: "var(--ink-1)", position: "sticky", top: 0 }}>
+                      <th style={{ padding: "10px 12px", textAlign: "left", fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid var(--line)" }}>Клиент</th>
+                      {months.map(m => <th key={m} style={{ padding: "10px 8px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", borderBottom: "1px solid var(--line)" }}>{m}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clients.length === 0 && (
+                      <tr><td colSpan={months.length + 1} style={{ padding: 28, textAlign: "center", color: "var(--ink-6)" }}>
+                        Нет клиентов в скоупе. Проверь синк Airtable и колонку «Сайт» в Google Sheets.
+                      </td></tr>
+                    )}
+                    {clients.map((c, i) => {
+                      const mdata = (c.metrics && c.metrics[activeMetric]) || {};
+                      const vals = months.map(m => mdata[m]);
+                      const last = vals.filter(v => v != null).slice(-1)[0];
+                      const prev = vals.filter(v => v != null).slice(-2, -1)[0];
+                      const delta = (last != null && prev != null && prev > 0) ? (last - prev) / prev : null;
+                      return (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--line-soft)" }}>
+                          <td style={{ padding: "8px 12px", color: "var(--ink-9)", fontWeight: 500 }}>
+                            {c.name}
+                            {delta != null && (
+                              <span className="mono" style={{ marginLeft: 8, fontSize: 10, color: delta >= 0 ? "var(--ok)" : "var(--critical)" }}>
+                                {delta >= 0 ? "+" : ""}{(delta * 100).toFixed(1)}%
+                              </span>
+                            )}
+                          </td>
+                          {months.map((m, j) => {
+                            const v = mdata[m];
+                            const tone = toneOf(v);
+                            const bg = v == null ? "transparent"
+                              : tone === "ok" ? "rgba(120,200,120,.08)"
+                              : tone === "warn" ? "rgba(240,180,60,.08)"
+                              : "rgba(240,70,58,.08)";
+                            return (
+                              <td key={j} style={{ padding: "8px 8px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: 11.5, color: "var(--ink-8)", background: bg }}>
+                                {fmt(v)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            )}
-            {rows.map((r, i) => (
-              <div key={r.rk}
-                onClick={() => { if (r.id) window.location.href = "/design/client/" + r.id; }}
-                style={{ display: "grid", gridTemplateColumns: "50px 1.6fr 70px 110px 90px 1fr 110px", gap: 14, padding: "12px 10px", alignItems: "center", borderBottom: i===rows.length-1?"none":"1px solid var(--line-soft)", cursor: "pointer" }}>
-                <span className="mono" style={{ fontSize: 13, fontWeight: 500, color: r.rk <= 3 ? "var(--signal)" : "var(--ink-6)" }}>{String(r.rk).padStart(2,"0")}</span>
-                <span style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500 }}>{r.name}</span>
-                <Seg value={r.seg}/>
-                <span className="mono" style={{ fontSize: 12, color: "var(--ink-8)" }}>{r.gmv}</span>
-                <span className="mono" style={{ fontSize: 12, color: (r.growth||"").startsWith("−") ? "var(--critical)" : "var(--ok)", fontWeight: 500 }}>{r.growth}</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ flex: 1 }}><Progress value={r.health} tone={r.health>=75?"ok":r.health>=55?"warn":"critical"} h={3}/></div>
-                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-7)", width: 22, textAlign: "right" }}>{r.health}</span>
-                </div>
-                <span style={{ fontSize: 12, color: "var(--ink-7)" }}>{r.pm}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+            </Card>
+          </>
+        )}
       </div>
     </div>
   );
