@@ -192,6 +192,41 @@ async def api_auto_task_rules_test(rule_id: int, db: Session = Depends(get_db), 
     return {"ok": True, "triggered": len(triggered), "created": created}
 
 
+@router.get("/api/auto-tasks/meta")
+async def api_auto_tasks_meta():
+    return {
+        "triggers": [
+            {"code": "health_drop",     "label": "Падение Health",     "config": [{"key": "threshold", "label": "Ниже", "type": "number", "default": 0.5}]},
+            {"code": "days_no_contact", "label": "Нет контакта N дней", "config": [{"key": "days", "label": "Дней", "type": "number", "default": 30}]},
+            {"code": "meeting_done",    "label": "После встречи",      "config": [{"key": "meeting_types", "label": "Типы встреч", "type": "multiselect", "options": ["qbr", "checkup", "sync", "kickoff", "support"]}]},
+            {"code": "followup_sent",   "label": "После followup",     "config": [{"key": "delay_days", "label": "Задержка (дней)", "type": "number", "default": 3}]},
+            {"code": "checkup_due",     "label": "Чекап подошёл",      "config": []},
+            {"code": "payment_overdue", "label": "Просрочка оплаты",   "config": []},
+            {"code": "nps_low",         "label": "Низкий NPS",         "config": [{"key": "threshold", "label": "NPS ≤", "type": "number", "default": 6}]},
+            {"code": "task_done",       "label": "Задача закрыта",     "config": []},
+            {"code": "manual",          "label": "Вручную",            "config": []}
+        ],
+        "actions": [
+            {"code": "create_task", "label": "Создать задачу", "params": [
+                {"key": "title", "label": "Название", "type": "text", "required": True, "hint": "Можно {client_name}, {mrr}, {health_score}, {segment}"},
+                {"key": "description", "label": "Описание", "type": "textarea"},
+                {"key": "priority", "label": "Приоритет", "type": "select", "options": ["low", "medium", "high", "urgent"], "default": "medium"},
+                {"key": "due_days", "label": "Срок через (дней)", "type": "number", "default": 3},
+                {"key": "task_type", "label": "Тип", "type": "select", "options": ["followup", "prep", "checkup", "other"], "default": "followup"}
+            ]},
+            {"code": "create_note", "label": "Создать заметку", "params": [
+                {"key": "content", "label": "Текст", "type": "textarea", "required": True}
+            ]},
+            {"code": "notify", "label": "Уведомить", "params": [
+                {"key": "channel", "label": "Канал", "type": "select", "options": ["inapp", "email", "tg"], "default": "inapp"},
+                {"key": "title", "label": "Заголовок", "type": "text"},
+                {"key": "message", "label": "Сообщение", "type": "textarea", "required": True}
+            ]}
+        ],
+        "variables": ["client_name", "domain", "segment", "manager_email", "health_score", "mrr", "nps", "meeting_date", "meeting_type", "task_title"]
+    }
+
+
 # ── Followup templates ──────────────────────────────────────────────────────
 
 

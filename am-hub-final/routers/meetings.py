@@ -256,6 +256,18 @@ async def api_send_followup(meeting_id: int, request: Request, db: Session = Dep
         except Exception as e:
             logger.warning(f"Airtable followup push failed: {e}")
 
+    # ── Автодействия: followup_sent + meeting_done ──────────────────────────
+    try:
+        from auto_actions import fire_event
+        extra = {
+            "meeting_type": meeting.type or "",
+            "meeting_date": meeting.date.isoformat() if meeting.date else "",
+        }
+        fire_event(db, "followup_sent", client, extra)
+        fire_event(db, "meeting_done", client, extra)
+    except Exception as e:
+        logger.warning(f"auto_actions fire_event failed: {e}")
+
     return {"ok": True, "task_id": task.id}
 
 

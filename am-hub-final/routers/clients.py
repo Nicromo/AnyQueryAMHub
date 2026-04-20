@@ -18,6 +18,8 @@ from models import (
     Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
     Notification, QBR, AccountPlan, ClientNote, TaskComment,
     FollowupTemplate, VoiceNote,
+    RevenueEntry, HealthSnapshot, NPSEntry, CheckupResult,
+    ClientHistory, ClientContact, ClientProduct,
 )
 from auth import (
     authenticate_user, create_user, create_access_token,
@@ -36,6 +38,32 @@ def _env(key: str, default: str = "") -> str:
 
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Общие хелперы авторизации для клиентского хаба /client/{id}
+
+def _require_user(auth_token, db):
+    """Извлекает пользователя из cookie или бросает 401."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
+
+def _require_client(client_id, user, db):
+    """Проверяет, что клиент есть и пользователь имеет к нему доступ."""
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+    if user.role == "manager" and client.manager_email != user.email:
+        raise HTTPException(status_code=403)
+    return client
 
 @router.get("/api/clients/{client_id}/qbr")
 async def api_get_qbr(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
@@ -1347,3 +1375,639 @@ async def update_client_note(
         note.text = data["text"]
     db.commit()
     return {"ok": True, "id": note.id}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Клиентский хаб /client/{id}: overview / charts / timeline
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get("/api/clients/{client_id}/overview")
+async def api_client_overview(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Данные для шапки клиентского хаба."""
+    user = _require_user(auth_token, db)
+    client = _require_client(client_id, user, db)
+
+    # health_trend (последние 2 HealthSnapshot)
+    trend = "flat"
+    current_health = None
+    try:
+        snaps = (
+            db.query(HealthSnapshot)
+            .filter(HealthSnapshot.client_id == client_id)
+            .order_by(HealthSnapshot.calculated_at.desc())
+            .limit(2)
+            .all()
+        )
+        if snaps:
+            current_health = snaps[0].score
+        if len(snaps) >= 2:
+            diff = snaps[0].score - snaps[1].score
+            if diff > 0.02:
+                trend = "up"
+            elif diff < -0.02:
+                trend = "down"
+            else:
+                trend = "flat"
+    except Exception as e:
+        logger.warning(f"overview: health snapshots failed: {e}")
+
+    # mrr_delta_pct (последние 2 RevenueEntry)
+    mrr_delta = 0.0
+    current_mrr = None
+    try:
+        revs = (
+            db.query(RevenueEntry)
+            .filter(RevenueEntry.client_id == client_id)
+            .order_by(RevenueEntry.period.desc())
+            .limit(2)
+            .all()
+        )
+        if revs:
+            current_mrr = revs[0].mrr
+        if len(revs) >= 2 and revs[1].mrr:
+            mrr_delta = round((revs[0].mrr - revs[1].mrr) / revs[1].mrr * 100, 1)
+    except Exception as e:
+        logger.warning(f"overview: revenue entries failed: {e}")
+
+    # последний чекап
+    last_checkup = None
+    try:
+        cr = (
+            db.query(CheckupResult)
+            .filter(CheckupResult.client_id == client_id)
+            .order_by(CheckupResult.created_at.desc())
+            .first()
+        )
+        if cr:
+            last_checkup = {
+                "date": cr.created_at.isoformat() if cr.created_at else None,
+                "score": cr.avg_score,
+            }
+        else:
+            ch = (
+                db.query(CheckUp)
+                .filter(CheckUp.client_id == client_id)
+                .order_by(CheckUp.scheduled_date.desc())
+                .first()
+            )
+            if ch:
+                last_checkup = {
+                    "date": ch.scheduled_date.isoformat() if ch.scheduled_date else None,
+                    "score": None,
+                }
+    except Exception as e:
+        logger.warning(f"overview: checkup failed: {e}")
+
+    # следующая встреча
+    next_meeting = None
+    try:
+        now = datetime.utcnow()
+        nm = (
+            db.query(Meeting)
+            .filter(Meeting.client_id == client_id, Meeting.date >= now)
+            .order_by(Meeting.date.asc())
+            .first()
+        )
+        if nm:
+            next_meeting = {
+                "id": nm.id,
+                "date": nm.date.isoformat() if nm.date else None,
+                "title": nm.title or nm.type,
+            }
+    except Exception as e:
+        logger.warning(f"overview: next meeting failed: {e}")
+
+    # last_contact_days
+    last_contact_days = None
+    try:
+        if client.last_meeting_date:
+            last_contact_days = (datetime.utcnow() - client.last_meeting_date).days
+    except Exception as e:
+        logger.warning(f"overview: last_contact_days failed: {e}")
+
+    # pinned_note
+    pinned_note = None
+    try:
+        pn = (
+            db.query(ClientNote)
+            .filter(ClientNote.client_id == client_id, ClientNote.is_pinned == True)
+            .order_by(ClientNote.updated_at.desc())
+            .first()
+        )
+        if pn:
+            pinned_note = {
+                "id": pn.id,
+                "content": pn.content,
+                "updated_at": pn.updated_at.isoformat() if pn.updated_at else None,
+            }
+    except Exception as e:
+        logger.warning(f"overview: pinned note failed: {e}")
+
+    # contacts_summary
+    contacts_summary = {"total": 0, "primary": None}
+    try:
+        total = (
+            db.query(ClientContact)
+            .filter(ClientContact.client_id == client_id)
+            .count()
+        )
+        primary = (
+            db.query(ClientContact)
+            .filter(ClientContact.client_id == client_id, ClientContact.is_primary == True)
+            .first()
+        )
+        contacts_summary = {
+            "total": total,
+            "primary": {
+                "id": primary.id,
+                "name": primary.name,
+                "role": primary.role,
+                "position": primary.position,
+                "email": primary.email,
+                "phone": primary.phone,
+            } if primary else None,
+        }
+    except Exception as e:
+        logger.warning(f"overview: contacts failed: {e}")
+
+    # products
+    products = []
+    try:
+        prods = (
+            db.query(ClientProduct)
+            .filter(ClientProduct.client_id == client_id)
+            .all()
+        )
+        products = [
+            {"code": p.code, "name": p.name, "status": p.status}
+            for p in prods
+        ]
+    except Exception as e:
+        logger.warning(f"overview: products failed: {e}")
+
+    # last_sync из integration_metadata
+    last_sync = {
+        "merchrules": None,
+        "ktalk": None,
+        "tbank": None,
+    }
+    try:
+        meta = client.integration_metadata or {}
+        last_sync = {
+            "merchrules": meta.get("last_sync_merchrules"),
+            "ktalk": meta.get("last_sync_ktalk"),
+            "tbank": meta.get("last_sync_tbank_time"),
+        }
+    except Exception as e:
+        logger.warning(f"overview: last_sync failed: {e}")
+
+    return {
+        "client": {
+            "id": client.id,
+            "name": client.name,
+            "segment": client.segment,
+            "manager_email": client.manager_email,
+            "domain": client.domain,
+        },
+        "health": {
+            "score": current_health if current_health is not None else client.health_score,
+            "trend": trend,
+        },
+        "mrr": {
+            "current": current_mrr if current_mrr is not None else client.mrr,
+            "delta_pct": mrr_delta,
+        },
+        "last_checkup": last_checkup,
+        "next_meeting": next_meeting,
+        "last_contact_days": last_contact_days,
+        "pinned_note": pinned_note,
+        "contacts_summary": contacts_summary,
+        "products": products,
+        "last_sync": last_sync,
+        "payment_status": client.payment_status,
+        "payment_due_date": client.payment_due_date.isoformat() if client.payment_due_date else None,
+    }
+
+
+@router.get("/api/clients/{client_id}/charts")
+async def api_client_charts(
+    client_id: int,
+    months: int = Query(12),
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Данные для графиков клиентского хаба."""
+    user = _require_user(auth_token, db)
+    client = _require_client(client_id, user, db)
+
+    # список месяцев YYYY-MM за последние m месяцев включая текущий
+    today = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    months_list: list = []
+    cur = today
+    for _ in range(months):
+        months_list.append(cur.strftime("%Y-%m"))
+        cur = (cur - timedelta(days=1)).replace(day=1)
+    months_list.reverse()
+
+    # период для диапазонных выборок
+    start_dt = datetime.strptime(months_list[0] + "-01", "%Y-%m-%d")
+
+    def _month_key(dt):
+        return dt.strftime("%Y-%m") if dt else None
+
+    # mrr
+    mrr_map = {m: None for m in months_list}
+    try:
+        revs = (
+            db.query(RevenueEntry)
+            .filter(
+                RevenueEntry.client_id == client_id,
+                RevenueEntry.period.in_(months_list),
+            )
+            .all()
+        )
+        for r in revs:
+            mrr_map[r.period] = r.mrr
+    except Exception as e:
+        logger.warning(f"charts: mrr failed: {e}")
+
+    # health: последний HealthSnapshot в каждом месяце
+    health_map = {m: None for m in months_list}
+    try:
+        snaps = (
+            db.query(HealthSnapshot)
+            .filter(
+                HealthSnapshot.client_id == client_id,
+                HealthSnapshot.calculated_at >= start_dt,
+            )
+            .order_by(HealthSnapshot.calculated_at.asc())
+            .all()
+        )
+        for s in snaps:
+            key = _month_key(s.calculated_at)
+            if key in health_map:
+                health_map[key] = s.score  # последний перезапишет
+    except Exception as e:
+        logger.warning(f"charts: health failed: {e}")
+
+    # nps
+    nps_map = {m: None for m in months_list}
+    try:
+        nps_rows = (
+            db.query(NPSEntry)
+            .filter(
+                NPSEntry.client_id == client_id,
+                NPSEntry.recorded_at >= start_dt,
+            )
+            .order_by(NPSEntry.recorded_at.asc())
+            .all()
+        )
+        for n in nps_rows:
+            key = _month_key(n.recorded_at)
+            if key in nps_map:
+                nps_map[key] = n.score
+    except Exception as e:
+        logger.warning(f"charts: nps failed: {e}")
+
+    # meetings_count
+    meetings_count = {m: 0 for m in months_list}
+    try:
+        meets = (
+            db.query(Meeting)
+            .filter(
+                Meeting.client_id == client_id,
+                Meeting.date >= start_dt,
+            )
+            .all()
+        )
+        for mt in meets:
+            key = _month_key(mt.date)
+            if key in meetings_count:
+                meetings_count[key] += 1
+    except Exception as e:
+        logger.warning(f"charts: meetings failed: {e}")
+
+    # tasks_closed
+    tasks_closed = {m: 0 for m in months_list}
+    try:
+        tasks = (
+            db.query(Task)
+            .filter(
+                Task.client_id == client_id,
+                Task.confirmed_at != None,
+                Task.confirmed_at >= start_dt,
+            )
+            .all()
+        )
+        for t in tasks:
+            key = _month_key(t.confirmed_at)
+            if key in tasks_closed:
+                tasks_closed[key] += 1
+    except Exception as e:
+        logger.warning(f"charts: tasks failed: {e}")
+
+    # checkups
+    checkups_list: list = []
+    try:
+        crs = (
+            db.query(CheckupResult)
+            .filter(
+                CheckupResult.client_id == client_id,
+                CheckupResult.created_at >= start_dt,
+            )
+            .order_by(CheckupResult.created_at.asc())
+            .all()
+        )
+        checkups_list = [
+            {
+                "date": cr.created_at.isoformat() if cr.created_at else None,
+                "score": cr.avg_score,
+            }
+            for cr in crs
+        ]
+    except Exception as e:
+        logger.warning(f"charts: checkups failed: {e}")
+
+    # qbrs
+    qbrs_list: list = []
+    try:
+        qbrs = (
+            db.query(QBR)
+            .filter(
+                QBR.client_id == client_id,
+                QBR.date >= start_dt,
+            )
+            .order_by(QBR.date.asc())
+            .all()
+        )
+        qbrs_list = [
+            {
+                "date": q.date.isoformat() if q.date else None,
+                "quarter": q.quarter,
+            }
+            for q in qbrs
+        ]
+    except Exception as e:
+        logger.warning(f"charts: qbrs failed: {e}")
+
+    return {
+        "months": months_list,
+        "mrr": mrr_map,
+        "health": health_map,
+        "nps": nps_map,
+        "meetings_count": meetings_count,
+        "tasks_closed": tasks_closed,
+        "checkups": checkups_list,
+        "qbrs": qbrs_list,
+    }
+
+
+@router.get("/api/clients/{client_id}/timeline")
+async def api_client_timeline(
+    client_id: int,
+    limit: int = Query(50),
+    type: str = Query("all"),
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Объединённый таймлайн клиентских событий."""
+    user = _require_user(auth_token, db)
+    client = _require_client(client_id, user, db)
+
+    events: list = []
+    want_all = (type == "all")
+
+    # Meetings
+    if want_all or type == "meeting":
+        try:
+            meets = (
+                db.query(Meeting)
+                .filter(Meeting.client_id == client_id)
+                .order_by(Meeting.date.desc())
+                .limit(limit * 2)
+                .all()
+            )
+            for m in meets:
+                events.append({
+                    "type": "meeting",
+                    "date": m.date.isoformat() if m.date else None,
+                    "title": m.title or m.type,
+                    "id": m.id,
+                    "_sort": m.date,
+                })
+        except Exception as e:
+            logger.warning(f"timeline: meetings failed: {e}")
+
+    # Tasks (done + confirmed_at)
+    if want_all or type == "task_done":
+        try:
+            tasks = (
+                db.query(Task)
+                .filter(
+                    Task.client_id == client_id,
+                    Task.status == "done",
+                    Task.confirmed_at != None,
+                )
+                .order_by(Task.confirmed_at.desc())
+                .limit(limit * 2)
+                .all()
+            )
+            for t in tasks:
+                events.append({
+                    "type": "task_done",
+                    "date": t.confirmed_at.isoformat() if t.confirmed_at else None,
+                    "title": t.title,
+                    "id": t.id,
+                    "_sort": t.confirmed_at,
+                })
+        except Exception as e:
+            logger.warning(f"timeline: tasks failed: {e}")
+
+    # Notes
+    if want_all or type == "note":
+        try:
+            notes = (
+                db.query(ClientNote)
+                .filter(ClientNote.client_id == client_id)
+                .order_by(ClientNote.created_at.desc())
+                .limit(limit * 2)
+                .all()
+            )
+            for n in notes:
+                author_email = None
+                try:
+                    if n.user_id:
+                        u = db.query(User).filter(User.id == n.user_id).first()
+                        author_email = u.email if u else None
+                except Exception:
+                    author_email = None
+                content = n.content or ""
+                events.append({
+                    "type": "note",
+                    "date": n.created_at.isoformat() if n.created_at else None,
+                    "content": content[:200],
+                    "id": n.id,
+                    "author": author_email or user.email,
+                    "_sort": n.created_at,
+                })
+        except Exception as e:
+            logger.warning(f"timeline: notes failed: {e}")
+
+    # CheckupResult
+    if want_all or type == "checkup":
+        try:
+            crs = (
+                db.query(CheckupResult)
+                .filter(CheckupResult.client_id == client_id)
+                .order_by(CheckupResult.created_at.desc())
+                .limit(limit * 2)
+                .all()
+            )
+            for cr in crs:
+                events.append({
+                    "type": "checkup",
+                    "date": cr.created_at.isoformat() if cr.created_at else None,
+                    "score": cr.avg_score,
+                    "id": cr.id,
+                    "_sort": cr.created_at,
+                })
+        except Exception as e:
+            logger.warning(f"timeline: checkups failed: {e}")
+
+    # ClientHistory
+    if want_all or type == "history":
+        try:
+            hist = (
+                db.query(ClientHistory)
+                .filter(ClientHistory.client_id == client_id)
+                .order_by(ClientHistory.created_at.desc())
+                .limit(limit * 2)
+                .all()
+            )
+            for h in hist:
+                events.append({
+                    "type": "history",
+                    "date": h.created_at.isoformat() if h.created_at else None,
+                    "field": h.field,
+                    "old": h.old_value,
+                    "new": h.new_value,
+                    "id": h.id,
+                    "_sort": h.created_at,
+                })
+        except Exception as e:
+            logger.warning(f"timeline: history failed: {e}")
+
+    # QBR
+    if want_all or type == "qbr":
+        try:
+            qbrs = (
+                db.query(QBR)
+                .filter(QBR.client_id == client_id)
+                .order_by(QBR.date.desc().nullslast() if hasattr(QBR.date.desc(), "nullslast") else QBR.date.desc())
+                .limit(limit * 2)
+                .all()
+            )
+            for q in qbrs:
+                events.append({
+                    "type": "qbr",
+                    "date": q.date.isoformat() if q.date else None,
+                    "quarter": q.quarter,
+                    "id": q.id,
+                    "_sort": q.date,
+                })
+        except Exception as e:
+            logger.warning(f"timeline: qbrs failed: {e}")
+
+    # Сортировка по date desc (None в конец)
+    def _sort_key(ev):
+        dt = ev.get("_sort")
+        return dt or datetime.min
+
+    events.sort(key=_sort_key, reverse=True)
+
+    # убираем служебное поле
+    for ev in events:
+        ev.pop("_sort", None)
+
+    return {"events": events[:limit], "total": len(events[:limit])}
+
+
+@router.post("/api/clients/{client_id}/qbr/auto-collect")
+async def api_qbr_auto_collect(client_id: int, request: Request,
+                                db: Session = Depends(get_db),
+                                auth_token: Optional[str] = Cookie(None)):
+    user = _require_user(auth_token, db)
+    client = _require_client(client_id, user, db)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    quarter = body.get("quarter")
+    overwrite = bool(body.get("overwrite_text", False))
+    from qbr_auto_collect import collect_and_save
+    import asyncio
+    result = await collect_and_save(db, client, quarter=quarter, overwrite_text=overwrite)
+    return result
+
+
+# ── Support tickets (Tbank Time / Mattermost) ────────────────────────────────
+
+@router.get("/api/clients/{client_id}/tickets")
+async def api_client_tickets(
+    client_id: int,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _require_user(auth_token, db)
+    client = _require_client(client_id, user, db)
+    from models import SupportTicket
+    q = db.query(SupportTicket).filter(SupportTicket.client_id == client.id)
+    if status_filter and status_filter != "all":
+        statuses = [s.strip() for s in status_filter.split(",")]
+        q = q.filter(SupportTicket.status.in_(statuses))
+    tickets = q.order_by(SupportTicket.opened_at.desc().nullslast()).limit(limit).all()
+    return {
+        "tickets": [{
+            "id": t.id, "external_id": t.external_id, "external_url": t.external_url,
+            "title": t.title, "body": (t.body or "")[:500], "status": t.status,
+            "priority": t.priority, "author": t.author_name or t.author,
+            "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+            "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
+            "comments_count": t.comments_count or 0,
+            "last_comment_at": t.last_comment_at.isoformat() if t.last_comment_at else None,
+            "last_comment_snippet": t.last_comment_snippet,
+            "external_client_id": t.external_client_id,
+        } for t in tickets],
+        "open_count": sum(1 for t in tickets if t.status in ("open", "in_progress")),
+        "total": len(tickets),
+    }
+
+
+@router.get("/api/clients/{client_id}/tickets/{ticket_id}/thread")
+async def api_ticket_thread(client_id: int, ticket_id: int,
+                             db: Session = Depends(get_db),
+                             auth_token: Optional[str] = Cookie(None)):
+    user = _require_user(auth_token, db)
+    _require_client(client_id, user, db)
+    from models import SupportTicket, TicketComment
+    t = db.query(SupportTicket).filter(SupportTicket.id == ticket_id, SupportTicket.client_id == client_id).first()
+    if not t:
+        raise HTTPException(status_code=404)
+    comments = db.query(TicketComment).filter(TicketComment.ticket_id == t.id).order_by(TicketComment.posted_at.asc()).all()
+    return {
+        "ticket": {
+            "id": t.id, "external_id": t.external_id, "external_url": t.external_url,
+            "title": t.title, "body": t.body, "status": t.status,
+            "author": t.author_name or t.author,
+            "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+        },
+        "comments": [{"id": c.id, "author": c.author_name or c.author, "body": c.body,
+                       "posted_at": c.posted_at.isoformat() if c.posted_at else None} for c in comments],
+    }

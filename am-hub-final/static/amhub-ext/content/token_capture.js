@@ -18,10 +18,11 @@
 
   // Ждём когда пользователь залогинится (URL меняется или появляется признак авторизации)
   let captured = false;
+  let badgeShown = false;   // показываем всплывашку только один раз за загрузку страницы
 
   function tryCapture() {
     if (captured) return;
-    
+
     // Проверяем признаки авторизации
     const isLoggedIn = (
       document.querySelector('[class*="user"]') ||
@@ -34,7 +35,7 @@
       document.querySelector('#sidebar-header') ||
       document.querySelector('.team-sidebar')
     );
-    
+
     if (!isLoggedIn) return;
     captured = true;
 
@@ -46,7 +47,10 @@
     }, response => {
       if (response?.ok) {
         console.log(`[AM Hub] ${system} токен захвачен автоматически`);
-        showBadge();
+        if (!badgeShown) {
+          showBadge();
+          badgeShown = true;
+        }
       }
     });
   }
@@ -74,7 +78,15 @@
   tryCapture();
   const observer = new MutationObserver(tryCapture);
   observer.observe(document.body, { childList: true, subtree: true });
-  
-  // Останавливаем наблюдение через 30 сек
+
+  // Останавливаем первичное наблюдение через 30 сек
   setTimeout(() => observer.disconnect(), 30000);
+
+  // Каждые 5 минут повторно пробуем захватить токен — SSO может обновить его,
+  // и cookie/localStorage будут обновлены. Сбрасываем флаг captured, чтобы дать
+  // tryCapture() ещё один проход.
+  setInterval(() => {
+    captured = false;
+    tryCapture();
+  }, 5 * 60 * 1000);
 })();

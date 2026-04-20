@@ -90,6 +90,19 @@ async def send_followup(meeting_id: int, request: Request, db: Session = Depends
         client.last_meeting_date = meeting.date or datetime.now()
 
     db.commit()
+
+    # ── Автодействия: followup_sent + meeting_done ──────────────────────────
+    try:
+        from auto_actions import fire_event
+        extra = {
+            "meeting_type": meeting.type or "",
+            "meeting_date": meeting.date.isoformat() if meeting.date else "",
+        }
+        fire_event(db, "followup_sent", client, extra)
+        fire_event(db, "meeting_done", client, extra)
+    except Exception:
+        pass
+
     return {"ok": True, "task_id": task.id}
 
 
