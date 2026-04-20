@@ -116,16 +116,37 @@ function Sidebar({ active = "command", onNav }) {
 
       {/* scroll region */}
       <nav style={{ flex: 1, overflowY: "auto", padding: "6px 8px 12px" }}>
-        {NAV.map((section, i) => (
+        {NAV.map((section, i) => {
+          const isEmpty = !section.group;
+          const storageKey = "amhub_navcol_" + (section.group || "_top");
+          const [collapsed, setCollapsed] = React.useState(() => {
+            try { return localStorage.getItem(storageKey) === "1"; } catch (_) { return false; }
+          });
+          const toggle = () => {
+            setCollapsed(v => {
+              const nv = !v;
+              try { localStorage.setItem(storageKey, nv ? "1" : "0"); } catch (_) {}
+              return nv;
+            });
+          };
+          return (
           <div key={i} style={{ marginTop: i === 0 ? 0 : 14 }}>
             {section.group && (
-              <div className="mono" style={{
-                fontSize: 10, color: "var(--ink-5)",
-                textTransform: "uppercase", letterSpacing: "0.1em",
-                padding: "6px 10px 6px",
-              }}>{section.group}</div>
+              <div className="mono"
+                onClick={toggle}
+                style={{
+                  fontSize: 10, color: "var(--ink-5)",
+                  textTransform: "uppercase", letterSpacing: "0.1em",
+                  padding: "6px 10px 6px",
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 6,
+                  userSelect: "none",
+                }}>
+                <span style={{ transition: "transform .15s", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>▾</span>
+                <span>{section.group}</span>
+              </div>
             )}
-            {section.items.map(item => {
+            {(!section.group || !collapsed) && section.items.map(item => {
               const Ic = I[item.icon];
               const isActive = item.id === active;
               return (
@@ -166,7 +187,8 @@ function Sidebar({ active = "command", onNav }) {
               );
             })}
           </div>
-        ))}
+        );
+        })}
 
         {/* sidebar stats block */}
         <div style={{

@@ -402,8 +402,20 @@ function PageHub() {
 
 // ── Big sparkline/area chart ──────────────────────────────
 function BigSpark() {
-  const data = (typeof window !== "undefined" && window.GMV_SPARK) || [];
+  let data = (typeof window !== "undefined" && window.GMV_SPARK) || [];
   const w = 520, h = 120;
+  // Фолбек: если история пустая, но клиенты с MRR есть — рисуем «плоскую»
+  // линию на текущем уровне, чтобы виджет не пустовал.
+  if (!data.length) {
+    const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+    const totalNow = CL.reduce((s, c) => {
+      const v = c && typeof c.gmv === "string" ? c.gmv : "";
+      const num = parseFloat(v.replace(/[^\d.,]/g, "").replace(",", "."));
+      if (isNaN(num)) return s;
+      return s + (v.includes("м") ? num * 1e6 : v.includes("к") ? num * 1e3 : num);
+    }, 0);
+    if (totalNow > 0) data = Array(6).fill(Math.round(totalNow));
+  }
   if (!data.length) {
     return (
       <div style={{ width: "100%", height: h, display: "flex", alignItems: "center", justifyContent: "center",
