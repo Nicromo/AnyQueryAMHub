@@ -99,7 +99,7 @@ PAGES_DATA_MAP = {
     "templates":  ["templates"],
     "auto":       ["auto_rules", "auto_stats"],
     "roadmap":    ["roadmap"],
-    "internal":   ["internal_tasks"],
+    "internal":   ["tasks", "internal_tasks"],
     "help":       [],
     "extension":  [],
     "profile":    [],
@@ -738,8 +738,19 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
 
     # ── Tasks ─────────────────────────────────────────────────
     if "tasks" in needed:
-        tasks_q = tasks_base.filter(Task.status.in_(["plan", "in_progress", "blocked"])) \
-                            .order_by(Task.due_date.asc()).limit(200).all()
+        tasks_q_base = tasks_base.filter(Task.status.in_(["plan", "in_progress", "blocked"]))
+        # Split task streams: /design/tasks — только клиентские задачи;
+        # /design/internal — только внутренние (без client_id) или source='internal'.
+        if page_id == "tasks":
+            tasks_q_base = tasks_q_base.filter(Task.client_id.isnot(None))
+        elif page_id == "internal":
+            try:
+                tasks_q_base = tasks_q_base.filter(
+                    (Task.client_id.is_(None)) | (Task.source == "internal")
+                )
+            except Exception:
+                tasks_q_base = tasks_q_base.filter(Task.client_id.is_(None))
+        tasks_q = tasks_q_base.order_by(Task.due_date.asc()).limit(200).all()
     else:
         tasks_q = []
 
