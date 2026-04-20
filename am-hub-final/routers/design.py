@@ -345,6 +345,8 @@ async def profile_get(
         "id":         user.id,
         "email":      user.email,
         "name":       user.name,
+        "first_name": user.first_name,
+        "last_name":  user.last_name,
         "role":       user.role,
         "is_active":  user.is_active,
         "telegram_id": user.telegram_id,

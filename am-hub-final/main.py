@@ -231,6 +231,9 @@ async def lifespan(app: FastAPI):
                     ("client_notes", "is_pinned",    "ALTER TABLE client_notes ADD COLUMN is_pinned BOOLEAN DEFAULT FALSE"),
                     # Checkup v2 (migration 007)
                     ("clients", "diginetica_api_key", "ALTER TABLE clients ADD COLUMN diginetica_api_key VARCHAR"),
+                    # User profile first/last name (for profile form persistence)
+                    ("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR"),
+                    ("users", "last_name",  "ALTER TABLE users ADD COLUMN last_name VARCHAR"),
                 ]
                 # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:
