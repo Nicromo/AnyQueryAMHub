@@ -127,8 +127,35 @@ function PageHub() {
         }
         actions={
           <>
-            <Btn kind="ghost" size="m" icon={<I.refresh size={14}/>}>Синхронизировать</Btn>
-            <Btn kind="primary" size="m" icon={<I.plus size={14}/>}>Новый клиент</Btn>
+            <Btn kind="ghost" size="m" icon={<I.refresh size={14}/>}
+              onClick={async () => {
+                if (!window.confirm("Синхронизировать из Airtable + Merchrules?")) return;
+                let atRes = {}, mrRes = {};
+                try {
+                  const r1 = await fetch("/api/sync/airtable", {
+                    method: "POST", credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ reset: true }),
+                  });
+                  atRes = await r1.json().catch(() => ({}));
+                } catch (e) { atRes = { error: e.message }; }
+                try {
+                  const r2 = await fetch("/api/sync/merchrules", {
+                    method: "POST", credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                  });
+                  mrRes = await r2.json().catch(() => ({}));
+                } catch (e) { mrRes = { error: e.message }; }
+                const at = atRes.error ? `Airtable: ${atRes.error}` : `Airtable: ${atRes.synced || 0} клиентов, оплата ${atRes.payment_updated || 0}`;
+                const mr = mrRes.error ? `Merchrules: ${mrRes.error}` : `Merchrules: ${mrRes.clients_synced || mrRes.synced || 0} клиентов, задач ${mrRes.tasks_synced || 0}`;
+                alert(`Готово:\n  ${at}\n  ${mr}`);
+                location.reload();
+              }}
+            >Синхронизировать</Btn>
+            <Btn kind="primary" size="m" icon={<I.plus size={14}/>}
+              onClick={() => { window.location.href = "/design/clients?new=1"; }}
+            >Новый клиент</Btn>
           </>
         }
       />

@@ -72,13 +72,17 @@ async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
         if not site_id:
             continue
 
-        # Найти или создать клиента
+        # Найти или создать клиента.
+        # Важно: НЕ присваиваем manager_email новым клиентам, пришедшим из расширения,
+        # потому что Merchrules отдаёт ВСЕ аккаунты, к которым у юзера есть доступ,
+        # а не только те, что закреплены за ним в Airtable. Источник правды по
+        # закреплению — Airtable. manager_email выставит /api/sync/airtable.
         client = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
         if not client:
             client = Client(
                 merchrules_account_id=site_id,
                 name=acc.get("name") or f"Site {site_id}",
-                manager_email=user.email,
+                manager_email=None,  # оставляем пустым — Airtable решит
                 segment=acc.get("segment") or "SMB",
                 domain=acc.get("domain"),
             )
@@ -94,10 +98,7 @@ async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
                 client.domain = acc["domain"]
             if acc.get("health_score") is not None:
                 client.health_score = float(acc["health_score"])
-
-        # Гарантируем привязку к менеджеру
-        if not client.manager_email:
-            client.manager_email = user.email
+            # НЕ переписываем manager_email: если он уже был задан (из Airtable) — оставляем.
 
         clients_synced += 1
 
