@@ -223,6 +223,42 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
 # ============================================================================
 # WORKFLOW: QBR
 
+@router.get("/api/tasks")
+async def api_tasks_list(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+    client_id: Optional[int] = None,
+    source: Optional[str] = None,
+    task_type: Optional[str] = None,
+):
+    """Список задач с фильтрами. Используется для per-client роадмапа."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Task)
+    if client_id is not None:
+        q = q.filter(Task.client_id == client_id)
+    if source:
+        q = q.filter(Task.source == source)
+    if task_type:
+        q = q.filter(Task.task_type == task_type)
+    tasks = q.order_by(Task.created_at.desc()).limit(500).all()
+    return {"tasks": [{
+        "id": t.id, "title": t.title, "status": t.status,
+        "priority": t.priority, "due_date": t.due_date.isoformat() if t.due_date else None,
+        "client_id": t.client_id, "source": t.source, "task_type": t.task_type,
+        "description": t.description,
+    } for t in tasks]}
+
+
 @router.get("/api/tasks/all")
 async def api_tasks_all(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     if not auth_token: raise HTTPException(status_code=401)

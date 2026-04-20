@@ -12,6 +12,40 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("API_GROQ", "")
 QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
 
 
+# ── Бизнес-контекст для AI ────────────────────────────────────────────────
+# Все промпты оборачиваем в этот system-промпт, чтобы модель понимала домен.
+DOMAIN_CONTEXT = """Ты — AI-ассистент Account Manager'а в AnyQuery.
+
+О продукте AnyQuery:
+• AnyQuery — B2B-платформа умного поиска и рекомендаций для крупных e-com (Yves Rocher, Lazurit, Vodovoz, Kuvalda, Mechta.kz, Beeline и др.).
+• Продукт включает: поиск (Search), рекомендации (Recsys), аналитику, антифрод, сортировки.
+• Клиенты интегрируют AnyQuery как SaaS: заводят фиды товаров, настраивают мерч-правила, получают API для поиска/реков.
+
+Ключевые понятия:
+• Merchrules (мерч-правила) — бизнес-правила для поисковой выдачи:
+  поднять/опустить товары, перемешать по брендам, фиксированные позиции. Настраиваются в merchrules.any-platform.ru.
+• Синонимы — словарь: запрос «крем от морщин» ⇄ «антивозрастной крем».
+• Whitelist — список разрешённых для показа товаров / выдач.
+• Фид (feed) — XML/JSON товаров партнёра, регулярно синхронизируется.
+• Diginetica — внешний поисковый движок, который мы анализируем на Top-50 / чекапах.
+• NDCG@20, Precision@20, Конверсия — ключевые качественные метрики поиска клиента.
+• Чекап — регулярная проверка качества поиска: берём ~20 реальных запросов, смотрим выдачу, ставим оценки.
+• QBR (Quarterly Business Review) — квартальная встреча с клиентом, ревью результатов + план.
+• Сегменты клиентов: ENT (ключевые, >1млн выручки), SME+/SME/SME-, SMB, SS (sandbox).
+• Health Score — 0..1, интегральный показатель здоровья клиента (задачи, встречи, метрики, churn-риск).
+• Роадмап — квартальный план развития клиента (Q1/Q2/Q3/Q4 + Бэклог).
+• Top-50 — приоритетный список 50 ключевых клиентов с ежемесячными метриками.
+• MRR / GMV — monthly recurring revenue / общий оборот клиента на платформе.
+• Time (Тайм) — внутренний Mattermost tbank'а, где клиенты оставляют тикеты в каналах.
+• Ktalk — Контур.Толк, корп. видеоконференции для встреч.
+
+Твоя задача: понимать, что Account Manager работает с конкретным партнёром,
+видит его задачи, встречи, метрики и мерч-правила; давать точные,
+прикладные рекомендации на русском, без воды. Не выдумывай факты — если
+данных мало, так и напиши.
+"""
+
+
 def _chat_sync(system: str, user: str, max_tokens: int = 3000) -> str:
     """Синхронный запрос к AI (Groq → Qwen fallback)."""
     # Попробовать Groq
@@ -72,7 +106,7 @@ def generate_prep_brief(client, tasks: list, meetings: list) -> str:
 3. Рекомендуемые действия"""
 
     try:
-        return _chat_sync("", prompt, max_tokens=1000)
+        return _chat_sync(DOMAIN_CONTEXT, prompt, max_tokens=1000)
     except Exception:
         return f"📋 Подготовка к встрече: {client.name}\n\nЗадачи: {len(tasks)}\nВстречи: {len(meetings)}"
 
@@ -102,7 +136,7 @@ def generate_smart_followup(client, tasks: list, meetings: list) -> str:
 - С вашей стороны: ..."""
 
     try:
-        return _chat_sync("", prompt, max_tokens=1000)
+        return _chat_sync(DOMAIN_CONTEXT, prompt, max_tokens=1000)
     except Exception:
         return f"✍️ Фолоуап: {client.name}\n\nЗадач: {len(tasks)}\nВстреч: {len(meetings)}"
 

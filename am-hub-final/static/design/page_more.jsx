@@ -1068,7 +1068,7 @@ function PageCabinet() {
 
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","инструменты","кабинет"]} title="Мой кабинет"
+      <TopBar breadcrumbs={["am hub","инструменты","заметки"]} title="Мои заметки"
         subtitle={`${U.name || U.email || "—"} · ${files.length} файлов`}
         actions={<>
           <Btn kind="ghost" size="m" icon={<I.mic size={14}/>} onClick={recording ? stopRecording : startRecording}>

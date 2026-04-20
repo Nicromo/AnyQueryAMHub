@@ -27,7 +27,6 @@ function _buildNav() {
       { id: "tasks",    label: "Задачи",     icon: "check",  count: num(s.tasksActive) },
       { id: "meetings", label: "Встречи",    icon: "cal",    count: num(s.meetingsUpcoming) },
       { id: "qbr",      label: "QBR Календарь", icon: "map" },
-      { id: "roadmap",  label: "Роадмап",    icon: "map" },
       { id: "internal", label: "Внутренние задачи", icon: "lock" },
     ]},
     { group: "Аналитика", items: [
@@ -38,7 +37,7 @@ function _buildNav() {
     { group: "Инструменты", items: [
       { id: "templates", label: "Шаблоны",    icon: "doc" },
       { id: "auto",      label: "Автозадачи", icon: "spark" },
-      { id: "cabinet",   label: "Мой кабинет", icon: "folder" },
+      { id: "cabinet",   label: "Мои заметки", icon: "doc" },
     ]},
     { group: "Настройки", items: [
       { id: "integrations", label: "Интеграции", icon: "link" },

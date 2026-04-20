@@ -344,6 +344,9 @@ function PageClient() {
             {/* Чекапы — v2 */}
             <ClientCheckupsList clientId={c.id}/>
 
+            {/* Роадмап клиента — per-client (Q1/Q2/Q3/Q4 + Бэклог) */}
+            <ClientRoadmap clientId={c.id}/>
+
             {/* История партнёра — real /api/clients/{id}/logs */}
             <ClientLogsList clientId={c.id}/>
           </div>
@@ -352,6 +355,117 @@ function PageClient() {
     </div>
   );
 }
+
+// ── ClientRoadmap — квартальный план развития клиента ──────────────────
+// Использует Task + source="roadmap" + task_type=Q1..Q4|backlog.
+// GET /api/tasks?client_id=X&source=roadmap → список, группируем по task_type.
+// POST /api/tasks → создать новый элемент в колонке
+function ClientRoadmap({ clientId }) {
+  const [items, setItems] = React.useState(null);
+  const [adding, setAdding] = React.useState(null); // Q1 / Q2 / ... / backlog
+
+  const COLS = [
+    { key: "Q1",      l: "Q1 · готово",   tone: "ok"      },
+    { key: "Q2",      l: "Q2 · в работе", tone: "signal"  },
+    { key: "Q3",      l: "Q3 · план",     tone: "info"    },
+    { key: "Q4",      l: "Q4 · идеи",     tone: "warn"    },
+    { key: "backlog", l: "бэклог",        tone: "neutral" },
+  ];
+
+  const reload = React.useCallback(async () => {
+    try {
+      const r = await fetch(`/api/tasks?client_id=${clientId}&source=roadmap`, { credentials: "include" });
+      if (!r.ok) { setItems([]); return; }
+      const d = await r.json();
+      setItems(d.tasks || []);
+    } catch (e) { setItems([]); }
+  }, [clientId]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  async function addItem(colKey) {
+    const title = (window.prompt(`Добавить в «${colKey}»:`) || "").trim();
+    if (!title) return;
+    try {
+      const r = await fetch("/api/tasks", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title, client_id: clientId, source: "roadmap",
+          task_type: colKey, priority: "med", status: "plan",
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      appToast("Добавлено в " + colKey, "ok");
+      reload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+  }
+
+  async function removeItem(id) {
+    if (!await appConfirm("Удалить пункт?")) return;
+    try {
+      await fetch("/api/tasks/" + id, { method: "DELETE", credentials: "include" });
+      reload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+  }
+
+  const grouped = {};
+  COLS.forEach(c => { grouped[c.key] = []; });
+  (items || []).forEach(t => {
+    const key = (t.task_type || "backlog").toUpperCase() === "BACKLOG" ? "backlog" : (t.task_type || "backlog");
+    if (grouped[key]) grouped[key].push(t);
+    else grouped["backlog"].push(t);
+  });
+
+  return React.createElement(Card, { title: "Роадмап клиента" },
+    items === null
+      ? React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } }, "Загрузка…")
+      : COLS.map((c, ci) =>
+          React.createElement("div", {
+            key: c.key,
+            style: {
+              padding: "10px 0",
+              borderBottom: ci === COLS.length - 1 ? "none" : "1px solid var(--line-soft)",
+            },
+          },
+            React.createElement("div", {
+              style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+            },
+              React.createElement("span", {
+                className: "mono",
+                style: { fontSize: 10.5, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" },
+              }, c.l),
+              React.createElement("button", {
+                onClick: () => addItem(c.key),
+                style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 },
+                title: "Добавить",
+              }, "+"),
+            ),
+            grouped[c.key].length === 0
+              ? React.createElement("div", { style: { fontSize: 12, color: "var(--ink-5)", padding: "2px 0 4px" } }, "пусто")
+              : grouped[c.key].map(t =>
+                  React.createElement("div", {
+                    key: t.id,
+                    style: {
+                      display: "flex", justifyContent: "space-between", gap: 8,
+                      padding: "4px 0", alignItems: "center",
+                    },
+                  },
+                    React.createElement("span", {
+                      style: { fontSize: 12.5, color: "var(--ink-8)", flex: 1 },
+                    }, t.title),
+                    React.createElement("button", {
+                      onClick: () => removeItem(t.id),
+                      style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 12, padding: 0 },
+                      title: "Удалить",
+                    }, "×"),
+                  )
+                )
+          )
+        )
+  );
+}
+window.ClientRoadmap = ClientRoadmap;
 
 window.PageClients = PageClients;
 window.PageClient = PageClient;
