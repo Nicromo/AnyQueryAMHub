@@ -130,27 +130,40 @@ function PageHub() {
             <Btn kind="ghost" size="m" icon={<I.refresh size={14}/>}
               onClick={async () => {
                 if (!await appConfirm("Синхронизировать из Airtable + Merchrules?")) return;
+                appToast("⏳ Синк запущен…", { tone: "info", duration: 6000 });
                 let atRes = {}, mrRes = {};
+                // Airtable
                 try {
                   const r1 = await fetch("/api/sync/airtable", {
                     method: "POST", credentials: "include",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({}),
                   });
-                  atRes = await r1.json().catch(() => ({}));
-                } catch (e) { atRes = { error: e.message }; }
+                  const txt1 = await r1.text();
+                  try { atRes = JSON.parse(txt1); } catch (_) { atRes = { error: `HTTP ${r1.status}: ${txt1.slice(0, 200)}` }; }
+                  if (!r1.ok && !atRes.error) atRes.error = `HTTP ${r1.status}`;
+                } catch (e) { atRes = { error: "fetch: " + e.message }; }
+                // Merchrules (необязательный — если не настроено, пропустим без крика)
                 try {
                   const r2 = await fetch("/api/sync/merchrules", {
                     method: "POST", credentials: "include",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({}),
                   });
-                  mrRes = await r2.json().catch(() => ({}));
-                } catch (e) { mrRes = { error: e.message }; }
-                const at = atRes.error ? `Airtable: ${atRes.error}` : `Airtable: ${atRes.synced || 0} клиентов, оплата ${atRes.payment_updated || 0}`;
-                const mr = mrRes.error ? `Merchrules: ${mrRes.error}` : `Merchrules: ${mrRes.clients_synced || mrRes.synced || 0} клиентов, задач ${mrRes.tasks_synced || 0}`;
-                appToast(`Готово:\n  ${at}\n  ${mr}`);
-                location.reload();
+                  const txt2 = await r2.text();
+                  try { mrRes = JSON.parse(txt2); } catch (_) { mrRes = { error: `HTTP ${r2.status}: ${txt2.slice(0, 200)}` }; }
+                  if (!r2.ok && !mrRes.error) mrRes.error = `HTTP ${r2.status}`;
+                } catch (e) { mrRes = { error: "fetch: " + e.message }; }
+
+                const atLine = atRes.error
+                  ? `❌ Airtable: ${atRes.error}`
+                  : `✅ Airtable: создано ${atRes.created || 0}, обновлено ${atRes.updated || 0}, пропущено ${atRes.skipped || 0}${atRes.payment_updated != null ? `, оплата ${atRes.payment_updated}` : ""}`;
+                const mrLine = mrRes.error
+                  ? `❌ Merchrules: ${mrRes.error}`
+                  : `✅ Merchrules: клиентов ${mrRes.clients_synced || mrRes.synced || 0}, задач ${mrRes.tasks_synced || 0}`;
+                const tone = (atRes.error && mrRes.error) ? "error" : "ok";
+                appToast(`${atLine}\n${mrLine}`, { tone, duration: 8000 });
+                if (!atRes.error || !mrRes.error) setTimeout(() => location.reload(), 1500);
               }}
             >Синхронизировать</Btn>
           </>
