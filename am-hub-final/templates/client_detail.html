@@ -75,6 +75,7 @@
       <button data-tab="meetings" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">📅 Встречи</button>
       <button data-tab="rules"    class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">⚙️ Мерч-правила</button>
       <button data-tab="feeds"    class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">📦 Фиды</button>
+      <button data-tab="tickets"  class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent hover:text-indigo-300">🎫 Тикеты</button>
     </nav>
 
     <div class="p-4">
@@ -84,6 +85,7 @@
       <div id="tab-meetings" class="tab-pane hidden"><div id="calendar"></div><div id="meeting-sheet" class="hidden"></div></div>
       <div id="tab-rules"    class="tab-pane hidden"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
       <div id="tab-feeds"    class="tab-pane hidden"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
+      <div id="tab-tickets"  class="tab-pane hidden"><div class="text-slate-500 text-center py-8">Загрузка...</div></div>
     </div>
   </div>
 </div>
@@ -204,7 +206,7 @@ function switchTab(name) {
   });
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('hidden', p.id !== `tab-${name}`));
   location.hash = name;
-  const loaders = {notes: loadNotes, roadmap: loadRoadmap, qbr: loadQBR, meetings: loadMeetings, rules: loadRules, feeds: loadFeeds};
+  const loaders = {notes: loadNotes, roadmap: loadRoadmap, qbr: loadQBR, meetings: loadMeetings, rules: loadRules, feeds: loadFeeds, tickets: loadTickets};
   if (loaders[name] && !loaders[name]._done) { loaders[name](); loaders[name]._done = true; }
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
@@ -216,6 +218,7 @@ async function loadQBR()      { $('#tab-qbr').innerHTML      = '<div class="text
 async function loadMeetings() { $('#tab-meetings').innerHTML = '<div class="text-slate-500">Встречи (TODO)</div>'; }
 async function loadRules()    { $('#tab-rules').innerHTML    = '<div class="text-slate-500">Правила (TODO)</div>'; }
 async function loadFeeds()    { $('#tab-feeds').innerHTML    = '<div class="text-slate-500">Фиды (TODO)</div>'; }
+async function loadTickets()  { $('#tab-tickets').innerHTML  = '<div class="text-slate-500">Тикеты (TODO)</div>'; }
 
 // TIMELINE
 async function loadTimeline() {
@@ -269,7 +272,7 @@ function openTab(name) { alert('TODO: вкладка контактов (' + nam
 loadOverview();
 loadCharts();
 const initialTab = (location.hash || '#notes').slice(1);
-switchTab(['notes','roadmap','qbr','meetings','rules','feeds'].includes(initialTab) ? initialTab : 'notes');
+switchTab(['notes','roadmap','qbr','meetings','rules','feeds','tickets'].includes(initialTab) ? initialTab : 'notes');
 </script>
 <script src="/static/js/client_hub_tabs.js"></script>
 {% endblock %}

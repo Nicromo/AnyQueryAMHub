@@ -349,4 +349,123 @@
       loadFeeds();
     } catch (e) { alert('Ошибка'); }
   };
+
+  // ──────── TICKETS ────────
+  window.loadTickets = async function () {
+    const c = $('#tab-tickets');
+    c.innerHTML = '<div class="text-slate-500 p-4">Загрузка тикетов...</div>';
+    try {
+      const d = await api(`/api/clients/${CID}/tickets?status=all&limit=50`);
+      const tickets = d.tickets || [];
+      if (!tickets.length) {
+        c.innerHTML = `
+          <div class="bg-slate-900 rounded-lg p-6 text-center">
+            <div class="text-slate-400 mb-3">Тикетов пока нет</div>
+            <button onclick="syncTickets()" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-sm">🔄 Синхронизировать с Time</button>
+          </div>`;
+        return;
+      }
+      const statusBadge = (s) => {
+        const map = {open:'bg-red-500/20 text-red-300',in_progress:'bg-yellow-500/20 text-yellow-300',resolved:'bg-green-500/20 text-green-300',closed:'bg-slate-600/30 text-slate-400'};
+        const label = {open:'Открыт',in_progress:'В работе',resolved:'Решён',closed:'Закрыт'}[s] || s;
+        return `<span class="px-2 py-0.5 rounded text-xs ${map[s]||''}">${label}</span>`;
+      };
+      const openCount = tickets.filter(t => t.status==='open'||t.status==='in_progress').length;
+      c.innerHTML = `
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm text-slate-300">Всего: ${tickets.length} · Открыто: <span class="text-red-400 font-semibold">${openCount}</span></div>
+          <button onclick="syncTickets()" class="px-3 py-1.5 rounded-lg bg-slate-700 text-sm">🔄 Синхронизировать</button>
+        </div>
+        <div class="space-y-2">
+          ${tickets.map(t => `
+            <div class="bg-slate-900 border border-slate-700 rounded-lg p-3 hover:border-slate-500 cursor-pointer" onclick="openTicket(${t.id})">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium text-sm">${esc(t.title||'Без темы')}</div>
+                  <div class="text-xs text-slate-500 mt-1 line-clamp-2">${esc((t.body||'').substring(0,200))}</div>
+                </div>
+                ${statusBadge(t.status)}
+              </div>
+              <div class="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                <span>👤 ${esc(t.author||'—')}</span>
+                <span>🕒 ${fmtDate(t.opened_at)}</span>
+                ${t.comments_count ? `<span>💬 ${t.comments_count}</span>` : ''}
+                ${t.last_comment_snippet ? `<span class="truncate flex-1">· ${esc(t.last_comment_snippet.substring(0,80))}</span>` : ''}
+                <a href="${esc(t.external_url||'#')}" target="_blank" class="text-indigo-400 ml-auto" onclick="event.stopPropagation()">↗ Time</a>
+              </div>
+            </div>
+          `).join('')}
+        </div>`;
+    } catch (e) {
+      c.innerHTML = `<div class="text-red-400 p-4">Ошибка: ${esc(e.message||'')}</div>`;
+    }
+  };
+
+  window.openTicket = async function (tid) {
+    try {
+      const d = await api(`/api/clients/${CID}/tickets/${tid}/thread`);
+      const t = d.ticket; const comments = d.comments || [];
+      const html = `
+        <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onclick="if(event.target===this)this.remove()">
+          <div class="bg-slate-900 border border-slate-700 rounded-lg max-w-2xl w-full max-h-[85vh] overflow-y-auto">
+            <div class="sticky top-0 bg-slate-900 border-b border-slate-700 p-3 flex items-center justify-between">
+              <div class="font-bold">${esc(t.title)}</div>
+              <button onclick="this.closest('.fixed').remove()" class="text-slate-400">✕</button>
+            </div>
+            <div class="p-4 space-y-3">
+              <div class="text-xs text-slate-500">👤 ${esc(t.author||'—')} · ${fmtDate(t.opened_at)} · <a href="${esc(t.external_url)}" target="_blank" class="text-indigo-400">Открыть в Time ↗</a></div>
+              <div class="text-sm whitespace-pre-wrap bg-slate-800 rounded p-3">${esc(t.body||'')}</div>
+              <div class="text-xs text-slate-400 mt-3">Комментарии (${comments.length})</div>
+              ${comments.map(cm => `
+                <div class="bg-slate-800 rounded p-2 text-sm">
+                  <div class="text-xs text-slate-500 mb-1">${esc(cm.author||'—')} · ${fmtDate(cm.posted_at)}</div>
+                  <div class="whitespace-pre-wrap">${esc(cm.body||'')}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>`;
+      const wrap = document.createElement('div'); wrap.innerHTML = html; document.body.appendChild(wrap.firstElementChild);
+    } catch (e) { alert('Ошибка загрузки треда'); }
+  };
+
+  window.syncTickets = async function () {
+    const btn = (typeof event !== 'undefined' && event) ? event.target : null;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Синхронизация...'; }
+    try {
+      const d = await api('/api/tickets/sync', {method: 'POST'});
+      alert(`✅ Новых: ${d.ingested||0}, Обновлено: ${d.updated||0}, Без привязки: ${d.unlinked||0}`);
+      loadTickets();
+    } catch (e) { alert('Ошибка синхронизации'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 Синхронизировать'; } }
+  };
+
+  // ──────── OVERVIEW: tickets chip ────────
+  // Маленький чип «🎫 Тикеты: N» в шапке. Вставляется в #products-chips
+  // или рядом как отдельная плашка, если контейнер не найден.
+  async function loadTicketsChip() {
+    try {
+      const d = await api(`/api/clients/${CID}/tickets?status=open&limit=1`);
+      const openCount = (d && (d.open_count != null ? d.open_count : (d.total != null ? d.total : (d.tickets||[]).length))) || 0;
+      const chipHtml = `<span id="tickets-chip" class="text-xs px-2 py-1 rounded-full bg-red-900/40 text-red-300 cursor-pointer hover:bg-red-900/60" onclick="switchTab('tickets')" title="Открытые тикеты">🎫 Тикеты: ${openCount}</span>`;
+      const chips = $('#products-chips');
+      if (chips) {
+        // удалим старый чип, если уже был, чтобы не дублировать при перезагрузке overview
+        const old = document.getElementById('tickets-chip');
+        if (old) old.remove();
+        chips.insertAdjacentHTML('beforeend', chipHtml);
+      } else {
+        const host = $('#hdr-metrics');
+        if (host && !document.getElementById('tickets-chip')) {
+          host.insertAdjacentHTML('afterend', `<div class="mt-2">${chipHtml}</div>`);
+        }
+      }
+    } catch (_) { /* тихо — эндпоинт может быть ещё не реализован */ }
+  }
+
+  // Пытаемся вставить чип после первичной загрузки overview.
+  // loadOverview() вызывается в inline-скрипте client_detail.html на init.
+  // Дадим ей 300 мс, потом добавим чип; плюс повторная попытка через 2 сек на случай медленной сети.
+  setTimeout(loadTicketsChip, 300);
+  setTimeout(loadTicketsChip, 2000);
 })();

@@ -236,7 +236,7 @@ async function handleCaptureTokens(system, url, tabId) {
 
     if (system === "tbank_time") {
       const mm = cookies.find(c => c.name === "MMAUTHTOKEN");
-      if (mm) tokens.tbank_time_token = mm.value;
+      if (mm) tokens.time_token = mm.value;
     }
     if (system === "ktalk") {
       // KTalk использует localStorage для access_token — достаём через scripting
@@ -274,6 +274,47 @@ async function handleCaptureTokens(system, url, tabId) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+// ── webRequest auth header capture (fallback для HttpOnly cookies) ──────────
+// Перехватываем Authorization-заголовок живых API-запросов time.tbank.ru и tbank.ktalk.ru,
+// чтобы надёжно достать токен даже если MMAUTHTOKEN помечен HttpOnly.
+const _lastCaptured = {};  // host → {token, ts}
+try {
+  chrome.webRequest.onBeforeSendHeaders.addListener(
+    (details) => {
+      try {
+        const url = new URL(details.url);
+        const host = url.hostname;
+        if (!/time\.tbank\.ru|tbank\.ktalk\.ru/.test(host)) return;
+        const auth = (details.requestHeaders || []).find(
+          h => h.name.toLowerCase() === "authorization"
+        );
+        if (!auth || !auth.value) return;
+        const value = auth.value.startsWith("Bearer ")
+          ? auth.value.slice(7)
+          : auth.value;
+        if (value.length < 20) return;
+        const prev = _lastCaptured[host];
+        const now = Date.now();
+        if (prev && prev.token === value && now - prev.ts < 5 * 60_000) return; // throttle 5 мин
+        _lastCaptured[host] = { token: value, ts: now };
+
+        const tokens = {};
+        if (host.includes("time.tbank.ru"))  tokens.time_token  = value;
+        if (host.includes("tbank.ktalk.ru")) tokens.ktalk_token = value;
+        if (!Object.keys(tokens).length) return;
+
+        // pushTokens уже импортирован из ../lib/hub.js — используем напрямую.
+        pushTokens(tokens).catch(() => {});
+      } catch (_) { /* noop */ }
+    },
+    { urls: ["https://time.tbank.ru/api/*", "https://tbank.ktalk.ru/*"] },
+    ["requestHeaders"]
+  );
+} catch (e) {
+  // Если webRequest недоступен (например, в MV3 profile без разрешения) — не падаем.
+  console.warn("[AM Hub] webRequest listener not registered:", e);
 }
 
 // Инициализация при установке
