@@ -984,3 +984,89 @@ function CheckupWizard({ checkup, clientId, onClose }) {
   );
 }
 window.CheckupWizard = CheckupWizard;
+
+
+// ── ClientProductsList — продукты клиента (из Airtable sync) ───────────────
+
+function ClientProductsList({ clientId }) {
+  const [list, setList] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/clients/${clientId}/products`, { credentials: "include" });
+        if (!r.ok) { if (!cancelled) setList([]); return; }
+        const d = await r.json();
+        const arr = Array.isArray(d) ? d : (d.products || []);
+        if (!cancelled) setList(arr);
+      } catch (_) { if (!cancelled) setList([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [clientId]);
+  const statusTone = { active: "ok", paused: "warn", trial: "info", disabled: "neutral" };
+  if (list === null) return React.createElement(Card, { title: "Продукты" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } }, "Загрузка…"));
+  if (!list.length) return React.createElement(Card, { title: "Продукты" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } },
+      "Продуктов нет. Добавятся при синке Airtable (поле «Подключенные продукты»)."));
+  return React.createElement(Card, { title: "Продукты" },
+    list.map((p, i) => React.createElement("div", {
+      key: p.id || i,
+      style: {
+        display: "flex", alignItems: "center", gap: 10, padding: "10px 0",
+        borderBottom: i === list.length - 1 ? "none" : "1px solid var(--line-soft)",
+      }
+    },
+      React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+        React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-8)" } }, p.name || p.code),
+        p.code && React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } }, p.code),
+      ),
+      React.createElement(Badge, { tone: statusTone[p.status] || "neutral", dot: true }, p.status || "—"),
+    ))
+  );
+}
+window.ClientProductsList = ClientProductsList;
+
+
+// ── ClientFeedsList — фиды клиента (из ClientFeed) ─────────────────────────
+
+function ClientFeedsList({ clientId }) {
+  const [list, setList] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/clients/${clientId}/feeds`, { credentials: "include" });
+        if (!r.ok) { if (!cancelled) setList([]); return; }
+        const d = await r.json();
+        const arr = Array.isArray(d) ? d : (d.feeds || []);
+        if (!cancelled) setList(arr);
+      } catch (_) { if (!cancelled) setList([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [clientId]);
+  const statusTone = { ok: "ok", warning: "warn", error: "critical", disabled: "neutral" };
+  if (list === null) return React.createElement(Card, { title: "Фиды" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } }, "Загрузка…"));
+  if (!list.length) return React.createElement(Card, { title: "Фиды" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } },
+      "Фидов нет. Добавятся когда синк фидов из Merchrules заработает."));
+  return React.createElement(Card, { title: "Фиды" },
+    list.map((f, i) => React.createElement("div", {
+      key: f.id || i,
+      style: {
+        display: "flex", alignItems: "center", gap: 10, padding: "10px 0",
+        borderBottom: i === list.length - 1 ? "none" : "1px solid var(--line-soft)",
+      }
+    },
+      React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+        React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-8)" } },
+          f.name || f.feed_type || "—"),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } },
+          `${f.sku_count ? "SKU " + f.sku_count : ""}${f.errors_count ? " · err " + f.errors_count : ""}${f.last_updated ? " · " + f.last_updated.slice(0,10) : " · не проверялся"}`.replace(/^ · /, "")),
+      ),
+      React.createElement(Badge, { tone: statusTone[f.status] || "neutral", dot: true }, f.status || "—"),
+    ))
+  );
+}
+window.ClientFeedsList = ClientFeedsList;
