@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv.win/
+.venv.unix/
+venv/
+.env
+oauth.env
+*.db
+*.sqlite
+data/*.sqlite
+**/active_time_account.json
+web/node_modules/
+web/dist/
+.DS_Store
