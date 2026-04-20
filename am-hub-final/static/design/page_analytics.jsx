@@ -46,6 +46,8 @@ function PageAnalytics() {
         </>}
       />
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <PortfolioSearchKPI/>
+
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
           <KPI label="GMV · портфель" value={gmvFmt} sub={`${CL.length} клиентов`} big/>
           <KPI label="Средний health" value={avgHealth} tone={avgHealth>=75?"ok":avgHealth>=55?"warn":"critical"} sub="из 100"/>
@@ -329,6 +331,45 @@ function PageQBR() {
     </div>
   );
 }
+
+// ── PortfolioSearchKPI — new block: search quality slice ──────────────
+function PortfolioSearchKPI() {
+  const [d, setD]     = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/analytics/portfolio-search-kpi", { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+      .then(j => { if (!cancelled) setD(j); })
+      .catch(e => { if (!cancelled) setErr(e.message); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const fmtPct  = (v) => v == null ? "—" : `${v}%`;
+  const fmtConv = (v) => v == null ? "—" : (typeof v === "number" ? (v <= 1 ? `${(v*100).toFixed(1)}%` : `${v}%`) : String(v));
+  const toneForZero = (v) => v == null ? "neutral" : v <= 5 ? "ok" : v <= 15 ? "warn" : "critical";
+  const toneForLow  = (v) => v == null ? "neutral" : v <= 10 ? "ok" : v <= 25 ? "warn" : "critical";
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 500, color: "var(--ink-9)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Качество поиска · срез по портфелю
+        </h3>
+        {err && <span style={{ fontSize: 11.5, color: "var(--critical)" }}>Ошибка: {err}</span>}
+        {d && !err && <span className="mono" style={{ fontSize: 11, color: "var(--ink-5)" }}>{d.clients_total} клиентов</span>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+        <KPI label="% нулевых запросов" value={d ? fmtPct(d.zero_pct) : "—"} tone={d ? toneForZero(d.zero_pct) : "neutral"} sub="по чекапам портфеля"/>
+        <KPI label="% запросов с низкой позицией" value={d ? fmtPct(d.low_pos_pct) : "—"} tone={d ? toneForLow(d.low_pos_pct) : "neutral"} sub="auto_score ≤ 1"/>
+        <KPI label="Клиентов с чекапом · 30д" value={d ? String(d.checkups_30d) : "—"} sub={d ? `из ${d.clients_total}` : "—"}/>
+        <KPI label="Средняя конверсия Top-50" value={d ? fmtConv(d.avg_conversion) : "—"} sub="из интеграций"/>
+      </div>
+    </div>
+  );
+}
+window.PortfolioSearchKPI = PortfolioSearchKPI;
 
 window.PageAnalytics = PageAnalytics;
 window.PageQBR = PageQBR;

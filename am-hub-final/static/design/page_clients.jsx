@@ -332,6 +332,9 @@ function PageClient() {
             {/* AI summary — real /api/ai/generate-prep */}
             <ClientAIBrief clientId={c.id}/>
 
+            {/* QBR prep — /api/clients/{id}/qbr-prep */}
+            <ClientQBRPrep clientId={c.id}/>
+
             {/* activity timeline — real /api/clients/{id}/timeline */}
             <ClientTimeline clientId={c.id}/>
           </div>
@@ -630,6 +633,121 @@ function ClientAIBrief({ clientId }) {
   );
 }
 window.ClientAIBrief = ClientAIBrief;
+
+
+// ── ClientQBRPrep — сводка для подготовки к QBR ────────────────────────
+function ClientQBRPrep({ clientId }) {
+  const [data, setData] = React.useState(null);
+  const [err, setErr]   = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/clients/${clientId}/qbr-prep`, { credentials: "include" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (!cancelled) setData(d);
+      } catch (e) { if (!cancelled) setErr(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, [clientId]);
+
+  const fmtMoney = (v) => {
+    if (v == null) return "—";
+    const n = Number(v);
+    if (!isFinite(n)) return "—";
+    if (n >= 1_000_000) return `₽ ${(n/1_000_000).toFixed(1)}м`;
+    if (n >= 1_000)     return `₽ ${Math.round(n/1_000)}к`;
+    return `₽ ${Math.round(n)}`;
+  };
+  const fmtPct = (v) => v == null ? null : `${v > 0 ? "+" : ""}${v}%`;
+  const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }); } catch { return "—"; } };
+  const deltaTone = (v) => v == null ? "neutral" : v > 0 ? "ok" : v < 0 ? "critical" : "neutral";
+
+  const header = React.createElement(Badge, { tone: "signal" }, "срез по клиенту");
+
+  if (err) return React.createElement(Card, { title: "Подготовка к QBR", action: header },
+    React.createElement("div", { style: { color: "var(--critical)", fontSize: 12.5, padding: "10px 0" } }, "Ошибка: " + err));
+  if (!data) return React.createElement(Card, { title: "Подготовка к QBR", action: header },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } }, "Загрузка…"));
+
+  const gmv = data.gmv || {};
+  const health = data.health || {};
+  const top50 = data.top50 || {};
+  const meetings = data.meetings || [];
+
+  const mini = (label, value, tone, hint) => React.createElement("div", {
+    style: { padding: 12, background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, minWidth: 0 }
+  },
+    React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, label),
+    React.createElement("div", { style: { fontSize: 20, fontWeight: 500, color: tone ? `var(--${tone})` : "var(--ink-9)", marginTop: 4, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, value),
+    hint != null && React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } }, hint),
+  );
+
+  const healthVal = health.current != null
+    ? (health.current <= 1 ? Math.round(health.current * 100) : Math.round(health.current))
+    : null;
+  const healthTrend = health.trend != null
+    ? (Math.abs(health.trend) < 2 ? "≈" : (health.trend > 0 ? `+${health.trend > 1 ? Math.round(health.trend) : (health.trend * 100).toFixed(0)}` : `${health.trend > -1 ? (health.trend * 100).toFixed(0) : Math.round(health.trend)}`))
+    : null;
+
+  const fmtTop50 = (v) => v == null ? "—" : (typeof v === "number" ? (v <= 1 ? `${(v*100).toFixed(1)}%` : String(v)) : String(v));
+
+  return React.createElement(Card, { title: "Подготовка к QBR", action: header },
+    // Row 1: GMV + Health + Checkups + Open tasks
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 12 } },
+      mini("GMV / MRR", fmtMoney(gmv.value), null, gmv.delta_pct != null ? `${fmtPct(gmv.delta_pct)} vs прошлый мес.` : "нет пред. периода"),
+      mini("Health score", healthVal != null ? String(healthVal) : "—", healthVal == null ? null : healthVal >= 70 ? "ok" : healthVal >= 40 ? "warn" : "critical", healthTrend != null ? `тренд ${healthTrend}` : "без истории"),
+      mini("Чекапов · квартал", String(data.checkups_count || 0), (data.checkups_count || 0) > 0 ? "signal" : null, "за 90 дней"),
+      mini("Открытых задач", String(data.open_tasks_count || 0), (data.open_tasks_count || 0) > 0 ? "warn" : "ok"),
+    ),
+
+    // Row 2: Top-50 metrics
+    React.createElement("div", { style: { padding: "10px 0", borderTop: "1px solid var(--line-soft)", borderBottom: "1px solid var(--line-soft)", marginBottom: 12 } },
+      React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 } }, "Top-50 · последний срез"),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 } },
+        React.createElement("div", null,
+          React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)" } }, "NDCG "),
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 500, color: "var(--ink-9)" } }, fmtTop50(top50.ndcg)),
+        ),
+        React.createElement("div", null,
+          React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)" } }, "Precision "),
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 500, color: "var(--ink-9)" } }, fmtTop50(top50.precision)),
+        ),
+        React.createElement("div", null,
+          React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)" } }, "Конверсия "),
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 500, color: "var(--ink-9)" } }, fmtTop50(top50.conversion)),
+        ),
+      ),
+    ),
+
+    // Row 3: Meetings
+    React.createElement("div", null,
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 } },
+        React.createElement("span", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Встречи за квартал"),
+        React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)" } }, String(data.meetings_count || 0)),
+      ),
+      meetings.length === 0 && React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "8px 0" } }, "Встреч не было."),
+      meetings.slice(0, 6).map((m, i) => React.createElement("div", {
+        key: m.id,
+        style: {
+          display: "grid", gridTemplateColumns: "80px 1fr auto",
+          gap: 10, alignItems: "center",
+          padding: "8px 0",
+          borderBottom: i === Math.min(meetings.length, 6) - 1 ? "none" : "1px solid var(--line-soft)",
+        },
+      },
+        React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } }, fmtDate(m.date)),
+        React.createElement("span", { style: { fontSize: 12.5, color: "var(--ink-8)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, m.title),
+        m.is_qbr
+          ? React.createElement(Badge, { tone: "signal" }, "QBR")
+          : React.createElement("span", { className: "mono", style: { fontSize: 10, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.06em" } }, m.type || "—"),
+      )),
+    ),
+  );
+}
+window.ClientQBRPrep = ClientQBRPrep;
 
 
 function ClientTimeline({ clientId }) {

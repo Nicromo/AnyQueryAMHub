@@ -986,24 +986,44 @@ function PageKanban() { return <PageTasks/>; }
 function PageKPI() {
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
   const U  = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
-  const S  = (typeof window !== "undefined" && window.__SIDEBAR_STATS) || {};
 
-  const totalGmv = CL.reduce((s, c) => s + _pg(c.gmv), 0);
-  const gmvFmt = totalGmv >= 1_000_000 ? `₽ ${(totalGmv/1_000_000).toFixed(1)}м` : `₽ ${Math.round(totalGmv/1000)}к`;
+  const [summary, setSummary] = React.useState(null);
+  const [summaryErr, setSummaryErr] = React.useState(null);
 
-  // Процент health>=ok из всего скоупа
-  const okClients = CL.filter(c => c.status === "ok").length;
-  const retention = CL.length > 0 ? Math.round((okClients / CL.length) * 100) : 0;
-
-  // План GMV — 120% от текущего (как грубая оценка)
-  const gmvPlan = Math.round(totalGmv * 1.2);
-  const gmvPlanFmt = gmvPlan >= 1_000_000 ? `₽ ${(gmvPlan/1_000_000).toFixed(1)}м` : `₽ ${Math.round(gmvPlan/1000)}к`;
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/me/kpi-summary", { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+      .then(d => { if (!cancelled) setSummary(d); })
+      .catch(e => { if (!cancelled) setSummaryErr(e.message); });
+    return () => { cancelled = true; };
+  }, []);
 
   const kpis = [
-    { l: "GMV портфеля", v: gmvFmt, plan: gmvPlanFmt, pct: gmvPlan > 0 ? Math.round((totalGmv/gmvPlan)*100) : 0, tone: "ok" },
-    { l: "Клиентов ok",  v: String(okClients), plan: String(CL.length), pct: CL.length > 0 ? Math.round((okClients/CL.length)*100) : 0, tone: "signal" },
-    { l: "Retention",    v: `${retention}%`, plan: "92%", pct: retention > 92 ? 100 : Math.round((retention/92)*100), tone: retention >= 92 ? "signal" : "warn" },
-    { l: "Активных задач", v: String(S.tasksActive || 0), plan: "—", pct: 0, tone: "info" },
+    {
+      l: "NRR",
+      v: summary && summary.nrr != null ? `${summary.nrr}%` : "—",
+      sub: "MRR this / prev month",
+      tone: !summary || summary.nrr == null ? "neutral" : summary.nrr >= 100 ? "ok" : summary.nrr >= 90 ? "warn" : "critical",
+    },
+    {
+      l: "NPS",
+      v: summary && summary.nps != null ? String(summary.nps) : "—",
+      sub: "за 90 дней",
+      tone: !summary || summary.nps == null ? "neutral" : summary.nps >= 30 ? "ok" : summary.nps >= 0 ? "warn" : "critical",
+    },
+    {
+      l: "Клиентов ок",
+      v: summary ? `${summary.clients_ok}/${summary.clients_total}` : "—",
+      sub: "health ≥ 70%",
+      tone: "signal",
+    },
+    {
+      l: "Просроченные встречи",
+      v: summary ? String(summary.overdue_meetings) : "—",
+      sub: "без followup",
+      tone: summary && (summary.overdue_meetings || 0) > 0 ? "critical" : "ok",
+    },
   ];
 
   return (
@@ -1011,42 +1031,216 @@ function PageKPI() {
       <TopBar breadcrumbs={["am hub","мой kpi"]} title="Мой KPI"
         subtitle={`${U.name || U.email || "Менеджер"} · ${U.role || "user"}`}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+        {summaryErr && (
+          <div style={{ padding: "8px 12px", background: "color-mix(in oklch, var(--critical) 10%, transparent)", border: "1px solid color-mix(in oklch, var(--critical) 30%, transparent)", borderRadius: 4, color: "var(--critical)", fontSize: 12 }}>
+            Ошибка загрузки KPI: {summaryErr}
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
           {kpis.map((k,i)=>(
             <div key={i} style={{ padding: 18, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{k.l}</div>
               <div style={{ fontSize: 34, fontWeight: 500, color: `var(--${k.tone})`, letterSpacing: "-0.03em", lineHeight: 1, marginTop: 8 }}>{k.v}</div>
-              <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", marginTop: 4 }}>цель · {k.plan}</div>
-              <div style={{ marginTop: 12 }}><Progress value={k.pct} tone={k.tone} h={4}/></div>
-              <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-6)", marginTop: 4 }}>{k.pct}% от плана</div>
+              <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", marginTop: 6 }}>{k.sub}</div>
             </div>
           ))}
         </div>
 
-        <Card title="Прогресс · по неделям">
-          {(function(){
-            const weekly = (typeof window !== "undefined" && window.KPI_WEEKLY) || [];
-            if (!weekly.length) {
-              return <div style={{ padding: "30px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
-                Данных о недельном прогрессе пока нет.
-              </div>;
-            }
-            const maxV = Math.max(1, ...weekly.map(w => w.value || 0));
-            return <div style={{ display: "grid", gridTemplateColumns: `repeat(${weekly.length},1fr)`, gap: 4, alignItems: "end", height: 160 }}>
-              {weekly.map((w, i) => {
-                const h = Math.max(4, Math.round((w.value || 0) / maxV * 140));
-                return (
-                  <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                    <div style={{ width: "100%", height: h, background: w.active ? "var(--signal)" : "var(--ink-3)", borderRadius: "2px 2px 0 0" }} title={String(w.value || 0)}/>
-                    <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)" }}>{w.label || `W${i+1}`}</span>
-                  </div>
-                );
-              })}
-            </div>;
-          })()}
-        </Card>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+          <NPSSurveysCard clients={CL}/>
+          <MRRTrendCard/>
+        </div>
       </div>
     </div>
+  );
+}
+
+// ── NPS Surveys card ────────────────────────────────────────
+function NPSSurveysCard({ clients }) {
+  const [list, setList] = React.useState(null);
+  const [avg, setAvg]   = React.useState(null);
+  const [err, setErr]   = React.useState(null);
+  const [modal, setModal] = React.useState(false);
+  const [form, setForm] = React.useState({ client_id: "", score: "9", comment: "" });
+  const [saving, setSaving] = React.useState(false);
+
+  const reload = React.useCallback(async () => {
+    try {
+      const r = await fetch("/api/nps", { credentials: "include" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      setList(d.entries || []);
+      setAvg(d.avg_nps);
+    } catch (e) { setErr(e.message); setList([]); }
+  }, []);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  async function submit() {
+    if (!form.client_id) { appToast("Выберите клиента", "warn"); return; }
+    setSaving(true);
+    try {
+      const r = await fetch("/api/nps", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: Number(form.client_id),
+          score: Number(form.score),
+          comment: form.comment.trim(),
+        }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.detail || ("HTTP " + r.status));
+      }
+      setModal(false);
+      setForm({ client_id: "", score: "9", comment: "" });
+      await reload();
+      appToast("NPS сохранён", "ok");
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    setSaving(false);
+  }
+
+  const scoreTone = (s) => s >= 9 ? "ok" : s >= 7 ? "signal" : s >= 5 ? "warn" : "critical";
+  const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }); } catch { return "—"; } };
+
+  const header = (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      {avg != null && <Badge tone={avg >= 30 ? "ok" : avg >= 0 ? "warn" : "critical"}>avg {avg}</Badge>}
+      <Btn size="s" kind="primary" icon={<I.plus size={12}/>} onClick={() => setModal(true)}>Опрос</Btn>
+    </div>
+  );
+
+  return (
+    <>
+      <Card title="NPS-опросы" action={header}>
+        {err && <div style={{ padding: "10px 0", color: "var(--critical)", fontSize: 12.5 }}>Ошибка: {err}</div>}
+        {!err && list === null && <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>Загрузка…</div>}
+        {list && list.length === 0 && (
+          <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+            Опросов пока нет. Нажмите «Опрос» чтобы добавить первый.
+          </div>
+        )}
+        {list && list.map((e, i) => (
+          <div key={e.id} style={{
+            display: "grid", gridTemplateColumns: "1fr auto auto",
+            gap: 10, alignItems: "center",
+            padding: "10px 0",
+            borderBottom: i === list.length - 1 ? "none" : "1px solid var(--line-soft)",
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, color: "var(--ink-9)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.client_name}</div>
+              {e.comment && <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2 }}>{e.comment}</div>}
+            </div>
+            <Badge tone={scoreTone(e.score)}>{e.score}</Badge>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{fmtDate(e.created_at)}</span>
+          </div>
+        ))}
+      </Card>
+      {modal && (
+        <div onClick={(e) => e.target === e.currentTarget && setModal(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6, width: 420, padding: 20 }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: "var(--ink-9)", marginBottom: 14 }}>Новый NPS-опрос</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Клиент</span>
+                <select value={form.client_id} onChange={(e) => setForm({...form, client_id: e.target.value})}
+                  style={{ padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--ink-9)", borderRadius: 4, fontSize: 13 }}>
+                  <option value="">— выберите —</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Score (0..10)</span>
+                <input type="number" min="0" max="10" value={form.score}
+                  onChange={(e) => setForm({...form, score: e.target.value})}
+                  style={{ padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--ink-9)", borderRadius: 4, fontSize: 13 }}/>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Комментарий</span>
+                <textarea rows={3} value={form.comment}
+                  onChange={(e) => setForm({...form, comment: e.target.value})}
+                  style={{ padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--ink-9)", borderRadius: 4, fontSize: 13, fontFamily: "inherit", resize: "vertical" }}/>
+              </label>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <Btn kind="ghost" size="m" onClick={() => setModal(false)}>Отмена</Btn>
+              <Btn kind="primary" size="m" onClick={submit}>{saving ? "…" : "Сохранить"}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── MRR Trend card ────────────────────────────────────────
+function MRRTrendCard() {
+  const [data, setData] = React.useState(null);
+  const [err, setErr]   = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/me/mrr-trend", { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+      .then(d => { if (!cancelled) setData(d); })
+      .catch(e => { if (!cancelled) setErr(e.message); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const fmtMrr = (v) => v >= 1_000_000 ? `₽ ${(v/1_000_000).toFixed(1)}м` : v >= 1_000 ? `₽ ${Math.round(v/1_000)}к` : `₽ ${Math.round(v)}`;
+
+  const header = data && data.nrr != null
+    ? <Badge tone={data.nrr >= 100 ? "ok" : data.nrr >= 90 ? "warn" : "critical"}>NRR {data.nrr}%</Badge>
+    : null;
+
+  if (err) return <Card title="NRR · MRR тренд">
+    <div style={{ padding: "10px 0", color: "var(--critical)", fontSize: 12.5 }}>Ошибка: {err}</div>
+  </Card>;
+
+  if (!data) return <Card title="NRR · MRR тренд">
+    <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>Загрузка…</div>
+  </Card>;
+
+  const points = data.points || [];
+  const hasData = points.some(p => (p.mrr || 0) > 0);
+  const maxV = Math.max(1, ...points.map(p => p.mrr || 0));
+
+  return (
+    <Card title="NRR · MRR тренд" action={header}>
+      {!hasData && (
+        <div style={{ padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+          MRR-записей нет. Добавьте RevenueEntry через БД / синк.
+        </div>
+      )}
+      {hasData && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${points.length},1fr)`, gap: 4, alignItems: "end", height: 120, marginTop: 8 }}>
+            {points.map((p, i) => {
+              const h = Math.max(4, Math.round((p.mrr || 0) / maxV * 100));
+              const isLast = i === points.length - 1;
+              return (
+                <div key={p.period} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                  <div style={{ width: "100%", height: h, background: isLast ? "var(--signal)" : "var(--ink-4)", borderRadius: "2px 2px 0 0" }} title={fmtMrr(p.mrr || 0)}/>
+                  <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)" }}>{p.period.slice(5)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, padding: "10px 0 0", borderTop: "1px solid var(--line-soft)" }}>
+            <div>
+              <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Этот месяц</div>
+              <div style={{ fontSize: 18, fontWeight: 500, color: "var(--ink-9)", marginTop: 2 }}>{fmtMrr(data.this_mrr || 0)}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Прошлый</div>
+              <div style={{ fontSize: 18, fontWeight: 500, color: "var(--ink-7)", marginTop: 2 }}>{fmtMrr(data.last_mrr || 0)}</div>
+            </div>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -1508,8 +1702,22 @@ function PageInternal() {
               const owner = r.owner || r.team || (r.client && r.client !== "—" ? r.client : "—");
               return (
                 <div key={i} style={{ display: "grid", gridTemplateColumns: "20px 1fr 180px 80px 80px", gap: 14, padding: "12px 6px", borderBottom: i===a.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
-                  <input type="checkbox" defaultChecked={!!r.done} style={{ accentColor: "var(--signal)" }}/>
-                  <span style={{ fontSize: 13, color: "var(--ink-8)" }}>{r.title || r.t}</span>
+                  <TaskCheck checked={r.status === "done" || !!r.done}
+                    onChange={async (checked) => {
+                      if (!r.id) return;
+                      const newStatus = checked ? "done" : "plan";
+                      try {
+                        const resp = await fetch(`/api/tasks/${r.id}/status`, {
+                          method: "PATCH", credentials: "include",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ status: newStatus }),
+                        });
+                        if (!resp.ok) throw new Error("HTTP " + resp.status);
+                        appToast(newStatus === "done" ? "Задача закрыта" : "Задача открыта", "ok");
+                        location.reload();
+                      } catch (err) { appToast("Ошибка: " + err.message, "error"); }
+                    }}/>
+                  <span style={{ fontSize: 13, color: "var(--ink-8)", textDecoration: (r.status === "done" || r.done) ? "line-through" : "none" }}>{r.title || r.t}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={owner} size={20}/><span style={{ fontSize: 12, color: "var(--ink-7)" }}>{owner}</span></div>
                   <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{r.due || "—"}</span>
                   <Badge tone={pr==="high"?"warn":pr==="med"?"info":"neutral"} dot>{pr}</Badge>
