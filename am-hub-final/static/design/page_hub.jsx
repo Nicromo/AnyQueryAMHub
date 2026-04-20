@@ -153,9 +153,6 @@ function PageHub() {
                 location.reload();
               }}
             >Синхронизировать</Btn>
-            <Btn kind="primary" size="m" icon={<I.plus size={14}/>}
-              onClick={() => { window.location.href = "/design/clients?new=1"; }}
-            >Новый клиент</Btn>
           </>
         }
       />

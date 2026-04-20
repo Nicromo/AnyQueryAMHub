@@ -4,7 +4,6 @@ function PageClients() {
   const P = (typeof window !== "undefined" && window.__PAGINATION) || { page: 1, total: 0, total_pages: 1, has_prev: false, has_next: false };
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [segFilter, setSegFilter] = React.useState("all");
-  const [newClientModal, setNewClientModal] = React.useState(false);
 
   // Сегменты — реальные из models.py (ENT, SME+, SME, SME-, SMB, SS).
   // Плюс виртуальные: NEW (недавно добавлен) и RISK (churn).
@@ -103,8 +102,6 @@ function PageClients() {
             }}>✨ Всё сразу</Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
               onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
-            <Btn kind="primary" size="m" icon={<I.plus size={14}/>}
-              onClick={() => setNewClientModal(true)}>Новый клиент</Btn>
           </>
         }
       />
@@ -225,23 +222,6 @@ function PageClients() {
           </div>
         )}
       </div>
-      {newClientModal && (
-        <FormModal
-          title="Новый клиент"
-          fields={[{ key: "name", label: "Название клиента", type: "text", placeholder: "ООО Ромашка", required: true }]}
-          submitLabel="Создать"
-          onClose={() => setNewClientModal(false)}
-          onSubmit={(vals) =>
-            fetch("/api/clients", {
-              method: "POST", credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: vals.name }),
-            })
-              .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-              .then(() => { setNewClientModal(false); location.reload(); })
-          }
-        />
-      )}
     </div>
   );
 }
