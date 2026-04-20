@@ -571,7 +571,7 @@ async def login_submit(
         return templates.TemplateResponse("login.html", {"request": request, "error": "Неверный email или пароль"})
 
     token = create_access_token({"sub": str(user.id)})
-    response = RedirectResponse(url="/dashboard", status_code=303)
+    response = RedirectResponse(url="/design/command", status_code=303)
     response.set_cookie(
         key="auth_token",
         value=token,

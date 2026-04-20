@@ -170,7 +170,7 @@ async def auth_telegram(request: Request, db: Session = Depends(get_db)):
 
     # Выдаём токен и редирект
     token = create_access_token({"sub": str(user.id)})
-    response = RedirectResponse(url="/dashboard", status_code=303)
+    response = RedirectResponse(url="/design/command", status_code=303)
     response.set_cookie(
         key="auth_token",
         value=token,
@@ -197,7 +197,7 @@ async def onboarding_page(request: Request, db: Session = Depends(get_db), auth_
 @router.get("/", response_class=HTMLResponse)
 async def index(auth_token: Optional[str] = Cookie(None)):
     if auth_token:
-        return RedirectResponse(url="/dashboard", status_code=303)
+        return RedirectResponse(url="/design/command", status_code=303)
     return RedirectResponse(url="/login", status_code=303)
 
 
@@ -271,6 +271,12 @@ def _stream_hint(stream, client, recent_meetings, recent_tasks, now):
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+    # Старый дашборд отключён — весь UI живёт на /design/*.
+    return RedirectResponse(url="/design/command", status_code=303)
+
+
+@router.get("/_dashboard_legacy", response_class=HTMLResponse)
+async def _dashboard_legacy(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     user = _get_user(auth_token, db)
     if not user:
         return _login_redirect()
@@ -734,11 +740,9 @@ async def analytics_page(request: Request, db: Session = Depends(get_db), auth_t
 
 
 @router.get("/inbox", response_class=HTMLResponse)
-async def inbox_page(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    user = _get_user(auth_token, db)
-    if not user:
-        return _login_redirect()
-    return templates.TemplateResponse("inbox.html", {"request": request, "user": user})
+async def inbox_page(request: Request):
+    # Старый inbox отключён — редиректим в новый UI на страницу "Сегодня"
+    return RedirectResponse(url="/design/today", status_code=303)
 
 
 @router.get("/voice-notes", response_class=HTMLResponse)
