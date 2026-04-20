@@ -305,28 +305,65 @@ async def internal_task_create(
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title required")
-    t = Task(
-        client_id=None,
-        title=title,
-        description=body.get("description") or "",
-        priority=body.get("priority") or "medium",
-        status="plan",
-        team=body.get("owner") or (user.email or ""),
-        source="internal",
-    )
-    # due_date — если пришёл как "YYYY-MM-DD" или "N дней"
+
+    # Определяем получателей.
+    # assignees может быть: "all" | ["a@x","b@y"] | None → старое поведение (себе).
+    assignees = body.get("assignees")
+    if assignees == "all":
+        emails = [
+            u.email for u in db.query(User)
+            .filter(User.is_active == True, User.email.isnot(None))
+            .all()
+            if u.email
+        ]
+    elif isinstance(assignees, list) and assignees:
+        emails = [
+            e.strip().lower() for e in assignees
+            if isinstance(e, str) and e.strip()
+        ]
+    else:
+        emails = [user.email or ""]
+
+    # Дедупликация с сохранением порядка, пустые выкидываем.
+    seen = set()
+    emails = [e for e in emails if e and not (e in seen or seen.add(e))]
+    if not emails:
+        emails = [user.email or ""]
+
+    # due_date считаем один раз — переиспользуем для всех создаваемых задач.
+    # due — "YYYY-MM-DD", "N" (строка цифр) или int days.
     due = body.get("due")
+    due_date = None
     if due:
         try:
             from datetime import datetime as _dt, timedelta as _td
             if isinstance(due, str) and due.isdigit():
-                t.due_date = _dt.utcnow() + _td(days=int(due))
+                due_date = _dt.utcnow() + _td(days=int(due))
+            elif isinstance(due, int):
+                due_date = _dt.utcnow() + _td(days=due)
             else:
-                t.due_date = _dt.fromisoformat(due)
+                due_date = _dt.fromisoformat(due)
         except Exception:
-            pass
-    db.add(t); db.commit(); db.refresh(t)
-    return {"ok": True, "id": t.id}
+            due_date = None
+
+    created_ids: List[int] = []
+    for email in emails:
+        t = Task(
+            client_id=None,
+            title=title,
+            description=body.get("description") or "",
+            priority=body.get("priority") or "medium",
+            status="plan",
+            team=email,
+            source="internal",
+        )
+        if due_date is not None:
+            t.due_date = due_date
+        db.add(t)
+        db.flush()
+        created_ids.append(t.id)
+    db.commit()
+    return {"ok": True, "count": len(created_ids), "ids": created_ids}
 
 
 # ── Profile ──────────────────────────────────────────────────
@@ -345,6 +382,8 @@ async def profile_get(
         "id":         user.id,
         "email":      user.email,
         "name":       user.name,
+        "first_name": user.first_name,
+        "last_name":  user.last_name,
         "role":       user.role,
         "is_active":  user.is_active,
         "telegram_id": user.telegram_id,

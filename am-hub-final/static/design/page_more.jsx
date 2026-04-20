@@ -1310,28 +1310,164 @@ function PageRoadmap() {
 }
 
 // ── Internal tasks ────────────────────────────────────────
+// Кастомный модал создания внутренней задачи с выбором исполнителей.
+// FormModal не поддерживает мультиселект, поэтому пишем свой.
+function InternalTaskModal({ onClose, onDone }) {
+  const [title, setTitle] = React.useState("");
+  const [priority, setPriority] = React.useState("med");
+  const [due, setDue] = React.useState("7");
+  const [mode, setMode] = React.useState("me"); // me | all | pick
+  const [users, setUsers] = React.useState(null); // null = ещё не загружены
+  const [usersErr, setUsersErr] = React.useState(null);
+  const [picked, setPicked] = React.useState({}); // email -> bool
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  // Грузим /api/users лениво: только когда пользователь выбрал «Выбрать…».
+  React.useEffect(function(){
+    if (mode !== "pick" || users !== null) return;
+    (async function(){
+      try {
+        const r = await fetch("/api/users", { credentials: "include" });
+        if (!r.ok) { setUsersErr("Ошибка " + r.status); setUsers([]); return; }
+        const d = await r.json();
+        setUsers(Array.isArray(d.users) ? d.users : []);
+      } catch (e) { setUsersErr(String(e.message || e)); setUsers([]); }
+    })();
+  }, [mode]);
+
+  const pickedEmails = Object.keys(picked).filter(function(k){ return picked[k]; });
+  // Для all-режима точное число будет известно только по ответу сервера,
+  // но если users уже подгружены (юзер открывал pick) — можно показать.
+  const allCount = Array.isArray(users) ? users.length : null;
+  const willCreate = mode === "me" ? 1
+                   : mode === "pick" ? pickedEmails.length
+                   : (allCount === null ? "?" : allCount);
+
+  const handleSubmit = async function(e) {
+    e.preventDefault();
+    if (!title.trim()) { setErr("Укажите название задачи"); return; }
+    if (mode === "pick" && pickedEmails.length === 0) { setErr("Выберите хотя бы одного исполнителя"); return; }
+    setSaving(true); setErr(null);
+    try {
+      const body = { title: title.trim(), priority: priority || "med", due: due || "7" };
+      if (mode === "all") body.assignees = "all";
+      else if (mode === "pick") body.assignees = pickedEmails;
+      const r = await fetch("/design/api/internal-tasks", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      await r.json().catch(function(){ return null; });
+      if (onDone) onDone();
+      else location.reload();
+    } catch (ex) {
+      setErr(String(ex.message || ex));
+      setSaving(false);
+    }
+  };
+
+  const inputStyle = { padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontFamily: "var(--f-mono)", fontSize: 12, outline: "none", width: "100%", boxSizing: "border-box" };
+  const labelStyle = { display: "flex", flexDirection: "column", gap: 4 };
+  const capStyle = { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" };
+
+  return (
+    <div onClick={function(e){ if (e.target === e.currentTarget) onClose(); }} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9999,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        width: 480, maxWidth: "92vw", maxHeight: "90vh", overflowY: "auto",
+        background: "var(--ink-1)", border: "1px solid var(--line)",
+        borderRadius: 8, padding: 24, display: "flex", flexDirection: "column", gap: 16,
+        boxShadow: "0 8px 40px rgba(0,0,0,0.4)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ink-9)" }}>Новая внутренняя задача</span>
+          <button onClick={onClose} style={{ background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4 }}>×</button>
+        </div>
+        {err && <div style={{ padding: "8px 10px", background: "color-mix(in oklch,var(--critical) 10%,transparent)", border: "1px solid color-mix(in oklch,var(--critical) 30%,transparent)", borderRadius: 4, color: "var(--critical)", fontSize: 12 }}>{err}</div>}
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <label style={labelStyle}>
+            <span className="mono" style={capStyle}>Задача<span style={{color:"var(--critical)"}}> *</span></span>
+            <input type="text" value={title} onChange={function(e){ setTitle(e.target.value); }} placeholder="Обновить регламент" required style={inputStyle}/>
+          </label>
+          <label style={labelStyle}>
+            <span className="mono" style={capStyle}>Приоритет</span>
+            <select value={priority} onChange={function(e){ setPriority(e.target.value); }} style={inputStyle}>
+              <option value="low">low</option>
+              <option value="med">med</option>
+              <option value="high">high</option>
+            </select>
+          </label>
+          <label style={labelStyle}>
+            <span className="mono" style={capStyle}>Срок (дней от сегодня)</span>
+            <input type="number" value={due} onChange={function(e){ setDue(e.target.value); }} placeholder="7" style={inputStyle}/>
+          </label>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", background: "var(--ink-2)", border: "1px solid var(--line-soft)", borderRadius: 4 }}>
+            <span className="mono" style={capStyle}>Исполнители</span>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--ink-8)", cursor: "pointer" }}>
+              <input type="radio" name="int-assignees" checked={mode === "me"} onChange={function(){ setMode("me"); }}/>
+              Только мне
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--ink-8)", cursor: "pointer" }}>
+              <input type="radio" name="int-assignees" checked={mode === "all"} onChange={function(){ setMode("all"); }}/>
+              Всем менеджерам
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--ink-8)", cursor: "pointer" }}>
+              <input type="radio" name="int-assignees" checked={mode === "pick"} onChange={function(){ setMode("pick"); }}/>
+              Выбрать…
+            </label>
+
+            {mode === "pick" && (
+              <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4, maxHeight: 200, overflowY: "auto", padding: "6px 4px", background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4 }}>
+                {users === null && <div style={{ fontSize: 12, color: "var(--ink-6)", padding: "6px 4px" }}>Загрузка…</div>}
+                {usersErr && <div style={{ fontSize: 12, color: "var(--critical)", padding: "6px 4px" }}>{usersErr}</div>}
+                {Array.isArray(users) && users.length === 0 && !usersErr && (
+                  <div style={{ fontSize: 12, color: "var(--ink-6)", padding: "6px 4px" }}>Нет активных пользователей</div>
+                )}
+                {Array.isArray(users) && users.map(function(u){
+                  if (!u.email) return null;
+                  const em = u.email;
+                  const label = em + (u.name ? " (" + u.name + ")" : "");
+                  return (
+                    <label key={em} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--ink-8)", cursor: "pointer", padding: "3px 4px" }}>
+                      <input type="checkbox" checked={!!picked[em]}
+                        onChange={function(e){
+                          const ch = e.target.checked;
+                          setPicked(function(p){ const n = Object.assign({}, p); n[em] = ch; return n; });
+                        }}/>
+                      <span>{label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ fontSize: 11.5, color: "var(--ink-6)", marginTop: 2 }}>
+              Будет создано: {willCreate} {typeof willCreate === "number" && willCreate === 1 ? "задача" : "задач"}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+            <Btn kind="ghost" size="m" type="button" onClick={onClose}>Отмена</Btn>
+            <Btn kind="primary" size="m" type="submit" disabled={saving}>{saving ? "Сохраняю…" : "Создать"}</Btn>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function PageInternal() {
   const [intModal, setIntModal] = React.useState(false);
   return (
     <div>
       {intModal && (
-        <FormModal title="Новая внутренняя задача"
-          fields={[
-            { k: "title",    label: "Задача",    required: true, placeholder: "Обновить регламент" },
-            { k: "priority", label: "Приоритет", type: "select",
-              options: [{v:"low",l:"low"},{v:"med",l:"med"},{v:"high",l:"high"}], default: "med" },
-            { k: "due",      label: "Срок (дней от сегодня)", type: "number", default: "7", placeholder: "7" },
-          ]}
-          onClose={() => setIntModal(false)}
-          onSubmit={async function(vals) {
-            const r = await fetch("/design/api/internal-tasks", {
-              method: "POST", credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ title: vals.title, priority: vals.priority || "med", due: vals.due || "7" }),
-            });
-            if (!r.ok) throw new Error(await r.text());
-            setIntModal(false); location.reload();
-          }}
+        <InternalTaskModal
+          onClose={function(){ setIntModal(false); }}
+          onDone={function(){ setIntModal(false); location.reload(); }}
         />
       )}
       <TopBar breadcrumbs={["am hub","внутренние задачи"]} title="Внутренние задачи"
