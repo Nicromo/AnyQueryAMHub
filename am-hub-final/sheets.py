@@ -24,9 +24,10 @@ def _extract_sheets_id(val: str) -> str:
 # Настройки по умолчанию
 SHEETS_SPREADSHEET_ID = _extract_sheets_id(os.getenv(
     "SHEETS_SPREADSHEET_ID",
-    "1baqs2xGFZNxCuAwTfuDiE52KXIaLaKtuZzcSN4lce3M",
+    "10SuYn0w2VyDU87KSrYE-A_TDqkekj7q__o910doRCsc",
 ))
-SHEETS_TOP50_GID = os.getenv("SHEETS_TOP50_GID", "374545260")
+# Tab "Актуальные метрики и список топ 50" в указанной таблице
+SHEETS_TOP50_GID = os.getenv("SHEETS_TOP50_GID", "112299807")
 
 # Список клиентов из БД — для фильтрации строк таблицы.
 # Если пусто — возвращаем все строки.
@@ -191,6 +192,157 @@ def get_headers(rows: list[dict]) -> list[str]:
     return list(rows[0].keys())
 
 
+async def fetch_top50_raw(spreadsheet_id: str = SHEETS_SPREADSHEET_ID,
+                           gid: str = SHEETS_TOP50_GID) -> list[list[str]]:
+    """Возвращает raw-матрицу CSV (список списков). Без обработки заголовков."""
+    url = _csv_export_url(spreadsheet_id, gid)
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT_S, follow_redirects=True) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            logger.error("Sheets fetch error: HTTP %s for %s", resp.status_code, url)
+            return []
+        reader = csv.reader(io.StringIO(resp.text))
+        return [row for row in reader]
+    except Exception as exc:
+        logger.error("Sheets raw fetch exception: %s", exc)
+        return []
+
+
+# Какие группы метрик ищем в шапке «Актуальные метрики» в первой строке
+# (объединённая ячейка, CSV экспортирует только в ПЕРВОЙ колонке группы;
+# остальные пусты — мы заполним их forward-fill).
+METRIC_GROUPS = ["ndcg@20_mean", "precision@20_mean", "precision_exact@20_mean", "Конверсия"]
+# Строки-заголовки по умолчанию (0-based):
+#   row 0 — группы метрик (объединённые ячейки)
+#   row 1 — месяцы (2025-04, 2025-07, ..., 2026-3) + Абсолютное изменение / Относительное / Тренд / Рост от минимума / Sparkline
+# Поиск клиента — колонка «Сайт» / «Клиент» в левой части таблицы.
+
+
+def _parse_top50_matrix(matrix: list[list[str]]) -> dict:
+    """Разбирает матрицу top-50 с двумя строками шапки.
+
+    Возвращает:
+      {
+        "client_col_index": int,
+        "metric_columns": {"ndcg@20_mean": [(idx, month), ...], ...},
+        "clients": [
+          {"name": "cdek.shopping",
+           "metrics": {
+             "ndcg@20_mean": {"2025-04": 0.9753, "2025-07": ...},
+             "precision@20_mean": {...},
+             ...
+           }},
+          ...
+        ]
+      }
+    """
+    if not matrix or len(matrix) < 3:
+        return {"clients": [], "metric_columns": {}, "client_col_index": None}
+
+    # Находим строки шапки. Row 0 — группы (часто «Актуальные» → metric_name → ...).
+    # Row 1 — месяца. Клиенты идут с row 2.
+    groups_row = matrix[0] if len(matrix) > 0 else []
+    months_row = matrix[1] if len(matrix) > 1 else []
+
+    # Forward-fill groups (Google Sheets CSV даёт имя группы только в первой колонке слияния).
+    filled_groups: list[str] = []
+    last = ""
+    for cell in groups_row:
+        v = (cell or "").strip()
+        if v:
+            last = v
+        filled_groups.append(last)
+
+    # Сопоставление: "ndcg@20_mean" → [(col_idx, month_label), ...]
+    metric_columns: dict[str, list[tuple[int, str]]] = {m: [] for m in METRIC_GROUPS}
+    for i, g in enumerate(filled_groups):
+        # Приводим имя группы к lower для матча
+        g_low = g.lower().strip()
+        for metric in METRIC_GROUPS:
+            m_low = metric.lower().strip()
+            if m_low in g_low:
+                month = (months_row[i] if i < len(months_row) else "").strip()
+                # Пропускаем служебные столбцы (абс/отн изменения, тренд, sparkline)
+                if not month:
+                    continue
+                low_m = month.lower()
+                if any(kw in low_m for kw in ("изменен", "трен", "sparkl", "рост", "мин", "%")):
+                    continue
+                # Храним только месяцы формата YYYY-MM или даты
+                metric_columns[metric].append((i, month))
+
+    # Найти колонку с именем клиента — первая колонка с непустым текстом в months_row,
+    # которая НЕ входит в metric_columns. Обычно это «Сайт» или «Клиент».
+    client_col_index = None
+    used = {i for vs in metric_columns.values() for i, _ in vs}
+    for i in range(min(len(months_row), 6)):  # ищем слева
+        header = (months_row[i] if i < len(months_row) else "").strip().lower()
+        if i in used:
+            continue
+        if any(kw in header for kw in ("клиент", "сайт", "site", "partner", "name", "магазин", "account")):
+            client_col_index = i
+            break
+    if client_col_index is None:
+        # Fallback: первая колонка с любым непустым текстовым значением в строках 2+
+        for i in range(len(months_row)):
+            if i in used: continue
+            for r in matrix[2:12]:
+                if i < len(r) and r[i].strip() and not _looks_numeric(r[i]):
+                    client_col_index = i
+                    break
+            if client_col_index is not None:
+                break
+    if client_col_index is None:
+        client_col_index = 0
+
+    # Парсим клиентов
+    clients = []
+    for row in matrix[2:]:
+        if not row or len(row) <= client_col_index:
+            continue
+        name = (row[client_col_index] or "").strip()
+        if not name:
+            continue
+        metrics_out: dict[str, dict[str, float]] = {}
+        for metric, col_month_list in metric_columns.items():
+            month_values: dict[str, float] = {}
+            for (idx, month) in col_month_list:
+                if idx < len(row):
+                    v = _to_float(row[idx])
+                    if v is not None:
+                        month_values[month] = v
+            if month_values:
+                metrics_out[metric] = month_values
+        clients.append({"name": name, "metrics": metrics_out})
+
+    return {
+        "client_col_index": client_col_index,
+        "metric_columns": metric_columns,
+        "clients": clients,
+    }
+
+
+def _looks_numeric(s: str) -> bool:
+    try:
+        float(str(s).replace(",", ".").replace(" ", ""))
+        return True
+    except Exception:
+        return False
+
+
+def _to_float(s):
+    if s is None:
+        return None
+    v = str(s).replace(",", ".").replace(" ", "").replace("\u00a0", "")
+    if not v:
+        return None
+    try:
+        return round(float(v), 6)
+    except Exception:
+        return None
+
+
 async def get_top50_data(
     my_clients: list[str],
     spreadsheet_id: str = SHEETS_SPREADSHEET_ID,
@@ -232,15 +384,43 @@ async def get_top50_data(
     # Группируем метрики по месяцам только по клиентам менеджера
     metrics_monthly = group_metrics_by_month(filtered, client_col, period_col, metric_cols) if metric_cols else []
 
+    # Новый формат (2-строчная шапка с метрика+месяц). Читаем сырую матрицу
+    # и вытаскиваем ndcg@20_mean / precision@20_mean / precision_exact@20_mean / Конверсия
+    # с разбивкой по месяцам для каждого клиента.
+    structured_clients: list[dict] = []
+    all_months: list[str] = []
+    try:
+        matrix = await fetch_top50_raw(spreadsheet_id, gid)
+        parsed = _parse_top50_matrix(matrix) if matrix else {"clients": [], "metric_columns": {}}
+        structured_clients = parsed.get("clients", [])
+        # Собираем упорядоченный список месяцев (берём из первой не-пустой группы)
+        for metric in METRIC_GROUPS:
+            cols = parsed.get("metric_columns", {}).get(metric, [])
+            if cols:
+                all_months = [m for _, m in cols]
+                break
+        # Фильтрация по my_clients
+        if my_clients:
+            norm = {_normalize(c) for c in my_clients}
+            structured_clients = [c for c in structured_clients if _normalize(c["name"]) in norm]
+    except Exception as _e:
+        logger.warning("structured top50 parse failed: %s", _e)
+
     return {
         "rows": rows,
         "filtered_rows": filtered,
         "headers": headers,
         "client_col": client_col,
         "problem_cols": problem_cols,
-        "metric_cols": metric_cols,       # найденные колонки метрик
-        "period_col": period_col,          # колонка с периодом/месяцем (если есть)
-        "metrics_monthly": metrics_monthly,  # [{client, period, metrics}]
+        "metric_cols": metric_cols,
+        "period_col": period_col,
+        "metrics_monthly": metrics_monthly,
+        # Новая структура, которой надо пользоваться:
+        "structured": {
+            "months": all_months,
+            "metrics": METRIC_GROUPS,
+            "clients": structured_clients,
+        },
         "fetched_at": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "error": None,
     }
