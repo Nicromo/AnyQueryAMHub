@@ -119,6 +119,63 @@ async def api_generate_prep(
         return {"error": str(e)}
 
 
+@router.post("/api/ai/analyze-top50")
+async def api_analyze_top50(
+    request: Request,
+    auth_token: Optional[str] = Cookie(None),
+):
+    """AI-разбор Top-50 метрик: тренды, риски, рекомендации."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from ai_assistant import _chat_sync, DOMAIN_CONTEXT
+
+    data = await request.json()
+    metric = (data.get("metric") or "").strip()
+    months = data.get("months") or []
+    clients = data.get("clients") or []
+
+    if not clients:
+        return {"text": "Нет данных для анализа — загрузи метрики из Google Sheets."}
+
+    # Компактная сводка: клиент × последние 3 месяца + тренд
+    lines = []
+    for c in clients[:50]:
+        mdata = (c.get("metrics") or {}).get(metric) or {}
+        vals = [(m, mdata.get(m)) for m in months]
+        filled = [(m, v) for m, v in vals if v is not None]
+        if not filled:
+            continue
+        last_m, last_v = filled[-1]
+        tail = ", ".join(f"{m}={v:.3f}" if isinstance(v, (int, float)) else f"{m}={v}" for m, v in filled[-3:])
+        delta = ""
+        if len(filled) >= 2 and filled[-2][1]:
+            d = (last_v - filled[-2][1]) / filled[-2][1] if filled[-2][1] else 0
+            delta = f" Δ={d*100:+.1f}%"
+        lines.append(f"- {c.get('name','?')}: {tail}{delta}")
+
+    if not lines:
+        return {"text": f"Метрика «{metric}» пуста во всех клиентах."}
+
+    prompt = f"""Проанализируй Top-50 клиентов AnyQuery по метрике «{metric}».
+
+Данные (клиент: последние 3 месяца + дельта):
+{chr(10).join(lines)}
+
+Сделай короткий разбор (6-10 пунктов, без воды):
+1. Кто в топе и кто лидирует по тренду.
+2. У кого явный регресс и почему это может быть критично (сегмент, GMV-класс).
+3. Кого срочно смотреть / с кем проводить внеплановый чекап.
+4. 2-3 конкретные рекомендации Account Manager'у на ближайшую неделю.
+
+Пиши строго по делу, по-русски, без шаблонных вежливостей."""
+
+    try:
+        text = _chat_sync(DOMAIN_CONTEXT, prompt, max_tokens=1200)
+        return {"text": text}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ============================================================================
 # SETTINGS
 

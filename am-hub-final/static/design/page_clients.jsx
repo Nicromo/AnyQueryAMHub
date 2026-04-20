@@ -4,6 +4,27 @@ function PageClients() {
   const P = (typeof window !== "undefined" && window.__PAGINATION) || { page: 1, total: 0, total_pages: 1, has_prev: false, has_next: false };
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [segFilter, setSegFilter] = React.useState("all");
+  // Tab switcher: список клиентов vs структура портфеля (бывшая страница /portfolio).
+  const [view, setView] = React.useState(() => {
+    try { return sessionStorage.getItem("amhub_portfolio_view") || "list"; } catch (_) { return "list"; }
+  });
+  const switchView = (v) => {
+    setView(v);
+    try { sessionStorage.setItem("amhub_portfolio_view", v); } catch (_) {}
+  };
+
+  // Если выбран режим «структура», рендерим PagePortfolio (глобальный компонент).
+  if (view === "structure" && typeof window.PagePortfolio === "function") {
+    return React.createElement("div", null,
+      React.createElement("div", {
+        style: { padding: "16px 28px 0 28px", display: "flex", gap: 8 },
+      },
+        React.createElement(Btn, { kind: "dim",     size: "s", onClick: () => switchView("list") },      "Список"),
+        React.createElement(Btn, { kind: "primary", size: "s", onClick: () => switchView("structure") }, "Структура"),
+      ),
+      React.createElement(window.PagePortfolio),
+    );
+  }
 
   // Сегменты — реальные из models.py (ENT, SME+, SME, SME-, SMB, SS).
   // Плюс виртуальные: NEW (недавно добавлен) и RISK (churn).
@@ -51,11 +72,13 @@ function PageClients() {
   return (
     <div>
       <TopBar
-        breadcrumbs={["am hub", "портфель"]}
-        title="Все клиенты"
+        breadcrumbs={["am hub", "мой портфель"]}
+        title="Мой портфель"
         subtitle={`${P.total} клиентов · стр. ${P.page} из ${P.total_pages}`}
         actions={
           <>
+            <Btn kind="primary" size="m" onClick={() => switchView("list")}>Список</Btn>
+            <Btn kind="ghost"   size="m" onClick={() => switchView("structure")}>Структура</Btn>
             <Btn kind="ghost" size="m" onClick={pullFromAirtable} disabled={syncBusy}>
               {syncBusy ? "Тянем..." : "⟲ Из Airtable"}
             </Btn>
@@ -320,12 +343,129 @@ function PageClient() {
 
             {/* Чекапы — v2 */}
             <ClientCheckupsList clientId={c.id}/>
+
+            {/* Роадмап клиента — per-client (Q1/Q2/Q3/Q4 + Бэклог) */}
+            <ClientRoadmap clientId={c.id}/>
+
+            {/* История партнёра — real /api/clients/{id}/logs */}
+            <ClientLogsList clientId={c.id}/>
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+// ── ClientRoadmap — квартальный план развития клиента ──────────────────
+// Использует Task + source="roadmap" + task_type=Q1..Q4|backlog.
+// GET /api/tasks?client_id=X&source=roadmap → список, группируем по task_type.
+// POST /api/tasks → создать новый элемент в колонке
+function ClientRoadmap({ clientId }) {
+  const [items, setItems] = React.useState(null);
+  const [adding, setAdding] = React.useState(null); // Q1 / Q2 / ... / backlog
+
+  const COLS = [
+    { key: "Q1",      l: "Q1 · готово",   tone: "ok"      },
+    { key: "Q2",      l: "Q2 · в работе", tone: "signal"  },
+    { key: "Q3",      l: "Q3 · план",     tone: "info"    },
+    { key: "Q4",      l: "Q4 · идеи",     tone: "warn"    },
+    { key: "backlog", l: "бэклог",        tone: "neutral" },
+  ];
+
+  const reload = React.useCallback(async () => {
+    try {
+      const r = await fetch(`/api/tasks?client_id=${clientId}&source=roadmap`, { credentials: "include" });
+      if (!r.ok) { setItems([]); return; }
+      const d = await r.json();
+      setItems(d.tasks || []);
+    } catch (e) { setItems([]); }
+  }, [clientId]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  async function addItem(colKey) {
+    const title = (window.prompt(`Добавить в «${colKey}»:`) || "").trim();
+    if (!title) return;
+    try {
+      const r = await fetch("/api/tasks", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title, client_id: clientId, source: "roadmap",
+          task_type: colKey, priority: "med", status: "plan",
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      appToast("Добавлено в " + colKey, "ok");
+      reload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+  }
+
+  async function removeItem(id) {
+    if (!await appConfirm("Удалить пункт?")) return;
+    try {
+      await fetch("/api/tasks/" + id, { method: "DELETE", credentials: "include" });
+      reload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+  }
+
+  const grouped = {};
+  COLS.forEach(c => { grouped[c.key] = []; });
+  (items || []).forEach(t => {
+    const key = (t.task_type || "backlog").toUpperCase() === "BACKLOG" ? "backlog" : (t.task_type || "backlog");
+    if (grouped[key]) grouped[key].push(t);
+    else grouped["backlog"].push(t);
+  });
+
+  return React.createElement(Card, { title: "Роадмап клиента" },
+    items === null
+      ? React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } }, "Загрузка…")
+      : COLS.map((c, ci) =>
+          React.createElement("div", {
+            key: c.key,
+            style: {
+              padding: "10px 0",
+              borderBottom: ci === COLS.length - 1 ? "none" : "1px solid var(--line-soft)",
+            },
+          },
+            React.createElement("div", {
+              style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+            },
+              React.createElement("span", {
+                className: "mono",
+                style: { fontSize: 10.5, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" },
+              }, c.l),
+              React.createElement("button", {
+                onClick: () => addItem(c.key),
+                style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 },
+                title: "Добавить",
+              }, "+"),
+            ),
+            grouped[c.key].length === 0
+              ? React.createElement("div", { style: { fontSize: 12, color: "var(--ink-5)", padding: "2px 0 4px" } }, "пусто")
+              : grouped[c.key].map(t =>
+                  React.createElement("div", {
+                    key: t.id,
+                    style: {
+                      display: "flex", justifyContent: "space-between", gap: 8,
+                      padding: "4px 0", alignItems: "center",
+                    },
+                  },
+                    React.createElement("span", {
+                      style: { fontSize: 12.5, color: "var(--ink-8)", flex: 1 },
+                    }, t.title),
+                    React.createElement("button", {
+                      onClick: () => removeItem(t.id),
+                      style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 12, padding: 0 },
+                      title: "Удалить",
+                    }, "×"),
+                  )
+                )
+          )
+        )
+  );
+}
+window.ClientRoadmap = ClientRoadmap;
 
 window.PageClients = PageClients;
 window.PageClient = PageClient;
@@ -605,6 +745,185 @@ function ClientCheckupsList({ clientId }) {
   );
 }
 window.ClientCheckupsList = ClientCheckupsList;
+
+
+// ── ClientLogsList — единая история партнёра (PartnerLog) ─────────────────
+// Card «История партнёра»:
+//  - форма сверху: event_type (select) + body (textarea) + кнопка «Добавить запись»
+//  - лента записей: иконка типа, title/body (первые 200 символов), дата, автор
+//  - кнопка «🗑» — удалить запись
+function ClientLogsList({ clientId }) {
+  const [list, setList] = React.useState(null);
+  const [eventType, setEventType] = React.useState("note");
+  const [bodyText, setBodyText] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  const EVENT_TYPES = [
+    { k: "note",                 l: "Заметка",            icon: "📝" },
+    { k: "communication",        l: "Коммуникация",       icon: "💬" },
+    { k: "call",                 l: "Звонок",             icon: "📞" },
+    { k: "email",                l: "Email",              icon: "✉️" },
+    { k: "meeting_summary",      l: "Итоги встречи",      icon: "🤝" },
+    { k: "merch_rule_created",   l: "Мерч-правило (new)", icon: "⚙️" },
+    { k: "merch_rule_updated",   l: "Мерч-правило (upd)", icon: "⚙️" },
+    { k: "synonym_added",        l: "Синоним добавлен",   icon: "🔤" },
+    { k: "whitelist_added",      l: "Whitelist",          icon: "✅" },
+    { k: "manual",               l: "Прочее",             icon: "•"  },
+  ];
+  const typeMeta = (t) => EVENT_TYPES.find(x => x.k === t) || { k: t, l: t, icon: "•" };
+
+  const reload = React.useCallback(async () => {
+    try {
+      const r = await fetch(`/api/clients/${clientId}/logs?limit=50`, { credentials: "include" });
+      if (!r.ok) { setList([]); return; }
+      const d = await r.json();
+      setList(d.logs || []);
+    } catch (e) { setList([]); }
+  }, [clientId]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  async function addOne() {
+    const text = (bodyText || "").trim();
+    if (!text) { appToast("Введите текст записи", "error"); return; }
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/clients/${clientId}/logs`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_type: eventType, body: text, source: "manual" }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) {
+        setBodyText("");
+        appToast("Запись добавлена", "ok");
+        reload();
+      } else {
+        appToast("Ошибка: " + (d.error || d.detail || "не удалось"), "error");
+      }
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  async function removeOne(id) {
+    if (!await appConfirm("Удалить запись из истории?")) return;
+    try {
+      await fetch(`/api/clients/${clientId}/logs/${id}`, {
+        method: "DELETE", credentials: "include",
+      });
+      reload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  // Форма добавления новой записи.
+  const form = React.createElement("div", {
+    style: {
+      display: "grid", gridTemplateColumns: "1fr", gap: 8,
+      padding: "10px 0 12px 0",
+      borderBottom: "1px solid var(--line-soft)",
+    },
+  },
+    React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+      React.createElement("select", {
+        value: eventType,
+        onChange: (e) => setEventType(e.target.value),
+        style: {
+          flex: "0 0 auto",
+          background: "var(--ink-1)", color: "var(--ink-8)",
+          border: "1px solid var(--line)", borderRadius: 4,
+          fontSize: 12, padding: "6px 8px",
+        },
+      },
+        EVENT_TYPES.map(t =>
+          React.createElement("option", { key: t.k, value: t.k }, `${t.icon}  ${t.l}`)
+        ),
+      ),
+    ),
+    React.createElement("textarea", {
+      value: bodyText,
+      onChange: (e) => setBodyText(e.target.value),
+      placeholder: "Текст записи (что произошло / о чём договорились / детали)…",
+      rows: 3,
+      style: {
+        width: "100%", resize: "vertical",
+        background: "var(--ink-1)", color: "var(--ink-8)",
+        border: "1px solid var(--line)", borderRadius: 4,
+        fontSize: 12.5, padding: "8px 10px",
+        fontFamily: "inherit",
+      },
+    }),
+    React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
+      React.createElement(Btn, {
+        size: "s", kind: "primary", disabled: saving,
+        icon: React.createElement(I.plus, { size: 12 }),
+        onClick: addOne,
+      }, saving ? "Сохраняем…" : "Добавить запись"),
+    ),
+  );
+
+  // Лента записей.
+  const feed = (() => {
+    if (list === null) return React.createElement("div",
+      { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } }, "Загрузка…");
+    if (!list.length) return React.createElement("div",
+      { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } },
+      "Записей ещё нет. Добавьте первую заметку.");
+    return React.createElement("div", null,
+      list.map((l, i) => {
+        const tm = typeMeta(l.event_type);
+        const raw = l.body || "";
+        const short = raw.slice(0, 200) + (raw.length > 200 ? "…" : "");
+        return React.createElement("div", {
+          key: l.id,
+          style: {
+            display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10,
+            padding: "10px 0",
+            borderBottom: i === list.length - 1 ? "none" : "1px solid var(--line-soft)",
+            alignItems: "flex-start",
+          },
+        },
+          React.createElement("div", {
+            style: { fontSize: 16, lineHeight: "18px", width: 22, textAlign: "center", flexShrink: 0 },
+            title: tm.l,
+          }, tm.icon),
+          React.createElement("div", { style: { minWidth: 0 } },
+            l.title && React.createElement("div", {
+              style: { fontSize: 12.5, fontWeight: 500, color: "var(--ink-8)", marginBottom: 2 },
+            }, l.title),
+            short && React.createElement("div", {
+              style: { fontSize: 12, color: "var(--ink-7)", whiteSpace: "pre-wrap", wordBreak: "break-word" },
+            }, short),
+            React.createElement("div", {
+              className: "mono",
+              style: { fontSize: 10.5, color: "var(--ink-5)", marginTop: 4 },
+            }, `${fmtDate(l.created_at)} · ${tm.l}${l.created_by ? " · " + l.created_by : ""}`),
+          ),
+          React.createElement("button", {
+            onClick: () => removeOne(l.id),
+            style: {
+              background: "none", border: 0, color: "var(--ink-5)",
+              cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1,
+            },
+            title: "Удалить запись",
+          }, "🗑"),
+        );
+      })
+    );
+  })();
+
+  return React.createElement(Card, { title: "История партнёра" },
+    form,
+    feed,
+  );
+}
+window.ClientLogsList = ClientLogsList;
 
 
 // ── CheckupWizard — фулскрин-модалка с табами ──────────────────────────────
