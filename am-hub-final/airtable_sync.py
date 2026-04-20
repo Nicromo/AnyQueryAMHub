@@ -38,9 +38,13 @@ FIELD_DOMAIN         = "fldw7UmncgsP3OtOy"   # Сайт клиента
 FIELD_MRR            = "fldtEBAWgyV35oVRK"   # МРР (bidirectional)
 FIELD_SEGMENT        = "fldyvNxsQglqiQs48"   # Сегмент клиента (bidirectional)
 FIELD_PRODUCTS       = "fldc5SOdHzGQD7QeI"   # Подключенные продукты (add/remove)
+FIELD_CONTACTS       = "fldybBIJjTcxzB5T1"   # Контакты клиента (linked / multi-text)
 FIELD_STATUS         = "fld4w5KAW9XCsOlOV"   # Статус клиента
 FIELD_STATUS_COMMENT = "fldOeAhDVEnwcVpoG"   # Комментарий к статусу
 FIELD_LAST_CONTACT   = "fldiOSJSuIQsXz7Z5"   # Дата последней коммуникации
+# Вторая таблица для оплаты: tblLEQYWypaYtAcp6, поле "♥️Оплачено CSM"
+PAYMENT_TABLE_ID     = os.getenv("AIRTABLE_PAYMENT_TABLE_ID", "tblLEQYWypaYtAcp6")
+PAYMENT_STATUS_NAME  = "♥️Оплачено CSM"
 
 # ── Heuristic candidates (fallback for other bases/tables) ────────────────────
 NAME_CANDIDATES    = ["account", "клиент", "название", "name", "company", "аккаунт", "сайт"]
@@ -416,7 +420,9 @@ async def sync_clients_from_airtable(
 
             # Products (multi-select)
             products_list = _val_list(fields, FIELD_PRODUCTS)
-            # (stored as metadata, not a direct Client column — skip for now)
+
+            # Contacts (text / linked / multi-text)
+            contacts_raw = fields.get(FIELD_CONTACTS)
 
             # Last contact date
             last_contact_raw = fields.get(FIELD_LAST_CONTACT, "")
@@ -505,7 +511,86 @@ async def sync_clients_from_airtable(
                     kwargs["gmv"] = gmv or 0.0
                 c = Client(**kwargs)
                 db.add(c)
+                db.flush()
                 created += 1
+
+            # ── Products → ClientProduct ─────────────────────────────
+            if exact and c and c.id:
+                try:
+                    from models import ClientProduct
+                    # Маппинг названий в code
+                    _code_map = {
+                        "поиск": "search", "search": "search",
+                        "рекомендации": "recommendations", "recs": "recommendations", "anyrecs": "recommendations",
+                        "баннеры": "banners", "banners": "banners",
+                        "персонализация": "personalization", "personal": "personalization",
+                        "email": "email", "почта": "email",
+                        "push": "push",
+                        "seo": "seo",
+                        "отзывы": "reviews", "reviews": "reviews", "anyreviews": "reviews",
+                        "фото": "images", "images": "images", "anyimages": "images",
+                    }
+                    def _product_code(nm: str) -> str:
+                        low = (nm or "").lower().strip()
+                        for k, v in _code_map.items():
+                            if k in low:
+                                return v
+                        return "".join(ch for ch in low if ch.isalnum())[:40] or "other"
+
+                    desired = [(_product_code(p), p) for p in (products_list or []) if p]
+                    existing = {p.code: p for p in db.query(ClientProduct).filter(ClientProduct.client_id == c.id).all()}
+                    desired_codes = {code for code, _ in desired}
+                    # Удалить лишние
+                    for code, p in existing.items():
+                        if code not in desired_codes:
+                            db.delete(p)
+                    # Добавить / обновить
+                    for code, name_p in desired:
+                        if code in existing:
+                            existing[code].name = name_p
+                            existing[code].status = "active"
+                        else:
+                            db.add(ClientProduct(client_id=c.id, code=code, name=name_p, status="active"))
+                except Exception as _pe:
+                    logger.debug(f"products upsert failed for {c.name}: {_pe}")
+
+            # ── Contacts → ClientContact ─────────────────────────────
+            if exact and c and c.id and contacts_raw:
+                try:
+                    from models import ClientContact
+                    # Парсим значение: список строк / email / текст
+                    raw_list = []
+                    if isinstance(contacts_raw, list):
+                        for item in contacts_raw:
+                            if isinstance(item, dict):
+                                raw_list.append(item.get("name") or item.get("text") or item.get("email") or "")
+                            else:
+                                raw_list.append(str(item))
+                    elif isinstance(contacts_raw, str):
+                        # Разбить по переводам строк/запятым/точкам с запятой
+                        for part in contacts_raw.replace(";", "\n").replace(",", "\n").split("\n"):
+                            if part.strip(): raw_list.append(part.strip())
+                    # Получить существующие, сопоставить по name
+                    existing = {(ct.name or "").strip().lower(): ct
+                                for ct in db.query(ClientContact).filter(ClientContact.client_id == c.id).all()}
+                    seen = set()
+                    for raw_c in raw_list:
+                        raw_c = raw_c.strip()
+                        if not raw_c: continue
+                        email = raw_c if "@" in raw_c else None
+                        name_c = raw_c
+                        key = name_c.lower()
+                        seen.add(key)
+                        if key in existing:
+                            if email and not existing[key].email:
+                                existing[key].email = email
+                        else:
+                            db.add(ClientContact(client_id=c.id, name=name_c[:200],
+                                                  email=email, role=None))
+                    # Контакты, пришедшие из Airtable, отмечаем как "airtable" в notes — но сейчас пропустим удаление старых,
+                    # чтобы не терять ручные контакты менеджера.
+                except Exception as _ce:
+                    logger.debug(f"contacts upsert failed for {c.name}: {_ce}")
         except Exception as exc:
             errors.append(f"{name}: {exc}")
             skipped += 1
@@ -834,3 +919,84 @@ async def sync_qbr_from_airtable(db, token: str = "") -> dict:
         "synced": created + updated,
         "errors": errors[:10],
     }
+
+
+async def sync_payment_status_from_airtable(db, token: str = "", base_id: str = "", table_id: str = "") -> dict:
+    """Тянет поле 'Оплачено CSM' из payment-таблицы Airtable (tblLEQYWypaYtAcp6)
+    и обновляет Client.payment_status.
+
+    Логика значений:
+      truthy (✓ / True / "да" / "оплачено") → "active"
+      falsy / пустой                        → "overdue"
+    """
+    use_token = token or AIRTABLE_TOKEN
+    use_base  = base_id or AIRTABLE_BASE_ID
+    use_table = table_id or PAYMENT_TABLE_ID
+    if not use_token or not use_base or not use_table:
+        return {"ok": False, "error": "AIRTABLE не настроен"}
+
+    records = []
+    offset = None
+    async with httpx.AsyncClient(timeout=30) as hx:
+        for _ in range(50):  # макс 50 страниц × 100 = 5000 строк
+            params = {"pageSize": 100}
+            if offset:
+                params["offset"] = offset
+            resp = await hx.get(
+                f"{BASE_URL}/{use_base}/{use_table}",
+                headers=_headers(use_token),
+                params=params,
+            )
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+            data = resp.json()
+            records.extend(data.get("records", []))
+            offset = data.get("offset")
+            if not offset:
+                break
+
+    def _pay_value(f: dict):
+        for k, v in (f or {}).items():
+            if PAYMENT_STATUS_NAME.lower() in (k or "").lower() or "оплачен" in (k or "").lower():
+                return v
+        return None
+
+    def _truthy(v) -> bool:
+        if v is None: return False
+        if isinstance(v, bool): return v
+        if isinstance(v, (int, float)): return v > 0
+        if isinstance(v, list): return any(_truthy(x) for x in v)
+        s = str(v).strip().lower()
+        return s in {"да", "yes", "true", "1", "✓", "✅", "оплачено", "paid", "active"}
+
+    from models import Client
+    updated = 0
+    skipped = 0
+    for r in records:
+        f = r.get("fields", {})
+        pay = _pay_value(f)
+        # Попробуем резолвить клиента: по name / айди сайта / айтейбл record_id
+        name = _val(f, FIELD_NAME) or _val(f, "Клиент") or _val(f, "Name")
+        site_id = _val(f, FIELD_SITE_ID) or _val(f, "Site ID") or _val(f, "ID")
+        c = None
+        if site_id:
+            c = db.query(Client).filter(
+                (Client.airtable_site_id == site_id) | (Client.merchrules_account_id == site_id)
+            ).first()
+        if not c and name:
+            c = db.query(Client).filter(Client.name == name).first()
+        if not c:
+            skipped += 1
+            continue
+        new_status = "active" if _truthy(pay) else "overdue"
+        if c.payment_status != new_status:
+            c.payment_status = new_status
+            updated += 1
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        return {"ok": False, "error": f"DB error: {exc}"}
+
+    return {"ok": True, "updated": updated, "skipped": skipped, "total": len(records)}
