@@ -32,6 +32,21 @@ templates = Jinja2Templates(directory="templates")
 
 router = APIRouter()
 
+
+async def get_user_cookie_or_bearer(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+) -> User:
+    """Dual-auth: cookie JWT (браузер) или Bearer (расширение/API).
+    HTTPBearer-only get_current_user из auth.py возвращает 403 при отсутствии
+    Authorization header — этим эндпоинтам это ломает вызов из браузера."""
+    from routers.api_tokens import resolve_user
+    user = resolve_user(db, request, auth_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    return user
+
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
@@ -862,7 +877,7 @@ def log_client_change(db, client_id: int, user_id: Optional[int],
 async def api_client_churn(
     client_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     from models import ChurnScore
     cs = db.query(ChurnScore).filter(ChurnScore.client_id == client_id).first()
@@ -888,7 +903,7 @@ async def api_client_churn(
 @router.post("/api/clients/auto-dedupe")
 async def api_clients_auto_dedupe(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Авто-дедуп клиентов текущего юзера по нормализованному имени.
     'Yves Rocher' == 'yves-rocher' == 'YvesRocher' — сливаются в один.
@@ -928,7 +943,7 @@ async def api_clients_auto_dedupe(
 async def api_clients_duplicates(
     threshold: int = 75,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Находит похожие названия клиентов через простой алгоритм."""
     if user.role != "admin": raise HTTPException(status_code=403)
@@ -979,7 +994,7 @@ async def api_clients_duplicates(
 async def api_clients_merge(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Слияние двух клиентов. master_id — остаётся, dup_id — удаляется."""
     if user.role != "admin": raise HTTPException(status_code=403)
@@ -1027,7 +1042,7 @@ async def api_clients_merge(
 @router.get("/api/clients/validation")
 async def api_clients_validation(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Клиенты с неполными данными."""
     q = db.query(Client)
@@ -1070,7 +1085,7 @@ async def api_set_revenue(
     client_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Установить MRR/ARR клиента."""
     body  = await request.json()
@@ -1095,7 +1110,7 @@ async def api_set_revenue(
 @router.get("/api/clients/validation/issues")
 async def api_validation_issues(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Клиенты с неполными/проблемными данными."""
     q = db.query(Client)
@@ -1140,7 +1155,7 @@ async def api_validation_issues(
 async def api_enrich_client(
     client_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """
     Обогащение данных клиента по домену.
@@ -1212,7 +1227,7 @@ async def api_enrich_client(
 @router.post("/api/clients/enrich-bulk")
 async def api_enrich_bulk(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Обогатить всех клиентов с доменом но без лого."""
     q = db.query(Client).filter(Client.domain.isnot(None))
@@ -1255,7 +1270,7 @@ async def api_enrich_bulk(
 async def api_churn_scores(
     risk_level: str = "",
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Список клиентов с churn score."""
     from models import ChurnScore
@@ -1282,7 +1297,7 @@ async def api_churn_scores(
 async def api_churn_recalc_single(
     client_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Пересчитать churn score одного клиента."""
     from churn import calculate_churn_score
@@ -1315,7 +1330,7 @@ async def api_upload_attachment(
     client_id: int,
     file: UploadFile,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     """Загрузить файл к клиенту."""
     from storage import upload_file, ALLOWED_MIME
@@ -1345,7 +1360,7 @@ async def api_upload_attachment(
 async def api_list_attachments(
     client_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_cookie_or_bearer),
 ):
     from models import ClientAttachment
     from storage import get_signed_url
