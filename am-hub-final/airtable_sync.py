@@ -210,7 +210,13 @@ async def _fetch_all_records(client, table_id: str, view_id: str = "", token: st
     page = 0
     while True:
         page += 1
-        params = {"pageSize": 100}
+        params = {
+            "pageSize": 100,
+            # Критично: без этого Airtable отдаёт ключами имена полей ("Account",
+            # "CSM"), а у нас захардкожены field-id ("fld..."). Тогда все
+            # lookup'ы возвращают None и sync проходит вхолостую.
+            "returnFieldsByFieldId": "true",
+        }
         if view_id:
             params["view"] = view_id
         if offset:

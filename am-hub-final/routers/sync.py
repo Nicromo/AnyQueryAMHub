@@ -314,7 +314,7 @@ async def api_sync_airtable_debug(
             r = await hx.get(
                 f"https://api.airtable.com/v0/{base_id}/{table_id}",
                 headers={"Authorization": f"Bearer {token}"},
-                params={"pageSize": 3},
+                params={"pageSize": 3, "returnFieldsByFieldId": "true"},
             )
         except Exception as e:
             return {**info, "ok": False, "error": f"HTTP fetch: {e}"}
