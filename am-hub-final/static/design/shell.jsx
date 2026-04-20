@@ -17,35 +17,35 @@ function _buildNav() {
   return [
     { group: "", items: [
       { id: "command",  label: "Командный центр", icon: "command", badge: num(s.inbox) },
+      { id: "today",    label: "Сегодня",         icon: "sun" },
     ]},
-    { group: "Ежедневное", items: [
-      { id: "today",    label: "Сегодня",     icon: "sun" },
-      { id: "clients",  label: "Все клиенты", icon: "users", count: num(s.clientsTotal) },
-      { id: "top50",    label: "Top-50",      icon: "trophy" },
-      { id: "tasks",    label: "Задачи",      icon: "check", count: num(s.tasksActive) },
-      { id: "meetings", label: "Встречи",     icon: "cal",   count: num(s.meetingsUpcoming) },
-      { id: "portfolio", label: "Портфель",   icon: "folder" },
+    { group: "Клиенты", items: [
+      { id: "clients",   label: "Все клиенты", icon: "users",  count: num(s.clientsTotal) },
+      { id: "top50",     label: "Top-50",      icon: "trophy" },
+      { id: "portfolio", label: "Портфель",    icon: "folder" },
+    ]},
+    { group: "Работа", items: [
+      { id: "tasks",    label: "Задачи",     icon: "check",  count: num(s.tasksActive) },
+      { id: "kanban",   label: "Канбан",     icon: "kanban" },
+      { id: "meetings", label: "Встречи",    icon: "cal",    count: num(s.meetingsUpcoming) },
+      { id: "qbr",      label: "QBR Календарь", icon: "map" },
+      { id: "roadmap",  label: "Роадмап",    icon: "map" },
+      { id: "internal", label: "Внутренние задачи", icon: "lock" },
     ]},
     { group: "Аналитика", items: [
-      { id: "analytics", label: "Аналитика",  icon: "chart" },
+      { id: "analytics", label: "Аналитика",    icon: "chart" },
+      { id: "kpi",       label: "Мой KPI",      icon: "target" },
       { id: "ai",        label: "AI-ассистент", icon: "bot", pill: "BETA" },
-      { id: "kanban",    label: "Канбан",     icon: "kanban" },
-      { id: "kpi",       label: "Мой KPI",    icon: "target" },
-      { id: "qbr",       label: "QBR Календарь", icon: "map" },
     ]},
     { group: "Инструменты", items: [
-      { id: "cabinet",   label: "Мой кабинет", icon: "folder" },
       { id: "templates", label: "Шаблоны",    icon: "doc" },
       { id: "auto",      label: "Автозадачи", icon: "spark" },
-      { id: "roadmap",   label: "Роадмап",    icon: "map" },
-      { id: "internal",  label: "Внутренние задачи", icon: "lock" },
+      { id: "cabinet",   label: "Мой кабинет", icon: "folder" },
     ]},
-    { group: "Интеграции", items: [
+    { group: "Настройки", items: [
       { id: "integrations", label: "Интеграции", icon: "link" },
-    ]},
-    { group: "Администрирование", items: [
-      { id: "profile",     label: "Мой профиль",     icon: "users" },
-      { id: "assignments", label: "Назначения",      icon: "folder" },
+      { id: "profile",      label: "Мой профиль", icon: "users" },
+      { id: "assignments",  label: "Назначения",  icon: "folder" },
     ]},
   ];
 }
