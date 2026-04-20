@@ -192,11 +192,40 @@ function PageTasks() {
   });
 
   const cols = [
-    { title: "Просрочено", tone: "critical", count: overdue.length, items: overdue.slice(0, 8).map(t => ({ t: t.title, cl: t.client, pr: t.priority })) },
-    { title: "Сегодня",    tone: "signal",   count: today.length,   items: today.slice(0, 8).map(t => ({ t: t.title, cl: t.client, pr: t.priority })) },
-    { title: "В работе",   tone: "warn",     count: 0,              items: [] },  // нет источника (status=in_progress приходят в today/backlog)
-    { title: "Бэклог",     tone: "neutral",  count: backlog.length, items: backlog.slice(0, 8).map(t => ({ t: t.title, cl: t.client, pr: t.priority })) },
+    { title: "Просрочено", key: "overdue",     tone: "critical", count: overdue.length, items: overdue.slice(0, 12).map(t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority })) },
+    { title: "Сегодня",    key: "today",       tone: "signal",   count: today.length,   items: today.slice(0, 12).map(t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority })) },
+    { title: "В работе",   key: "in_progress", tone: "warn",     count: 0,              items: [] },
+    { title: "Бэклог",     key: "plan",        tone: "neutral",  count: backlog.length, items: backlog.slice(0, 12).map(t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority })) },
   ];
+
+  // Drag-and-drop: перемещение задачи в колонку → PATCH /api/tasks/{id}/status.
+  const [dragOver, setDragOver] = React.useState(null);
+  const onDragStart = (e, taskId) => {
+    e.dataTransfer.setData("text/plain", String(taskId));
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const onDrop = async (e, colKey) => {
+    e.preventDefault();
+    setDragOver(null);
+    const taskId = parseInt(e.dataTransfer.getData("text/plain"), 10);
+    if (!taskId) return;
+    // Маппинг колонки → task.status
+    const statusMap = { overdue: "plan", today: "plan", in_progress: "in_progress", plan: "plan" };
+    const newStatus = statusMap[colKey];
+    if (!newStatus) return;
+    try {
+      const r = await fetch(`/api/tasks/${taskId}/status`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      if (typeof appToast === "function") appToast("Перемещено: " + colKey, "ok");
+      location.reload();
+    } catch (err) {
+      if (typeof appToast === "function") appToast("Ошибка: " + err.message, "error");
+    }
+  };
   const totalActive = TK.length;
   return (
     <div>
@@ -234,7 +263,18 @@ function PageTasks() {
       <div style={{ padding: "22px 28px 40px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
           {cols.map((c, i) => (
-            <div key={i} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6, display: "flex", flexDirection: "column", minHeight: 480 }}>
+            <div key={i}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(c.key); }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={(e) => onDrop(e, c.key)}
+              style={{
+                background: "var(--ink-2)",
+                border: `1px solid ${dragOver === c.key ? "var(--signal)" : "var(--line)"}`,
+                borderRadius: 6,
+                display: "flex", flexDirection: "column",
+                minHeight: 480,
+                transition: "border-color .15s",
+              }}>
               <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line-soft)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 999, background: c.tone==="signal"?"var(--signal)":c.tone==="warn"?"var(--warn)":c.tone==="ok"?"var(--ok)":"var(--ink-5)" }}/>
@@ -243,8 +283,19 @@ function PageTasks() {
                 <span className="mono" style={{ fontSize: 11, color: "var(--ink-5)" }}>{c.count}</span>
               </div>
               <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
-                {c.items.map((it, j) => (
-                  <div key={j} style={{ padding: 12, background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, cursor: "grab" }}>
+                {c.items.map((it) => (
+                  <div key={it.id || it.t}
+                    draggable={!!it.id}
+                    onDragStart={(e) => onDragStart(e, it.id)}
+                    onClick={() => { if (it.id) window.location.href = "/design/tasks?id=" + it.id; }}
+                    style={{
+                      padding: 12,
+                      background: "var(--ink-1)",
+                      border: "1px solid var(--line)",
+                      borderRadius: 4,
+                      cursor: it.id ? "grab" : "default",
+                      userSelect: "none",
+                    }}>
                     <div style={{ fontSize: 12.5, color: "var(--ink-8)", lineHeight: 1.4, marginBottom: 8 }}>{it.t}</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{it.cl}</span>
