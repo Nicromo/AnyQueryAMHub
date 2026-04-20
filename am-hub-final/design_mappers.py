@@ -790,8 +790,13 @@ def _auto_stats_cached(user: Any, db: Any, now: datetime) -> Dict[str, Any]:
 
 
 def internal_tasks_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
-    """Внутренние задачи команды (client_id IS NULL)."""
-    q = db.query(Task).filter(Task.client_id.is_(None)).order_by(Task.due_date.asc().nullslast()).limit(40)
+    """Внутренние задачи команды (client_id IS NULL или source='internal')."""
+    try:
+        q = db.query(Task).filter(
+            (Task.client_id.is_(None)) | (Task.source == "internal")
+        ).order_by(Task.due_date.asc().nullslast()).limit(40)
+    except Exception:
+        q = db.query(Task).filter(Task.client_id.is_(None)).order_by(Task.due_date.asc().nullslast()).limit(40)
     rows = q.all()
     return [{
         "id":       t.id,
