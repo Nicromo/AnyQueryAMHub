@@ -279,6 +279,69 @@ async def api_sync_airtable_payment(
     return await sync_payment_status_from_airtable(db=db, token=token, base_id=base_id)
 
 
+@router.get("/api/sync/airtable/debug")
+async def api_sync_airtable_debug(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Диагностика: возвращает информацию о токене и первые 3 записи из Airtable
+    для текущего пользователя. Безопасно — не пишет в БД."""
+    from routers.api_tokens import resolve_user
+    user = resolve_user(db, request, auth_token)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    u = user.settings or {}
+    at = u.get("airtable", {})
+    token = at.get("pat") or at.get("token") or _env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT")
+    base_id = at.get("base_id") or _env("AIRTABLE_BASE_ID") or "appEAS1rPKpevoIel"
+    table_id = _env("AIRTABLE_TABLE_ID") or "tblIKAi1gcFayRJTn"
+
+    info = {
+        "user_email": user.email,
+        "has_token_in_settings": bool(at.get("pat") or at.get("token")),
+        "has_token_in_env": bool(_env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT")),
+        "token_prefix": (token[:8] + "…") if token else None,
+        "base_id": base_id,
+        "table_id": table_id,
+    }
+
+    if not token:
+        return {**info, "ok": False, "error": "Нет токена"}
+
+    import httpx
+    async with httpx.AsyncClient(timeout=20) as hx:
+        try:
+            r = await hx.get(
+                f"https://api.airtable.com/v0/{base_id}/{table_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"pageSize": 3},
+            )
+        except Exception as e:
+            return {**info, "ok": False, "error": f"HTTP fetch: {e}"}
+
+        info["http_status"] = r.status_code
+        if r.status_code != 200:
+            return {**info, "ok": False, "error": r.text[:400]}
+
+        data = r.json()
+        records = data.get("records", [])
+        info["records_count"] = len(records)
+        # Показываем сырой вид FIELD_MANAGER и имени у первой записи — это то, что обычно не резолвится.
+        from airtable_sync import FIELD_MANAGER, FIELD_NAME, FIELD_SITE_ID, _extract_manager_email
+        samples = []
+        for rec in records[:3]:
+            f = rec.get("fields", {})
+            samples.append({
+                "record_id": rec.get("id"),
+                "name_field_raw": f.get(FIELD_NAME),
+                "manager_field_raw": f.get(FIELD_MANAGER),
+                "manager_resolved": _extract_manager_email(f, FIELD_MANAGER),
+                "site_id_raw": f.get(FIELD_SITE_ID),
+                "field_keys": list(f.keys())[:20],
+            })
+        return {**info, "ok": True, "samples": samples}
+
+
 @router.post("/api/sync/merchrules")
 async def api_sync_merchrules(
     request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
