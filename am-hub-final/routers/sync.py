@@ -383,7 +383,10 @@ async def api_sync_merchrules(
                     continue
                 c = db.query(Client).filter(Client.merchrules_account_id == sid).first()
                 if not c:
-                    c = Client(merchrules_account_id=sid, name=f"Site {sid}", manager_email=user.email, segment="SMB")
+                    # manager_email=None: Merchrules отдаёт все доступные
+                    # site_id, Airtable — источник правды по закреплению.
+                    c = Client(merchrules_account_id=sid, name=f"Site {sid}",
+                               manager_email=None, segment="SMB")
                     db.add(c)
                     db.flush()
 
@@ -477,19 +480,19 @@ async def api_sync_merchrules(
 
                 c = db.query(Client).filter(Client.merchrules_account_id == site_id).first()
                 if not c:
+                    # manager_email=None — закрепление идёт из Airtable.
                     c = Client(
                         merchrules_account_id=site_id,
                         name=acc_name,
-                        manager_email=user.email,
+                        manager_email=None,
                         segment=acc_segment,
                     )
                     db.add(c)
                     db.flush()
                 else:
-                    # Обновляем имя и менеджера
+                    # Обновляем имя и сегмент, но НЕ трогаем manager_email:
+                    # если он был null, значит Airtable его не закрепил — не надо самоприсваиваться.
                     c.name = acc_name
-                    if not c.manager_email:
-                        c.manager_email = user.email
                     if acc_segment and not c.segment:
                         c.segment = acc_segment
 
