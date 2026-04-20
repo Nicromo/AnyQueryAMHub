@@ -732,8 +732,13 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
     # ── Clients ───────────────────────────────────────────────
     if "clients" in needed:
         clients_total = clients_base.count()
-        offset = (page - 1) * per_page
-        clients_q = clients_base.order_by(Client.id.desc()).offset(offset).limit(per_page).all()
+        # На странице «clients» используем пагинацию, на остальных (meetings, qbr,
+        # roadmap …) грузим ВСЕХ — для дропдаунов в модалках и полного списка.
+        if page_id == "clients":
+            offset = (page - 1) * per_page
+            clients_q = clients_base.order_by(Client.id.desc()).offset(offset).limit(per_page).all()
+        else:
+            clients_q = clients_base.order_by(Client.id.desc()).limit(1000).all()
     else:
         clients_total = 0
         clients_q = []

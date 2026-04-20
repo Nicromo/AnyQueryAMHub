@@ -4,6 +4,27 @@ function PageClients() {
   const P = (typeof window !== "undefined" && window.__PAGINATION) || { page: 1, total: 0, total_pages: 1, has_prev: false, has_next: false };
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [segFilter, setSegFilter] = React.useState("all");
+  // Tab switcher: список клиентов vs структура портфеля (бывшая страница /portfolio).
+  const [view, setView] = React.useState(() => {
+    try { return sessionStorage.getItem("amhub_portfolio_view") || "list"; } catch (_) { return "list"; }
+  });
+  const switchView = (v) => {
+    setView(v);
+    try { sessionStorage.setItem("amhub_portfolio_view", v); } catch (_) {}
+  };
+
+  // Если выбран режим «структура», рендерим PagePortfolio (глобальный компонент).
+  if (view === "structure" && typeof window.PagePortfolio === "function") {
+    return React.createElement("div", null,
+      React.createElement("div", {
+        style: { padding: "16px 28px 0 28px", display: "flex", gap: 8 },
+      },
+        React.createElement(Btn, { kind: "dim",     size: "s", onClick: () => switchView("list") },      "Список"),
+        React.createElement(Btn, { kind: "primary", size: "s", onClick: () => switchView("structure") }, "Структура"),
+      ),
+      React.createElement(window.PagePortfolio),
+    );
+  }
 
   // Сегменты — реальные из models.py (ENT, SME+, SME, SME-, SMB, SS).
   // Плюс виртуальные: NEW (недавно добавлен) и RISK (churn).
@@ -51,11 +72,13 @@ function PageClients() {
   return (
     <div>
       <TopBar
-        breadcrumbs={["am hub", "портфель"]}
-        title="Все клиенты"
+        breadcrumbs={["am hub", "мой портфель"]}
+        title="Мой портфель"
         subtitle={`${P.total} клиентов · стр. ${P.page} из ${P.total_pages}`}
         actions={
           <>
+            <Btn kind="primary" size="m" onClick={() => switchView("list")}>Список</Btn>
+            <Btn kind="ghost"   size="m" onClick={() => switchView("structure")}>Структура</Btn>
             <Btn kind="ghost" size="m" onClick={pullFromAirtable} disabled={syncBusy}>
               {syncBusy ? "Тянем..." : "⟲ Из Airtable"}
             </Btn>

@@ -20,13 +20,11 @@ function _buildNav() {
       { id: "today",    label: "Сегодня",         icon: "sun" },
     ]},
     { group: "Клиенты", items: [
-      { id: "clients",   label: "Все клиенты", icon: "users",  count: num(s.clientsTotal) },
-      { id: "top50",     label: "Top-50",      icon: "trophy" },
-      { id: "portfolio", label: "Портфель",    icon: "folder" },
+      { id: "clients",   label: "Мой портфель", icon: "folder", count: num(s.clientsTotal) },
+      { id: "top50",     label: "Top-50",       icon: "trophy" },
     ]},
     { group: "Работа", items: [
       { id: "tasks",    label: "Задачи",     icon: "check",  count: num(s.tasksActive) },
-      { id: "kanban",   label: "Канбан",     icon: "kanban" },
       { id: "meetings", label: "Встречи",    icon: "cal",    count: num(s.meetingsUpcoming) },
       { id: "qbr",      label: "QBR Календарь", icon: "map" },
       { id: "roadmap",  label: "Роадмап",    icon: "map" },
