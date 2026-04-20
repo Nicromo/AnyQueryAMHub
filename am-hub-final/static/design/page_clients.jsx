@@ -329,6 +329,9 @@ function PageClient() {
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
 
+            {/* Онбординг — per-client 10-step flow */}
+            <ClientOnboardingCard clientId={c.id}/>
+
             {/* AI summary — real /api/ai/generate-prep */}
             <ClientAIBrief clientId={c.id}/>
 
@@ -1620,3 +1623,114 @@ function ClientFeedsList({ clientId }) {
   );
 }
 window.ClientFeedsList = ClientFeedsList;
+
+
+// ── ClientOnboardingCard — 10-step per-client onboarding (кнопка + прогресс + модал) ──
+function ClientOnboardingCard({ clientId }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [modalOpen, setModalOpen] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    fetch(`/api/clients/${clientId}/onboarding`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setData(d))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const start = () => {
+    fetch(`/api/clients/${clientId}/onboarding/start`, {
+      method: "POST", credentials: "include",
+    }).then(() => load());
+  };
+
+  const markSent = () => {
+    fetch(`/api/clients/${clientId}/onboarding/mark-sent`, {
+      method: "POST", credentials: "include",
+    }).then(() => { setModalOpen(false); load(); });
+  };
+
+  if (loading) {
+    return React.createElement(Card, { title: "Онбординг" },
+      React.createElement("div", { style: { color: "var(--ink-5)", fontSize: 12.5 } }, "Загружаем…"));
+  }
+
+  if (!data || !data.active && !data.completed_at) {
+    return React.createElement(Card, { title: "Онбординг" },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+        React.createElement("div", { style: { flex: 1, fontSize: 12.5, color: "var(--ink-6)" } },
+          "Онбординг ещё не запущен. 10 сообщений × 5 недель, по 2 в неделю."),
+        React.createElement(Btn, { kind: "primary", size: "s", onClick: start }, "Запустить онбординг"),
+      )
+    );
+  }
+
+  if (data.completed_at) {
+    return React.createElement(Card, { title: "Онбординг" },
+      React.createElement(Badge, { tone: "ok", dot: true }, "Онбординг завершён · 10/10"),
+      React.createElement("div", { style: { marginTop: 8, fontSize: 12, color: "var(--ink-5)" } },
+        "Завершён " + (data.completed_at ? data.completed_at.slice(0, 10) : "")));
+  }
+
+  const step = data.current_step || 0;
+  const pct = Math.round(step / 10 * 100);
+  const tpl = data.current_template;
+
+  return React.createElement(Card, { title: "Онбординг · " + step + "/10" },
+    React.createElement("div", {
+      style: {
+        height: 6, background: "var(--ink-2)", borderRadius: 4, overflow: "hidden",
+        marginBottom: 12,
+      }
+    },
+      React.createElement("div", { style: { width: pct + "%", height: "100%", background: "var(--signal)" } }),
+    ),
+    React.createElement("div", { style: { fontSize: 12, color: "var(--ink-6)", marginBottom: 10 } },
+      data.next_step
+        ? `Следующее сообщение #${data.next_step}${data.next_send_date ? " · план: " + data.next_send_date : ""}`
+        : "Все 10 сообщений отправлены."),
+    tpl && React.createElement("div", null,
+      React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 8 } }, tpl.title),
+      React.createElement(Btn, { kind: "primary", size: "s", onClick: () => setModalOpen(true) },
+        data.open_task_id ? "Открыть текст · " + tpl.step : "Показать текст шага " + tpl.step),
+    ),
+    modalOpen && tpl && React.createElement("div", {
+      style: {
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 100,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+      },
+      onClick: (e) => { if (e.target === e.currentTarget) setModalOpen(false); },
+    },
+      React.createElement("div", {
+        style: {
+          background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 8,
+          maxWidth: 640, width: "100%", padding: 24, maxHeight: "85vh", overflow: "auto",
+        }
+      },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 } },
+          React.createElement(Badge, { tone: "signal" }, "Шаг " + tpl.step + " / 10"),
+          React.createElement("h3", { style: { margin: 0, fontSize: 17, color: "var(--ink-9)" } }, tpl.title),
+        ),
+        React.createElement("div", {
+          style: {
+            padding: 14, background: "var(--ink-2)", border: "1px solid var(--line-soft)",
+            borderRadius: 6, fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap",
+            color: "var(--ink-8)", marginBottom: 16,
+          }
+        }, tpl.body),
+        React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end" } },
+          React.createElement(Btn, {
+            kind: "ghost", size: "m",
+            onClick: () => { navigator.clipboard && navigator.clipboard.writeText(tpl.body); }
+          }, "Копировать"),
+          React.createElement(Btn, { kind: "ghost", size: "m", onClick: () => setModalOpen(false) }, "Закрыть"),
+          React.createElement(Btn, { kind: "primary", size: "m", onClick: markSent }, "Отправлено в TG"),
+        ),
+      )
+    )
+  );
+}
+window.ClientOnboardingCard = ClientOnboardingCard;

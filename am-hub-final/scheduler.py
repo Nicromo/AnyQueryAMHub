@@ -1179,6 +1179,259 @@ def evaluate_auto_rules():
             logger.info("evaluate_auto_rules: новых задач нет")
 
 
+# ── Autotask jobs (dedupe через scheduler_utils.get_or_create_autotask) ──────
+# Чекап-интервалы из models.CHECKUP_INTERVALS; триггерим за 5 дней до срока.
+_CHECKUP_DUE_LEAD_DAYS = 5
+_CHECKUP_DUE_RECENT_GUARD_DAYS = 30  # dedupe: не чаще 1 раза в 30 дней
+_QBR_TRIGGER_OFFSET_DAYS = 83  # 90−7 — за неделю до квартала
+
+
+async def job_daily_meeting_prep():
+    """Ежедневно 10:00 МСК: задача «Подготовиться к встрече» на каждую встречу сегодня."""
+    logger.info("📋 daily_meeting_prep…")
+    try:
+        from database import SessionLocal
+        from models import Client, Meeting
+        from scheduler_utils import get_or_create_autotask
+
+        with SessionLocal() as db:
+            today_msk = datetime.now(MSK).date()
+            day_start = datetime.combine(today_msk, datetime.min.time())
+            day_end = day_start + timedelta(days=1)
+
+            meetings = db.query(Meeting).filter(
+                Meeting.date >= day_start,
+                Meeting.date < day_end,
+            ).all()
+
+            created = 0
+            for m in meetings:
+                if not m.date or not m.client_id:
+                    continue
+                client = db.query(Client).filter(Client.id == m.client_id).first()
+                if not client:
+                    continue
+                hhmm = m.date.strftime("%H:%M")
+                title = f"Подготовиться к встрече с {client.name} — сегодня в {hhmm}"
+                before = db.query(type(m).__bases__[0]).count() if False else None  # noqa
+                t = get_or_create_autotask(
+                    db,
+                    client_id=client.id,
+                    rule_key=f"meeting_prep:{m.id}",
+                    target_date=today_msk,
+                    manager_email=client.manager_email,
+                    title=title,
+                    task_type="meeting_prep",
+                    due_date=m.date,
+                    meta={"meeting_id": m.id},
+                    priority="high",
+                )
+                if t and t.created_at and t.created_at >= datetime.utcnow() - timedelta(minutes=5):
+                    created += 1
+            db.commit()
+            logger.info(f"✅ daily_meeting_prep: processed {len(meetings)} meetings, ~{created} new tasks")
+    except Exception as e:
+        logger.error(f"❌ job_daily_meeting_prep: {e}")
+
+
+async def job_hourly_meeting_followup():
+    """Каждый час: задача «Отправить фолоуап» для встреч, закончившихся в последние 2 часа."""
+    logger.info("✍️  hourly_meeting_followup…")
+    try:
+        from database import SessionLocal
+        from models import Client, Meeting
+        from meeting_slots import DEFAULT_MEETING_DURATION_MIN
+        from scheduler_utils import get_or_create_autotask
+
+        with SessionLocal() as db:
+            now = datetime.utcnow()
+            # end_time окно [now-2h, now]; Meeting хранит только start (date),
+            # поэтому фильтруем по date в окне [now - 2h - duration, now - duration].
+            dur = timedelta(minutes=DEFAULT_MEETING_DURATION_MIN)
+            lo = now - timedelta(hours=2) - dur
+            hi = now - dur
+
+            meetings = db.query(Meeting).filter(
+                Meeting.date >= lo,
+                Meeting.date <= hi,
+            ).all()
+
+            for m in meetings:
+                if not m.date or not m.client_id:
+                    continue
+                if m.followup_status == "sent":
+                    continue
+                client = db.query(Client).filter(Client.id == m.client_id).first()
+                if not client:
+                    continue
+                end_time = m.date + dur
+                get_or_create_autotask(
+                    db,
+                    client_id=client.id,
+                    rule_key=f"meeting_followup:{m.id}",
+                    target_date=end_time.date(),
+                    manager_email=client.manager_email,
+                    title=f"Отправить фолоуап + заполнить Roadmap: {client.name}",
+                    task_type="meeting_followup",
+                    due_date=end_time + timedelta(hours=1),
+                    meta={"meeting_id": m.id},
+                    priority="high",
+                )
+            db.commit()
+            logger.info(f"✅ hourly_meeting_followup: {len(meetings)} meetings scanned")
+    except Exception as e:
+        logger.error(f"❌ job_hourly_meeting_followup: {e}")
+
+
+# Lead-дни до checkup_due per-segment: 180−5, 90−5, 60−5, 30−5.
+_CHECKUP_SEGMENT_DAYS = {"SS": 175, "SMB": 85, "SME": 55, "ENT": 25,
+                         "SME+": 55, "SME-": 55}
+
+
+async def job_daily_checkup_due():
+    """Ежедневно 09:00 МСК: «Сделать чекап ... (срок через 5 дней)» per-сегмент."""
+    logger.info("🩺 daily_checkup_due…")
+    try:
+        from database import SessionLocal
+        from models import Client, Task
+        from scheduler_utils import get_or_create_autotask
+
+        with SessionLocal() as db:
+            now = datetime.utcnow()
+            today = datetime.now(MSK).date()
+            clients = db.query(Client).all()
+            triggered = 0
+            for c in clients:
+                lead = _CHECKUP_SEGMENT_DAYS.get(c.segment or "")
+                if not lead:
+                    continue
+                # Если last_checkup пуст — считаем от created_at (first checkup due).
+                baseline = c.last_checkup or None
+                if not baseline:
+                    baseline = db.execute(
+                        __import__("sqlalchemy").text(
+                            "SELECT created_at FROM clients WHERE id = :id"
+                        ), {"id": c.id},
+                    ).scalar()
+                if not baseline:
+                    continue
+                days_since = (now - baseline).days if isinstance(baseline, datetime) else (now.date() - baseline).days
+                if days_since < lead:
+                    continue
+
+                # Dedupe: не чаще 1 раза в 30 дней по этому клиенту (любой rule_key
+                # checkup_due:*).
+                recent = db.query(Task).filter(
+                    Task.client_id == c.id,
+                    Task.meta["rule_key"].astext.like("checkup_due:%"),
+                    Task.created_at >= now - timedelta(days=_CHECKUP_DUE_RECENT_GUARD_DAYS),
+                ).first()
+                if recent:
+                    continue
+
+                rule_key = f"checkup_due:{today.isoformat()}"
+                get_or_create_autotask(
+                    db,
+                    client_id=c.id,
+                    rule_key=rule_key,
+                    target_date=today,
+                    manager_email=c.manager_email,
+                    title=f"Сделать чекап по клиенту {c.name} (срок через {_CHECKUP_DUE_LEAD_DAYS} дней)",
+                    task_type="checkup_due",
+                    due_date=now + timedelta(days=_CHECKUP_DUE_LEAD_DAYS),
+                    meta={"segment": c.segment},
+                    priority="high",
+                )
+                triggered += 1
+            db.commit()
+            logger.info(f"✅ daily_checkup_due: {triggered} tasks created ({len(clients)} clients scanned)")
+    except Exception as e:
+        logger.error(f"❌ job_daily_checkup_due: {e}")
+
+
+async def job_daily_qbr_sync():
+    """Ежедневно 09:00 МСК: «Согласовать QBR» за 7 дней до +90 от last_qbr_date."""
+    logger.info("📊 daily_qbr_sync…")
+    try:
+        from database import SessionLocal
+        from models import Client
+        from scheduler_utils import get_or_create_autotask
+
+        with SessionLocal() as db:
+            today = datetime.now(MSK).date()
+            now = datetime.utcnow()
+            # Первый QBR не триггерим — нужен last_qbr_date.
+            clients = db.query(Client).filter(Client.last_qbr_date.isnot(None)).all()
+            triggered = 0
+            for c in clients:
+                # Если next_qbr_date уже задан — QBR запланирован, пропускаем.
+                if c.next_qbr_date:
+                    continue
+                since_last = (now - c.last_qbr_date).days
+                if since_last < _QBR_TRIGGER_OFFSET_DAYS:
+                    continue
+                rule_key = f"qbr_sync:{c.last_qbr_date.date().isoformat()}"
+                get_or_create_autotask(
+                    db,
+                    client_id=c.id,
+                    rule_key=rule_key,
+                    target_date=today,
+                    manager_email=c.manager_email,
+                    title=f"Согласовать встречу по QBR с {c.name}",
+                    task_type="qbr_sync",
+                    due_date=now + timedelta(days=7),
+                    meta={"last_qbr_date": c.last_qbr_date.isoformat()},
+                    priority="high",
+                )
+                triggered += 1
+            db.commit()
+            logger.info(f"✅ daily_qbr_sync: {triggered} tasks")
+    except Exception as e:
+        logger.error(f"❌ job_daily_qbr_sync: {e}")
+
+
+async def job_daily_onboarding_tick():
+    """Ежедневно 09:00 МСК: создаёт задачи «Отправить сообщение по онбордингу #N»
+    для всех активных OnboardingProgress, у которых next_send_date <= today."""
+    logger.info("📧 daily_onboarding_tick…")
+    try:
+        from database import SessionLocal
+        from models import Client, ClientOnboardingProgress
+        from scheduler_utils import get_or_create_autotask
+
+        with SessionLocal() as db:
+            today = datetime.now(MSK).date()
+            rows = (db.query(ClientOnboardingProgress)
+                      .filter(ClientOnboardingProgress.completed_at.is_(None),
+                              ClientOnboardingProgress.next_send_date <= today)
+                      .all())
+            created = 0
+            for prog in rows:
+                if prog.current_step >= 10:
+                    continue
+                next_step = prog.current_step + 1
+                client = db.query(Client).filter(Client.id == prog.client_id).first()
+                if not client:
+                    continue
+                get_or_create_autotask(
+                    db,
+                    client_id=client.id,
+                    rule_key=f"onboarding_msg:{next_step}",
+                    target_date=today,
+                    manager_email=client.manager_email,
+                    title=f"Отправить сообщение по онбордингу #{next_step}",
+                    task_type="onboarding_message",
+                    due_date=datetime.combine(today, datetime.min.time()) + timedelta(hours=18),
+                    meta={"step": next_step, "onboarding_id": prog.id},
+                    priority="medium",
+                )
+                created += 1
+            db.commit()
+            logger.info(f"✅ daily_onboarding_tick: {created} tasks created ({len(rows)} active)")
+    except Exception as e:
+        logger.error(f"❌ job_daily_onboarding_tick: {e}")
+
+
 async def job_backup_all_managers():
     logger.info("🗄  Daily backup job starting")
     from database import SessionLocal
@@ -1242,6 +1495,18 @@ def start_scheduler():
     # Daily per-manager backups at 03:00 MSK
     sched.add_job(job_backup_all_managers, "cron", hour=3, minute=0,
                   id="daily_backup", name="Daily per-manager backups", replace_existing=True)
+
+    # Autotasks: meeting prep/followup, checkup due, QBR sync, onboarding
+    sched.add_job(job_daily_meeting_prep, "cron", hour=10, minute=0,
+                  id="meeting_prep", name="Daily Meeting Prep 10:00 MSK", replace_existing=True)
+    sched.add_job(job_hourly_meeting_followup, "interval", hours=1,
+                  id="meeting_followup", name="Hourly Meeting Followup", replace_existing=True)
+    sched.add_job(job_daily_checkup_due, "cron", hour=9, minute=0,
+                  id="checkup_due", name="Daily Checkup Due (per-segment −5d)", replace_existing=True)
+    sched.add_job(job_daily_qbr_sync, "cron", hour=9, minute=5,
+                  id="qbr_sync", name="Daily QBR Sync (−7d before +3mo)", replace_existing=True)
+    sched.add_job(job_daily_onboarding_tick, "cron", hour=9, minute=10,
+                  id="onboarding_tick", name="Daily Onboarding Tick", replace_existing=True)
 
     sched.start()
     logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")

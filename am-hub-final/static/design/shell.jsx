@@ -299,6 +299,7 @@ function TopBar({ title, subtitle, breadcrumbs = [], actions, meta }) {
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {actions}
+        <ScopeSwitcher/>
         <ThemeToggle/>
         <button
           title="Уведомления"
@@ -331,6 +332,62 @@ function TopBar({ title, subtitle, breadcrumbs = [], actions, meta }) {
         </button>
       </div>
     </header>
+  );
+}
+
+// ── ScopeSwitcher — meeting UI for grouphead/leadership/admin ──
+// Видимый если available_scopes > 1. Меняет cookie am_scope и перезагружает страницу.
+function ScopeSwitcher() {
+  const [data, setData] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch("/api/me/scope", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && d.available_scopes) setData(d); })
+      .catch(() => {});
+  }, []);
+
+  if (!data || !data.available_scopes || data.available_scopes.length < 2) return null;
+
+  const labels = { mine: "Только мои", group: data.group_name ? `Группа · ${data.group_name}` : "Моя группа", all: "Все клиенты" };
+
+  const pick = (s) => {
+    fetch("/api/me/scope", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: s }),
+    }).then(() => { window.location.reload(); });
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen(!open)} style={{
+        height: 34, padding: "0 12px",
+        background: "transparent", border: "1px solid var(--line)", borderRadius: 4,
+        color: "var(--ink-7)", cursor: "pointer", fontSize: 12,
+        display: "inline-flex", alignItems: "center", gap: 6,
+      }} title="Область просмотра">
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase" }}>scope:</span>
+        {labels[data.active] || data.active}
+        <span style={{ opacity: 0.6 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: 38, right: 0, minWidth: 180,
+          background: "var(--ink-1)", border: "1px solid var(--line)",
+          borderRadius: 6, boxShadow: "0 6px 16px rgba(0,0,0,0.18)", zIndex: 50,
+        }}>
+          {data.available_scopes.map(s => (
+            <div key={s} onClick={() => pick(s)} style={{
+              padding: "8px 14px", cursor: "pointer",
+              background: s === data.active ? "var(--ink-2)" : "transparent",
+              color: "var(--ink-8)", fontSize: 13,
+            }}>{labels[s] || s}</div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -706,4 +763,4 @@ function _inputStyle() {
 }
 
 
-Object.assign(window, { Shell, Sidebar, TopBar });
+Object.assign(window, { Shell, Sidebar, TopBar, ScopeSwitcher });

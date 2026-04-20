@@ -613,8 +613,9 @@ async def api_clients_list(
     search: Optional[str] = None,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
+    am_scope: Optional[str] = Cookie(None),
 ):
-    """API список клиентов с фильтрами."""
+    """API список клиентов с фильтрами + scope (mine/group/all)."""
     if not auth_token:
         raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -625,9 +626,13 @@ async def api_clients_list(
     if not user:
         raise HTTPException(status_code=401)
 
+    from scope import resolve_scope, get_manager_emails_for_scope
+    active = resolve_scope(user, am_scope)
+    emails = get_manager_emails_for_scope(db, user, active)
+
     q = db.query(Client)
-    if user.role == "manager":
-        q = q.filter(Client.manager_email == user.email)
+    if emails is not None:
+        q = q.filter(Client.manager_email.in_(emails))
     if segment:
         q = q.filter(Client.segment == segment)
     if search:

@@ -234,6 +234,12 @@ async def lifespan(app: FastAPI):
                     # User profile first/last name (for profile form persistence)
                     ("users", "first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR"),
                     ("users", "last_name",  "ALTER TABLE users ADD COLUMN last_name VARCHAR"),
+                    # Autotask dedupe + snooze (scheduler_utils.get_or_create_autotask)
+                    ("tasks", "meta",          "ALTER TABLE tasks ADD COLUMN meta JSONB DEFAULT '{}'::jsonb"),
+                    ("tasks", "snoozed_until", "ALTER TABLE tasks ADD COLUMN snoozed_until DATE"),
+                    ("tasks", "snoozed_count", "ALTER TABLE tasks ADD COLUMN snoozed_count INTEGER DEFAULT 0"),
+                    # RBAC: group_id for grouphead/leadership scope
+                    ("users", "group_id", "ALTER TABLE users ADD COLUMN group_id INTEGER"),
                 ]
                 # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:
@@ -363,6 +369,27 @@ async def lifespan(app: FastAPI):
                         source VARCHAR DEFAULT 'manual',
                         created_at TIMESTAMP DEFAULT NOW(),
                         created_by VARCHAR)""",
+                    # 10-step per-client onboarding flow
+                    "client_onboarding_progress": """CREATE TABLE IF NOT EXISTS client_onboarding_progress (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER NOT NULL UNIQUE REFERENCES clients(id),
+                        started_at TIMESTAMP DEFAULT NOW(),
+                        started_by VARCHAR,
+                        current_step INTEGER DEFAULT 0,
+                        next_send_date DATE,
+                        completed_at TIMESTAMP)""",
+                    "onboarding_templates": """CREATE TABLE IF NOT EXISTS onboarding_templates (
+                        id SERIAL PRIMARY KEY,
+                        step INTEGER NOT NULL UNIQUE,
+                        title VARCHAR NOT NULL,
+                        body TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT NOW())""",
+                    # RBAC: manager groups
+                    "manager_groups": """CREATE TABLE IF NOT EXISTS manager_groups (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR NOT NULL UNIQUE,
+                        grouphead_id INTEGER REFERENCES users(id),
+                        created_at TIMESTAMP DEFAULT NOW())""",
                 }
                 for tname, tsql in _new_tables.items():
                     db.execute(_text(tsql))
@@ -379,6 +406,8 @@ async def lifespan(app: FastAPI):
                     ("meetings", "client_date", "CREATE INDEX IF NOT EXISTS ix_meetings_client_date ON meetings(client_id, date)"),
                     ("clients", "manager_email", "CREATE INDEX IF NOT EXISTS ix_clients_manager_email ON clients(manager_email)"),
                     ("checkup_queries", "checkup_id_group", "CREATE INDEX IF NOT EXISTS ix_checkup_queries_cg ON checkup_queries(checkup_id, \"group\")"),
+                    # Autotask dedupe: fast lookup by (client_id, meta->>'rule_key')
+                    ("tasks", "client_rule_key", "CREATE INDEX IF NOT EXISTS ix_tasks_client_rule_key ON tasks(client_id, (meta->>'rule_key'))"),
                 ]
                 for tbl, nm, sql in _perf_indices:
                     try:
@@ -388,6 +417,18 @@ async def lifespan(app: FastAPI):
                         db.rollback()
                         logger.warning(f"index {nm} failed: {_ie}")
                 logger.info("✅ Auto-migration complete")
+
+                # Seed default 10 onboarding templates if table is empty
+                try:
+                    from models import OnboardingTemplate, DEFAULT_ONBOARDING_TEMPLATES
+                    if db.query(OnboardingTemplate).count() == 0:
+                        for step, title, body in DEFAULT_ONBOARDING_TEMPLATES:
+                            db.add(OnboardingTemplate(step=step, title=title, body=body))
+                        db.commit()
+                        logger.info("✅ Seeded %d default onboarding templates", len(DEFAULT_ONBOARDING_TEMPLATES))
+                except Exception as _se:
+                    db.rollback()
+                    logger.warning(f"Onboarding template seed warning: {_se}")
             except Exception as _e:
                 logger.warning(f"Auto-migration warning: {_e}")
 
@@ -497,6 +538,12 @@ app.include_router(account_dashboard.router, tags=["account-dashboard"])
 
 from routers import airtable as airtable_router
 app.include_router(airtable_router.router, tags=["airtable"])
+
+# Per-client onboarding (10-step flow) + scope switcher + manager groups
+from routers import onboarding as onboarding_flow_router
+from routers import scope_and_groups as scope_router
+app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
+app.include_router(scope_router.router, tags=["scope"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router

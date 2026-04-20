@@ -99,6 +99,37 @@ async def api_update_task(task_id: int, request: Request, db: Session = Depends(
 # ============================================================================
 # API: AI PROCESSING
 
+@router.post("/api/tasks/{task_id}/snooze")
+async def api_snooze_task(task_id: int, request: Request,
+                          db: Session = Depends(get_db),
+                          auth_token: Optional[str] = Cookie(None)):
+    """Отложить задачу на N дней — сдвигает due_date + snoozed_until."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    days = int(data.get("days", 1))
+    if days < 1 or days > 90:
+        raise HTTPException(400, "days must be 1..90")
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404)
+    base = task.due_date or datetime.now()
+    new_due = base + timedelta(days=days)
+    task.due_date = new_due
+    task.snoozed_until = new_due.date() if hasattr(new_due, "date") else new_due
+    task.snoozed_count = (task.snoozed_count or 0) + 1
+    db.commit()
+    return {"ok": True, "due_date": new_due.isoformat(),
+            "snoozed_count": task.snoozed_count}
+
+
 @router.post("/api/tasks/{task_id}/confirm")
 async def api_confirm_task(task_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Подтверждение выполнения задачи."""
