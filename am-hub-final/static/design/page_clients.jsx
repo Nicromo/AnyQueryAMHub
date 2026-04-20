@@ -1099,6 +1099,29 @@ function CheckupWizard({ checkup, clientId, onClose }) {
     } catch (e) { appToast("Ошибка: " + e.message, "error"); }
   }
 
+  // Маппинг активного подтаба → kind для Merchrules analytics
+  // top / random — как есть; zero (Нулевые) → null; zero_queries (ZeroQueries) → zero.
+  const SUBTAB_TO_MR_KIND = { top: "top", random: "random", zero: "null", zero_queries: "zero" };
+
+  async function loadFromMerchrules() {
+    const kind = SUBTAB_TO_MR_KIND[subTab] || "top";
+    try {
+      const r = await fetch(`/api/checkup/${c.id}/load-queries-from-merchrules`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, limit: 30 }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) {
+        appToast("Merchrules: " + (d.error || d.detail || ("HTTP " + r.status)), "error", { duration: 9000 });
+        return;
+      }
+      appToast(`Merchrules: добавлено ${d.count || 0} запросов`, "ok");
+      const full = await fetch(`/api/checkups/${c.id}`, { credentials: "include" }).then(x => x.json());
+      setQueries(full.queries || []);
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+  }
+
   async function importCsv(evt) {
     const file = evt.target.files[0]; if (!file) return;
     const text = await file.text();
@@ -1233,6 +1256,7 @@ function CheckupWizard({ checkup, clientId, onClose }) {
     // Actions
     React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
       React.createElement(Btn, {size: "s", kind: "ghost", onClick: loadFromAnalytics}, "⬇ Загрузить из аналитики"),
+      React.createElement(Btn, {size: "s", kind: "ghost", onClick: loadFromMerchrules}, "⬇ Из Merchrules"),
       React.createElement("label", {
         style: { padding: "6px 11px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-7)", cursor: "pointer" },
       },
