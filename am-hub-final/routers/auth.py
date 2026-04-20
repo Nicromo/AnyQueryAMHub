@@ -77,6 +77,120 @@ async def time_oauth_start(request: Request, auth_token: Optional[str] = Cookie(
     return HTMLResponse(content=html)
 
 
+# ── Time OAuth 2.0 flow (на основе наработок коллеги) ───────────────────────
+
+@router.get("/auth/time/login")
+async def time_oauth_login(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Старт OAuth: редирект на time.tbank.ru/oauth/authorize."""
+    if not auth_token:
+        return RedirectResponse(url="/login")
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        return RedirectResponse(url="/login")
+    from integrations.time_oauth import is_configured, authorize_url
+    if not is_configured():
+        raise HTTPException(status_code=500, detail="TIME_OAUTH_CLIENT_ID/SECRET не заданы в env")
+    import secrets as _secrets
+    state = _secrets.token_urlsafe(24) + "." + str(payload.get("sub"))
+    resp = RedirectResponse(url=authorize_url(state), status_code=303)
+    resp.set_cookie(key="time_oauth_state", value=state, max_age=600,
+                     httponly=True, samesite="lax", secure=False)
+    return resp
+
+
+@router.get("/auth/time/callback")
+@router.get("/auth/time/oauth/callback")
+async def time_oauth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+    time_oauth_state: Optional[str] = Cookie(None),
+):
+    """Time перенаправит сюда с ?code=...&state=...; меняем code на токены."""
+    if error:
+        return HTMLResponse(content=f"<h3>Time OAuth отменён</h3><p>{error}</p><p><a href='/design/command'>← Вернуться</a></p>",
+                             status_code=400)
+    if not code or not state:
+        return HTMLResponse(content="<h3>Нет code/state в ответе Time</h3>", status_code=400)
+    if time_oauth_state and time_oauth_state != state:
+        return HTMLResponse(content="<h3>State mismatch (CSRF?)</h3>", status_code=400)
+    # Извлечь user_id из state
+    try:
+        user_id = int(state.rsplit(".", 1)[-1])
+    except Exception:
+        return HTMLResponse(content="<h3>Битый state</h3>", status_code=400)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return HTMLResponse(content="<h3>Пользователь не найден</h3>", status_code=400)
+
+    from integrations.time_oauth import exchange_code, get_me
+    import time as _time
+    try:
+        tok = await exchange_code(code)
+    except Exception as e:
+        logger.exception("Time OAuth exchange failed")
+        return HTMLResponse(content=f"<h3>Ошибка обмена code: {e}</h3>", status_code=500)
+
+    access_token = tok.get("access_token")
+    if not access_token:
+        return HTMLResponse(content=f"<h3>Нет access_token в ответе Time</h3><pre>{tok}</pre>", status_code=500)
+
+    # Получаем username/email
+    me = {}
+    try:
+        me = await get_me(access_token)
+    except Exception as e:
+        logger.warning("Time users/me failed after OAuth: %s", e)
+
+    # Канал any-team-support
+    channel_id = None
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=10) as hx:
+            ch = await hx.get(
+                "https://time.tbank.ru/api/v4/teams/name/tinkoff/channels/name/any-team-support",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if ch.status_code == 200:
+                channel_id = ch.json().get("id")
+    except Exception:
+        pass
+
+    settings = dict(user.settings or {})
+    tm = dict(settings.get("tbank_time", {}))
+    tm.update({
+        "access_token": access_token,
+        "refresh_token": tok.get("refresh_token", tm.get("refresh_token", "")),
+        "token_type": tok.get("token_type", "bearer"),
+        "expires_at": int(_time.time()) + int(tok.get("expires_in", 3600)) - 30,
+        "username": me.get("username") or tm.get("username"),
+        "email": me.get("email") or tm.get("email"),
+        "user_id": me.get("id") or tm.get("user_id"),
+    })
+    if channel_id:
+        tm["support_channel_id"] = channel_id
+    # Выкинем устаревшие mmauthtoken / session_cookie если были
+    tm.pop("mmauthtoken", None)
+    tm.pop("session_cookie", None)
+    settings["tbank_time"] = tm
+    from sqlalchemy.orm.attributes import flag_modified
+    user.settings = settings
+    flag_modified(user, "settings")
+    db.commit()
+
+    resp = RedirectResponse(url="/design/command?time_auth=ok", status_code=303)
+    resp.delete_cookie("time_oauth_state")
+    return resp
+
+
 
 @router.post("/api/auth/time/token")
 async def api_time_save_token(
