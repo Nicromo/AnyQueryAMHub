@@ -55,6 +55,7 @@ class Client(Base):
     payment_status   = Column(String, default="active")
     payment_due_date = Column(DateTime, nullable=True)
     payment_amount   = Column(Float, nullable=True)
+    diginetica_api_key = Column(String, nullable=True)
 
     tasks = relationship("Task", back_populates="client", cascade="all, delete-orphan")
     meetings = relationship("Meeting", back_populates="client", cascade="all, delete-orphan")
@@ -715,3 +716,56 @@ class ClientFeed(Base):
     last_error     = Column(Text, nullable=True)
     schedule       = Column(String, nullable=True)
     client         = relationship("Client", backref="feeds")
+
+
+# ── Checkup v2 — чекапы качества поиска/рекомендаций ────────────────────────
+
+class CheckupV2(Base):
+    __tablename__ = "checkups_v2"
+    id             = Column(Integer, primary_key=True, index=True)
+    client_id      = Column(Integer, ForeignKey("clients.id"), index=True)
+    name           = Column(String, nullable=False)
+    frequency      = Column(String, default="monthly")
+    due_date       = Column(DateTime, nullable=True)
+    partner_comment = Column(Text, nullable=True)
+    any_comment     = Column(Text, nullable=True)
+    status         = Column(String, default="draft")
+    score          = Column(Float, nullable=True)
+    score_max      = Column(Float, default=3.0)
+
+    tracking       = Column(JSONB, default=dict)
+    uiux           = Column(JSONB, default=dict)
+    recs           = Column(JSONB, default=dict)
+    reviews        = Column(JSONB, default=dict)
+    products_tab   = Column(JSONB, default=dict)
+    debts          = Column(JSONB, default=dict)
+
+    search_comment       = Column(Text, nullable=True)
+    top_queries_comment  = Column(Text, nullable=True)
+
+    created_at     = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by     = Column(String, nullable=True)
+
+    client = relationship("Client", backref="checkups_v2")
+
+
+class CheckupQuery(Base):
+    __tablename__ = "checkup_queries"
+    id             = Column(Integer, primary_key=True, index=True)
+    checkup_id     = Column(Integer, ForeignKey("checkups_v2.id", ondelete="CASCADE"), index=True)
+    group          = Column(String, default="top")
+    query          = Column(String, nullable=False)
+    shows_count    = Column(Integer, default=0)
+    score          = Column(Integer, nullable=True)
+    problem        = Column(Text, nullable=True)
+    solution       = Column(Text, nullable=True)
+    partner_comment = Column(Text, nullable=True)
+    diginetica_response = Column(JSONB, default=dict)
+    response_time_ms = Column(Integer, nullable=True)
+    results_count  = Column(Integer, default=0)
+    has_correction = Column(Boolean, default=False)
+    checked_at     = Column(DateTime, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    checkup = relationship("CheckupV2", backref="queries")

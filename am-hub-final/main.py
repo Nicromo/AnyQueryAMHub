@@ -229,6 +229,8 @@ async def lifespan(app: FastAPI):
                     ("auto_task_rules", "last_triggered_at", "ALTER TABLE auto_task_rules ADD COLUMN last_triggered_at TIMESTAMP"),
                     # ClientNote pin (from client hub work)
                     ("client_notes", "is_pinned",    "ALTER TABLE client_notes ADD COLUMN is_pinned BOOLEAN DEFAULT FALSE"),
+                    # Checkup v2 (migration 007)
+                    ("clients", "diginetica_api_key", "ALTER TABLE clients ADD COLUMN diginetica_api_key VARCHAR"),
                 ]
                 # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:
@@ -326,6 +328,28 @@ async def lifespan(app: FastAPI):
                         ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE CASCADE,
                         external_id VARCHAR UNIQUE, author VARCHAR, author_name VARCHAR,
                         body TEXT, posted_at TIMESTAMP, raw JSONB DEFAULT '{}'::jsonb)""",
+                    # Checkup v2 (migration 007)
+                    "checkups_v2": """CREATE TABLE IF NOT EXISTS checkups_v2 (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        name VARCHAR NOT NULL, frequency VARCHAR DEFAULT 'monthly',
+                        due_date TIMESTAMP, partner_comment TEXT, any_comment TEXT,
+                        status VARCHAR DEFAULT 'draft', score FLOAT, score_max FLOAT DEFAULT 3.0,
+                        tracking JSONB DEFAULT '{}'::jsonb, uiux JSONB DEFAULT '{}'::jsonb,
+                        recs JSONB DEFAULT '{}'::jsonb, reviews JSONB DEFAULT '{}'::jsonb,
+                        products_tab JSONB DEFAULT '{}'::jsonb, debts JSONB DEFAULT '{}'::jsonb,
+                        search_comment TEXT, top_queries_comment TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(),
+                        created_by VARCHAR)""",
+                    "checkup_queries": """CREATE TABLE IF NOT EXISTS checkup_queries (
+                        id SERIAL PRIMARY KEY,
+                        checkup_id INTEGER REFERENCES checkups_v2(id) ON DELETE CASCADE,
+                        "group" VARCHAR DEFAULT 'top',
+                        query VARCHAR NOT NULL, shows_count INTEGER DEFAULT 0,
+                        score INTEGER, problem TEXT, solution TEXT, partner_comment TEXT,
+                        diginetica_response JSONB DEFAULT '{}'::jsonb,
+                        response_time_ms INTEGER, results_count INTEGER DEFAULT 0,
+                        has_correction BOOLEAN DEFAULT FALSE,
+                        checked_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())""",
                 }
                 for tname, tsql in _new_tables.items():
                     db.execute(_text(tsql))
