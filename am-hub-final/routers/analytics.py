@@ -1313,5 +1313,204 @@ async def api_portfolio_search_kpi(
 
 
 # ============================================================================
+# NRR PULSE — Net Revenue Retention for portfolio (hub dashboard)
+# ============================================================================
+
+
+def _nrr_period_ym(months_back: int):
+    """YYYY-MM для (сейчас - months_back месяцев)."""
+    now = datetime.utcnow()
+    y, m = now.year, now.month - months_back
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{y:04d}-{m:02d}"
+
+
+@router.get("/api/me/nrr-pulse")
+async def api_me_nrr_pulse(
+    period: str = "30d",
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Пульс портфеля через Net Revenue Retention.
+    NRR = sum(this_period_mrr) / sum(last_period_mrr) * 100.
+
+    - 7d: текущий месяц vs прошлый месяц (у RevenueEntry только месячная
+          гранулярность — для недели всё равно сравниваем 1м vs 1м)
+    - 30d: текущий месяц vs прошлый месяц
+    - quarter: сумма последних 3 месяцев vs сумма предыдущих 3 месяцев
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+    client_ids = [c.id for c in clients]
+
+    if not client_ids:
+        return {
+            "nrr_total": None,
+            "by_segment": {"ENT": None, "SME+": None, "SME": None, "SMB": None, "SS": None},
+            "gmv_total": 0,
+            "clients_count": 0,
+            "period": period,
+        }
+
+    # Окна периодов в месяцах YYYY-MM
+    p = (period or "").lower()
+    if p in ("quarter", "q", "3m"):
+        this_months = [_nrr_period_ym(i) for i in range(0, 3)]
+        prev_months = [_nrr_period_ym(i) for i in range(3, 6)]
+    else:
+        # 7d / 30d — текущий мес vs прошлый
+        this_months = [_nrr_period_ym(0)]
+        prev_months = [_nrr_period_ym(1)]
+
+    entries = db.query(RevenueEntry).filter(
+        RevenueEntry.client_id.in_(client_ids),
+        RevenueEntry.period.in_(this_months + prev_months),
+    ).all()
+
+    this_by_cid: dict = {}
+    prev_by_cid: dict = {}
+    for e in entries:
+        mrr = float(e.mrr or 0)
+        if e.period in this_months:
+            this_by_cid[e.client_id] = this_by_cid.get(e.client_id, 0.0) + mrr
+        elif e.period in prev_months:
+            prev_by_cid[e.client_id] = prev_by_cid.get(e.client_id, 0.0) + mrr
+
+    def _nrr(this_sum: float, prev_sum: float):
+        if prev_sum <= 0:
+            return None
+        return round(this_sum / prev_sum * 100.0, 1)
+
+    # Overall
+    total_this = sum(this_by_cid.values())
+    total_prev = sum(prev_by_cid.values())
+    nrr_total = _nrr(total_this, total_prev)
+
+    # Канонизируем сегменты: SME- → SME, ENTERPRISE → ENT и т.п.
+    def _canon_seg(raw):
+        s = (raw or "").upper()
+        if s in ("ENT", "ENTERPRISE"): return "ENT"
+        if s in ("SME+",): return "SME+"
+        if s in ("SME", "SME-"): return "SME"
+        if s in ("SMB",): return "SMB"
+        if s in ("SS", "SELF-SERVE", "SELFSERVE"): return "SS"
+        return None
+
+    segs = ["ENT", "SME+", "SME", "SMB", "SS"]
+    by_segment: dict = {s: None for s in segs}
+
+    cids_by_seg: dict = {s: [] for s in segs}
+    for c in clients:
+        seg = _canon_seg(c.segment)
+        if seg:
+            cids_by_seg[seg].append(c.id)
+
+    for seg in segs:
+        cids = cids_by_seg[seg]
+        if len(cids) < 2:
+            # < 2 клиентов → фронт покажет «—»
+            by_segment[seg] = None
+            continue
+        t_sum = sum(this_by_cid.get(cid, 0.0) for cid in cids)
+        p_sum = sum(prev_by_cid.get(cid, 0.0) for cid in cids)
+        by_segment[seg] = _nrr(t_sum, p_sum)
+
+    gmv_total = int(round(total_this))
+
+    return {
+        "nrr_total": nrr_total,
+        "by_segment": by_segment,
+        "gmv_total": gmv_total,
+        "clients_count": len(clients),
+        "period": period,
+    }
+
+
+# ============================================================================
+# NPS SURVEY — stub отправки опроса клиенту (пока пишем в PartnerLog)
+# ============================================================================
+
+NPS_SURVEY_TEXT = (
+    "Оцените от 0 до 10 вероятность, что порекомендуете AnyQuery коллегам. "
+    "Можно добавить комментарий."
+)
+
+
+@router.post("/api/nps/send-survey")
+async def api_nps_send_survey(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Отправить NPS-опрос клиенту. Пока stub — пишет запись в PartnerLog.
+
+    В будущем — реальная доставка в TG канал клиента / email.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    client_id = body.get("client_id")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id required")
+    try:
+        client_id = int(client_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="client_id must be int")
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="client not found")
+    if user.role == "manager" and client.manager_email != user.email:
+        raise HTTPException(status_code=403, detail="not your client")
+
+    log = PartnerLog(
+        client_id=client.id,
+        user_id=user.id,
+        event_type="nps_survey_sent",
+        title="NPS-опрос отправлен",
+        body=NPS_SURVEY_TEXT,
+        payload={
+            "channel": "stub",
+            "survey_text": NPS_SURVEY_TEXT,
+            "sent_by_email": user.email,
+        },
+        source="manual",
+        created_by=user.email,
+    )
+    db.add(log)
+    db.commit()
+
+    return {
+        "ok": True,
+        "channel": "stub",
+        "note": "Реальная доставка клиенту — в работе",
+    }
+
+
+# ============================================================================
 # FILE ATTACHMENTS
 

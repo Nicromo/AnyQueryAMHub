@@ -240,39 +240,8 @@ function PageHub() {
               )}
             </Card>
 
-            {/* portfolio pulse — chart */}
-            <Card title="Пульс портфеля · GMV 30 дней" action={
-              <div style={{ display: "flex", gap: 6 }}>
-                <Btn size="s" kind="ghost">7д</Btn>
-                <Btn size="s" kind="dim">30д</Btn>
-                <Btn size="s" kind="ghost">квартал</Btn>
-              </div>
-            }>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 20, alignItems: "stretch" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14 }}>
-                    <div style={{ fontSize: 38, fontWeight: 500, letterSpacing: "-0.03em", lineHeight: 1, color: "var(--ink-9)" }}>
-                      {_formatGmv(totalGmv)}
-                    </div>
-                    <div className="mono" style={{ fontSize: 13, color: "var(--ink-5)", fontWeight: 500 }}>
-                      {CL.length} {CL.length === 1 ? "клиент" : (CL.length < 5 ? "клиента" : "клиентов")}
-                    </div>
-                  </div>
-                  <BigSpark/>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, borderLeft: "1px solid var(--line)", paddingLeft: 18 }}>
-                  {buckets.map((r, i) => (
-                    <div key={i}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{r.label}</span>
-                        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ink-8)" }}>{_formatGmv(r.rub)}</span>
-                      </div>
-                      <Progress value={pctOf(r.rub)} tone={r.color} h={3}/>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
+            {/* portfolio pulse — NRR */}
+            <NrrPulse fallbackTotalGmv={totalGmv} fallbackClientsCount={CL.length}/>
 
             {/* attention + tickets — заменили инструменты/cron на более полезные блоки */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
@@ -447,6 +416,107 @@ function BigSpark() {
     </svg>
   );
 }
+
+// ── NRR Pulse — пульс портфеля через Net Revenue Retention ──
+function NrrPulse({ fallbackTotalGmv = 0, fallbackClientsCount = 0 }) {
+  const [period, setPeriod] = React.useState("30d");
+  const [data, setData] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setErr(null);
+    (async () => {
+      try {
+        const r = await fetch(`/api/me/nrr-pulse?period=${period}`, { credentials: "include" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (!cancelled) { setData(d); setLoading(false); }
+      } catch (e) {
+        if (!cancelled) { setErr(e.message); setLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [period]);
+
+  const nrrTotal = data && data.nrr_total != null ? Number(data.nrr_total) : null;
+  const gmvTotal = data && data.gmv_total != null ? Number(data.gmv_total) : fallbackTotalGmv;
+  const clientsCnt = data && data.clients_count != null ? Number(data.clients_count) : fallbackClientsCount;
+  const bySeg = (data && data.by_segment) || {};
+
+  const nrrColor = (v) => {
+    if (v == null) return "var(--ink-5)";
+    if (v >= 100) return "var(--ok)";
+    if (v >= 90) return "var(--warn)";
+    return "var(--critical)";
+  };
+  const nrrTone = (v) => {
+    if (v == null) return "signal";
+    if (v >= 100) return "ok";
+    if (v >= 90) return "warn";
+    return "critical";
+  };
+  const fmtNrr = (v) => v == null ? "—" : `${v.toFixed(1)}%`;
+
+  const segOrder = ["ENT", "SME+", "SME", "SMB", "SS"];
+  const periods = [
+    { k: "7d",      l: "7д"      },
+    { k: "30d",     l: "30д"     },
+    { k: "quarter", l: "квартал" },
+  ];
+
+  return React.createElement(Card, {
+    title: "Пульс портфеля · NRR",
+    action: React.createElement("div", { style: { display: "flex", gap: 6 } },
+      periods.map((p) => React.createElement(Btn, {
+        key: p.k, size: "s", kind: period === p.k ? "dim" : "ghost",
+        onClick: () => setPeriod(p.k),
+      }, p.l)),
+    ),
+  },
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 220px", gap: 20, alignItems: "stretch" } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 } },
+          React.createElement("div", {
+            style: {
+              fontSize: 48, fontWeight: 500, letterSpacing: "-0.03em", lineHeight: 1,
+              color: nrrColor(nrrTotal),
+              fontVariantNumeric: "tabular-nums",
+            },
+          }, loading ? "…" : (err ? "—" : fmtNrr(nrrTotal))),
+          React.createElement("div", { className: "mono", style: { fontSize: 12, color: "var(--ink-5)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em" } },
+            "NRR"),
+        ),
+        React.createElement("div", { className: "mono", style: { fontSize: 11.5, color: "var(--ink-6)", marginBottom: 14 } },
+          `оборот ${_formatGmv(gmvTotal)} / ${clientsCnt} ${clientsCnt === 1 ? "клиент" : (clientsCnt < 5 && clientsCnt > 0 ? "клиента" : "клиентов")}`),
+        err && React.createElement("div", { style: { fontSize: 11.5, color: "var(--critical)", marginBottom: 10 } },
+          "Не удалось загрузить NRR: " + err),
+        React.createElement(BigSpark, null),
+      ),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, borderLeft: "1px solid var(--line)", paddingLeft: 18 } },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 } },
+          "NRR по сегментам"),
+        segOrder.map((seg) => {
+          const v = bySeg[seg];
+          const isNum = typeof v === "number" && !isNaN(v);
+          return React.createElement("div", { key: seg },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 } },
+              React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" } }, seg),
+              React.createElement("span", { style: { fontSize: 12, fontWeight: 500, color: isNum ? nrrColor(v) : "var(--ink-5)", fontVariantNumeric: "tabular-nums" } },
+                isNum ? fmtNrr(v) : "—"),
+            ),
+            React.createElement(Progress, {
+              value: isNum ? Math.max(0, Math.min(120, v)) : 0,
+              max: 120, tone: nrrTone(v), h: 3,
+            }),
+          );
+        }),
+      ),
+    ),
+  );
+}
+window.NrrPulse = NrrPulse;
 
 window.PageHub = PageHub;
 
