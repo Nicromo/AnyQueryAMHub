@@ -370,6 +370,20 @@ async def lifespan(app: FastAPI):
                     db.commit()
                 except Exception:
                     db.rollback()
+                # ── Prefetch-индексы для часто используемых полей (perf tuning) ──
+                _perf_indices = [
+                    ("tasks", "client_id_status", "CREATE INDEX IF NOT EXISTS ix_tasks_client_status ON tasks(client_id, status)"),
+                    ("meetings", "client_date", "CREATE INDEX IF NOT EXISTS ix_meetings_client_date ON meetings(client_id, date)"),
+                    ("clients", "manager_email", "CREATE INDEX IF NOT EXISTS ix_clients_manager_email ON clients(manager_email)"),
+                    ("checkup_queries", "checkup_id_group", "CREATE INDEX IF NOT EXISTS ix_checkup_queries_cg ON checkup_queries(checkup_id, \"group\")"),
+                ]
+                for tbl, nm, sql in _perf_indices:
+                    try:
+                        db.execute(_text(sql))
+                        db.commit()
+                    except Exception as _ie:
+                        db.rollback()
+                        logger.warning(f"index {nm} failed: {_ie}")
                 logger.info("✅ Auto-migration complete")
             except Exception as _e:
                 logger.warning(f"Auto-migration warning: {_e}")
@@ -470,6 +484,8 @@ from routers import pdf_export
 app.include_router(pdf_export.router, tags=["pdf"])
 from routers import api_tokens as api_tokens_router
 app.include_router(api_tokens_router.router, tags=["api-tokens"])
+from routers import partner_logs as partner_logs_router
+app.include_router(partner_logs_router.router, tags=["partner-logs"])
 from routers import extension_api
 app.include_router(extension_api.router, tags=["extension"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])

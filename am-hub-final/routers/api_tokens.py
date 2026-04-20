@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -228,10 +229,14 @@ async def api_me_integrations(
     tb  = s.get("tbank_time") or {}
     mr  = s.get("merchrules") or {}
     at  = s.get("airtable") or {}
-    return {
+    result = {
         "ktalk":      bool(kt.get("access_token")),
         "tbank_time": bool(tb.get("mmauthtoken") or tb.get("session_cookie") or tb.get("access_token")),
         "merchrules": bool(mr.get("login") or mr.get("username")),
         "airtable":   bool(at.get("pat") or at.get("token") or at.get("api_key")),
         "telegram":   bool(getattr(user, "telegram_id", None)),
     }
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "private, max-age=60"},  # 1 минута
+    )

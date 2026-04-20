@@ -320,6 +320,9 @@ function PageClient() {
 
             {/* Чекапы — v2 */}
             <ClientCheckupsList clientId={c.id}/>
+
+            {/* История партнёра — real /api/clients/{id}/logs */}
+            <ClientLogsList clientId={c.id}/>
           </div>
         </div>
       </div>
@@ -605,6 +608,185 @@ function ClientCheckupsList({ clientId }) {
   );
 }
 window.ClientCheckupsList = ClientCheckupsList;
+
+
+// ── ClientLogsList — единая история партнёра (PartnerLog) ─────────────────
+// Card «История партнёра»:
+//  - форма сверху: event_type (select) + body (textarea) + кнопка «Добавить запись»
+//  - лента записей: иконка типа, title/body (первые 200 символов), дата, автор
+//  - кнопка «🗑» — удалить запись
+function ClientLogsList({ clientId }) {
+  const [list, setList] = React.useState(null);
+  const [eventType, setEventType] = React.useState("note");
+  const [bodyText, setBodyText] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  const EVENT_TYPES = [
+    { k: "note",                 l: "Заметка",            icon: "📝" },
+    { k: "communication",        l: "Коммуникация",       icon: "💬" },
+    { k: "call",                 l: "Звонок",             icon: "📞" },
+    { k: "email",                l: "Email",              icon: "✉️" },
+    { k: "meeting_summary",      l: "Итоги встречи",      icon: "🤝" },
+    { k: "merch_rule_created",   l: "Мерч-правило (new)", icon: "⚙️" },
+    { k: "merch_rule_updated",   l: "Мерч-правило (upd)", icon: "⚙️" },
+    { k: "synonym_added",        l: "Синоним добавлен",   icon: "🔤" },
+    { k: "whitelist_added",      l: "Whitelist",          icon: "✅" },
+    { k: "manual",               l: "Прочее",             icon: "•"  },
+  ];
+  const typeMeta = (t) => EVENT_TYPES.find(x => x.k === t) || { k: t, l: t, icon: "•" };
+
+  const reload = React.useCallback(async () => {
+    try {
+      const r = await fetch(`/api/clients/${clientId}/logs?limit=50`, { credentials: "include" });
+      if (!r.ok) { setList([]); return; }
+      const d = await r.json();
+      setList(d.logs || []);
+    } catch (e) { setList([]); }
+  }, [clientId]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  async function addOne() {
+    const text = (bodyText || "").trim();
+    if (!text) { appToast("Введите текст записи", "error"); return; }
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/clients/${clientId}/logs`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_type: eventType, body: text, source: "manual" }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) {
+        setBodyText("");
+        appToast("Запись добавлена", "ok");
+        reload();
+      } else {
+        appToast("Ошибка: " + (d.error || d.detail || "не удалось"), "error");
+      }
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    finally { setSaving(false); }
+  }
+
+  async function removeOne(id) {
+    if (!await appConfirm("Удалить запись из истории?")) return;
+    try {
+      await fetch(`/api/clients/${clientId}/logs/${id}`, {
+        method: "DELETE", credentials: "include",
+      });
+      reload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  // Форма добавления новой записи.
+  const form = React.createElement("div", {
+    style: {
+      display: "grid", gridTemplateColumns: "1fr", gap: 8,
+      padding: "10px 0 12px 0",
+      borderBottom: "1px solid var(--line-soft)",
+    },
+  },
+    React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+      React.createElement("select", {
+        value: eventType,
+        onChange: (e) => setEventType(e.target.value),
+        style: {
+          flex: "0 0 auto",
+          background: "var(--ink-1)", color: "var(--ink-8)",
+          border: "1px solid var(--line)", borderRadius: 4,
+          fontSize: 12, padding: "6px 8px",
+        },
+      },
+        EVENT_TYPES.map(t =>
+          React.createElement("option", { key: t.k, value: t.k }, `${t.icon}  ${t.l}`)
+        ),
+      ),
+    ),
+    React.createElement("textarea", {
+      value: bodyText,
+      onChange: (e) => setBodyText(e.target.value),
+      placeholder: "Текст записи (что произошло / о чём договорились / детали)…",
+      rows: 3,
+      style: {
+        width: "100%", resize: "vertical",
+        background: "var(--ink-1)", color: "var(--ink-8)",
+        border: "1px solid var(--line)", borderRadius: 4,
+        fontSize: 12.5, padding: "8px 10px",
+        fontFamily: "inherit",
+      },
+    }),
+    React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
+      React.createElement(Btn, {
+        size: "s", kind: "primary", disabled: saving,
+        icon: React.createElement(I.plus, { size: 12 }),
+        onClick: addOne,
+      }, saving ? "Сохраняем…" : "Добавить запись"),
+    ),
+  );
+
+  // Лента записей.
+  const feed = (() => {
+    if (list === null) return React.createElement("div",
+      { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } }, "Загрузка…");
+    if (!list.length) return React.createElement("div",
+      { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } },
+      "Записей ещё нет. Добавьте первую заметку.");
+    return React.createElement("div", null,
+      list.map((l, i) => {
+        const tm = typeMeta(l.event_type);
+        const raw = l.body || "";
+        const short = raw.slice(0, 200) + (raw.length > 200 ? "…" : "");
+        return React.createElement("div", {
+          key: l.id,
+          style: {
+            display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10,
+            padding: "10px 0",
+            borderBottom: i === list.length - 1 ? "none" : "1px solid var(--line-soft)",
+            alignItems: "flex-start",
+          },
+        },
+          React.createElement("div", {
+            style: { fontSize: 16, lineHeight: "18px", width: 22, textAlign: "center", flexShrink: 0 },
+            title: tm.l,
+          }, tm.icon),
+          React.createElement("div", { style: { minWidth: 0 } },
+            l.title && React.createElement("div", {
+              style: { fontSize: 12.5, fontWeight: 500, color: "var(--ink-8)", marginBottom: 2 },
+            }, l.title),
+            short && React.createElement("div", {
+              style: { fontSize: 12, color: "var(--ink-7)", whiteSpace: "pre-wrap", wordBreak: "break-word" },
+            }, short),
+            React.createElement("div", {
+              className: "mono",
+              style: { fontSize: 10.5, color: "var(--ink-5)", marginTop: 4 },
+            }, `${fmtDate(l.created_at)} · ${tm.l}${l.created_by ? " · " + l.created_by : ""}`),
+          ),
+          React.createElement("button", {
+            onClick: () => removeOne(l.id),
+            style: {
+              background: "none", border: 0, color: "var(--ink-5)",
+              cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1,
+            },
+            title: "Удалить запись",
+          }, "🗑"),
+        );
+      })
+    );
+  })();
+
+  return React.createElement(Card, { title: "История партнёра" },
+    form,
+    feed,
+  );
+}
+window.ClientLogsList = ClientLogsList;
 
 
 // ── CheckupWizard — фулскрин-модалка с табами ──────────────────────────────
