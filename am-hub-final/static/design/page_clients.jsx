@@ -314,95 +314,26 @@ function PageClient() {
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
 
-            {/* AI summary */}
-            <Card title="AI-бриф перед встречей" action={<Badge tone="signal">auto · 09:12</Badge>}>
-              <div style={{ fontSize: 13.5, color: "var(--ink-8)", lineHeight: 1.6 }}>
-                Клиент растёт <span style={{ color: "var(--signal)" }}>+12% MoM</span>, однако за последние 7 дней
-                воронка оплаты просела на 6%. Drilldown показывает: проблема на шаге &laquo;адрес&raquo; —
-                видимо связано с обновлением Merchrules от 11 апр. Рекомендую: поднять лимит ежедневного
-                вывода до 1.2М и обсудить запуск программы лояльности.
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-                <Btn size="s" kind="dim">Принять всё</Btn>
-                <Btn size="s" kind="ghost">Показать источники</Btn>
-                <Btn size="s" kind="ghost">Обновить</Btn>
-              </div>
-            </Card>
+            {/* AI summary — real /api/ai/generate-prep */}
+            <ClientAIBrief clientId={c.id}/>
 
-            {/* activity timeline */}
-            <Card title="Хронология">
-              <div style={{ position: "relative", paddingLeft: 20 }}>
-                <div style={{ position: "absolute", left: 5, top: 4, bottom: 4, width: 1, background: "var(--line)" }}/>
-                {[
-                  { when: "сегодня", title: "Запланирован чекап 14:00", sub: "KTalk · встреча с Ольгой Л. (CMO)", tone: "signal" },
-                  { when: "2 дня назад", title: "Отправлен follow-up по новым правилам", sub: "email · 1 ответ получен", tone: "ok" },
-                  { when: "5 дней назад", title: "GMV перешагнул рубеж ₽4м", sub: "+12% за 30 дней", tone: "ok" },
-                  { when: "11 дней назад", title: "Поднят лимит вывода до 800к", sub: "согласовано с финансами", tone: "neutral" },
-                  { when: "21 день назад", title: "Чекап проведён · настроение positive", sub: "заметка: обсуждали интеграцию с Diginetica", tone: "neutral" },
-                ].map((e, i) => (
-                  <div key={i} style={{ position: "relative", paddingBottom: 18 }}>
-                    <div style={{
-                      position: "absolute", left: -20, top: 4, width: 11, height: 11, borderRadius: 999,
-                      background: "var(--ink-1)",
-                      border: `2px solid ${e.tone === "signal" ? "var(--signal)" : e.tone === "ok" ? "var(--ok)" : "var(--ink-4)"}`,
-                    }}/>
-                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{e.when}</div>
-                    <div style={{ fontSize: 13.5, color: "var(--ink-9)", fontWeight: 500, marginTop: 2 }}>{e.title}</div>
-                    <div style={{ fontSize: 12, color: "var(--ink-6)", marginTop: 2 }}>{e.sub}</div>
-                  </div>
-                ))}
-              </div>
-            </Card>
+            {/* activity timeline — real /api/clients/{id}/timeline */}
+            <ClientTimeline clientId={c.id}/>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-            <Card title="Контакты">
-              {[
-                { name: "Ольга Ларина", role: "CMO · главное лицо", ch: "KTalk · live" },
-                { name: "Денис Ткач", role: "Финансы", ch: "email" },
-                { name: "Алиса Р.", role: "Operations", ch: "Telegram" },
-              ].map((p, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 0",
-                  borderBottom: i === 2 ? "none" : "1px solid var(--line-soft)",
-                }}>
-                  <Avatar name={p.name} size={32}/>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 500, color: "var(--ink-8)" }}>{p.name}</div>
-                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{p.role}</div>
-                  </div>
-                  <span className="mono" style={{ fontSize: 10, color: "var(--ink-6)" }}>{p.ch}</span>
-                </div>
-              ))}
+            {/* Контакты — real /api/clients/{id}/contacts */}
+            <ClientContactsList clientId={c.id}/>
+
+            <Card title="Документы и договоры" action={<Badge tone="ghost" mono>в разработке</Badge>}>
+              <div style={{ fontSize: 12.5, color: "var(--ink-6)", padding: "14px 0" }}>
+                Раздел в разработке — будет интеграция с хранилищем договоров.
+              </div>
             </Card>
 
-            <Card title="Документы и договоры">
-              {[
-                { name: "Договор №2241", status: "подписан", date: "15 мар 2022" },
-                { name: "Допсоглашение Q2'26", status: "на подписи", date: "12 апр" },
-                { name: "API ключ Merchrules", status: "активен", date: "ротация 01.06" },
-              ].map((d, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 0",
-                  borderBottom: i === 2 ? "none" : "1px solid var(--line-soft)",
-                }}>
-                  <I.doc size={16} stroke="var(--ink-6)"/>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, color: "var(--ink-8)" }}>{d.name}</div>
-                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{d.date}</div>
-                  </div>
-                  <Badge tone={d.status === "на подписи" ? "warn" : "ok"} dot>{d.status}</Badge>
-                </div>
-              ))}
-            </Card>
-
-            <Card title="Теги">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {["tier-1", "строймат", "мск", "diginetica-интерес", "qbr-квартальный", "telegram-ok"].map(t => (
-                  <Badge key={t} tone="ghost" mono>{t}</Badge>
-                ))}
+            <Card title="Теги" action={<Badge tone="ghost" mono>в разработке</Badge>}>
+              <div style={{ fontSize: 12.5, color: "var(--ink-6)", padding: "14px 0" }}>
+                Кастомные теги клиента появятся в следующей итерации.
               </div>
             </Card>
           </div>
@@ -446,3 +377,149 @@ function TrendBars({ data = [], down = false, w = 96, h = 28 }) {
   );
 }
 window.TrendBars = TrendBars;
+
+
+// ── Client detail: real data components ───────────────────────────────
+
+function ClientAIBrief({ clientId }) {
+  const [text, setText] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  const reload = React.useCallback(async () => {
+    setLoading(true); setErr(null);
+    try {
+      const r = await fetch("/api/ai/generate-prep", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: Number(clientId) }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      setText(d.brief || d.text || d.prep_text || "");
+    } catch (e) { setErr(e.message || "Не удалось получить AI-бриф"); }
+    finally { setLoading(false); }
+  }, [clientId]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  return React.createElement(Card, {
+    title: "AI-бриф перед встречей",
+    action: React.createElement(Badge, { tone: "signal" }, loading ? "генерация…" : "auto"),
+  },
+    err && React.createElement("div", { style: { fontSize: 12.5, color: "var(--critical)", padding: "10px 0" } }, "Ошибка: " + err),
+    !err && !loading && !text && React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } }, "Недостаточно данных — добавьте встречи/задачи и повторите."),
+    !err && text && React.createElement("div", { style: { fontSize: 13.5, color: "var(--ink-8)", lineHeight: 1.6, whiteSpace: "pre-wrap" } }, text),
+    React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" } },
+      React.createElement(Btn, { size: "s", kind: "ghost", onClick: reload }, "Обновить"),
+      React.createElement(Btn, { size: "s", kind: "ghost", onClick: () => { window.location.href = `/prep/${clientId}`; } }, "Открыть полный prep"),
+    )
+  );
+}
+window.ClientAIBrief = ClientAIBrief;
+
+
+function ClientTimeline({ clientId }) {
+  const [events, setEvents] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/clients/${clientId}/timeline?limit=20`, { credentials: "include" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (!cancelled) setEvents(d.events || []);
+      } catch (e) { if (!cancelled) setErr(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, [clientId]);
+
+  const relDay = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const diff = Math.round((Date.now() - d.getTime()) / 86400000);
+    if (diff === 0) return "сегодня";
+    if (diff === 1) return "вчера";
+    if (diff < 0) return "через " + (-diff) + " дн";
+    return diff + " дн назад";
+  };
+  const toneMap = { meeting: "signal", task_done: "ok", note: "neutral", checkup: "ok", qbr: "signal", history: "neutral" };
+
+  if (err) return React.createElement(Card, { title: "Хронология" },
+    React.createElement("div", { style: { color: "var(--critical)", fontSize: 12.5, padding: "10px 0" } }, "Ошибка: " + err));
+  if (events === null) return React.createElement(Card, { title: "Хронология" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } }, "Загрузка..."));
+  if (!events.length) return React.createElement(Card, { title: "Хронология" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } }, "Событий ещё нет."));
+
+  return React.createElement(Card, { title: "Хронология" },
+    React.createElement("div", { style: { position: "relative", paddingLeft: 20 } },
+      React.createElement("div", { style: { position: "absolute", left: 5, top: 4, bottom: 4, width: 1, background: "var(--line)" } }),
+      events.map((e, i) => {
+        const tone = toneMap[e.type] || "neutral";
+        const color = tone === "signal" ? "var(--signal)" : tone === "ok" ? "var(--ok)" : "var(--ink-4)";
+        const title = e.title || e.content || e.field || e.type;
+        return React.createElement("div", { key: i, style: { position: "relative", paddingBottom: 18 } },
+          React.createElement("div", { style: {
+            position: "absolute", left: -20, top: 4, width: 11, height: 11, borderRadius: 999,
+            background: "var(--ink-1)", border: `2px solid ${color}`,
+          } }),
+          React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, relDay(e.date)),
+          React.createElement("div", { style: { fontSize: 13.5, color: "var(--ink-9)", fontWeight: 500, marginTop: 2 } }, title),
+          e.author && React.createElement("div", { style: { fontSize: 12, color: "var(--ink-6)", marginTop: 2 } }, e.author),
+        );
+      })
+    )
+  );
+}
+window.ClientTimeline = ClientTimeline;
+
+
+function ClientContactsList({ clientId }) {
+  const [list, setList] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/clients/${clientId}/contacts`, { credentials: "include" });
+        if (!r.ok) { if (!cancelled) setList([]); return; }
+        const d = await r.json();
+        const arr = d.contacts || d || [];
+        if (!cancelled) setList(Array.isArray(arr) ? arr : []);
+      } catch (e) { if (!cancelled) setList([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [clientId]);
+
+  const roleMap = { decision_maker: "ЛПР", tech: "Технический", finance: "Финансы", other: "Другое" };
+
+  if (list === null) return React.createElement(Card, { title: "Контакты" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } }, "Загрузка..."));
+  if (!list.length) return React.createElement(Card, { title: "Контакты" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } },
+      "Контактов нет. Добавятся при синке Airtable."));
+
+  return React.createElement(Card, { title: "Контакты" },
+    list.map((p, i) => React.createElement("div", {
+      key: p.id || i,
+      style: {
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "10px 0",
+        borderBottom: i === list.length - 1 ? "none" : "1px solid var(--line-soft)",
+      }
+    },
+      React.createElement(Avatar, { name: p.name || "?", size: 32 }),
+      React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+        React.createElement("div", { style: { fontSize: 12.5, fontWeight: 500, color: "var(--ink-8)" } }, p.name || "—"),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } },
+          [roleMap[p.role] || p.role || "", p.position || ""].filter(Boolean).join(" · ") || "—"),
+      ),
+      React.createElement("span", { className: "mono", style: { fontSize: 10, color: "var(--ink-6)" } },
+        p.email || p.phone || p.telegram || ""),
+    ))
+  );
+}
+window.ClientContactsList = ClientContactsList;

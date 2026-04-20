@@ -120,11 +120,19 @@ def compute_next_touchpoint(
 ) -> str:
     next_meeting_dt = next_meetings_by_client.get(client.id)
 
+    # Ожидаемый чекап. База — last_checkup → last_meeting_date → last_sync_at → now.
     next_checkup_dt: Optional[datetime] = None
-    if client.last_checkup and client.segment in CHECKUP_INTERVALS:
-        next_checkup_dt = client.last_checkup + timedelta(
-            days=CHECKUP_INTERVALS[client.segment]
+    if client.segment in CHECKUP_INTERVALS:
+        base = (
+            getattr(client, "last_checkup", None)
+            or getattr(client, "last_meeting_date", None)
+            or getattr(client, "last_sync_at", None)
         )
+        if base:
+            next_checkup_dt = base + timedelta(days=CHECKUP_INTERVALS[client.segment])
+        else:
+            # Новый клиент без истории — следующий чекап через интервал от now
+            next_checkup_dt = now + timedelta(days=CHECKUP_INTERVALS[client.segment])
 
     candidates = [d for d in (next_meeting_dt, next_checkup_dt) if d is not None]
     if not candidates:
@@ -147,6 +155,43 @@ def prefetch_next_meetings(db: Any, now: datetime, visible_ids: Optional[List[in
             return {}
         q = q.filter(Meeting.client_id.in_(visible_ids))
     return {cid: dt for cid, dt in q.all()}
+
+
+def prefetch_revenue_trends(db: Any, visible_ids: Optional[List[int]] = None, months: int = 6) -> Dict[int, Dict[str, Any]]:
+    """Собирает ряды MRR помесячно для sparkline и считает delta% к предыдущему периоду.
+
+    Возвращает: {client_id: {"trend": [int, int, ...], "delta": "+12%" | "−5%" | "—"}}
+    """
+    try:
+        from models import RevenueEntry
+    except Exception:
+        return {}
+    try:
+        q = db.query(RevenueEntry).filter(RevenueEntry.client_id.isnot(None))
+        if visible_ids is not None:
+            if not visible_ids:
+                return {}
+            q = q.filter(RevenueEntry.client_id.in_(visible_ids))
+        # Берём последние N*макс.клиентов записей и группируем на стороне Python
+        rows = q.order_by(RevenueEntry.client_id, RevenueEntry.period.desc()).all()
+    except Exception:
+        return {}
+    by_client: Dict[int, List[Any]] = {}
+    for r in rows:
+        by_client.setdefault(r.client_id, []).append(r)
+    result: Dict[int, Dict[str, Any]] = {}
+    for cid, rs in by_client.items():
+        # Отсортируем по периоду возрастание
+        rs_sorted = sorted(rs, key=lambda x: x.period or "")
+        values = [float(r.mrr or 0) for r in rs_sorted[-months:]]
+        trend = [int(v) for v in values]
+        delta_str = "—"
+        if len(values) >= 2 and values[-2] > 0:
+            pct = round((values[-1] - values[-2]) / values[-2] * 100, 1)
+            sign = "+" if pct >= 0 else "−"
+            delta_str = f"{sign}{abs(pct)}%"
+        result[cid] = {"trend": trend, "delta": delta_str}
+    return result
 
 
 # ──────────────────────────────────────────────────────────────
@@ -242,6 +287,7 @@ def client_to_design(
     client: Any,
     now: datetime,
     next_meetings_by_client: Dict[int, datetime],
+    revenue_trends_by_client: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     lm_date = getattr(client, "last_meeting_date", None)
     lc_date = getattr(client, "last_checkup", None)
@@ -250,6 +296,14 @@ def client_to_design(
     days_since_added = (
         (now.date() - created_at.date()).days if created_at else None
     )
+    # Динамика: сначала из RevenueEntry, если не прокинули — фоллбек на client.revenue_trend
+    rev_info = (revenue_trends_by_client or {}).get(client.id) if revenue_trends_by_client else None
+    if rev_info:
+        delta = rev_info.get("delta", "—")
+        trend = rev_info.get("trend", [])
+    else:
+        delta = format_delta(client.revenue_trend)
+        trend = parse_trend(client.revenue_trend)
     return {
         "id": client.id,
         "name": client.name or "—",
@@ -270,8 +324,8 @@ def client_to_design(
         "gmv": format_gmv(client.mrr),
         "gmv_raw": client.mrr,
         "mrr": client.mrr,
-        "delta": format_delta(client.revenue_trend),
-        "trend": parse_trend(client.revenue_trend),
+        "delta": delta,
+        "trend": trend,
         "revenue_trend": client.revenue_trend,
         "days_since": (
             (now.date() - lm_date.date()).days if lm_date else None
