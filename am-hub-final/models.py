@@ -624,3 +624,46 @@ class ClientFeed(Base):
     last_error     = Column(Text, nullable=True)
     schedule       = Column(String, nullable=True)      # hourly | daily | manual
     client         = relationship("Client", backref="feeds")
+
+
+# ── Блок 4: Support Tickets (Tbank Time / Mattermost) ────────────────────────
+
+class SupportTicket(Base):
+    """Тикет поддержки из Tbank Time (Mattermost)."""
+    __tablename__ = "support_tickets"
+    id                   = Column(Integer, primary_key=True, index=True)
+    client_id            = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    source               = Column(String, default="tbank_time")     # tbank_time | manual
+    external_id          = Column(String, unique=True, index=True)  # Mattermost post id (root)
+    external_url         = Column(String, nullable=True)
+    channel_id           = Column(String, nullable=True)
+    title                = Column(String, nullable=True)
+    body                 = Column(Text, nullable=True)
+    status               = Column(String, default="open")           # open | in_progress | resolved | closed
+    priority             = Column(String, default="normal")
+    author               = Column(String, nullable=True)
+    author_name          = Column(String, nullable=True)
+    external_client_id   = Column(String, nullable=True, index=True)  # Распарсенный ID из текста
+    comments_count       = Column(Integer, default=0)
+    last_comment_at      = Column(DateTime, nullable=True)
+    last_comment_snippet = Column(Text, nullable=True)
+    opened_at            = Column(DateTime, nullable=True, index=True)
+    updated_at           = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    resolved_at          = Column(DateTime, nullable=True)
+    raw                  = Column(JSONB, default=dict)
+
+    client = relationship("Client", backref="support_tickets")
+
+
+class TicketComment(Base):
+    """Комментарий к тикету — сообщение из треда Mattermost."""
+    __tablename__ = "ticket_comments"
+    id           = Column(Integer, primary_key=True, index=True)
+    ticket_id    = Column(Integer, ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True)
+    external_id  = Column(String, unique=True, index=True)
+    author       = Column(String, nullable=True)
+    author_name  = Column(String, nullable=True)
+    body         = Column(Text, nullable=True)
+    posted_at    = Column(DateTime, nullable=True)
+    raw          = Column(JSONB, default=dict)
+    ticket       = relationship("SupportTicket", backref="comments")

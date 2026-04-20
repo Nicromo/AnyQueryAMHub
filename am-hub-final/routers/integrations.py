@@ -658,6 +658,24 @@ async def api_test_integration(
 
     return {"ok": False, "error": f"Неизвестный сервис: {service}"}
 
+
+@router.post("/api/tickets/sync")
+async def api_tickets_sync_all(db: Session = Depends(get_db),
+                                auth_token: Optional[str] = Cookie(None)):
+    """Ручная синхронизация тикетов из Tbank Time для текущего пользователя."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    from integrations.tbank_time import ingest_tickets
+    return await ingest_tickets(db, user, limit_new=200, fetch_threads=True)
+
+
 # ============================================================================
 # CHROME EXTENSION — push токенов Time и Ktalk
 

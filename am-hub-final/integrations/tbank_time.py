@@ -290,3 +290,222 @@ async def get_all_tickets(token: str = "", per_page: int = 100) -> List[Dict]:
 
     tickets.sort(key=lambda t: t.get("created_at") or datetime.min, reverse=True)
     return tickets
+
+
+# ── Новый режим: ingest тикетов в БД с связью по ID клиента ───────────────────
+
+import re
+
+# Регексы для поиска client_id в тексте поста
+_CLIENT_ID_PATTERNS = [
+    re.compile(r"#(\d{2,10})\b"),
+    re.compile(r"(?:ID|Id|id|АЙДИ|Айди|айди)[\s:=№#-]*(\d{2,10})"),
+    re.compile(r"(?:account[_\-]?id|акк[а-я]*[\s_]?id)[\s:=#-]*(\d{2,10})", re.IGNORECASE),
+    re.compile(r"(?:client[_\-]?id|клиент[а-я]*[\s_]?id)[\s:=#-]*(\d{2,10})", re.IGNORECASE),
+]
+
+
+def parse_client_id(text: str) -> Optional[str]:
+    """Извлекает ID клиента из текста поста."""
+    if not text:
+        return None
+    for pat in _CLIENT_ID_PATTERNS:
+        m = pat.search(text)
+        if m:
+            return m.group(1)
+    return None
+
+
+def extract_title(text: str) -> str:
+    lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
+    return (lines[0][:200] if lines else "Без темы")
+
+
+async def get_users_map(token: str, user_ids: List[str]) -> Dict[str, Dict]:
+    """Резолв user_id → {username, email, nickname} через /api/v4/users/ids."""
+    if not user_ids:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            resp = await hx.post(
+                f"{TIME_BASE_URL}/api/v4/users/ids",
+                headers=_headers(token),
+                json=list(set(user_ids)),
+            )
+            if resp.status_code == 200:
+                return {u["id"]: u for u in resp.json() if u.get("id")}
+    except Exception as e:
+        logger.error(f"get_users_map error: {e}")
+    return {}
+
+
+async def get_post_thread(token: str, post_id: str) -> Dict:
+    """Получить тред (root + все реплаи)."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            resp = await hx.get(
+                f"{TIME_BASE_URL}/api/v4/posts/{post_id}/thread",
+                headers=_headers(token),
+            )
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.error(f"get_post_thread error: {e}")
+    return {}
+
+
+def _detect_status(message: str, props: dict | None = None) -> str:
+    m = (message or "").lower()
+    if any(k in m for k in ["закрыт", "решён", "решен", "resolved", "closed", "✅", "🟢"]):
+        return "resolved"
+    if any(k in m for k in ["в работе", "обрабатывается", "in progress", "🟡"]):
+        return "in_progress"
+    return "open"
+
+
+async def get_all_channel_posts(token: str, channel_id: str, max_pages: int = 20) -> List[Dict]:
+    """Забирает все root-посты канала (не-реплаи), до max_pages страниц по 100."""
+    all_posts = []
+    async with httpx.AsyncClient(timeout=30) as hx:
+        for page in range(max_pages):
+            try:
+                resp = await hx.get(
+                    f"{TIME_BASE_URL}/api/v4/channels/{channel_id}/posts",
+                    headers=_headers(token),
+                    params={"per_page": 100, "page": page},
+                )
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
+                posts = data.get("posts", {})
+                order = data.get("order", [])
+                if not order:
+                    break
+                for pid in order:
+                    p = posts.get(pid)
+                    if p and not p.get("root_id"):  # только root-посты
+                        all_posts.append(p)
+                if len(order) < 100:
+                    break
+            except Exception as e:
+                logger.error(f"get_all_channel_posts page={page}: {e}")
+                break
+    return all_posts
+
+
+async def ingest_tickets(db, user, limit_new: int = 100, fetch_threads: bool = True) -> Dict[str, Any]:
+    """Главная функция: забирает посты из Mattermost, связывает с клиентами по ID, апсертит в БД."""
+    from models import SupportTicket, TicketComment, Client
+    settings = user.settings or {}
+    tm = settings.get("tbank_time", {})
+    token = tm.get("mmauthtoken") or tm.get("session_cookie") or tm.get("api_token") or os.environ.get("TIME_API_TOKEN")
+    if not token:
+        return {"ok": False, "error": "no_token"}
+
+    channel_id = tm.get("support_channel_id") or await get_channel_id(token)
+    if not channel_id:
+        return {"ok": False, "error": "no_channel"}
+
+    posts = await get_all_channel_posts(token, channel_id, max_pages=max(1, limit_new // 100 + 1))
+    if not posts:
+        return {"ok": True, "ingested": 0, "note": "Пусто"}
+
+    # Соберём всех авторов для резолва
+    user_ids = list({p.get("user_id") for p in posts if p.get("user_id")})
+    users_map = await get_users_map(token, user_ids)
+
+    # Индекс клиентов для быстрого резолва по ID
+    clients = db.query(Client).all()
+    client_by_mrid = {c.merchrules_account_id: c for c in clients if c.merchrules_account_id}
+    client_by_internal = {str(c.id): c for c in clients}
+    client_by_site: Dict[str, Any] = {}
+    for c in clients:
+        for sid in (c.site_ids or []):
+            client_by_site[str(sid)] = c
+
+    def resolve_client(cid_str: Optional[str]):
+        if not cid_str:
+            return None
+        return client_by_mrid.get(cid_str) or client_by_site.get(cid_str) or client_by_internal.get(cid_str)
+
+    ingested = 0
+    updated = 0
+    unlinked = 0
+
+    for p in posts[:limit_new]:
+        ext_id = p.get("id")
+        if not ext_id:
+            continue
+        msg = p.get("message", "") or ""
+        cid_raw = parse_client_id(msg)
+        client = resolve_client(cid_raw)
+        if not client:
+            unlinked += 1
+
+        ts_created = p.get("create_at")
+        ts_updated = p.get("update_at") or p.get("edit_at") or ts_created
+        opened_at = datetime.fromtimestamp(ts_created / 1000) if ts_created else None
+
+        author_id = p.get("user_id") or ""
+        author_info = users_map.get(author_id) or {}
+        author_name = author_info.get("username") or author_info.get("nickname") or author_id
+
+        ticket = db.query(SupportTicket).filter(SupportTicket.external_id == ext_id).first()
+        is_new = ticket is None
+        if is_new:
+            ticket = SupportTicket(external_id=ext_id, source="tbank_time")
+            db.add(ticket)
+
+        ticket.client_id           = client.id if client else None
+        ticket.external_client_id  = cid_raw
+        ticket.channel_id          = channel_id
+        ticket.title               = extract_title(msg)
+        ticket.body                = msg
+        ticket.status              = _detect_status(msg, p.get("props"))
+        ticket.author              = author_id
+        ticket.author_name         = author_name
+        ticket.opened_at           = opened_at
+        ticket.external_url        = f"{TIME_BASE_URL}/{TEAM_NAME}/channels/{CHANNEL_NAME}/{ext_id}"
+        ticket.raw                 = p
+        if ticket.status == "resolved" and not ticket.resolved_at:
+            ticket.resolved_at = datetime.fromtimestamp((ts_updated or ts_created) / 1000) if ts_updated else datetime.utcnow()
+
+        db.flush()
+
+        # Тред
+        if fetch_threads and p.get("reply_count", 0):
+            thread = await get_post_thread(token, ext_id)
+            tposts = list((thread.get("posts") or {}).values()) if isinstance(thread.get("posts"), dict) else []
+            reply_user_ids = list({rp.get("user_id") for rp in tposts if rp.get("user_id") and rp.get("id") != ext_id})
+            reply_users = await get_users_map(token, reply_user_ids) if reply_user_ids else {}
+            last_comment_at = None
+            last_comment_snippet = None
+            cnt = 0
+            for rp in sorted(tposts, key=lambda x: x.get("create_at") or 0):
+                rid = rp.get("id")
+                if rid == ext_id:
+                    continue
+                comment = db.query(TicketComment).filter(TicketComment.external_id == rid).first()
+                if not comment:
+                    comment = TicketComment(ticket_id=ticket.id, external_id=rid)
+                    db.add(comment)
+                comment.author      = rp.get("user_id")
+                comment.author_name = (reply_users.get(rp.get("user_id") or "") or {}).get("username") or rp.get("user_id")
+                comment.body        = rp.get("message")
+                comment.posted_at   = datetime.fromtimestamp(rp.get("create_at") / 1000) if rp.get("create_at") else None
+                comment.raw         = rp
+                cnt += 1
+                if comment.posted_at and (not last_comment_at or comment.posted_at > last_comment_at):
+                    last_comment_at = comment.posted_at
+                    last_comment_snippet = (rp.get("message") or "")[:200]
+            ticket.comments_count       = cnt
+            ticket.last_comment_at      = last_comment_at
+            ticket.last_comment_snippet = last_comment_snippet
+
+        if is_new:
+            ingested += 1
+        else:
+            updated += 1
+
+    db.commit()
+    return {"ok": True, "ingested": ingested, "updated": updated, "unlinked": unlinked, "total_posts": len(posts)}

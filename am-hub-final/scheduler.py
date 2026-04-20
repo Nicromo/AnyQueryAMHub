@@ -1061,6 +1061,32 @@ def job_qbr_auto_collect():
         db.close()
 
 
+def job_sync_tbank_tickets():
+    """Каждые 15 минут: тянет тикеты из Tbank Time для всех пользователей с токеном."""
+    from database import SessionLocal
+    from models import User
+    from integrations.tbank_time import ingest_tickets
+    import asyncio
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.is_active == True).all()
+        loop = asyncio.new_event_loop()
+        try:
+            for u in users:
+                s = u.settings or {}
+                tm = s.get("tbank_time", {}) or {}
+                if not (tm.get("mmauthtoken") or tm.get("session_cookie")):
+                    continue
+                try:
+                    loop.run_until_complete(ingest_tickets(db, u, limit_new=200, fetch_threads=True))
+                except Exception:
+                    logger.exception("tbank tickets sync user=%s failed", u.id)
+        finally:
+            loop.close()
+    finally:
+        db.close()
+
+
 def start_scheduler():
     sched = _get_scheduler()
 
@@ -1096,6 +1122,10 @@ def start_scheduler():
     # Автодействия по плановым триггерам (health_drop, days_no_contact, checkup_due, payment_overdue, nps_low)
     sched.add_job(job_auto_task_rules, "interval", hours=1,
                   id="auto_task_rules", name="Auto Task Rules (planned triggers)", replace_existing=True)
+
+    # Tbank Time (Mattermost) — тикеты из канала any-team-support
+    sched.add_job(job_sync_tbank_tickets, "interval", minutes=15,
+                  id="sync_tbank_tickets", name="Sync Tbank Time tickets", replace_existing=True)
 
     # Квартальный автосбор QBR: первого числа каждого месяца в 06:00
     sched.add_job(job_qbr_auto_collect, "cron", day=1, hour=6,

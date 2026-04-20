@@ -1953,3 +1953,61 @@ async def api_qbr_auto_collect(client_id: int, request: Request,
     import asyncio
     result = await collect_and_save(db, client, quarter=quarter, overwrite_text=overwrite)
     return result
+
+
+# ── Support tickets (Tbank Time / Mattermost) ────────────────────────────────
+
+@router.get("/api/clients/{client_id}/tickets")
+async def api_client_tickets(
+    client_id: int,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    user = _require_user(auth_token, db)
+    client = _require_client(client_id, user, db)
+    from models import SupportTicket
+    q = db.query(SupportTicket).filter(SupportTicket.client_id == client.id)
+    if status_filter and status_filter != "all":
+        statuses = [s.strip() for s in status_filter.split(",")]
+        q = q.filter(SupportTicket.status.in_(statuses))
+    tickets = q.order_by(SupportTicket.opened_at.desc().nullslast()).limit(limit).all()
+    return {
+        "tickets": [{
+            "id": t.id, "external_id": t.external_id, "external_url": t.external_url,
+            "title": t.title, "body": (t.body or "")[:500], "status": t.status,
+            "priority": t.priority, "author": t.author_name or t.author,
+            "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+            "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
+            "comments_count": t.comments_count or 0,
+            "last_comment_at": t.last_comment_at.isoformat() if t.last_comment_at else None,
+            "last_comment_snippet": t.last_comment_snippet,
+            "external_client_id": t.external_client_id,
+        } for t in tickets],
+        "open_count": sum(1 for t in tickets if t.status in ("open", "in_progress")),
+        "total": len(tickets),
+    }
+
+
+@router.get("/api/clients/{client_id}/tickets/{ticket_id}/thread")
+async def api_ticket_thread(client_id: int, ticket_id: int,
+                             db: Session = Depends(get_db),
+                             auth_token: Optional[str] = Cookie(None)):
+    user = _require_user(auth_token, db)
+    _require_client(client_id, user, db)
+    from models import SupportTicket, TicketComment
+    t = db.query(SupportTicket).filter(SupportTicket.id == ticket_id, SupportTicket.client_id == client_id).first()
+    if not t:
+        raise HTTPException(status_code=404)
+    comments = db.query(TicketComment).filter(TicketComment.ticket_id == t.id).order_by(TicketComment.posted_at.asc()).all()
+    return {
+        "ticket": {
+            "id": t.id, "external_id": t.external_id, "external_url": t.external_url,
+            "title": t.title, "body": t.body, "status": t.status,
+            "author": t.author_name or t.author,
+            "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+        },
+        "comments": [{"id": c.id, "author": c.author_name or c.author, "body": c.body,
+                       "posted_at": c.posted_at.isoformat() if c.posted_at else None} for c in comments],
+    }
