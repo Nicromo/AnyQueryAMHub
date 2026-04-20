@@ -9,7 +9,7 @@ URL-схема: /design/{page_id}
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -750,6 +750,78 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
     else:
         meetings_q = []
 
+    # ── Ktalk events (если настроена интеграция) ─────────────
+    ktalk_meetings_design: list = []
+    if "meetings" in needed:
+        try:
+            import asyncio as _asyncio
+            import concurrent.futures as _futures
+            from integrations import ktalk as _ktalk
+            if _ktalk.KTALK_BASE_URL and _ktalk.KTALK_API_TOKEN:
+                _coro = _ktalk.get_events(
+                    date_from=now - timedelta(days=7),
+                    date_to=now + timedelta(days=30),
+                    limit=200,
+                    use_cache=True,
+                )
+                # Безопасно: всегда отдельный тред + свой loop, чтобы не ломать главный event loop FastAPI
+                with _futures.ThreadPoolExecutor(max_workers=1) as _ex:
+                    _events = _ex.submit(_asyncio.run, _coro).result(timeout=20)
+                # Карта клиентов по нормализованному имени/домену для резолва
+                _cmap: dict = {}
+                _cq = db.query(Client)
+                if visible_ids is not None:
+                    if not visible_ids:
+                        _cq = _cq.filter(Client.id == -1)
+                    else:
+                        _cq = _cq.filter(Client.id.in_(visible_ids))
+                for _c in _cq.all():
+                    for k in filter(None, [_c.name, _c.domain]):
+                        _cmap[k.lower().strip()] = _c
+
+                def _resolve(title: str):
+                    t = (title or "").lower()
+                    for k, c in _cmap.items():
+                        if k and k in t:
+                            return c
+                    return None
+
+                for _e in _events:
+                    _start = _e.get("start")
+                    if isinstance(_start, str):
+                        try:
+                            _sdt = datetime.fromisoformat(_start.replace("Z", "+00:00"))
+                            if _sdt.tzinfo is not None:
+                                _sdt = _sdt.replace(tzinfo=None)
+                        except Exception:
+                            continue
+                    elif isinstance(_start, datetime):
+                        _sdt = _start
+                    else:
+                        continue
+                    if _sdt < now:
+                        continue
+                    _client_obj = _resolve(_e.get("title", ""))
+                    _mood = "risk" if "churn" in (_e.get("title") or "").lower() else "ok"
+
+                    # Формат под meeting_to_design — он читает .date, .client, .type, .mood
+                    class _Proxy:
+                        pass
+                    _p = _Proxy()
+                    _p.date = _sdt
+                    _p.type = "sync"
+                    _p.mood = _mood
+                    _p.sentiment_score = None
+                    _p.client = _client_obj
+
+                    # Используем обычный mapper, затем перезаписываем name на заголовок Ktalk
+                    _design = dm.meeting_to_design(_p, now)
+                    _design["client"] = _e.get("title") or _design.get("client") or "—"
+                    _design["source"] = "ktalk"
+                    ktalk_meetings_design.append(_design)
+        except Exception as _e:
+            logger.exception("ktalk meetings fetch failed: %s", _e)
+
     # Pagination info (always computed, uses cached clients_total)
     total_pages = max(1, (clients_total + per_page - 1) // per_page) if clients_total else 1
     pagination = {
@@ -830,7 +902,7 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
         "page_title":     title,
         "clients":  [dm.client_to_design(c, now, next_meetings) for c in clients_q],
         "tasks":    [dm.task_to_design(t, now) for t in tasks_q],
-        "meetings": [dm.meeting_to_design(m, now) for m in meetings_q],
+        "meetings": ([dm.meeting_to_design(m, now) for m in meetings_q] + ktalk_meetings_design),
         "activity":        activity,
         "tools":           tools,
         "jobs":            jobs,
