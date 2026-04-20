@@ -1207,7 +1207,12 @@ function PageInternal() {
       <div style={{ padding: "22px 28px 40px" }}>
         <Card title="Задачи команды">
           {(function(){
-            const items = (typeof window !== "undefined" && window.INTERNAL_TASKS) || [];
+            // Предпочитаем window.TASKS (отфильтрован сервером: client_id IS NULL
+            // либо source='internal') — единый источник правды. Fallback — INTERNAL_TASKS
+            // для обратной совместимости.
+            const srvTasks = (typeof window !== "undefined" && Array.isArray(window.TASKS)) ? window.TASKS : [];
+            const intTasks = (typeof window !== "undefined" && Array.isArray(window.INTERNAL_TASKS)) ? window.INTERNAL_TASKS : [];
+            const items = srvTasks.length ? srvTasks : intTasks;
             if (!items.length) {
               return <div style={{ padding: "30px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
                 Внутренних задач пока нет.
@@ -1215,11 +1220,13 @@ function PageInternal() {
             }
             return items.map((r,i,a)=>{
               const pr = r.priority || r.pr || "low";
+              // window.TASKS не содержит owner — в task_to_design есть только client.
+              const owner = r.owner || r.team || (r.client && r.client !== "—" ? r.client : "—");
               return (
                 <div key={i} style={{ display: "grid", gridTemplateColumns: "20px 1fr 180px 80px 80px", gap: 14, padding: "12px 6px", borderBottom: i===a.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
                   <input type="checkbox" defaultChecked={!!r.done} style={{ accentColor: "var(--signal)" }}/>
                   <span style={{ fontSize: 13, color: "var(--ink-8)" }}>{r.title || r.t}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={r.owner || "—"} size={20}/><span style={{ fontSize: 12, color: "var(--ink-7)" }}>{r.owner || "—"}</span></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={owner} size={20}/><span style={{ fontSize: 12, color: "var(--ink-7)" }}>{owner}</span></div>
                   <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{r.due || "—"}</span>
                   <Badge tone={pr==="high"?"warn":pr==="med"?"info":"neutral"} dot>{pr}</Badge>
                 </div>
@@ -1245,6 +1252,9 @@ function PageExtInstall() {
   const [newToken, setNewToken] = React.useState(null);  // показываем сырой токен после create
   const [creating, setCreating] = React.useState(false);
 
+  // Integrations status (ktalk / tbank_time / merchrules / airtable / telegram)
+  const [integrations, setIntegrations] = React.useState(null);
+
   async function reloadTokens() {
     setTokensLoading(true);
     setTokensErr(null);
@@ -1261,7 +1271,18 @@ function PageExtInstall() {
     }
   }
 
-  React.useEffect(() => { reloadTokens(); }, []);
+  async function reloadIntegrations() {
+    try {
+      const r = await fetch("/api/me/integrations", { credentials: "include" });
+      if (!r.ok) { setIntegrations({}); return; }
+      const d = await r.json();
+      setIntegrations(d || {});
+    } catch (e) {
+      setIntegrations({});
+    }
+  }
+
+  React.useEffect(() => { reloadTokens(); reloadIntegrations(); }, []);
 
   async function createToken() {
     const name = (newName || "").trim();
@@ -1348,6 +1369,94 @@ function PageExtInstall() {
 
         {/* ── LEFT: карточки расширений ───────────────────── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+          {/* Интеграции — статусы и кнопки входа в внешние системы */}
+          <Card title="Интеграции" action={<span className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>личные токены</span>}>
+            {(function() {
+              const ints = integrations || {};
+              const rows = [
+                {
+                  key: "ktalk",
+                  name: "Ktalk",
+                  desc: "Встречи · tbank.ktalk.ru · OIDC через Т-Банк SSO",
+                  connected: !!ints.ktalk,
+                  action: { label: "Войти", kind: "primary",
+                    onClick: function() { window.location.href = "/auth/ktalk"; } },
+                  actionReconnect: { label: "Переподключить", kind: "ghost",
+                    onClick: function() { window.location.href = "/auth/ktalk"; } },
+                },
+                {
+                  key: "tbank_time",
+                  name: "Tbank Time",
+                  desc: "Тайм-трекинг · time.tbank.ru · расширение захватит токен",
+                  connected: !!ints.tbank_time,
+                  action: { label: "Открыть Time", kind: "primary",
+                    onClick: function() {
+                      window.open("https://time.tbank.ru", "_blank");
+                      if (typeof appToast === "function") appToast("Войди в Time — расширение захватит токен автоматически", "ok");
+                    } },
+                  actionReconnect: { label: "Обновить токен", kind: "ghost",
+                    onClick: function() {
+                      window.open("https://time.tbank.ru", "_blank");
+                      if (typeof appToast === "function") appToast("Войди в Time — расширение захватит новый токен", "ok");
+                    } },
+                },
+                {
+                  key: "merchrules",
+                  name: "Merchrules",
+                  desc: "Синхронизация клиентов · логин/пароль в popup расширения",
+                  connected: !!ints.merchrules,
+                  action: { label: "Настроить", kind: "ghost",
+                    onClick: function() { window.location.href = "/settings"; } },
+                  actionReconnect: { label: "Изменить", kind: "ghost",
+                    onClick: function() { window.location.href = "/settings"; } },
+                },
+                {
+                  key: "airtable",
+                  name: "Airtable",
+                  desc: "Импорт портфеля · Personal Access Token",
+                  connected: !!ints.airtable,
+                  action: { label: "Настроить", kind: "ghost",
+                    onClick: function() { window.location.href = "/settings"; } },
+                  actionReconnect: { label: "Изменить", kind: "ghost",
+                    onClick: function() { window.location.href = "/settings"; } },
+                },
+                {
+                  key: "telegram",
+                  name: "Telegram",
+                  desc: "Уведомления и voice-заметки · через @am_hub_bot",
+                  connected: !!ints.telegram,
+                  action: { label: "Привязать", kind: "ghost",
+                    onClick: function() { window.location.href = "/design/profile"; } },
+                  actionReconnect: { label: "Изменить", kind: "ghost",
+                    onClick: function() { window.location.href = "/design/profile"; } },
+                },
+              ];
+              return rows.map(function(r, i, a) {
+                const act = r.connected ? r.actionReconnect : r.action;
+                return (
+                  <div key={r.key} style={{
+                    display: "grid",
+                    gridTemplateColumns: "140px 1fr auto",
+                    gap: 14, alignItems: "center",
+                    padding: "12px 0",
+                    borderBottom: i === a.length - 1 ? "none" : "1px solid var(--line-soft)"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-9)" }}>{r.name}</span>
+                      {integrations === null
+                        ? <Badge tone="neutral">…</Badge>
+                        : r.connected
+                          ? <Badge tone="ok" dot>подключено</Badge>
+                          : <Badge tone="neutral" dot>нет</Badge>}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--ink-6)", lineHeight: 1.4 }}>{r.desc}</div>
+                    <Btn size="s" kind={act.kind} onClick={act.onClick}>{act.label}</Btn>
+                  </div>
+                );
+              });
+            })()}
+          </Card>
 
           {EXTS.map((ext, i) => (
             <Card
