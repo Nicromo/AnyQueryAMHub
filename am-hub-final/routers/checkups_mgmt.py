@@ -394,3 +394,256 @@ async def api_checklist_get(
 
 
 
+
+
+# ─── Checkup v2 — чекапы качества поиска + Diginetica ──────────────────────
+
+def _require_user_v2(auth_token, db, request=None):
+    bearer = ""
+    if request:
+        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = bearer or auth_token
+    if not token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
+
+def _checkup_dict(c):
+    return {
+        "id": c.id, "client_id": c.client_id, "name": c.name,
+        "frequency": c.frequency, "due_date": c.due_date.isoformat() if c.due_date else None,
+        "partner_comment": c.partner_comment, "any_comment": c.any_comment,
+        "status": c.status, "score": c.score, "score_max": c.score_max,
+        "tracking": c.tracking or {}, "uiux": c.uiux or {},
+        "recs": c.recs or {}, "reviews": c.reviews or {},
+        "products_tab": c.products_tab or {}, "debts": c.debts or {},
+        "search_comment": c.search_comment, "top_queries_comment": c.top_queries_comment,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        "created_by": c.created_by,
+    }
+
+
+def _query_dict(q):
+    return {
+        "id": q.id, "checkup_id": q.checkup_id, "group": q.group,
+        "query": q.query, "shows_count": q.shows_count, "score": q.score,
+        "problem": q.problem, "solution": q.solution,
+        "partner_comment": q.partner_comment,
+        "response_time_ms": q.response_time_ms, "results_count": q.results_count,
+        "has_correction": q.has_correction,
+        "checked_at": q.checked_at.isoformat() if q.checked_at else None,
+    }
+
+
+@router.post("/api/clients/{client_id}/checkups")
+async def v2_create_checkup(
+    client_id: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    user = _require_user_v2(auth_token, db, request)
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    body = await request.json()
+    from models import CheckupV2
+    due = None
+    if body.get("due_date"):
+        try: due = datetime.fromisoformat(str(body["due_date"])[:19])
+        except Exception: pass
+    c = CheckupV2(
+        client_id=client_id,
+        name=body.get("name") or f"Чек-ап {datetime.utcnow().strftime('%b %Y')}",
+        frequency=body.get("frequency") or "monthly",
+        due_date=due,
+        partner_comment=body.get("partner_comment"),
+        any_comment=body.get("any_comment"),
+        status="draft",
+        created_by=user.email,
+    )
+    db.add(c); db.commit(); db.refresh(c)
+    return _checkup_dict(c)
+
+
+@router.get("/api/clients/{client_id}/checkups")
+async def v2_list_checkups(
+    client_id: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupV2
+    rows = db.query(CheckupV2).filter(CheckupV2.client_id == client_id).order_by(CheckupV2.created_at.desc()).all()
+    return {"checkups": [_checkup_dict(c) for c in rows]}
+
+
+@router.get("/api/checkups/{checkup_id}")
+async def v2_get_checkup(
+    checkup_id: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupV2, CheckupQuery
+    c = db.query(CheckupV2).filter(CheckupV2.id == checkup_id).first()
+    if not c: raise HTTPException(status_code=404)
+    queries = db.query(CheckupQuery).filter(CheckupQuery.checkup_id == checkup_id).all()
+    return {"checkup": _checkup_dict(c), "queries": [_query_dict(q) for q in queries]}
+
+
+@router.patch("/api/checkups/{checkup_id}")
+async def v2_update_checkup(
+    checkup_id: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupV2
+    c = db.query(CheckupV2).filter(CheckupV2.id == checkup_id).first()
+    if not c: raise HTTPException(status_code=404)
+    body = await request.json()
+    for field in ("name", "frequency", "partner_comment", "any_comment",
+                  "status", "search_comment", "top_queries_comment",
+                  "tracking", "uiux", "recs", "reviews", "products_tab", "debts"):
+        if field in body:
+            setattr(c, field, body[field])
+    if "due_date" in body and body["due_date"]:
+        try: c.due_date = datetime.fromisoformat(str(body["due_date"])[:19])
+        except Exception: pass
+    db.commit(); db.refresh(c)
+    return _checkup_dict(c)
+
+
+@router.delete("/api/checkups/{checkup_id}")
+async def v2_delete_checkup(
+    checkup_id: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupV2
+    db.query(CheckupV2).filter(CheckupV2.id == checkup_id).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/checkups/{checkup_id}/queries")
+async def v2_add_queries(
+    checkup_id: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupV2, CheckupQuery
+    c = db.query(CheckupV2).filter(CheckupV2.id == checkup_id).first()
+    if not c: raise HTTPException(status_code=404)
+    body = await request.json()
+    group = body.get("group", "top")
+    queries = body.get("queries", []) or []
+    added = 0
+    for q in queries:
+        if isinstance(q, str):
+            q = {"query": q}
+        text = (q.get("query") or "").strip()
+        if not text: continue
+        db.add(CheckupQuery(
+            checkup_id=checkup_id, group=group,
+            query=text, shows_count=int(q.get("shows_count") or 0),
+        ))
+        added += 1
+    if c.status == "draft":
+        c.status = "in_progress"
+    db.commit()
+    return {"ok": True, "added": added}
+
+
+@router.patch("/api/checkup-queries/{qid}")
+async def v2_update_query(
+    qid: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupQuery
+    q = db.query(CheckupQuery).filter(CheckupQuery.id == qid).first()
+    if not q: raise HTTPException(status_code=404)
+    body = await request.json()
+    for field in ("score", "problem", "solution", "partner_comment",
+                  "shows_count", "query"):
+        if field in body:
+            setattr(q, field, body[field])
+    db.commit()
+    return _query_dict(q)
+
+
+@router.delete("/api/checkup-queries/{qid}")
+async def v2_delete_query(
+    qid: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupQuery
+    db.query(CheckupQuery).filter(CheckupQuery.id == qid).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/checkups/{checkup_id}/run")
+async def v2_run_checkup(
+    checkup_id: int, request: Request,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    """Прогнать все запросы чекапа через Diginetica. Записать оценки и пересчитать avg."""
+    _require_user_v2(auth_token, db, request)
+    from models import CheckupV2, CheckupQuery
+    from integrations.diginetica import run_search, auto_score
+    c = db.query(CheckupV2).filter(CheckupV2.id == checkup_id).first()
+    if not c: raise HTTPException(status_code=404)
+    client = db.query(Client).filter(Client.id == c.client_id).first()
+    api_key = getattr(client, "diginetica_api_key", None) if client else None
+    if not api_key:
+        return {"ok": False, "error": "У клиента не задан diginetica_api_key"}
+    queries = db.query(CheckupQuery).filter(CheckupQuery.checkup_id == checkup_id).all()
+    scored = 0
+    scores_sum = 0
+    scores_count = 0
+    for q in queries:
+        res = await run_search(api_key, q.query)
+        sc = auto_score(res)
+        q.score = sc
+        q.diginetica_response = (res or {}).get("raw") or {}
+        q.response_time_ms = res.get("response_time_ms")
+        q.results_count = res.get("results_count", 0) or 0
+        q.has_correction = bool(res.get("has_correction"))
+        q.checked_at = datetime.utcnow()
+        if sc is not None:
+            scores_sum += sc
+            scores_count += 1
+        scored += 1
+    if scores_count:
+        c.score = round(scores_sum / scores_count, 2)
+    if c.status == "draft" or c.status == "in_progress":
+        c.status = "done"
+    db.commit()
+    return {"ok": True, "scored": scored, "avg_score": c.score}
+
+
+@router.get("/api/clients/{client_id}/analytics/queries")
+async def v2_analytics_queries(
+    client_id: int,
+    period_days: int = 30,
+    limit: int = 30,
+    q_type: str = "top",
+    request: Request = None,
+    db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
+):
+    """Поисковые запросы клиента из аналитики. Пока заглушка с fallback пустого списка.
+
+    TODO: подключить реальный источник через Merchrules backend или Diginetica analytics API.
+    """
+    _require_user_v2(auth_token, db, request)
+    # TODO: реальный источник
+    return {
+        "queries": [],
+        "message": "Источник аналитики не настроен — добавляйте запросы вручную или CSV-импортом.",
+    }
