@@ -325,4 +325,50 @@ function appToast(message, toneOrOpts) {
   }, duration);
 }
 
-Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder, appConfirm, appToast });
+// Промис-осн. ввод текста. await appPrompt("Заметка:") → string | null
+function appPrompt(message, opts) {
+  const {
+    title = "Введите значение",
+    okLabel = "OK", cancelLabel = "Отмена",
+    placeholder = "", multiline = true,
+    defaultValue = "",
+  } = opts || {};
+  return new Promise((resolve) => {
+    const root = _ensureOverlay();
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;";
+    const inputHtml = multiline
+      ? '<textarea class="ap-input" rows="5" style="width:100%;resize:vertical;min-height:110px;background:var(--ink-2);color:var(--ink-8);border:1px solid var(--line);border-radius:4px;padding:8px 10px;font-size:13px;font-family:inherit;"></textarea>'
+      : '<input type="text" class="ap-input" style="width:100%;background:var(--ink-2);color:var(--ink-8);border:1px solid var(--line);border-radius:4px;padding:8px 10px;font-size:13px;font-family:inherit;"/>';
+    wrap.innerHTML =
+      '<div class="ac-card" role="dialog" aria-modal="true" style="background:var(--ink-1);border:1px solid var(--line);border-radius:10px;max-width:560px;width:100%;padding:22px 24px;box-shadow:0 24px 64px rgba(0,0,0,.5);">' +
+      '<div class="ac-title" style="font-size:15px;font-weight:600;color:var(--ink-9);margin-bottom:6px;"></div>' +
+      '<div class="ac-msg" style="font-size:12.5px;color:var(--ink-7);line-height:1.5;margin-bottom:10px;"></div>' +
+      inputHtml +
+      '<div class="ac-actions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">' +
+      '<button class="ac-btn" data-act="cancel" style="padding:8px 16px;font-size:12.5px;font-weight:500;border-radius:4px;border:1px solid var(--line);background:var(--ink-2);color:var(--ink-8);cursor:pointer;"></button>' +
+      '<button class="ac-btn ac-btn-primary" data-act="ok" style="padding:8px 16px;font-size:12.5px;font-weight:500;border-radius:4px;border:1px solid var(--signal);background:var(--signal);color:var(--ink-0);cursor:pointer;"></button>' +
+      '</div></div>';
+    wrap.querySelector(".ac-title").textContent = title;
+    wrap.querySelector(".ac-msg").textContent = String(message || "");
+    const input = wrap.querySelector(".ap-input");
+    input.placeholder = placeholder;
+    input.value = defaultValue;
+    wrap.querySelector('[data-act="ok"]').textContent = okLabel;
+    wrap.querySelector('[data-act="cancel"]').textContent = cancelLabel;
+    const close = (v) => { wrap.remove(); document.removeEventListener("keydown", onKey); resolve(v); };
+    wrap.querySelector('[data-act="ok"]').onclick = () => close(input.value);
+    wrap.querySelector('[data-act="cancel"]').onclick = () => close(null);
+    wrap.onclick = (e) => { if (e.target === wrap) close(null); };
+    const onKey = (e) => {
+      if (e.key === "Escape") close(null);
+      if (e.key === "Enter" && !multiline) close(input.value);
+      if (e.key === "Enter" && multiline && (e.ctrlKey || e.metaKey)) close(input.value);
+    };
+    document.addEventListener("keydown", onKey);
+    root.appendChild(wrap);
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
+Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder, appConfirm, appToast, appPrompt });
