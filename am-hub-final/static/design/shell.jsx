@@ -221,8 +221,16 @@ function Sidebar({ active = "command", onNav }) {
           );
         })()}
         <ThemeToggle/>
-        <button style={{ background: "transparent", border: 0, color: "var(--ink-6)", cursor: "pointer", padding: 6 }}>
-          <I.gear size={15}/>
+        <button
+          title="Выйти"
+          onClick={() => { window.location.href = "/logout"; }}
+          style={{
+            background: "transparent", border: 0,
+            color: "var(--ink-6)", cursor: "pointer", padding: 6,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <I.signout size={15}/>
         </button>
       </div>
     </aside>
@@ -271,18 +279,34 @@ function TopBar({ title, subtitle, breadcrumbs = [], actions, meta }) {
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {actions}
         <ThemeToggle/>
-        <button style={{
-          width: 34, height: 34, background: "transparent",
-          border: "1px solid var(--line)", borderRadius: 4,
-          color: "var(--ink-7)", cursor: "pointer",
-          display: "inline-flex", alignItems: "center", justifyContent: "center",
-          position: "relative",
-        }}>
+        <button
+          title="Уведомления"
+          onClick={() => { window.location.href = "/inbox"; }}
+          style={{
+            width: 34, height: 34, background: "transparent",
+            border: "1px solid var(--line)", borderRadius: 4,
+            color: "var(--ink-7)", cursor: "pointer",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            position: "relative",
+          }}
+        >
           <I.bell size={15}/>
           <span style={{
             position: "absolute", top: 4, right: 5,
             width: 6, height: 6, borderRadius: 999, background: "var(--critical)",
           }}/>
+        </button>
+        <button
+          title="Выйти"
+          onClick={() => { window.location.href = "/logout"; }}
+          style={{
+            width: 34, height: 34, background: "transparent",
+            border: "1px solid var(--line)", borderRadius: 4,
+            color: "var(--ink-7)", cursor: "pointer",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <I.signout size={15}/>
         </button>
       </div>
     </header>

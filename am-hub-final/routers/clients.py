@@ -18,6 +18,9 @@ from models import (
     Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
     Notification, QBR, AccountPlan, ClientNote, TaskComment,
     FollowupTemplate, VoiceNote,
+    RevenueEntry, HealthSnapshot, NPSEntry, CheckupResult,
+    ClientHistory, ClientContact, ClientProduct,
+    ClientMerchRule, ClientFeed, SupportTicket, TicketComment,
 )
 from auth import (
     authenticate_user, create_user, create_access_token,
@@ -988,6 +991,122 @@ async def api_clients_duplicates(
     groups.sort(key=lambda x: -x["similarity"])
     return {"groups": groups[:50], "total": len(groups)}
 
+
+# ── Чистка «мусорных» клиентов (текстовые заметки вместо имён) ──────────────
+
+def _is_garbage_client_name(name: str | None) -> bool:
+    """Определяет, похоже ли имя клиента на мусор (заметку/цель/фразу).
+
+    Триггеры (любой):
+      • длина > 60 символов и > 5 слов — скорее всего предложение.
+      • содержит запятую или точку + пробел посередине — тоже предложение.
+      • начинается с характерных для заметок глаголов/фраз.
+    Нормальные имена клиентов — короткие, обычно одно слово/домен.
+    """
+    if not name:
+        return True
+    n = name.strip()
+    if not n:
+        return True
+    # Явные фразы-маркеры
+    bad_prefixes = (
+        "переход на", "стабильная", "цель:", "задача:", "нужно ", "требуется ",
+        "проверить", "обновить ", "подключить ", "внедрить ", "запустить ",
+    )
+    low = n.lower()
+    if any(low.startswith(p) for p in bad_prefixes):
+        return True
+    # Длинное предложение с пунктуацией
+    words = n.split()
+    has_sentence_punct = ("," in n) or (". " in n)
+    if len(n) > 60 and len(words) > 5:
+        return True
+    if has_sentence_punct and len(words) > 4 and len(n) > 40:
+        return True
+    return False
+
+
+@router.get("/api/clients/garbage")
+async def api_clients_garbage(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Preview: находит записи клиентов, где в имени, похоже, мусор (цель/фраза, а не имя)."""
+    if user.role != "admin": raise HTTPException(status_code=403)
+    rows = db.query(Client).all()
+    garbage = []
+    for c in rows:
+        if _is_garbage_client_name(c.name):
+            tcnt = db.query(Task).filter(Task.client_id == c.id).count()
+            mcnt = db.query(Meeting).filter(Meeting.client_id == c.id).count()
+            garbage.append({
+                "id": c.id,
+                "name": c.name,
+                "segment": c.segment,
+                "domain": c.domain,
+                "mrr": c.mrr,
+                "tasks_count": tcnt,
+                "meetings_count": mcnt,
+                "airtable_record_id": c.airtable_record_id,
+                "merchrules_account_id": c.merchrules_account_id,
+            })
+    return {"garbage": garbage, "total": len(garbage)}
+
+
+@router.post("/api/clients/garbage/cleanup")
+async def api_clients_garbage_cleanup(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Удаляет записи-мусор. Можно передать конкретные ids, иначе — удалит всё, что детектор считает мусором.
+
+    Body: {"ids": [1388, 1476, ...]} или пусто.
+    Заодно чистит связанные Task/Meeting/ClientNote/ClientHistory/CheckUp.
+    """
+    if user.role != "admin": raise HTTPException(status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    ids = body.get("ids") or []
+
+    q = db.query(Client)
+    if ids:
+        q = q.filter(Client.id.in_([int(x) for x in ids]))
+    targets = []
+    for c in q.all():
+        if ids or _is_garbage_client_name(c.name):
+            targets.append(c)
+
+    deleted = []
+    from sqlalchemy import text as _sql
+    for c in targets:
+        # Подчистить связи вручную по всем таблицам, у которых FK на clients (cascade может быть не везде)
+        for tbl, col in [
+            ("tasks", "client_id"),
+            ("meetings", "client_id"),
+            ("client_notes", "client_id"),
+            ("client_history", "client_id"),
+            ("checkups", "client_id"),
+            ("checkup_results", "client_id"),
+            ("account_plans", "client_id"),
+            ("qbrs", "client_id"),
+            ("client_attachments", "client_id"),
+            ("revenue_entries", "client_id"),
+            ("health_snapshots", "client_id"),
+            ("nps_entries", "client_id"),
+            ("churn_scores", "client_id"),
+            ("upsell_events", "client_id"),
+        ]:
+            try:
+                db.execute(_sql(f"DELETE FROM {tbl} WHERE {col} = :cid"), {"cid": c.id})
+            except Exception:
+                pass
+        deleted.append({"id": c.id, "name": c.name})
+        db.delete(c)
+    db.commit()
+    return {"ok": True, "deleted": deleted, "count": len(deleted)}
 
 
 @router.post("/api/clients/merge")

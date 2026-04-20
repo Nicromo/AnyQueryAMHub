@@ -37,6 +37,7 @@ const I = {
   plus:      (p) => <Icon {...p}><path d="M12 5v14M5 12h14"/></Icon>,
   x:         (p) => <Icon {...p}><path d="M6 6l12 12M18 6L6 18"/></Icon>,
   gear:      (p) => <Icon {...p}><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></Icon>,
+  signout:   (p) => <Icon {...p}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></Icon>,
   play:      (p) => <Icon {...p}><path d="M7 4v16l13-8L7 4z"/></Icon>,
   dot3:      (p) => <Icon {...p}><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></Icon>,
   flame:     (p) => <Icon {...p}><path d="M12 3c3 4 6 6 6 10a6 6 0 0 1-12 0c0-2 1-4 3-5-.5 2 .5 3 2 3 0-2-1-3 1-8z"/></Icon>,

@@ -67,6 +67,40 @@ function PageClients() {
               alert(d.ok ? `Объединено: ${d.merged}` : (d.error || "Ошибка"));
               if (d.ok) location.reload();
             }}>⎘ Дубли</Btn>
+            <Btn kind="ghost" size="m" onClick={async () => {
+              const pv = await fetch("/api/clients/garbage", {credentials:"include"}).then(r=>r.json()).catch(()=>({garbage:[]}));
+              const list = (pv.garbage || []);
+              if (!list.length) { alert("Мусорных записей не найдено."); return; }
+              const names = list.map(x => `#${x.id} ${x.name}`).join("\n");
+              if (!window.confirm(`Найдено ${list.length} мусорных записей. Удалить?\n\n${names}`)) return;
+              const r = await fetch("/api/clients/garbage/cleanup", {
+                method:"POST", credentials:"include",
+                headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({ids: list.map(x => x.id)}),
+              });
+              const d = await r.json().catch(()=>({}));
+              alert(d.ok ? `Удалено: ${d.count}` : (d.error || "Ошибка"));
+              if (d.ok) location.reload();
+            }}>🗑 Чистка</Btn>
+            <Btn kind="ghost" size="m" onClick={async () => {
+              if (!window.confirm("Полная чистка: удалить мусор + объединить дубли?")) return;
+              const pv = await fetch("/api/clients/garbage", {credentials:"include"}).then(r=>r.json()).catch(()=>({garbage:[]}));
+              const ids = (pv.garbage || []).map(x => x.id);
+              let deleted = 0;
+              if (ids.length) {
+                const r1 = await fetch("/api/clients/garbage/cleanup", {
+                  method:"POST", credentials:"include",
+                  headers:{"Content-Type":"application/json"},
+                  body: JSON.stringify({ids}),
+                });
+                const d1 = await r1.json().catch(()=>({}));
+                deleted = d1.count || 0;
+              }
+              const r2 = await fetch("/api/clients/auto-dedupe", {method:"POST", credentials:"include"});
+              const d2 = await r2.json().catch(()=>({}));
+              alert(`Готово:\n  удалено мусора: ${deleted}\n  объединено дублей: ${d2.merged || 0}`);
+              location.reload();
+            }}>✨ Всё сразу</Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
               onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
             <Btn kind="primary" size="m" icon={<I.plus size={14}/>}

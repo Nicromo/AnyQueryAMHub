@@ -993,6 +993,104 @@ async def job_renewal_alerts():
     except Exception as e:
         logger.error(f"❌ Renewal alerts error: {e}")
 
+# ── Auto-task rules with actions engine (ported from main) ──────────────────
+
+def job_auto_task_rules():
+    """Плановые триггеры (health_drop, days_no_contact, checkup_due,
+    payment_overdue, nps_low). Событийные триггеры (meeting_done,
+    followup_sent, task_done) выполняются через auto_actions.fire_event
+    из роутеров."""
+    from database import SessionLocal
+    from models import AutoTaskRule, Client
+    try:
+        from auto_actions import execute_actions
+    except Exception as e:
+        logger.warning(f"auto_actions not available: {e}")
+        return
+    planned = {"health_drop", "days_no_contact", "checkup_due",
+               "payment_overdue", "nps_low", "task_blocked_days"}
+    with SessionLocal() as db:
+        rules = db.query(AutoTaskRule).filter(AutoTaskRule.is_active == True).all()
+        now = datetime.utcnow()
+        for r in rules:
+            if r.trigger not in planned:
+                continue
+            q = db.query(Client)
+            segs = r.segment_filter or []
+            if segs:
+                q = q.filter(Client.segment.in_(segs))
+            cfg = r.trigger_config or {}
+            for c in q.all():
+                match = False
+                if r.trigger == "health_drop":
+                    match = (c.health_score or 0) < cfg.get("threshold", 0.5)
+                elif r.trigger == "days_no_contact":
+                    last = c.last_meeting_date or c.last_checkup
+                    match = not last or (now - last).days >= cfg.get("days", 30)
+                elif r.trigger == "checkup_due":
+                    match = bool(c.needs_checkup)
+                elif r.trigger == "payment_overdue":
+                    match = getattr(c, "payment_status", None) == "overdue"
+                elif r.trigger == "nps_low":
+                    match = c.nps_last is not None and c.nps_last <= cfg.get("threshold", 6)
+                if match:
+                    try:
+                        execute_actions(db, r, c)
+                    except Exception:
+                        logger.exception("auto rule %s client %s failed", r.id, c.id)
+
+
+def job_sync_tbank_tickets():
+    """Каждые 15 минут: тянет тикеты из Tbank Time (Mattermost) для всех пользователей с токеном."""
+    from database import SessionLocal
+    from models import User
+    try:
+        from integrations.tbank_time import ingest_tickets
+    except Exception as e:
+        logger.warning(f"tbank_time ingest not available: {e}")
+        return
+    import asyncio
+    with SessionLocal() as db:
+        users = db.query(User).filter(User.is_active == True).all()
+        loop = asyncio.new_event_loop()
+        try:
+            for u in users:
+                s = u.settings or {}
+                tm = s.get("tbank_time", {}) or {}
+                if not (tm.get("mmauthtoken") or tm.get("session_cookie")):
+                    continue
+                try:
+                    loop.run_until_complete(ingest_tickets(db, u, limit_new=200, fetch_threads=True))
+                except Exception:
+                    logger.exception("tbank tickets sync user=%s failed", u.id)
+        finally:
+            loop.close()
+
+
+def job_qbr_auto_collect():
+    """Квартальный автосбор QBR по всем активным клиентам из Merchrules."""
+    from database import SessionLocal
+    from models import Client
+    try:
+        from qbr_auto_collect import collect_and_save, current_quarter
+    except Exception as e:
+        logger.warning(f"qbr_auto_collect not available: {e}")
+        return
+    import asyncio
+    with SessionLocal() as db:
+        q = current_quarter()
+        clients = db.query(Client).all()
+        loop = asyncio.new_event_loop()
+        try:
+            for c in clients:
+                try:
+                    loop.run_until_complete(collect_and_save(db, c, quarter=q, overwrite_text=False))
+                except Exception:
+                    logger.exception("qbr auto-collect client=%s failed", c.id)
+        finally:
+            loop.close()
+
+
 def evaluate_auto_rules():
     """Раз в час проверяем все активные правила и создаём задачи по триггерам.
     Дедупликация: не создаём дубль Task с тем же title+client_id в последние 24ч."""
@@ -1115,6 +1213,18 @@ def start_scheduler():
 
     sched.add_job(evaluate_auto_rules, "interval", hours=1,
                   id="evaluate_auto_rules", name="Evaluate Auto Task Rules", replace_existing=True)
+
+    # Ported from main: user-defined auto-task rules with actions engine
+    sched.add_job(job_auto_task_rules, "interval", hours=1,
+                  id="auto_task_rules", name="Auto Task Rules (actions engine)", replace_existing=True)
+
+    # Tbank Time support tickets ingest (Mattermost channel)
+    sched.add_job(job_sync_tbank_tickets, "interval", minutes=15,
+                  id="sync_tbank_tickets", name="Sync Tbank Time tickets", replace_existing=True)
+
+    # Quarterly QBR auto-collect from Merchrules
+    sched.add_job(job_qbr_auto_collect, "cron", day=1, hour=6, minute=0,
+                  id="qbr_auto_collect", name="Quarterly QBR auto-collect", replace_existing=True)
 
     sched.start()
     logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")
