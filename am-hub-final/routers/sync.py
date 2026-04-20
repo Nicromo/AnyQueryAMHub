@@ -235,13 +235,15 @@ async def api_sync_airtable(
         db.commit()
         logger.info(f"Reset manager_email for {n} clients of {user.email}")
 
+    # default_manager_email нужен, чтобы записи с linked-менеджером, который
+    # приходит от Airtable без резолва email'а (только rec-id), всё-таки
+    # попадали на текущего юзера. Для пустых manager-полей он игнорируется.
     result = await sync_clients_from_airtable(
         db=db,
         token=token,
         base_id=base_id or None,
         view_id=view_id,
-        # НЕ передаём default_manager_email — иначе клиенты без CSM в
-        # Airtable снова улетят на текущего юзера.
+        default_manager_email=user.email,
     )
 
     # После синка клиентов — вторым запросом подтянем payment status

@@ -379,12 +379,25 @@ async def sync_clients_from_airtable(
                 continue
 
             # Manager email (linked record or text).
-            # ВАЖНО: НЕ подставляем default_manager_email как fallback —
-            # иначе клиенты без CSM в Airtable сыпятся на текущего юзера,
-            # раздувая его портфель (37 → 41 без причины).
-            # Лучше оставить manager_email=None — такие клиенты никому
-            # не принадлежат и не попадут в чей-либо фильтр по email.
+            # Airtable возвращает FIELD_MANAGER как массив record-id'шников
+            # (["recXXX"]). _extract_manager_email умеет достать email только
+            # если linked-запись была expanded (у нас не всегда). Поэтому
+            # три шага:
+            #   1. Попробовать достать email напрямую.
+            #   2. Если не вышло, но в поле ЕСТЬ линк — запись закреплена за
+            #      кем-то, и если пришла через вьюху текущего юзера — это он.
+            #      Используем default_manager_email как fallback.
+            #   3. Если поле вообще пустое — manager_email остаётся None
+            #      (это «ничей» клиент, в портфель не попадёт).
             manager_email = _extract_manager_email(fields, FIELD_MANAGER)
+            if not manager_email:
+                raw = fields.get(FIELD_MANAGER)
+                has_link = bool(raw) and (
+                    (isinstance(raw, list) and len(raw) > 0)
+                    or (isinstance(raw, str) and raw.strip())
+                )
+                if has_link and default_manager_email:
+                    manager_email = default_manager_email
 
             # Site ID
             site_id_raw = fields.get(FIELD_SITE_ID)

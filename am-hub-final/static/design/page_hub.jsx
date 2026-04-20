@@ -135,7 +135,7 @@ function PageHub() {
                   const r1 = await fetch("/api/sync/airtable", {
                     method: "POST", credentials: "include",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ reset: true }),
+                    body: JSON.stringify({}),
                   });
                   atRes = await r1.json().catch(() => ({}));
                 } catch (e) { atRes = { error: e.message }; }
@@ -257,97 +257,10 @@ function PageHub() {
               </div>
             </Card>
 
-            {/* tools + jobs */}
+            {/* attention + tickets — заменили инструменты/cron на более полезные блоки */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-              <Card title="Инструменты" action={
-                <a className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>
-                  {`${TOOLS.filter(t=>t.ok).length}/${TOOLS.length} online`}
-                </a>
-              }>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {TOOLS.map((t, i) => {
-                    const cfg = t.configured !== false;
-                    const state = t.ok ? "online" : (cfg ? "offline" : "не настроено");
-                    const color = t.ok ? "var(--ok)" : (cfg ? "var(--ink-5)" : "var(--warn)");
-                    return (
-                      <div key={i} style={{
-                        display: "flex", alignItems: "center", gap: 10,
-                        padding: "9px 10px",
-                        background: "var(--ink-1)",
-                        borderRadius: 4,
-                        borderLeft: `2px solid ${t.ok ? "var(--ok)" : (cfg ? "var(--ink-3)" : "var(--warn)")}`,
-                      }}>
-                        <div style={{
-                          width: 22, height: 22, borderRadius: 3,
-                          background: "var(--ink-3)", display: "flex",
-                          alignItems: "center", justifyContent: "center",
-                          color: "var(--ink-7)", flexShrink: 0,
-                        }}>
-                          <I.link size={12}/>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 500, color: "var(--ink-8)" }}>{t.name}</div>
-                          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.detail}</div>
-                        </div>
-                        <div style={{ textAlign: "right" }}>
-                          <div className="mono" style={{ fontSize: 10.5, color }}>
-                            {t.ok ? "● online" : (cfg ? "○ offline" : "◌ не настр.")}
-                          </div>
-                          <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-5)" }}>{t.sync}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
-
-              <Card title="Автоматизация · cron">
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {JOBS.map((j, i) => (
-                    <div key={i} style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "8px 4px",
-                      borderBottom: i === JOBS.length - 1 ? "none" : "1px solid var(--line-soft)",
-                    }}>
-                      <span style={{
-                        width: 6, height: 6, borderRadius: 999,
-                        background: j.ok ? "var(--ok)" : "var(--critical)",
-                        boxShadow: j.ok ? "0 0 6px var(--ok)" : "0 0 6px var(--critical)",
-                        flexShrink: 0,
-                      }}/>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, color: "var(--ink-8)" }}>{j.name}</div>
-                        <div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>{j.schedule}</div>
-                      </div>
-                      <div className="mono" style={{ fontSize: 10.5, color: j.ok ? "var(--ink-6)" : "var(--critical)" }}>
-                        {j.last}
-                      </div>
-                      <button style={{ background: "none", border: 0, cursor: "pointer", color: "var(--ink-6)", padding: 2 }}>
-                        <I.play size={11}/>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div style={{
-                  marginTop: 12, padding: 10,
-                  background: "var(--ink-1)",
-                  border: "1px dashed var(--line)",
-                  borderRadius: 4,
-                  display: "flex", alignItems: "center", gap: 10,
-                }}>
-                  <I.link size={14} stroke="var(--ink-6)"/>
-                  <code className="mono" style={{ fontSize: 10.5, color: "var(--ink-7)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    hub.amteam.ops/webhook/merchrules
-                  </code>
-                  <button style={{
-                    background: "var(--ink-3)", border: "1px solid var(--line)",
-                    borderRadius: 3, padding: "3px 7px", cursor: "pointer",
-                    color: "var(--ink-7)",
-                  }}>
-                    <I.copy size={12}/>
-                  </button>
-                </div>
-              </Card>
+              <AttentionList clients={CL}/>
+              <FreshTickets/>
             </div>
 
           </div>
@@ -460,6 +373,9 @@ function PageHub() {
               </div>
             </Card>
 
+            {/* weekly snapshot — заполняет пустое пространство под лентой */}
+            <WeeklySnapshot clients={CL} tasks={TK} meetings={MT}/>
+
           </div>
         </div>
       </div>
@@ -504,3 +420,204 @@ function BigSpark() {
 }
 
 window.PageHub = PageHub;
+
+
+// ── Replacement blocks for old ИНСТРУМЕНТЫ / АВТОМАТИЗАЦИЯ ───────────
+
+// Клиенты, требующие внимания: churn-риск + просрочка чекапа + давний контакт.
+function AttentionList({ clients }) {
+  const CL = Array.isArray(clients) ? clients : [];
+  // Сортируем: сначала risk, потом warn, потом по last contact (давно → раньше)
+  const ranked = CL.filter(c => {
+    if (c.status === "risk" || c.status === "warn") return true;
+    if (typeof c.days_since === "number" && c.days_since >= 30) return true;
+    if (c.health_score != null && c.health_score < 0.4) return true;
+    return false;
+  }).sort((a, b) => {
+    const rank = s => s === "risk" ? 0 : s === "warn" ? 1 : 2;
+    if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
+    return (b.days_since || 0) - (a.days_since || 0);
+  }).slice(0, 5);
+
+  return React.createElement(Card, {
+    title: "Требуют внимания",
+    action: React.createElement("a", {
+      className: "mono", href: "/design/clients",
+      style: { fontSize: 11, color: "var(--ink-6)", textDecoration: "none" },
+    }, `${ranked.length} из ${CL.length}`),
+  },
+    ranked.length === 0
+      ? React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "14px 0" } },
+          "Сейчас все клиенты в норме.")
+      : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+          ranked.map((c) => {
+            const tone = c.status === "risk" ? "critical" : c.status === "warn" ? "warn" : "ink-4";
+            const toneVar = tone === "critical" ? "var(--critical)" : tone === "warn" ? "var(--warn)" : "var(--ink-4)";
+            const reason = c.status === "risk"
+              ? (c.delta && c.delta !== "—" ? `GMV ${c.delta}` : "churn-риск")
+              : (c.days_since != null ? `контакт ${c.days_since} дн назад` : (c.stage || "требует проверки"));
+            return React.createElement("a", {
+              key: c.id,
+              href: `/design/client/${c.id}`,
+              style: {
+                display: "grid",
+                gridTemplateColumns: "6px 1fr auto",
+                gap: 10,
+                padding: "10px 12px",
+                background: "var(--ink-1)",
+                borderRadius: 4,
+                textDecoration: "none",
+                color: "inherit",
+                alignItems: "center",
+              },
+            },
+              React.createElement("span", { style: {
+                width: 3, height: 28, borderRadius: 2, background: toneVar,
+              } }),
+              React.createElement("div", { style: { minWidth: 0 } },
+                React.createElement("div", { style: {
+                  fontSize: 13, fontWeight: 500, color: "var(--ink-8)",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                } }, c.name),
+                React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } },
+                  `${c.seg || "—"} · ${reason}`),
+              ),
+              React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: toneVar } },
+                c.status === "risk" ? "risk" : c.status === "warn" ? "warn" : "old"),
+            );
+          })
+        )
+  );
+}
+window.AttentionList = AttentionList;
+
+
+// Свежие тикеты из Time (Mattermost). Показывает последние 5 открытых.
+function FreshTickets() {
+  const [tickets, setTickets] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Нет эндпоинта списка по всем — агрегируем через список клиентов
+        const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+        const ids = CL.slice(0, 50).map(c => c.id).filter(Boolean);
+        const results = [];
+        for (const id of ids) {
+          try {
+            const r = await fetch(`/api/clients/${id}/tickets?status=open,in_progress&limit=3`, { credentials: "include" });
+            if (!r.ok) continue;
+            const d = await r.json();
+            (d.tickets || []).forEach(t => results.push({ ...t, _client_id: id, _client_name: (CL.find(x => x.id === id) || {}).name || "—" }));
+          } catch (_) {}
+          if (results.length >= 10) break;
+        }
+        // Сортируем по opened_at desc, топ-5
+        results.sort((a, b) => (new Date(b.opened_at || 0)) - (new Date(a.opened_at || 0)));
+        if (!cancelled) setTickets(results.slice(0, 5));
+      } catch (e) { if (!cancelled) setErr(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const body = (() => {
+    if (err) return React.createElement("div", { style: { color: "var(--critical)", fontSize: 12.5, padding: "14px 0" } }, "Ошибка: " + err);
+    if (tickets === null) return React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "14px 0" } }, "Загрузка…");
+    if (!tickets.length) return React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "14px 0" } },
+      "Открытых тикетов нет. Синк Tbank Time через расширение.");
+    return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+      tickets.map(t => {
+        const statusColor = t.status === "open" ? "var(--critical)" : "var(--warn)";
+        return React.createElement("a", {
+          key: t.id,
+          href: `/design/client/${t._client_id}#tickets`,
+          style: {
+            display: "grid",
+            gridTemplateColumns: "6px 1fr auto",
+            gap: 10,
+            padding: "10px 12px",
+            background: "var(--ink-1)",
+            borderRadius: 4,
+            textDecoration: "none",
+            color: "inherit",
+            alignItems: "center",
+          },
+        },
+          React.createElement("span", { style: { width: 3, height: 28, borderRadius: 2, background: statusColor } }),
+          React.createElement("div", { style: { minWidth: 0 } },
+            React.createElement("div", { style: {
+              fontSize: 13, fontWeight: 500, color: "var(--ink-8)",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            } }, t.title || "Без темы"),
+            React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } },
+              `${t._client_name} · ${t.comments_count || 0} комм.`),
+          ),
+          React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: statusColor } },
+            t.status === "open" ? "open" : "work"),
+        );
+      })
+    );
+  })();
+
+  return React.createElement(Card, {
+    title: "Свежие тикеты",
+    action: React.createElement("button", {
+      className: "mono",
+      onClick: async () => {
+        try {
+          const r = await fetch("/api/tickets/sync", { method: "POST", credentials: "include" });
+          const d = await r.json().catch(() => ({}));
+          appToast(d.ok ? `Синк: новых ${d.ingested||0}, обновлено ${d.updated||0}` : (d.error || "Ошибка"), d.ok ? "ok" : "error");
+          location.reload();
+        } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+      },
+      style: {
+        background: "none", border: 0, fontSize: 11, color: "var(--ink-6)", cursor: "pointer",
+      },
+    }, "↻ синк"),
+  }, body);
+}
+window.FreshTickets = FreshTickets;
+
+
+// Еженедельный снимок — сегментация портфеля + что на этой неделе
+function WeeklySnapshot({ clients, tasks, meetings }) {
+  const CL = Array.isArray(clients) ? clients : [];
+  const TK = Array.isArray(tasks) ? tasks : [];
+  const MT = Array.isArray(meetings) ? meetings : [];
+
+  const total = CL.length;
+  const risks = CL.filter(c => c.status === "risk").length;
+  const warns = CL.filter(c => c.status === "warn").length;
+  const ok    = CL.filter(c => c.status !== "risk" && c.status !== "warn").length;
+
+  const openTasks = TK.filter(t => typeof t.due === "string" && t.due.indexOf("просроч") === -1).length;
+  const overdue   = TK.filter(t => typeof t.due === "string" && t.due.indexOf("просроч") !== -1).length;
+  const meetingsWk = MT.length;
+
+  const Row = ({ label, value, tone }) => React.createElement("div", {
+    style: {
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "8px 0",
+      borderBottom: "1px solid var(--line-soft)",
+    }
+  },
+    React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" } }, label),
+    React.createElement("span", { className: "mono", style: { fontSize: 13, fontWeight: 500, color: tone || "var(--ink-9)" } }, value),
+  );
+
+  return React.createElement(Card, { title: "Снимок недели", dense: true },
+    React.createElement("div", null,
+      React.createElement(Row, { label: "клиентов",     value: String(total) }),
+      React.createElement(Row, { label: "в риске",      value: String(risks), tone: risks ? "var(--critical)" : "var(--ink-9)" }),
+      React.createElement(Row, { label: "требуют внимания", value: String(warns), tone: warns ? "var(--warn)" : "var(--ink-9)" }),
+      React.createElement(Row, { label: "в норме",      value: String(ok), tone: "var(--ok)" }),
+      React.createElement(Row, { label: "встреч на неделе", value: String(meetingsWk) }),
+      React.createElement(Row, { label: "задач открыто",    value: String(openTasks) }),
+      React.createElement(Row, { label: "задач просрочено", value: String(overdue), tone: overdue ? "var(--critical)" : "var(--ink-9)" }),
+    )
+  );
+}
+window.WeeklySnapshot = WeeklySnapshot;
