@@ -457,9 +457,13 @@ def task_to_design(task: Any, now: datetime) -> Dict[str, Any]:
         "id": task.id,
         "title": task.title,
         "client": task.client.name if task.client else "—",
+        "client_id": task.client_id,
         "due": due,
         "priority": _PRIORITY_MAP.get((task.priority or "").lower(), "med"),
         "type": _TYPE_MAP.get((task.task_type or "").lower(), task.task_type or "task"),
+        "status": task.status,
+        "description": (task.description or "")[:500] if task.description else None,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
     }
 
 

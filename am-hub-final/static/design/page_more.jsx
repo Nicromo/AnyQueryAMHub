@@ -220,25 +220,26 @@ function PageTasks() {
     ? ALL_TK.filter(t => !t.team || t.team === U.email || t.team === U.name)
     : ALL_TK;
 
-  // Группировка реальных задач по колонкам.
-  // На сервере (design_mappers) статус не передаётся в task-dict — есть только due и priority.
-  // Поэтому колонки делим по смыслу due: просрочено → "В работе" (требует внимания),
-  // сегодня → "Сегодня", через N дн. → "Бэклог". Готовые (status=done) не приходят с сервера.
-  const today = [], soon = [], backlog = [], overdue = [];
+  // Группировка: сначала по статусу (in_progress → «В работе»), остальное по due.
+  const today = [], backlog = [], overdue = [], inProgress = [];
   TK.forEach(t => {
+    if (t.status === "in_progress") { inProgress.push(t); return; }
     const due = (t.due || "").toLowerCase();
     if (due.indexOf("просроч") !== -1) overdue.push(t);
     else if (due === "сегодня") today.push(t);
-    else if (due === "завтра" || due.indexOf("через") !== -1) backlog.push(t);
     else backlog.push(t);
   });
 
+  const mapItem = t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority, raw: t });
   const cols = [
-    { title: "Просрочено", key: "overdue",     tone: "critical", count: overdue.length, items: overdue.slice(0, 12).map(t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority })) },
-    { title: "Сегодня",    key: "today",       tone: "signal",   count: today.length,   items: today.slice(0, 12).map(t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority })) },
-    { title: "В работе",   key: "in_progress", tone: "warn",     count: 0,              items: [] },
-    { title: "Бэклог",     key: "plan",        tone: "neutral",  count: backlog.length, items: backlog.slice(0, 12).map(t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority })) },
+    { title: "Просрочено", key: "overdue",     tone: "critical", count: overdue.length,    items: overdue.slice(0, 20).map(mapItem) },
+    { title: "Сегодня",    key: "today",       tone: "signal",   count: today.length,      items: today.slice(0, 20).map(mapItem) },
+    { title: "В работе",   key: "in_progress", tone: "warn",     count: inProgress.length, items: inProgress.slice(0, 20).map(mapItem) },
+    { title: "Бэклог",     key: "plan",        tone: "neutral",  count: backlog.length,    items: backlog.slice(0, 20).map(mapItem) },
   ];
+
+  // Детали задачи — модалка
+  const [detail, setDetail] = React.useState(null);
 
   // Drag-and-drop: перемещение задачи в колонку → PATCH /api/tasks/{id}/status.
   const [dragOver, setDragOver] = React.useState(null);
@@ -329,7 +330,7 @@ function PageTasks() {
                   <div key={it.id || it.t}
                     draggable={!!it.id}
                     onDragStart={(e) => onDragStart(e, it.id)}
-                    onClick={() => { if (it.id) window.location.href = "/design/tasks?id=" + it.id; }}
+                    onClick={() => { if (it.raw || it.id) setDetail(it.raw || { id: it.id, title: it.t, client: it.cl, priority: it.pr }); }}
                     style={{
                       padding: 12,
                       background: "var(--ink-1)",
@@ -351,9 +352,99 @@ function PageTasks() {
           ))}
         </div>
       </div>
+      {detail && <TaskDetailModal task={detail} onClose={() => setDetail(null)} onReload={() => location.reload()}/>}
     </div>
   );
 }
+
+// ── TaskDetailModal — модалка с деталями задачи + смена статуса ────────────
+
+function TaskDetailModal({ task, onClose, onReload }) {
+  const [full, setFull] = React.useState(task);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!task.id) return;
+    (async () => {
+      try {
+        const r = await fetch("/api/tasks/" + task.id, { credentials: "include" });
+        if (r.ok) { const d = await r.json(); setFull({...task, ...(d.task || d)}); }
+      } catch (_) {}
+    })();
+  }, [task.id]);
+
+  async function updateStatus(newStatus) {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/tasks/${task.id}/status`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      appToast("Статус обновлён: " + newStatus, "ok");
+      onClose(); onReload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    setBusy(false);
+  }
+
+  async function removeTask() {
+    if (!await appConfirm("Удалить задачу?")) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/tasks/" + task.id, { method: "DELETE", credentials: "include" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      appToast("Удалено", "ok");
+      onClose(); onReload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    setBusy(false);
+  }
+
+  return React.createElement("div", {
+    style: {
+      position: "fixed", inset: 0, zIndex: 9998,
+      background: "rgba(0,0,0,.55)", backdropFilter: "blur(3px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 24,
+    },
+    onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
+  },
+    React.createElement("div", {
+      style: {
+        background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 8,
+        width: "100%", maxWidth: 620, maxHeight: "80vh", overflowY: "auto",
+        boxShadow: "0 24px 64px rgba(0,0,0,.5)",
+      },
+    },
+      React.createElement("div", { style: { padding: 18, borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 } },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 15, fontWeight: 600, color: "var(--ink-9)" } }, full.title || "Задача"),
+          React.createElement("div", { className: "mono", style: { fontSize: 11, color: "var(--ink-5)", marginTop: 4 } },
+            `#${full.id} · ${full.client || "—"} · ${full.status || "—"} · ${full.due || "—"}`),
+        ),
+        React.createElement("button", { onClick: onClose, style: { background: "none", border: 0, color: "var(--ink-6)", fontSize: 20, cursor: "pointer" } }, "✕"),
+      ),
+      React.createElement("div", { style: { padding: 18, fontSize: 13, color: "var(--ink-8)", lineHeight: 1.6, whiteSpace: "pre-wrap" } },
+        full.description || React.createElement("span", { style: { color: "var(--ink-6)" } }, "Без описания"),
+      ),
+      React.createElement("div", { style: { padding: "14px 18px", borderTop: "1px solid var(--line)", display: "flex", gap: 8, flexWrap: "wrap" } },
+        ["plan", "in_progress", "review", "done", "blocked"].map(s =>
+          React.createElement(Btn, {
+            key: s, size: "s",
+            kind: full.status === s ? "primary" : "ghost",
+            onClick: () => updateStatus(s), disabled: busy,
+          }, s)
+        ),
+        React.createElement("div", { style: { marginLeft: "auto", display: "flex", gap: 8 } },
+          full.client_id && React.createElement(Btn, { size: "s", kind: "ghost",
+            onClick: () => { window.location.href = "/design/client/" + full.client_id; } }, "К клиенту →"),
+          React.createElement(Btn, { size: "s", kind: "ghost", onClick: removeTask, disabled: busy }, "🗑"),
+        ),
+      ),
+    ),
+  );
+}
+window.TaskDetailModal = TaskDetailModal;
 
 // ── Meetings ──────────────────────────────────────────────
 function PageMeetings() {
