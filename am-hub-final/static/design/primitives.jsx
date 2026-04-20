@@ -246,4 +246,83 @@ const Placeholder = ({ label = "placeholder", w = "100%", h = 120 }) => (
   }}>{label}</div>
 );
 
-Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder });
+// ── Confirm / Toast — заменяют window.confirm/alert на внутренние модалки ────
+
+function _ensureOverlay() {
+  let root = document.getElementById("__app_overlay_root");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "__app_overlay_root";
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
+// Промис-основанный confirm. await appConfirm("Текст?") → true/false
+function appConfirm(message, opts) {
+  const { title = "Подтверждение", okLabel = "OK", cancelLabel = "Отмена", tone = "primary" } = opts || {};
+  return new Promise((resolve) => {
+    const root = _ensureOverlay();
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;";
+    wrap.innerHTML = `
+      <style>
+        .ac-card { background: var(--ink-1); border: 1px solid var(--line); border-radius: 10px;
+          max-width: 440px; width: 100%; padding: 22px 24px; box-shadow: 0 24px 64px rgba(0,0,0,.5); }
+        .ac-title { font-size: 15px; font-weight: 600; color: var(--ink-9); margin-bottom: 8px; }
+        .ac-msg { font-size: 13px; color: var(--ink-7); line-height: 1.5; white-space: pre-wrap; margin-bottom: 18px; }
+        .ac-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .ac-btn { padding: 8px 16px; font-size: 12.5px; font-weight: 500; border-radius: 4px;
+          border: 1px solid var(--line); background: var(--ink-2); color: var(--ink-8); cursor: pointer; }
+        .ac-btn:hover { background: var(--ink-3); }
+        .ac-btn-primary { background: var(--signal); border-color: var(--signal); color: var(--ink-0); }
+        .ac-btn-danger { background: var(--critical); border-color: var(--critical); color: #fff; }
+      </style>
+      <div class="ac-card" role="dialog" aria-modal="true">
+        <div class="ac-title"></div>
+        <div class="ac-msg"></div>
+        <div class="ac-actions">
+          <button class="ac-btn" data-act="cancel"></button>
+          <button class="ac-btn ${tone === "danger" ? "ac-btn-danger" : "ac-btn-primary"}" data-act="ok"></button>
+        </div>
+      </div>`;
+    wrap.querySelector(".ac-title").textContent = title;
+    wrap.querySelector(".ac-msg").textContent = String(message || "");
+    wrap.querySelector('[data-act="ok"]').textContent = okLabel;
+    wrap.querySelector('[data-act="cancel"]').textContent = cancelLabel;
+    const close = (v) => { wrap.remove(); document.removeEventListener("keydown", onKey); resolve(v); };
+    wrap.querySelector('[data-act="ok"]').onclick = () => close(true);
+    wrap.querySelector('[data-act="cancel"]').onclick = () => close(false);
+    wrap.onclick = (e) => { if (e.target === wrap) close(false); };
+    const onKey = (e) => { if (e.key === "Escape") close(false); if (e.key === "Enter") close(true); };
+    document.addEventListener("keydown", onKey);
+    root.appendChild(wrap);
+    setTimeout(() => wrap.querySelector('[data-act="ok"]').focus(), 50);
+  });
+}
+
+// Тост — appToast(msg) / appToast(msg, "error") / appToast(msg, {tone, duration})
+function appToast(message, toneOrOpts) {
+  let tone = "info", duration = 3500;
+  if (typeof toneOrOpts === "string") tone = toneOrOpts;
+  else if (toneOrOpts) { tone = toneOrOpts.tone || tone; duration = toneOrOpts.duration || duration; }
+  let stack = document.getElementById("__app_toast_stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "__app_toast_stack";
+    stack.style.cssText = "position:fixed;bottom:24px;right:24px;z-index:10000;display:flex;flex-direction:column;gap:8px;pointer-events:none;";
+    document.body.appendChild(stack);
+  }
+  const colors = { info: "var(--signal)", ok: "var(--ok)", error: "var(--critical)", warn: "var(--warn)" };
+  const toast = document.createElement("div");
+  toast.style.cssText = `padding:12px 16px;background:var(--ink-1);border:1px solid var(--line);border-left:3px solid ${colors[tone] || colors.info};border-radius:6px;color:var(--ink-8);font-size:12.5px;box-shadow:0 8px 24px rgba(0,0,0,.4);max-width:420px;white-space:pre-wrap;pointer-events:auto;`;
+  toast.textContent = String(message || "");
+  stack.appendChild(toast);
+  setTimeout(() => {
+    toast.style.transition = "opacity .25s ease";
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder, appConfirm, appToast });

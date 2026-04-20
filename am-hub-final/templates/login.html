@@ -1,150 +1,179 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Вход — AM Hub</title>
   <link rel="preconnect" href="https://fonts.bunny.net">
-  <link href="https://fonts.bunny.net/css?family=geist:300,400,500,600,700" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link href="https://fonts.bunny.net/css?family=geist:300,400,500,600,700|geist-mono:400,500" rel="stylesheet">
+  <link rel="stylesheet" href="/static/design/tokens.css">
   <style>
+    :root {
+      --f-sans: 'Geist', -apple-system, sans-serif;
+      --f-mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
     body {
+      background: var(--ink-0);
+      color: var(--ink-8);
+      font-family: var(--f-sans);
+      font-size: 13.5px;
+      line-height: 1.5;
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      background:
-        radial-gradient(ellipse 70% 60% at 50% 40%, rgba(129,140,248,.09) 0%, transparent 65%),
-        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(74,222,128,.04) 0%, transparent 50%),
-        var(--bg);
+      padding: 24px;
+      background-image:
+        radial-gradient(ellipse 60% 50% at 50% 30%, var(--signal-glow) 0%, transparent 60%),
+        linear-gradient(180deg, var(--ink-0), var(--ink-0));
     }
-    .login-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 44px 40px;
+    .card {
+      background: var(--ink-1);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 36px 32px;
       width: 100%;
-      max-width: 420px;
-      text-align: center;
-      box-shadow: 0 20px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05);
+      max-width: 380px;
+      box-shadow: 0 24px 64px rgba(0,0,0,.5);
     }
-    .login-logo {
-      width: 52px; height: 52px;
-      margin: 0 auto 14px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, var(--accent), #ec4899);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.6rem;
-      font-weight: 800;
-      color: #fff;
-      box-shadow: 0 4px 16px rgba(129,140,248,.35);
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line-soft);
+      margin-bottom: 24px;
     }
-    h1 {
-      font-size: 1.55rem;
-      font-weight: 700;
-      letter-spacing: -.4px;
-      margin-bottom: 4px;
+    .logo {
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      background: var(--signal);
+      color: var(--ink-0);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--f-mono);
+      font-weight: 600;
+      font-size: 14px;
     }
-    .sub {
-      color: var(--muted);
-      font-size: .88rem;
-      margin-bottom: 28px;
-      line-height: 1.5;
+    .brand-text { flex: 1; }
+    .brand-title {
+      font-size: 14.5px;
+      font-weight: 500;
+      color: var(--ink-9);
+      letter-spacing: -0.01em;
     }
+    .brand-sub {
+      font-family: var(--f-mono);
+      font-size: 10.5px;
+      color: var(--ink-5);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-top: 2px;
+    }
+
+    .section-label {
+      font-family: var(--f-mono);
+      font-size: 10px;
+      color: var(--ink-5);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 10px;
+    }
+
     .tg-wrap {
-      min-height: 52px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 18px 0 8px;
+      min-height: 46px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 14px;
     }
     .tg-info {
-      font-size: .78rem;
-      color: var(--text-dim);
-      margin-top: 10px;
-      line-height: 1.5;
+      font-size: 12px;
+      color: var(--ink-6);
+      line-height: 1.55;
     }
-    .tg-info a { color: var(--accent); }
+    .tg-info b { color: var(--ink-8); font-family: var(--f-mono); font-weight: 500; }
+
     .divider {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin: 24px 0;
-      color: var(--text-dim);
-      font-size: .75rem;
+      font-family: var(--f-mono);
+      font-size: 10px;
+      color: var(--ink-5);
       text-transform: uppercase;
-      letter-spacing: .1em;
+      letter-spacing: 0.1em;
+      margin: 22px 0 18px;
     }
     .divider::before, .divider::after {
-      content: '';
+      content: "";
       flex: 1;
       height: 1px;
-      background: var(--border);
+      background: var(--line-soft);
     }
-    .fallback-toggle {
-      background: none;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: .8rem;
-      font-family: inherit;
-      padding: 6px 10px;
-      border-radius: 6px;
-      transition: background .15s, color .15s;
-    }
-    .fallback-toggle:hover { color: var(--text); background: rgba(255,255,255,.04); }
-    .fallback-form { display: none; margin-top: 14px; text-align: left; }
-    .fallback-form.show { display: block; }
-    .fallback-form label {
+
+    label {
       display: block;
-      font-size: .78rem;
-      color: var(--muted);
-      margin-bottom: 5px;
-      font-weight: 500;
+      font-family: var(--f-mono);
+      font-size: 10px;
+      color: var(--ink-5);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
     }
-    .fallback-form input {
+    input {
       width: 100%;
-      padding: 10px 13px;
-      border: 1px solid var(--border);
-      border-radius: 9px;
-      background: rgba(255,255,255,.03);
-      color: var(--text);
-      font-size: .9rem;
+      padding: 10px 12px;
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--ink-8);
+      font-family: var(--f-sans);
+      font-size: 13px;
       outline: none;
+      transition: border-color .15s;
       margin-bottom: 14px;
-      transition: border .15s;
-      font-family: inherit;
     }
-    .fallback-form input:focus { border-color: var(--accent); }
-    .fallback-form button {
+    input:focus { border-color: var(--signal); }
+    input::placeholder { color: var(--ink-5); }
+
+    .btn {
       width: 100%;
-      padding: 11px;
-      border: none;
-      border-radius: 9px;
-      background: linear-gradient(135deg, var(--accent-d, #6366f1), var(--accent));
-      color: #fff;
-      font-size: .9rem;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-    }
-    .fallback-form button:hover { filter: brightness(1.08); }
-    .err {
-      background: rgba(248,113,113,.12);
-      border: 1px solid rgba(248,113,113,.3);
-      border-radius: 9px;
       padding: 10px 14px;
-      font-size: .85rem;
-      color: var(--red);
-      margin-bottom: 16px;
+      border: 1px solid var(--signal);
+      border-radius: 4px;
+      background: var(--signal);
+      color: var(--ink-0);
+      font-family: var(--f-sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: filter .15s;
     }
+    .btn:hover { filter: brightness(1.08); }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--ink-7);
+    }
+    .btn-ghost:hover { background: var(--ink-2); }
+
+    .err {
+      background: rgba(240, 70, 58, 0.08);
+      border: 1px solid var(--critical-dim);
+      border-left: 3px solid var(--critical);
+      border-radius: 4px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--critical);
+      margin-bottom: 18px;
+    }
+
+    .fallback-form { display: none; }
+    .fallback-form.show { display: block; }
+
     .spinner {
       display: inline-block;
-      width: 22px; height: 22px;
-      border: 2.5px solid var(--border);
-      border-top-color: var(--accent);
+      width: 18px; height: 18px;
+      border: 2px solid var(--line);
+      border-top-color: var(--signal);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
@@ -152,14 +181,18 @@
   </style>
 </head>
 <body>
-  <div class="login-card">
-    <div class="login-logo">AQ</div>
-    <h1>AM Hub</h1>
-    <p class="sub">Рабочий центр аккаунт-менеджера</p>
+  <div class="card">
+    <div class="brand">
+      <div class="logo">AQ</div>
+      <div class="brand-text">
+        <div class="brand-title">AM Hub</div>
+        <div class="brand-sub">ops console</div>
+      </div>
+    </div>
 
     {% if error %}<div class="err">{{ error }}</div>{% endif %}
 
-    <!-- Telegram Login Widget -->
+    <div class="section-label">вход через telegram</div>
     <div class="tg-wrap" id="tg-login">
       {% if bot_username %}
       <script async src="https://telegram.org/js/telegram-widget.js?23"
@@ -168,46 +201,44 @@
               data-onauth="onTelegramAuth(user)"
               data-request-access="write"></script>
       {% else %}
-      <div style="color: var(--muted); font-size: .85rem">
-        ⚠ TG_BOT_USERNAME не задан в .env
+      <div style="color: var(--ink-6); font-size: 12px">
+        ⚠ TG_BOT_USERNAME не задан
       </div>
       {% endif %}
     </div>
+    <div class="tg-info">
+      Авторизация через бота <b>@{{ bot_username or 'anyquery_am_bot' }}</b>.<br>
+      Нужен доступ — напишите админу команды.
+    </div>
 
-    <p class="tg-info">
-      Войдите через Telegram — используется бот <b>@{{ bot_username or 'anyquery_am_bot' }}</b>.<br>
-      Нужен доступ? Напишите админу команды.
-    </p>
-
-    <!-- Fallback email/password (скрыт до клика) -->
     <div class="divider">или</div>
 
-    <button type="button" class="fallback-toggle" onclick="toggleFallback()">
-      Войти по email и паролю (admin / dev)
+    <button type="button" class="btn btn-ghost" onclick="toggleFallback()" id="fallback-toggle">
+      Войти по email и паролю
     </button>
 
-    <form class="fallback-form" id="fallback-form" method="POST">
-      <label>Email</label>
-      <input type="email" name="email" placeholder="you@company.ru" autocomplete="email">
-      <label>Пароль</label>
-      <input type="password" name="password" placeholder="••••••••" autocomplete="current-password">
-      <button type="submit">Войти</button>
+    <form class="fallback-form" id="fallback-form" method="POST" action="/login" style="margin-top:18px">
+      <label>email</label>
+      <input type="email" name="email" placeholder="you@company.ru" autocomplete="email" required>
+      <label>пароль</label>
+      <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+      <button type="submit" class="btn">Войти</button>
     </form>
   </div>
 
   <script>
-    // Telegram Login callback — серверный endpoint /auth/telegram валидирует подпись
     function onTelegramAuth(user) {
       const tgWrap = document.getElementById('tg-login');
       tgWrap.innerHTML = '<div class="spinner"></div>';
-
       const params = new URLSearchParams(user).toString();
-      // Отправляем на сервер для HMAC-верификации + установки cookie
       window.location.href = '/auth/telegram?' + params;
     }
-
     function toggleFallback() {
-      document.getElementById('fallback-form').classList.toggle('show');
+      const f = document.getElementById('fallback-form');
+      const t = document.getElementById('fallback-toggle');
+      const open = f.classList.toggle('show');
+      t.style.display = open ? 'none' : '';
+      if (open) setTimeout(() => f.querySelector('input').focus(), 50);
     }
   </script>
 </body>
