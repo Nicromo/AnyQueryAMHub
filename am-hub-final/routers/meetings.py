@@ -109,6 +109,43 @@ async def api_create_meeting(
         logger.warning(f"Slots creation failed: {e}")
 
     db.commit()
+
+    # Push встречи обратно в Merchrules (bidirectional sync).
+    # Ошибка не блокирует ответ — встреча уже в локальной БД.
+    if client and meeting_date and client.site_ids:
+        try:
+            from merchrules import push_meeting
+            u_settings = user.settings or {}
+            mr = u_settings.get("merchrules", {}) or {}
+            mr_login = mr.get("login") or os.environ.get("MERCHRULES_LOGIN")
+            mr_password = mr.get("password") or os.environ.get("MERCHRULES_PASSWORD")
+            site_ids = client.site_ids if isinstance(client.site_ids, list) else []
+            if mr_login and mr_password and site_ids:
+                await push_meeting(
+                    site_ids=[str(s) for s in site_ids],
+                    meeting_date=meeting_date.strftime("%Y-%m-%d"),
+                    meeting_type=meeting_type,
+                    summary=notes or title or meeting_type,
+                    mood="ok",
+                    next_meeting=None,
+                    login=mr_login,
+                    password=mr_password,
+                )
+        except Exception as e:
+            logger.warning(f"Push meeting to Merchrules failed (non-fatal): {e}")
+
+    # Push в Airtable (обновить 'Дата последней коммуникации' + комментарий)
+    if client and client.name and meeting_date:
+        try:
+            from airtable_sync import sync_meeting_to_airtable
+            await sync_meeting_to_airtable(
+                client_name=client.name,
+                meeting_date=meeting_date,
+                comment=notes or title or meeting_type,
+            )
+        except Exception as e:
+            logger.warning(f"Push meeting to Airtable failed (non-fatal): {e}")
+
     return {"ok": True, "meeting_id": meeting.id, "message": f"Встреча «{meeting.title}» создана"}
 
 

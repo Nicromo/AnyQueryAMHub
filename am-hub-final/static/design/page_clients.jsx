@@ -253,6 +253,12 @@ function PageClient() {
   const gmv = c.gmv != null ? "₽ " + (c.gmv >= 1e6 ? (c.gmv/1e6).toFixed(1) + "м" : c.gmv >= 1e3 ? (c.gmv/1e3).toFixed(0) + "к" : c.gmv) : "—";
   const openTasks = (c.tasks_open != null) ? c.tasks_open : (c.open_tasks != null ? c.open_tasks : null);
 
+  // payment_status: active | overdue | suspended | trial | unknown
+  const payMap = { active: "✓ активна", overdue: "⚠ просрочка", suspended: "⛔ приост.", trial: "🆓 триал" };
+  const payToneMap = { active: "ok", overdue: "warn", suspended: "critical", trial: "signal" };
+  const payStr = payMap[c.payment_status] || "—";
+  const payTone = payToneMap[c.payment_status] || "neutral";
+
   return (
     <div>
       <TopBar
@@ -283,10 +289,11 @@ function PageClient() {
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
 
         {/* top strip — реальные данные клиента */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12 }}>
           <KPI label="Сегмент" value={segment} tone={segment !== "—" ? "signal" : "neutral"}/>
           <KPI label="GMV · 30д" value={gmv} sub={c.revenue_trend || undefined}/>
-          <KPI label="Health score" value={health != null ? String(health) : "—"} tone={health == null ? "neutral" : health < 40 ? "err" : health < 70 ? "warn" : "ok"} sub={health == null ? "данные не синкнуты" : undefined}/>
+          <KPI label="Health score" value={health != null ? String(health) : "—"} tone={health == null ? "neutral" : health < 40 ? "critical" : health < 70 ? "warn" : "ok"} sub={health == null ? "данные не синкнуты" : undefined}/>
+          <KPI label="Оплата" value={payStr} tone={payTone}/>
           <KPI label="Открытых задач" value={openTasks != null ? String(openTasks) : "—"} sub={openTasks == null ? "синк не делался" : undefined}/>
           <KPI label="Последний контакт" value={lastContactStr} sub={c.domain ? "домен: " + c.domain : undefined}/>
         </div>
@@ -305,17 +312,11 @@ function PageClient() {
             {/* Контакты — real /api/clients/{id}/contacts */}
             <ClientContactsList clientId={c.id}/>
 
-            <Card title="Документы и договоры" action={<Badge tone="ghost" mono>в разработке</Badge>}>
-              <div style={{ fontSize: 12.5, color: "var(--ink-6)", padding: "14px 0" }}>
-                Раздел в разработке — будет интеграция с хранилищем договоров.
-              </div>
-            </Card>
+            {/* Продукты — real /api/clients/{id}/products */}
+            <ClientProductsList clientId={c.id}/>
 
-            <Card title="Теги" action={<Badge tone="ghost" mono>в разработке</Badge>}>
-              <div style={{ fontSize: 12.5, color: "var(--ink-6)", padding: "14px 0" }}>
-                Кастомные теги клиента появятся в следующей итерации.
-              </div>
-            </Card>
+            {/* Фиды — real /api/clients/{id}/feeds */}
+            <ClientFeedsList clientId={c.id}/>
           </div>
         </div>
       </div>
