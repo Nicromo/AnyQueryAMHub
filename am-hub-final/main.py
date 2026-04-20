@@ -219,6 +219,16 @@ async def lifespan(app: FastAPI):
                     # QBR columns — required for /design/qbr page
                     ("qbrs", "manager_email",      "ALTER TABLE qbrs ADD COLUMN manager_email VARCHAR"),
                     ("qbrs", "airtable_record_id",  "ALTER TABLE qbrs ADD COLUMN airtable_record_id VARCHAR"),
+                    # Client hub overview (migration 004)
+                    ("clients", "payment_status",   "ALTER TABLE clients ADD COLUMN payment_status VARCHAR DEFAULT 'active'"),
+                    ("clients", "payment_due_date", "ALTER TABLE clients ADD COLUMN payment_due_date TIMESTAMP"),
+                    ("clients", "payment_amount",   "ALTER TABLE clients ADD COLUMN payment_amount FLOAT"),
+                    # AutoTaskRule actions (migration 005)
+                    ("auto_task_rules", "actions",           "ALTER TABLE auto_task_rules ADD COLUMN actions JSONB DEFAULT '[]'::jsonb"),
+                    ("auto_task_rules", "trigger_count",     "ALTER TABLE auto_task_rules ADD COLUMN trigger_count INTEGER DEFAULT 0"),
+                    ("auto_task_rules", "last_triggered_at", "ALTER TABLE auto_task_rules ADD COLUMN last_triggered_at TIMESTAMP"),
+                    # ClientNote pin (from client hub work)
+                    ("client_notes", "is_pinned",    "ALTER TABLE client_notes ADD COLUMN is_pinned BOOLEAN DEFAULT FALSE"),
                 ]
                 # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:
@@ -274,6 +284,48 @@ async def lifespan(app: FastAPI):
                         score INTEGER NOT NULL, type VARCHAR DEFAULT 'nps',
                         comment TEXT, source VARCHAR DEFAULT 'manual',
                         recorded_at TIMESTAMP DEFAULT NOW(), recorded_by VARCHAR)""",
+                    # Client hub (migration 004)
+                    "client_contacts": """CREATE TABLE IF NOT EXISTS client_contacts (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        name VARCHAR NOT NULL, role VARCHAR, position VARCHAR,
+                        email VARCHAR, phone VARCHAR, telegram VARCHAR,
+                        is_primary BOOLEAN DEFAULT FALSE, notes TEXT,
+                        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW())""",
+                    "client_products": """CREATE TABLE IF NOT EXISTS client_products (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        code VARCHAR NOT NULL, name VARCHAR NOT NULL,
+                        status VARCHAR DEFAULT 'active', activated_at TIMESTAMP,
+                        extra JSONB DEFAULT '{}'::jsonb)""",
+                    "client_merch_rules": """CREATE TABLE IF NOT EXISTS client_merch_rules (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        merchrules_id VARCHAR, name VARCHAR NOT NULL,
+                        rule_type VARCHAR, status VARCHAR DEFAULT 'active',
+                        priority INTEGER DEFAULT 0, config JSONB DEFAULT '{}'::jsonb,
+                        last_synced TIMESTAMP, updated_at TIMESTAMP DEFAULT NOW())""",
+                    "client_feeds": """CREATE TABLE IF NOT EXISTS client_feeds (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        feed_type VARCHAR NOT NULL, name VARCHAR, url VARCHAR,
+                        status VARCHAR DEFAULT 'ok', last_updated TIMESTAMP,
+                        sku_count INTEGER DEFAULT 0, errors_count INTEGER DEFAULT 0,
+                        last_error TEXT, schedule VARCHAR)""",
+                    # Support tickets (migration 006)
+                    "support_tickets": """CREATE TABLE IF NOT EXISTS support_tickets (
+                        id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id),
+                        source VARCHAR DEFAULT 'tbank_time',
+                        external_id VARCHAR UNIQUE, external_url VARCHAR, channel_id VARCHAR,
+                        title VARCHAR, body TEXT,
+                        status VARCHAR DEFAULT 'open', priority VARCHAR DEFAULT 'normal',
+                        author VARCHAR, author_name VARCHAR,
+                        external_client_id VARCHAR,
+                        comments_count INTEGER DEFAULT 0,
+                        last_comment_at TIMESTAMP, last_comment_snippet TEXT,
+                        opened_at TIMESTAMP, updated_at TIMESTAMP DEFAULT NOW(),
+                        resolved_at TIMESTAMP, raw JSONB DEFAULT '{}'::jsonb)""",
+                    "ticket_comments": """CREATE TABLE IF NOT EXISTS ticket_comments (
+                        id SERIAL PRIMARY KEY,
+                        ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE CASCADE,
+                        external_id VARCHAR UNIQUE, author VARCHAR, author_name VARCHAR,
+                        body TEXT, posted_at TIMESTAMP, raw JSONB DEFAULT '{}'::jsonb)""",
                 }
                 for tname, tsql in _new_tables.items():
                     db.execute(_text(tsql))
