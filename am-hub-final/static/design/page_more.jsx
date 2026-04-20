@@ -549,7 +549,7 @@ function PageAI() {
   const [listening, setListening] = React.useState(false);
   const toggleMic = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert("Голосовой ввод не поддерживается этим браузером."); return; }
+    if (!SR) { appToast("Голосовой ввод не поддерживается этим браузером."); return; }
     if (listening) { recogRef.current?.stop(); setListening(false); return; }
     const r = new SR();
     r.lang = "ru-RU"; r.continuous = false; r.interimResults = true;
@@ -1065,7 +1065,7 @@ function PageRoadmap() {
 
   const delItem = (id, title) => {
     fetch(`/design/api/roadmap/${id}`, { method: "DELETE", credentials: "include" })
-      .then(r => r.ok ? location.reload() : alert("Ошибка удаления"));
+      .then(r => r.ok ? location.reload() : appToast("Ошибка удаления"));
   };
 
   return (
@@ -1223,7 +1223,7 @@ function PageExtInstall() {
         credentials: "include",
         body: JSON.stringify({ name }),
       });
-      if (!r.ok) { alert("Ошибка: " + r.status); return; }
+      if (!r.ok) { appToast("Ошибка: " + r.status); return; }
       const d = await r.json();
       setNewToken(d.token);
       setNewName("");
@@ -1234,18 +1234,18 @@ function PageExtInstall() {
   }
 
   async function revokeToken(id) {
-    if (!window.confirm("Отозвать токен? Устройства с ним перестанут работать.")) return;
+    if (!await appConfirm("Отозвать токен? Устройства с ним перестанут работать.")) return;
     const r = await fetch("/api/me/api-tokens/" + encodeURIComponent(id), {
       method: "DELETE", credentials: "include",
     });
     if (r.ok) reloadTokens();
-    else alert("Ошибка отзыва: " + r.status);
+    else appToast("Ошибка отзыва: " + r.status);
   }
 
   // Пересоздать: удалить старый токен и сразу создать новый с тем же именем.
   // Полный токен покажется в карточке new-token-display как при обычном create.
   async function regenerateToken(id, name) {
-    if (!window.confirm(
+    if (!await appConfirm(
       `Пересоздать токен «${name}»?\n\nСтарый будет отозван — устройства с ним ` +
       `перестанут работать. Появится новый полный токен, который нужно будет ` +
       `скопировать и вставить в расширение ещё раз.`
@@ -1254,7 +1254,7 @@ function PageExtInstall() {
     const delResp = await fetch("/api/me/api-tokens/" + encodeURIComponent(id), {
       method: "DELETE", credentials: "include",
     });
-    if (!delResp.ok) { alert("Не удалось отозвать старый: " + delResp.status); return; }
+    if (!delResp.ok) { appToast("Не удалось отозвать старый: " + delResp.status); return; }
     // 2) create new with same name
     const createResp = await fetch("/api/me/api-tokens", {
       method: "POST",
@@ -1262,7 +1262,7 @@ function PageExtInstall() {
       credentials: "include",
       body: JSON.stringify({ name: name || "Пересоздан" }),
     });
-    if (!createResp.ok) { alert("Старый отозван, но новый не создался: " + createResp.status); reloadTokens(); return; }
+    if (!createResp.ok) { appToast("Старый отозван, но новый не создался: " + createResp.status); reloadTokens(); return; }
     const d = await createResp.json();
     setNewToken(d.token);
     reloadTokens();
@@ -1272,13 +1272,13 @@ function PageExtInstall() {
   async function copyPrefix(prefix, name) {
     try {
       await navigator.clipboard.writeText(prefix);
-      window.alert(
+      appToast(
         `Скопировал префикс: ${prefix}…\n\n` +
         `ℹ️ Это только начало токена — полный мы не храним (только hash).\n` +
         `Если потерян полный токен для «${name}», нажми 🔄 чтобы пересоздать.`
       );
     } catch (e) {
-      window.alert("Не удалось скопировать: " + e.message);
+      appToast("Не удалось скопировать: " + e.message);
     }
   }
 
@@ -1795,9 +1795,9 @@ function PageQBR() {
       });
       const d = await r.json();
       if (d.ok) { setEditQbr(null); location.reload(); }
-      else alert("Ошибка: " + (d.detail || JSON.stringify(d)));
+      else appToast("Ошибка: " + (d.detail || JSON.stringify(d)));
     } catch (e) {
-      alert("Ошибка: " + e.message);
+      appToast("Ошибка: " + e.message);
     } finally {
       setSaving(false);
     }

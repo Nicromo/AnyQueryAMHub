@@ -36,13 +36,13 @@ function PageClients() {
       });
       const d = await r.json().catch(() => ({}));
       if (d.error) {
-        alert("Airtable: " + d.error);
+        appToast("Airtable: " + d.error);
       } else {
-        alert(`Готово. ${d.message || JSON.stringify(d).slice(0, 200)}`);
+        appToast(`Готово. ${d.message || JSON.stringify(d).slice(0, 200)}`);
         location.reload();
       }
     } catch (e) {
-      alert("Ошибка: " + e.message);
+      appToast("Ошибка: " + e.message);
     } finally {
       setSyncBusy(false);
     }
@@ -60,29 +60,29 @@ function PageClients() {
               {syncBusy ? "Тянем..." : "⟲ Из Airtable"}
             </Btn>
             <Btn kind="ghost" size="m" onClick={async () => {
-              if (!window.confirm("Объединить дубли клиентов по нормализованному имени? 'Yves Rocher' и 'yves-rocher' станут одним.")) return;
+              if (!await appConfirm("Объединить дубли клиентов по нормализованному имени? 'Yves Rocher' и 'yves-rocher' станут одним.")) return;
               const r = await fetch("/api/clients/auto-dedupe", {method:"POST", credentials:"include"});
               const d = await r.json().catch(()=>({}));
-              alert(d.ok ? `Объединено: ${d.merged}` : (d.error || "Ошибка"));
+              appToast(d.ok ? `Объединено: ${d.merged}` : (d.error || "Ошибка"));
               if (d.ok) location.reload();
             }}>⎘ Дубли</Btn>
             <Btn kind="ghost" size="m" onClick={async () => {
               const pv = await fetch("/api/clients/garbage", {credentials:"include"}).then(r=>r.json()).catch(()=>({garbage:[]}));
               const list = (pv.garbage || []);
-              if (!list.length) { alert("Мусорных записей не найдено."); return; }
+              if (!list.length) { appToast("Мусорных записей не найдено."); return; }
               const names = list.map(x => `#${x.id} ${x.name}`).join("\n");
-              if (!window.confirm(`Найдено ${list.length} мусорных записей. Удалить?\n\n${names}`)) return;
+              if (!await appConfirm(`Найдено ${list.length} мусорных записей. Удалить?\n\n${names}`)) return;
               const r = await fetch("/api/clients/garbage/cleanup", {
                 method:"POST", credentials:"include",
                 headers:{"Content-Type":"application/json"},
                 body: JSON.stringify({ids: list.map(x => x.id)}),
               });
               const d = await r.json().catch(()=>({}));
-              alert(d.ok ? `Удалено: ${d.count}` : (d.error || "Ошибка"));
+              appToast(d.ok ? `Удалено: ${d.count}` : (d.error || "Ошибка"));
               if (d.ok) location.reload();
             }}>🗑 Чистка</Btn>
             <Btn kind="ghost" size="m" onClick={async () => {
-              if (!window.confirm("Полная чистка: удалить мусор + объединить дубли?")) return;
+              if (!await appConfirm("Полная чистка: удалить мусор + объединить дубли?")) return;
               const pv = await fetch("/api/clients/garbage", {credentials:"include"}).then(r=>r.json()).catch(()=>({garbage:[]}));
               const ids = (pv.garbage || []).map(x => x.id);
               let deleted = 0;
@@ -97,7 +97,7 @@ function PageClients() {
               }
               const r2 = await fetch("/api/clients/auto-dedupe", {method:"POST", credentials:"include"});
               const d2 = await r2.json().catch(()=>({}));
-              alert(`Готово:\n  удалено мусора: ${deleted}\n  объединено дублей: ${d2.merged || 0}`);
+              appToast(`Готово:\n  удалено мусора: ${deleted}\n  объединено дублей: ${d2.merged || 0}`);
               location.reload();
             }}>✨ Всё сразу</Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
@@ -269,7 +269,7 @@ function PageClient() {
                 body: JSON.stringify({ content: txt }),
               });
               if (r.ok) window.location.reload();
-              else alert("Не удалось сохранить заметку");
+              else appToast("Не удалось сохранить заметку");
             }}>Заметка</Btn>
             <Btn kind="ghost" size="m" icon={<I.cal size={14}/>} onClick={() => {
               window.location.href = `/design/meetings?client_id=${c.id}`;

@@ -129,7 +129,7 @@ function PageHub() {
           <>
             <Btn kind="ghost" size="m" icon={<I.refresh size={14}/>}
               onClick={async () => {
-                if (!window.confirm("Синхронизировать из Airtable + Merchrules?")) return;
+                if (!await appConfirm("Синхронизировать из Airtable + Merchrules?")) return;
                 let atRes = {}, mrRes = {};
                 try {
                   const r1 = await fetch("/api/sync/airtable", {
@@ -149,7 +149,7 @@ function PageHub() {
                 } catch (e) { mrRes = { error: e.message }; }
                 const at = atRes.error ? `Airtable: ${atRes.error}` : `Airtable: ${atRes.synced || 0} клиентов, оплата ${atRes.payment_updated || 0}`;
                 const mr = mrRes.error ? `Merchrules: ${mrRes.error}` : `Merchrules: ${mrRes.clients_synced || mrRes.synced || 0} клиентов, задач ${mrRes.tasks_synced || 0}`;
-                alert(`Готово:\n  ${at}\n  ${mr}`);
+                appToast(`Готово:\n  ${at}\n  ${mr}`);
                 location.reload();
               }}
             >Синхронизировать</Btn>
