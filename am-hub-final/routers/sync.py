@@ -242,8 +242,38 @@ async def api_sync_airtable(
         # НЕ передаём default_manager_email — иначе клиенты без CSM в
         # Airtable снова улетят на текущего юзера.
     )
+
+    # После синка клиентов — вторым запросом подтянем payment status
+    try:
+        from airtable_sync import sync_payment_status_from_airtable
+        pay_result = await sync_payment_status_from_airtable(db=db, token=token, base_id=base_id)
+        if pay_result.get("ok"):
+            result["payment_updated"] = pay_result.get("updated", 0)
+        else:
+            result["payment_error"] = pay_result.get("error")
+    except Exception as _pe:
+        logger.warning(f"payment sync failed: {_pe}")
     return result
 
+
+@router.post("/api/sync/airtable/payment")
+async def api_sync_airtable_payment(
+    request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)
+):
+    """Отдельный триггер синка только payment status из Airtable."""
+    from routers.api_tokens import resolve_user
+    user = resolve_user(db, request, auth_token)
+    if not user:
+        raise HTTPException(status_code=401)
+    u_settings = user.settings or {}
+    at_settings = u_settings.get("airtable", {})
+    token = (at_settings.get("pat") or at_settings.get("token")
+             or _env("AIRTABLE_TOKEN") or _env("AIRTABLE_PAT"))
+    base_id = at_settings.get("base_id") or _env("AIRTABLE_BASE_ID")
+    if not token:
+        return {"error": "Нет токена Airtable"}
+    from airtable_sync import sync_payment_status_from_airtable
+    return await sync_payment_status_from_airtable(db=db, token=token, base_id=base_id)
 
 
 @router.post("/api/sync/merchrules")
