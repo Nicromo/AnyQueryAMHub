@@ -215,14 +215,42 @@ function PageTasks() {
   const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
   const CL_TASKS = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [taskModal, setTaskModal] = React.useState(null); // null or {column}
+  // Кастомные колонки (пользовательские доски). Храним в localStorage.
+  // Структура: [{ key: "review", title: "На проверке", tone: "info" }, ...]
+  const CUSTOM_KEY = "amhub_kanban_cols_v1";
+  const [customCols, setCustomCols] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || "[]"); }
+    catch (_) { return []; }
+  });
+  const saveCustom = (next) => {
+    setCustomCols(next);
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(next)); } catch (_) {}
+  };
+  const addColumn = () => {
+    const title = (window.prompt("Название колонки:") || "").trim();
+    if (!title) return;
+    const key = "c_" + Date.now().toString(36);
+    saveCustom([...customCols, { key, title, tone: "info" }]);
+  };
+  const removeColumn = async (key) => {
+    if (!await appConfirm("Удалить колонку? Задачи останутся, но без колонки.")) return;
+    saveCustom(customCols.filter(c => c.key !== key));
+  };
+
   // When filter="mine", show tasks assigned to current user (by team/email); "all" shows all
   const TK = filter === "mine" && U.email
     ? ALL_TK.filter(t => !t.team || t.team === U.email || t.team === U.name)
     : ALL_TK;
 
-  // Группировка: сначала по статусу (in_progress → «В работе»), остальное по due.
+  // Группировка:
+  //  1) task_type совпадает с key кастомной колонки → в неё
+  //  2) status === "in_progress" → «В работе»
+  //  3) по due → Просрочено / Сегодня / Бэклог
+  const customBuckets = {}; customCols.forEach(c => { customBuckets[c.key] = []; });
   const today = [], backlog = [], overdue = [], inProgress = [];
+  const customKeys = new Set(customCols.map(c => c.key));
   TK.forEach(t => {
+    if (t.task_type && customKeys.has(t.task_type)) { customBuckets[t.task_type].push(t); return; }
     if (t.status === "in_progress") { inProgress.push(t); return; }
     const due = (t.due || "").toLowerCase();
     if (due.indexOf("просроч") !== -1) overdue.push(t);
@@ -231,17 +259,25 @@ function PageTasks() {
   });
 
   const mapItem = t => ({ id: t.id, t: t.title, cl: t.client, pr: t.priority, raw: t });
-  const cols = [
-    { title: "Просрочено", key: "overdue",     tone: "critical", count: overdue.length,    items: overdue.slice(0, 20).map(mapItem) },
-    { title: "Сегодня",    key: "today",       tone: "signal",   count: today.length,      items: today.slice(0, 20).map(mapItem) },
-    { title: "В работе",   key: "in_progress", tone: "warn",     count: inProgress.length, items: inProgress.slice(0, 20).map(mapItem) },
-    { title: "Бэклог",     key: "plan",        tone: "neutral",  count: backlog.length,    items: backlog.slice(0, 20).map(mapItem) },
+  const standardCols = [
+    { title: "Просрочено", key: "overdue",     tone: "critical", items: overdue,    removable: false },
+    { title: "Сегодня",    key: "today",       tone: "signal",   items: today,      removable: false },
+    { title: "В работе",   key: "in_progress", tone: "warn",     items: inProgress, removable: false },
+    { title: "Бэклог",     key: "plan",        tone: "neutral",  items: backlog,    removable: false },
   ];
+  const userCols = customCols.map(c => ({
+    title: c.title, key: c.key, tone: c.tone || "info",
+    items: customBuckets[c.key] || [], removable: true,
+  }));
+  const cols = [...standardCols, ...userCols].map(c => ({
+    ...c, count: c.items.length, items: c.items.slice(0, 20).map(mapItem),
+  }));
 
   // Детали задачи — модалка
   const [detail, setDetail] = React.useState(null);
 
-  // Drag-and-drop: перемещение задачи в колонку → PATCH /api/tasks/{id}/status.
+  // Drag-and-drop: перемещение задачи в колонку.
+  //  standard keys меняют status ± due_date; кастомные — task_type.
   const [dragOver, setDragOver] = React.useState(null);
   const onDragStart = (e, taskId) => {
     e.dataTransfer.setData("text/plain", String(taskId));
@@ -252,18 +288,40 @@ function PageTasks() {
     setDragOver(null);
     const taskId = parseInt(e.dataTransfer.getData("text/plain"), 10);
     if (!taskId) return;
-    // Маппинг колонки → task.status
-    const statusMap = { overdue: "plan", today: "plan", in_progress: "in_progress", plan: "plan" };
-    const newStatus = statusMap[colKey];
-    if (!newStatus) return;
+
+    // PUT /api/tasks/{id} принимает status, due_date, task_type.
+    const body = {};
+    const now = new Date();
+    if (colKey === "overdue") {
+      // Вчера 23:59 — чтобы попала в «Просрочено».
+      const d = new Date(now); d.setDate(d.getDate() - 1); d.setHours(23, 59, 0, 0);
+      body.status = "plan"; body.due_date = d.toISOString();
+      body.task_type = null;
+    } else if (colKey === "today") {
+      const d = new Date(now); d.setHours(23, 59, 0, 0);
+      body.status = "plan"; body.due_date = d.toISOString();
+      body.task_type = null;
+    } else if (colKey === "in_progress") {
+      body.status = "in_progress";
+      body.task_type = null;
+    } else if (colKey === "plan") {
+      const d = new Date(now); d.setDate(d.getDate() + 7); d.setHours(18, 0, 0, 0);
+      body.status = "plan"; body.due_date = d.toISOString();
+      body.task_type = null;
+    } else if (customKeys.has(colKey)) {
+      body.task_type = colKey;
+    } else {
+      return;
+    }
+
     try {
-      const r = await fetch(`/api/tasks/${taskId}/status`, {
-        method: "PATCH", credentials: "include",
+      const r = await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error("HTTP " + r.status);
-      if (typeof appToast === "function") appToast("Перемещено: " + colKey, "ok");
+      if (typeof appToast === "function") appToast("Перемещено", "ok");
       location.reload();
     } catch (err) {
       if (typeof appToast === "function") appToast("Ошибка: " + err.message, "error");
@@ -304,13 +362,14 @@ function PageTasks() {
           document.querySelector('button[title="Новая задача"]')?.click();
         }}>Задача</Btn></>}/>
       <div style={{ padding: "22px 28px 40px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start", overflowX: "auto", paddingBottom: 8 }}>
           {cols.map((c, i) => (
-            <div key={i}
+            <div key={c.key || i}
               onDragOver={(e) => { e.preventDefault(); setDragOver(c.key); }}
               onDragLeave={() => setDragOver(null)}
               onDrop={(e) => onDrop(e, c.key)}
               style={{
+                flex: "0 0 280px",
                 background: "var(--ink-2)",
                 border: `1px solid ${dragOver === c.key ? "var(--signal)" : "var(--line)"}`,
                 borderRadius: 6,
@@ -320,10 +379,17 @@ function PageTasks() {
               }}>
               <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line-soft)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 999, background: c.tone==="signal"?"var(--signal)":c.tone==="warn"?"var(--warn)":c.tone==="ok"?"var(--ok)":"var(--ink-5)" }}/>
+                  <span style={{ width: 6, height: 6, borderRadius: 999, background: c.tone==="signal"?"var(--signal)":c.tone==="warn"?"var(--warn)":c.tone==="critical"?"var(--critical)":c.tone==="info"?"var(--info,var(--signal))":"var(--ink-5)" }}/>
                   <span style={{ fontSize: 13, fontWeight: 500 }}>{c.title}</span>
                 </div>
-                <span className="mono" style={{ fontSize: 11, color: "var(--ink-5)" }}>{c.count}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-5)" }}>{c.count}</span>
+                  {c.removable && (
+                    <button onClick={() => removeColumn(c.key)}
+                      title="Удалить колонку"
+                      style={{ background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 }}>×</button>
+                  )}
+                </div>
               </div>
               <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
                 {c.items.map((it) => (
@@ -346,10 +412,22 @@ function PageTasks() {
                     </div>
                   </div>
                 ))}
-                <button onClick={() => setTaskModal({ column: c.title })} style={{ marginTop: 4, padding: "8px 10px", background: "transparent", border: "1px dashed var(--line)", borderRadius: 4, color: "var(--ink-5)", cursor: "pointer", fontFamily: "var(--f-mono)", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>+ добавить</button>
+                <button onClick={() => setTaskModal({ column: c.title, colKey: c.key })} style={{ marginTop: 4, padding: "8px 10px", background: "transparent", border: "1px dashed var(--line)", borderRadius: 4, color: "var(--ink-5)", cursor: "pointer", fontFamily: "var(--f-mono)", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>+ добавить</button>
               </div>
             </div>
           ))}
+          {/* Кнопка «+ Колонка» — добавляет кастомную доску */}
+          <button onClick={addColumn}
+            style={{
+              flex: "0 0 280px", minHeight: 60,
+              background: "transparent",
+              border: "1px dashed var(--line)",
+              borderRadius: 6,
+              color: "var(--ink-5)",
+              cursor: "pointer",
+              fontFamily: "var(--f-mono)", fontSize: 11,
+              letterSpacing: "0.08em", textTransform: "uppercase",
+            }}>+ Колонка</button>
         </div>
       </div>
       {detail && <TaskDetailModal task={detail} onClose={() => setDetail(null)} onReload={() => location.reload()}/>}
