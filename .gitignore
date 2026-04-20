@@ -28,3 +28,6 @@ am-hub-final/data/*.db-shm
 # Файл кредов
 ~/.search-checkup-creds.json
 *.credentials.json
+
+# Per-agent worktrees (transient)
+.claude/worktrees/

@@ -86,6 +86,11 @@ class Task(Base):
     pushed_to_roadmap = Column(Boolean, default=False)
     roadmap_pushed_at = Column(DateTime, nullable=True)
 
+    # Autotask dedupe + snooze (rule_key, target_date live inside meta)
+    meta = Column(JSONB, default=dict)
+    snoozed_until = Column(Date, nullable=True)
+    snoozed_count = Column(Integer, default=0)
+
     client = relationship("Client", back_populates="tasks")
     meeting = relationship("Meeting", back_populates="created_tasks")
 
@@ -215,16 +220,26 @@ class AccountPlan(Base):
     client = relationship("Client")
 
 
+class ManagerGroup(Base):
+    """Группа менеджеров — grouphead видит всех внутри группы, leadership переключает scope."""
+    __tablename__ = "manager_groups"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    grouphead_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     first_name = Column(String, nullable=True)
     last_name = Column(String, nullable=True)
-    role = Column(String, default="manager")
+    role = Column(String, default="manager")  # admin/manager/viewer/grouphead/leadership
     is_active = Column(Boolean, default=True)
     hashed_password = Column(String, nullable=True)
     telegram_id = Column(String, nullable=True, unique=True)
+    group_id = Column(Integer, ForeignKey("manager_groups.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     settings = Column(JSONB, default=dict)
@@ -797,3 +812,94 @@ class PartnerLog(Base):
 
     client = relationship("Client", backref="partner_logs")
     user   = relationship("User")
+
+
+# ── Client onboarding (10-step flow, per-client) ────────────────────────────
+# Отдельно от OnboardingProgress (тот трекает онбординг самого менеджера).
+class ClientOnboardingProgress(Base):
+    """Прогресс 10-ступенчатого онбординга конкретного клиента."""
+    __tablename__ = "client_onboarding_progress"
+    id             = Column(Integer, primary_key=True, index=True)
+    client_id      = Column(Integer, ForeignKey("clients.id"), unique=True, nullable=False, index=True)
+    started_at     = Column(DateTime, default=datetime.utcnow)
+    started_by     = Column(String)                 # email менеджера
+    current_step   = Column(Integer, default=0)     # 0..10, 10 = всё отправлено
+    next_send_date = Column(Date, nullable=True)    # когда планируется следующее сообщение
+    completed_at   = Column(DateTime, nullable=True)
+
+    client = relationship("Client", backref="onboarding_progress_client")
+
+
+class OnboardingTemplate(Base):
+    """10 дефолтных шаблонов сообщений онбординга — менеджер правит под себя."""
+    __tablename__ = "onboarding_templates"
+    id         = Column(Integer, primary_key=True, index=True)
+    step       = Column(Integer, unique=True, nullable=False)  # 1..10
+    title      = Column(String, nullable=False)
+    body       = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# Дефолтные 10 шаблонов — сидятся в main.py lifespan если таблица пуста.
+DEFAULT_ONBOARDING_TEMPLATES = [
+    (1,  "Шаг 1 — Приветствие и знакомство с личным кабинетом",
+     "Здравствуйте, {client_name}! Меня зовут {manager_name}, я буду сопровождать вас в AnyQuery. "
+     "В первую неделю мы познакомим вас с личным кабинетом: где смотреть аналитику, задачи и синки. "
+     "Я пришлю вам ссылку на кабинет и короткое видео-обзор. "
+     "Если есть вопросы — пишите сюда, отвечаю в рабочие часы. "
+     "Через пару дней расскажу, как загрузить первый feed товаров."),
+    (2,  "Шаг 2 — Как загрузить первый feed",
+     "Здравствуйте, {client_name}! Сегодня покажу, как подгрузить товарный фид: форматы XML/CSV/JSON, "
+     "автообновление по расписанию, частые ошибки валидации. "
+     "Прикладываю чек-лист и скрин кабинета. "
+     "Если с доступом к вашему фиду есть нюансы — скиньте URL, я проверю у себя и подскажу. "
+     "В следующем сообщении — базовые merch-правила."),
+    (3,  "Шаг 3 — Настройка merch-правил (базовые)",
+     "Здравствуйте, {client_name}! Разберём базовые merch-правила: pin/boost/bury, фильтры по остаткам, "
+     "приоритет брендов. Это минимум, который даёт быструю пользу на поиске. "
+     "Я подготовил 3 правила-заготовки под ваш ассортимент — пришлю отдельно. "
+     "Когда внедрим, посмотрим на метрики через неделю. "
+     "Дальше перейдём к аналитике null/zero queries."),
+    (4,  "Шаг 4 — Аналитика: где смотреть Null/Zero queries",
+     "Здравствуйте, {client_name}! Главные отчёты для еженедельной проверки: Null queries (ничего не нашли), "
+     "Zero-result (нашли, но 0 кликов), Top-слова без покупок. "
+     "В кабинете они в разделе «Аналитика → Поиск». "
+     "Рекомендую зайти раз в неделю и выписать топ-20 — там обычно и сидят проблемы. "
+     "Дальше поговорим про синонимы и справочник товаров."),
+    (5,  "Шаг 5 — Синонимы и справочник товаров",
+     "Здравствуйте, {client_name}! Синонимы покрывают опечатки, сленг и ассортиментные различия "
+     "(«телик» vs «телевизор»). Справочник товаров — это словарь брендов/категорий/свойств. "
+     "Оба инструмента дают +10-20% к релевантности. "
+     "Пришлю шаблон-табличку и пример наполнения. "
+     "Следующая тема — как запустить A/B-тест."),
+    (6,  "Шаг 6 — A/B-тесты: как запустить",
+     "Здравствуйте, {client_name}! A/B-тест в AnyQuery — это способ безопасно проверить гипотезу "
+     "(новое правило, другой вес релевантности и т. п.) на части трафика. "
+     "Минимум 2 недели, чтобы данные устаканились. "
+     "Подскажу, как сформулировать гипотезу и что смотреть на финиш. "
+     "Дальше — интеграция рекомендаций на карточке товара."),
+    (7,  "Шаг 7 — Интеграция с рекомендациями на карточке товара",
+     "Здравствуйте, {client_name}! Блок «Похожие/С этим покупают» на карточке обычно даёт +3-8% к GMV. "
+     "Нужно подключить наш JS-сниппет и разместить контейнер в шаблоне карточки. "
+     "Я пришлю инструкцию для вашего разработчика и пример верстки. "
+     "После деплоя — тестим на staging, потом раскатываем. "
+     "Дальше — типовые проблемы и диагностика."),
+    (8,  "Шаг 8 — Диагностика и типовые проблемы",
+     "Здравствуйте, {client_name}! Собрал топ-5 проблем, с которыми сталкиваются новые клиенты: "
+     "расходится остаток фида и сайта, некорректные синонимы, правила друг другу противоречат, "
+     "медленный отклик API, и пропавшие товары после переиндексации. "
+     "По каждой есть короткий гайд — пришлю. "
+     "Дальше — чек-лист максимизации."),
+    (9,  "Шаг 9 — Как получить максимум от платформы: чек-лист",
+     "Здравствуйте, {client_name}! Вот сводный чек-лист: регулярный анализ null/zero, "
+     "обновление синонимов, A/B-тесты раз в месяц, ревью merch-правил, "
+     "мониторинг скорости API, квартальный QBR со мной. "
+     "Всё это — рутина, которая держит поиск в форме. "
+     "Финальное сообщение — про переход к регулярному циклу."),
+    (10, "Шаг 10 — Финализация онбординга, переход к регулярному циклу",
+     "Здравствуйте, {client_name}! Онбординг закрыт — поздравляю. "
+     "Теперь у нас с вами регулярный ритм: синки раз в 2 недели, чекап раз в {checkup_days} дней, "
+     "квартальный QBR. Все задачи и артефакты — в личном кабинете. "
+     "Если что-то появится — пишите, я рядом. "
+     "Спасибо за доверие, работаем дальше!"),
+]

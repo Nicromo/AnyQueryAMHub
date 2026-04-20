@@ -146,6 +146,26 @@ async def api_create_meeting(
         except Exception as e:
             logger.warning(f"Push meeting to Airtable failed (non-fatal): {e}")
 
+    # Hook: если QBR — сразу создаём задачу «Подготовиться к QBR».
+    if meeting_type == "qbr" and client and meeting_date:
+        try:
+            from scheduler_utils import get_or_create_autotask
+            get_or_create_autotask(
+                db,
+                client_id=client.id,
+                rule_key=f"qbr_prep:{meeting.id}",
+                target_date=meeting_date.date(),
+                manager_email=client.manager_email,
+                title=f"Подготовиться к встрече по QBR с {client.name}",
+                task_type="qbr_prep",
+                due_date=meeting_date,
+                meta={"meeting_id": meeting.id},
+                priority="high",
+            )
+            db.commit()
+        except Exception as e:
+            logger.warning(f"qbr_prep autotask create failed: {e}")
+
     return {"ok": True, "meeting_id": meeting.id, "message": f"Встреча «{meeting.title}» создана"}
 
 
@@ -167,6 +187,23 @@ async def api_delete_meeting(
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if not meeting:
         raise HTTPException(status_code=404)
+
+    # Cancel связанные автотаски (meeting_prep/followup/qbr_prep для этой встречи).
+    try:
+        from sqlalchemy import or_
+        keys = [f"meeting_prep:{meeting.id}",
+                f"meeting_followup:{meeting.id}",
+                f"qbr_prep:{meeting.id}"]
+        stale = (db.query(Task)
+                   .filter(Task.client_id == meeting.client_id,
+                           Task.status != "done",
+                           Task.meta["rule_key"].astext.in_(keys))
+                   .all())
+        for t in stale:
+            t.status = "cancelled"
+    except Exception as e:
+        logger.warning(f"cancel autotasks on meeting delete failed: {e}")
+
     db.delete(meeting)
     db.commit()
     return {"ok": True}
