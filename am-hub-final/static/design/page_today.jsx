@@ -125,16 +125,32 @@ function PageToday() {
               </div>
             )}
             <div>
-              {TK.map((t, i) => (
+              {TK.map((t, i) => {
+                const isDone = t.status === "done" || !!t.done;
+                return (
                 <div key={i} style={{
                   display: "grid", gridTemplateColumns: "20px 1fr 90px 120px 24px",
                   gap: 12, padding: "12px 4px",
                   borderBottom: i === TK.length-1 ? "none" : "1px solid var(--line-soft)",
                   alignItems: "center",
                 }}>
-                  <input type="checkbox" style={{ accentColor: "var(--signal)" }}/>
+                  <TaskCheck checked={isDone}
+                    onChange={async (checked) => {
+                      if (!t.id) return;
+                      const newStatus = checked ? "done" : "plan";
+                      try {
+                        const resp = await fetch(`/api/tasks/${t.id}/status`, {
+                          method: "PATCH", credentials: "include",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ status: newStatus }),
+                        });
+                        if (!resp.ok) throw new Error("HTTP " + resp.status);
+                        appToast(newStatus === "done" ? "Задача закрыта" : "Задача открыта", "ok");
+                        location.reload();
+                      } catch (err) { appToast("Ошибка: " + err.message, "error"); }
+                    }}/>
                   <div>
-                    <div style={{ fontSize: 13, color: "var(--ink-8)" }}>{t.title}</div>
+                    <div style={{ fontSize: 13, color: isDone ? "var(--ink-5)" : "var(--ink-8)", textDecoration: isDone ? "line-through" : "none" }}>{t.title}</div>
                     <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", marginTop: 3 }}>{t.client}</div>
                   </div>
                   <Badge tone={t.priority === "critical" ? "critical" : t.priority === "high" ? "warn" : t.priority === "med" ? "info" : "neutral"} dot>
@@ -143,7 +159,8 @@ function PageToday() {
                   <span className="mono" style={{ fontSize: 11, color: (t.due||"").includes("просроч") ? "var(--critical)" : "var(--ink-6)" }}>{t.due}</span>
                   <I.dot3 size={14} stroke="var(--ink-6)"/>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         </div>

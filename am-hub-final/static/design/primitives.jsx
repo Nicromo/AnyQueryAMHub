@@ -371,4 +371,33 @@ function appPrompt(message, opts) {
   });
 }
 
-Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder, appConfirm, appToast, appPrompt });
+// ── TaskCheck (styled checkbox replacement) ───────────────
+const TaskCheck = ({ checked = false, onChange, size = 18, disabled = false }) => {
+  return React.createElement("button", {
+    type: "button", disabled,
+    onClick: (e) => { e.stopPropagation(); if (!disabled && onChange) onChange(!checked); },
+    "aria-checked": checked ? "true" : "false",
+    role: "checkbox",
+    style: {
+      width: size, height: size,
+      background: checked ? "var(--signal)" : "transparent",
+      border: `1.5px solid ${checked ? "var(--signal)" : "var(--ink-5)"}`,
+      borderRadius: 4,
+      cursor: disabled ? "not-allowed" : "pointer",
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      padding: 0, flexShrink: 0,
+      transition: "all var(--dur,.15s) var(--ease,ease)",
+    },
+  },
+    checked && React.createElement("svg", {
+      width: size - 6, height: size - 6, viewBox: "0 0 12 12", fill: "none", "aria-hidden": "true",
+    },
+      React.createElement("path", {
+        d: "M2.5 6.5 L5 9 L10 3",
+        stroke: "var(--ink-0)", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round",
+      }),
+    ),
+  );
+};
+
+Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder, appConfirm, appToast, appPrompt, TaskCheck });

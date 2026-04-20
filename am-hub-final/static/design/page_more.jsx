@@ -1063,6 +1063,32 @@ function NPSSurveysCard({ clients }) {
   const [modal, setModal] = React.useState(false);
   const [form, setForm] = React.useState({ client_id: "", score: "9", comment: "" });
   const [saving, setSaving] = React.useState(false);
+  const [sendModal, setSendModal] = React.useState(false);
+  const [sendClientId, setSendClientId] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+
+  const NPS_SURVEY_TEXT = "Оцените от 0 до 10 вероятность, что порекомендуете AnyQuery коллегам. Можно добавить комментарий.";
+
+  async function sendSurvey() {
+    if (!sendClientId) { appToast("Выберите клиента", "warn"); return; }
+    setSending(true);
+    try {
+      const r = await fetch("/api/nps/send-survey", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: Number(sendClientId) }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.detail || ("HTTP " + r.status));
+      }
+      const d = await r.json();
+      setSendModal(false);
+      setSendClientId("");
+      appToast(d.note ? `Опрос зафиксирован как отправленный (${d.note})` : "Опрос зафиксирован", "ok");
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    setSending(false);
+  }
 
   const reload = React.useCallback(async () => {
     try {
@@ -1108,6 +1134,7 @@ function NPSSurveysCard({ clients }) {
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       {avg != null && <Badge tone={avg >= 30 ? "ok" : avg >= 0 ? "warn" : "critical"}>avg {avg}</Badge>}
       <Btn size="s" kind="primary" icon={<I.plus size={12}/>} onClick={() => setModal(true)}>Опрос</Btn>
+      <Btn size="s" kind="ghost" onClick={() => setSendModal(true)}>📨 Отправить опрос клиенту</Btn>
     </div>
   );
 
@@ -1167,6 +1194,36 @@ function NPSSurveysCard({ clients }) {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <Btn kind="ghost" size="m" onClick={() => setModal(false)}>Отмена</Btn>
               <Btn kind="primary" size="m" onClick={submit}>{saving ? "…" : "Сохранить"}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+      {sendModal && (
+        <div onClick={(e) => e.target === e.currentTarget && setSendModal(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6, width: 460, padding: 20 }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: "var(--ink-9)", marginBottom: 14 }}>Отправить NPS-опрос клиенту</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Клиент</span>
+                <select value={sendClientId} onChange={(e) => setSendClientId(e.target.value)}
+                  style={{ padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--ink-9)", borderRadius: 4, fontSize: 13 }}>
+                  <option value="">— выберите —</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Текст опроса</span>
+                <textarea readOnly value={NPS_SURVEY_TEXT} rows={3}
+                  style={{ padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--ink-7)", borderRadius: 4, fontSize: 12.5, fontFamily: "inherit", resize: "vertical", cursor: "not-allowed" }}/>
+              </label>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>
+                Пока отправка — stub: запись в PartnerLog. Реальная доставка (TG/email) — в разработке.
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <Btn kind="ghost" size="m" onClick={() => setSendModal(false)}>Отмена</Btn>
+              <Btn kind="primary" size="m" onClick={sendSurvey}>{sending ? "…" : "Отправить"}</Btn>
             </div>
           </div>
         </div>
@@ -1717,7 +1774,7 @@ function PageInternal() {
                         location.reload();
                       } catch (err) { appToast("Ошибка: " + err.message, "error"); }
                     }}/>
-                  <span style={{ fontSize: 13, color: "var(--ink-8)", textDecoration: (r.status === "done" || r.done) ? "line-through" : "none" }}>{r.title || r.t}</span>
+                  <span style={{ fontSize: 13, color: (r.status === "done" || r.done) ? "var(--ink-5)" : "var(--ink-8)", textDecoration: (r.status === "done" || r.done) ? "line-through" : "none" }}>{r.title || r.t}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={owner} size={20}/><span style={{ fontSize: 12, color: "var(--ink-7)" }}>{owner}</span></div>
                   <span className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{r.due || "—"}</span>
                   <Badge tone={pr==="high"?"warn":pr==="med"?"info":"neutral"} dot>{pr}</Badge>
