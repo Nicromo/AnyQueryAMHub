@@ -93,6 +93,43 @@ function _pg(str) {
   return n;
 }
 
+// AI-разбор Top-50: шлёт метрики в /api/ai/analyze-top50 → получает текст.
+function Top50AIAnalysis({ data, metric }) {
+  const [text, setText] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  const run = React.useCallback(async () => {
+    if (!data || !metric) return;
+    setLoading(true); setErr(null);
+    try {
+      const r = await fetch("/api/ai/analyze-top50", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metric, months: data.months, clients: data.clients }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      setText(d.text || "");
+    } catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  }, [data, metric]);
+
+  React.useEffect(() => { run(); }, [run]);
+
+  return React.createElement(Card, {
+    title: "AI-разбор метрик",
+    action: React.createElement(Badge, { tone: "signal" }, loading ? "генерация…" : "auto"),
+  },
+    err && React.createElement("div", { style: { fontSize: 12.5, color: "var(--critical)", padding: "10px 0" } }, "Ошибка: " + err),
+    !err && !loading && !text && React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } }, "Нет данных для анализа."),
+    !err && text && React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", lineHeight: 1.6, whiteSpace: "pre-wrap", padding: "6px 0" } }, text),
+    React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+      React.createElement(Btn, { size: "s", kind: "ghost", onClick: run }, "Обновить"),
+    ),
+  );
+}
+
 function PageTop50() {
   // Живые данные из Google Sheets (лист «Актуальные метрики и список топ 50»).
   // Эндпоинт /api/top50/metrics возвращает {months, metrics, clients}.
@@ -149,6 +186,9 @@ function PageTop50() {
                 }}>{m}</button>
               ))}
             </div>
+
+            {/* AI-разбор раздела — шлём данные в /api/ai/analyze-top50 */}
+            <Top50AIAnalysis data={data} metric={activeMetric}/>
 
             <Card title={`${activeMetric} · по месяцам`}>
               <div style={{ overflowX: "auto" }}>
