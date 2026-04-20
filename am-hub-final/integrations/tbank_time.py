@@ -296,12 +296,24 @@ async def get_all_tickets(token: str = "", per_page: int = 100) -> List[Dict]:
 
 import re
 
-# Регексы для поиска client_id в тексте поста
+# Регексы для поиска client_id в тексте поста Time/Workflow.
+# Основной формат (Workflow-бот):
+#   Какой Site ID (Customer ID)?:
+#   5860
+# Также поддерживаем: #5860, ID: 5860, account_id=5860 и т.п.
 _CLIENT_ID_PATTERNS = [
-    re.compile(r"#(\d{2,10})\b"),
-    re.compile(r"(?:ID|Id|id|АЙДИ|Айди|айди)[\s:=№#-]*(\d{2,10})"),
-    re.compile(r"(?:account[_\-]?id|акк[а-я]*[\s_]?id)[\s:=#-]*(\d{2,10})", re.IGNORECASE),
-    re.compile(r"(?:client[_\-]?id|клиент[а-я]*[\s_]?id)[\s:=#-]*(\d{2,10})", re.IGNORECASE),
+    re.compile(
+        r"(?:Site\s*ID|Customer\s*ID|Client\s*ID|Account\s*ID|Сайт\s*ID|Сайт[\s_-]?айди)"
+        r"[^\d\n\r]{0,60}(\d{3,10})",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?<![\w])#(\d{3,10})\b"),
+    re.compile(r"\b(?:ID|АЙДИ|Айди|айди)\s*[:№#=\-]\s*(\d{3,10})", re.IGNORECASE),
+    re.compile(
+        r"(?:account|client|акк[а-я]*|клиент[а-я]*)[_\s-]?id"
+        r"[^\d\n\r]{0,20}(\d{3,10})",
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -316,9 +328,40 @@ def parse_client_id(text: str) -> Optional[str]:
     return None
 
 
+_FIELD_QUESTION_RE = re.compile(
+    r"(?:Опишите\s+кратко\s+суть\s+вопроса|Суть\s+вопроса|Тема|Вопрос)\s*\??\s*:\s*",
+    re.IGNORECASE,
+)
+
+_SKIP_LABELS = (
+    "к кому вопрос", "какой site id", "какой customer id",
+    "клиент из списка", "примеры кейсов", "обращение в саппорт",
+    "опишите", "от пользователя",
+)
+
+
 def extract_title(text: str) -> str:
-    lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
-    return (lines[0][:200] if lines else "Без темы")
+    """Заголовок тикета: первая содержательная строка после 'Опишите кратко суть вопроса:'.
+    Фолбек — первая непустая строка, не похожая на служебный лейбл Workflow."""
+    if not text:
+        return "Без темы"
+
+    m = _FIELD_QUESTION_RE.search(text)
+    if m:
+        tail = text[m.end():].strip()
+        if tail:
+            first = next((l.strip() for l in tail.split("\n") if l.strip()), "")
+            if first:
+                return first[:200]
+
+    for line in (l.strip() for l in text.split("\n")):
+        if not line:
+            continue
+        low = line.lower()
+        if any(low.startswith(lab) for lab in _SKIP_LABELS):
+            continue
+        return line[:200]
+    return "Без темы"
 
 
 async def get_users_map(token: str, user_ids: List[str]) -> Dict[str, Dict]:

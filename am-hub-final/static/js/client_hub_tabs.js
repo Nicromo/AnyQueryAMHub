@@ -249,11 +249,19 @@
   };
 
   window.generatePrep = async function (mid) {
-    $('#prep-result').innerHTML = '<div class="text-slate-500">Генерация...</div>';
+    const out = $('#prep-result');
+    out.innerHTML = '<div class="text-slate-500">Генерация brief…</div>';
     try {
-      // TODO: реальный эндпоинт для prep — пока через существующий
-      window.location.href = `/prep/${CID}`;
-    } catch (e) { $('#prep-result').innerHTML = '<div class="text-red-400">Ошибка</div>'; }
+      const d = await api('/api/ai/generate-prep', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({client_id: Number(CID), meeting_id: mid}),
+      });
+      const text = d.brief || d.text || d.prep_text || '';
+      out.innerHTML = text
+        ? `<div class="whitespace-pre-wrap text-sm bg-slate-800 rounded p-3 mt-2">${esc(text)}</div>
+           <a href="/prep/${CID}" class="text-xs text-indigo-400">Открыть полную страницу prep →</a>`
+        : '<div class="text-slate-500">AI не вернул текст</div>';
+    } catch (e) { out.innerHTML = '<div class="text-red-400">Ошибка генерации</div>'; }
   };
   window.generateFup = async function (mid) {
     try {

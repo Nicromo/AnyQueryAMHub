@@ -211,14 +211,16 @@ function switchTab(name) {
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
-// STUBS — будут дозаполнены вторым агентом
-async function loadNotes()    { $('#tab-notes').innerHTML    = '<div class="text-slate-500">Заметки (TODO)</div>'; }
-async function loadRoadmap()  { $('#tab-roadmap').innerHTML  = '<div class="text-slate-500">Роадмап (TODO)</div>'; }
-async function loadQBR()      { $('#tab-qbr').innerHTML      = '<div class="text-slate-500">QBR (TODO)</div>'; }
-async function loadMeetings() { $('#tab-meetings').innerHTML = '<div class="text-slate-500">Встречи (TODO)</div>'; }
-async function loadRules()    { $('#tab-rules').innerHTML    = '<div class="text-slate-500">Правила (TODO)</div>'; }
-async function loadFeeds()    { $('#tab-feeds').innerHTML    = '<div class="text-slate-500">Фиды (TODO)</div>'; }
-async function loadTickets()  { $('#tab-tickets').innerHTML  = '<div class="text-slate-500">Тикеты (TODO)</div>'; }
+// Реальные loaders определены в /static/js/client_hub_tabs.js и привязаны к window.
+// Здесь — спиннеры на случай, если внешний скрипт ещё не загрузился.
+const _spin = '<div class="text-slate-500 text-center py-8">Загрузка...</div>';
+async function loadNotes()    { $('#tab-notes').innerHTML    = _spin; }
+async function loadRoadmap()  { $('#tab-roadmap').innerHTML  = _spin; }
+async function loadQBR()      { $('#tab-qbr').innerHTML      = _spin; }
+async function loadMeetings() { $('#tab-meetings').innerHTML = _spin; }
+async function loadRules()    { $('#tab-rules').innerHTML    = _spin; }
+async function loadFeeds()    { $('#tab-feeds').innerHTML    = _spin; }
+async function loadTickets()  { $('#tab-tickets').innerHTML  = _spin; }
 
 // TIMELINE
 async function loadTimeline() {
@@ -250,29 +252,135 @@ async function unpinNote() {
   $('#pinned-note-wrap').classList.add('hidden');
 }
 
-// AI CHAT (заглушка)
+// AI CHAT — реальный эндпоинт /api/ai/chat
+const _aiHistory = [];
 function openAIChat() { $('#ai-modal').classList.remove('hidden'); $('#ai-input').focus(); }
 function closeAIChat() { $('#ai-modal').classList.add('hidden'); }
 async function sendAI() {
   const q = $('#ai-input').value.trim(); if (!q) return;
   const log = $('#ai-log');
-  log.innerHTML += `<div class="p-2 rounded-lg bg-slate-800 ml-auto max-w-[80%]">${esc(q)}</div>`;
+  log.innerHTML += `<div class="p-2 rounded-lg bg-slate-800 ml-auto max-w-[80%] whitespace-pre-wrap">${esc(q)}</div>`;
   $('#ai-input').value = '';
-  // TODO: POST /api/ai/chat {client_id, message}
-  log.innerHTML += `<div class="p-2 rounded-lg bg-indigo-900/40 max-w-[80%]">AI отвечает... (заглушка — подключить POST /api/ai/chat)</div>`;
+  const thinking = document.createElement('div');
+  thinking.className = 'p-2 rounded-lg bg-indigo-900/40 max-w-[80%] text-slate-300';
+  thinking.textContent = '⏳ AI думает…';
+  log.appendChild(thinking);
+  log.scrollTop = log.scrollHeight;
+  try {
+    const r = await fetch('/api/ai/chat', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: q, client_id: Number(CID), history: _aiHistory}),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    thinking.className = 'p-2 rounded-lg bg-indigo-900/40 max-w-[80%] whitespace-pre-wrap';
+    thinking.textContent = d.reply || '(пустой ответ)';
+    _aiHistory.push({role: 'user', content: q});
+    _aiHistory.push({role: 'assistant', content: d.reply || ''});
+  } catch (e) {
+    thinking.className = 'p-2 rounded-lg bg-red-900/40 text-red-300 max-w-[80%]';
+    thinking.textContent = 'Ошибка AI: ' + e.message;
+  }
   log.scrollTop = log.scrollHeight;
 }
+$('#ai-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendAI(); });
 
-// UTILS
-function openNewNote() { alert('TODO: модалка новой заметки'); }
-function newTask() { window.location.href = '/tasks?client_id=' + CID; }
-function openTab(name) { alert('TODO: вкладка контактов (' + name + ')'); }
+// Создание новой заметки — прокрутить к вкладке "Заметки" и сфокусировать поле
+function openNewNote() {
+  switchTab('notes');
+  setTimeout(() => {
+    const el = document.querySelector('#note-input');
+    if (el) { el.focus(); el.scrollIntoView({behavior: 'smooth', block: 'center'}); }
+  }, 150);
+}
 
-// INIT
-loadOverview();
-loadCharts();
-const initialTab = (location.hash || '#notes').slice(1);
-switchTab(['notes','roadmap','qbr','meetings','rules','feeds','tickets'].includes(initialTab) ? initialTab : 'notes');
+function newTask() { window.location.href = '/tasks?client_id=' + CID + '&new=1'; }
+
+// Модалка редактирования контактов (реальная, без заглушек)
+async function openTab(name) {
+  if (name !== 'contacts') return;
+  let list = [];
+  try { list = (await api(`/api/clients/${CID}/contacts`)).contacts || []; } catch (_) {}
+  const roleLabels = {decision_maker: 'ЛПР', tech: 'Технический', finance: 'Финансовый', other: 'Другое'};
+  const rows = list.map(c => `
+    <tr class="border-t border-slate-700">
+      <td class="p-2">${esc(c.name)}${c.is_primary ? ' <span class="text-xs text-amber-400">★</span>' : ''}</td>
+      <td class="p-2 text-xs text-slate-400">${esc(roleLabels[c.role] || c.role || '—')}</td>
+      <td class="p-2 text-xs">${esc(c.email || '—')}</td>
+      <td class="p-2 text-xs">${esc(c.phone || '—')}</td>
+      <td class="p-2"><button onclick="deleteContact(${c.id})" class="text-xs text-red-400">Удалить</button></td>
+    </tr>`).join('');
+  const html = `
+    <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onclick="if(event.target===this)this.remove()">
+      <div class="bg-slate-900 border border-slate-700 rounded-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto">
+        <div class="sticky top-0 bg-slate-900 border-b border-slate-700 p-3 flex items-center justify-between">
+          <div class="font-bold">Контакты клиента</div>
+          <button onclick="this.closest('.fixed').remove()" class="text-slate-400">✕</button>
+        </div>
+        <div class="p-4">
+          <table class="w-full text-sm mb-4"><thead class="text-xs text-slate-400"><tr>
+            <th class="text-left p-2">Имя</th><th class="text-left p-2">Роль</th>
+            <th class="text-left p-2">Email</th><th class="text-left p-2">Телефон</th><th></th>
+          </tr></thead><tbody>${rows || '<tr><td colspan="5" class="p-4 text-center text-slate-500">Контактов нет</td></tr>'}</tbody></table>
+          <div class="border-t border-slate-700 pt-3">
+            <div class="text-xs text-slate-400 mb-2">+ Добавить контакт</div>
+            <div class="grid grid-cols-2 gap-2">
+              <input id="nc-name" placeholder="Имя" class="bg-slate-800 rounded px-2 py-1.5 text-sm">
+              <select id="nc-role" class="bg-slate-800 rounded px-2 py-1.5 text-sm">
+                <option value="decision_maker">ЛПР</option><option value="tech">Технический</option>
+                <option value="finance">Финансовый</option><option value="other">Другое</option>
+              </select>
+              <input id="nc-email" placeholder="Email" class="bg-slate-800 rounded px-2 py-1.5 text-sm">
+              <input id="nc-phone" placeholder="Телефон" class="bg-slate-800 rounded px-2 py-1.5 text-sm">
+              <label class="flex items-center gap-2 text-xs text-slate-400 col-span-2">
+                <input type="checkbox" id="nc-primary"> Основной контакт
+              </label>
+            </div>
+            <button onclick="saveContact()" class="mt-2 px-3 py-1.5 rounded-lg bg-indigo-600 text-sm">Добавить</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  document.body.appendChild(wrap.firstElementChild);
+}
+
+window.deleteContact = async function (cid) {
+  if (!confirm('Удалить контакт?')) return;
+  await api(`/api/clients/${CID}/contacts/${cid}`, {method: 'DELETE'});
+  document.querySelector('.fixed.inset-0')?.remove();
+  openTab('contacts');
+  loadOverview();
+};
+
+window.saveContact = async function () {
+  const body = {
+    name: $('#nc-name').value.trim(),
+    role: $('#nc-role').value,
+    email: $('#nc-email').value.trim(),
+    phone: $('#nc-phone').value.trim(),
+    is_primary: $('#nc-primary').checked,
+  };
+  if (!body.name) return alert('Укажите имя');
+  await api(`/api/clients/${CID}/contacts`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  document.querySelector('.fixed.inset-0')?.remove();
+  openTab('contacts');
+  loadOverview();
+};
+
+// INIT — сначала загружаем реальные loaders из client_hub_tabs.js, потом переключаем вкладку.
+function initClientHub() {
+  loadOverview();
+  loadCharts();
+  const initialTab = (location.hash || '#notes').slice(1);
+  const valid = ['notes','roadmap','qbr','meetings','rules','feeds','tickets'];
+  switchTab(valid.includes(initialTab) ? initialTab : 'notes');
+}
 </script>
 <script src="/static/js/client_hub_tabs.js"></script>
+<script>initClientHub();</script>
 {% endblock %}
