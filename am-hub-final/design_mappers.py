@@ -338,6 +338,7 @@ def client_to_design(
         "days_since_added": days_since_added,
         "is_new": (days_since_added is not None and days_since_added <= 14),
         "stage": stage_label(client, now),
+        "payment_status": getattr(client, "payment_status", None) or "unknown",
     }
 
 
