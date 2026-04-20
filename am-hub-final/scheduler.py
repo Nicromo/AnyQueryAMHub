@@ -1179,6 +1179,19 @@ def evaluate_auto_rules():
             logger.info("evaluate_auto_rules: новых задач нет")
 
 
+async def job_backup_all_managers():
+    logger.info("🗄  Daily backup job starting")
+    from database import SessionLocal
+    from backups import backup_all_managers, cleanup_old_backups
+    db = SessionLocal()
+    try:
+        paths = backup_all_managers(db)
+        removed = cleanup_old_backups(keep_days=30)
+        logger.info("✅ Backup done: %d files, purged %d old", len(paths), removed)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     sched = _get_scheduler()
 
@@ -1225,6 +1238,10 @@ def start_scheduler():
     # Quarterly QBR auto-collect from Merchrules
     sched.add_job(job_qbr_auto_collect, "cron", day=1, hour=6, minute=0,
                   id="qbr_auto_collect", name="Quarterly QBR auto-collect", replace_existing=True)
+
+    # Daily per-manager backups at 03:00 MSK
+    sched.add_job(job_backup_all_managers, "cron", hour=3, minute=0,
+                  id="daily_backup", name="Daily per-manager backups", replace_existing=True)
 
     sched.start()
     logger.info(f"✅ Scheduler started: {[j.id for j in sched.get_jobs()]}")

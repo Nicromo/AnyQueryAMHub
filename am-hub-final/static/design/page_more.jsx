@@ -2473,6 +2473,8 @@ function PageIntegrations() {
     return () => { cancelled = true; };
   }, []);
 
+  const isAdmin = (typeof window !== "undefined" && window.__CURRENT_USER && window.__CURRENT_USER.role === "admin");
+
   const TABS = [
     { k: "overview",   l: "Обзор" },
     { k: "merchrules", l: "Merchrules" },
@@ -2483,6 +2485,7 @@ function PageIntegrations() {
     { k: "diginetica", l: "Diginetica" },
     { k: "extension",  l: "Расширение" },
     { k: "help",       l: "Помощь" },
+    ...(isAdmin ? [{ k: "backups", l: "Бэкапы" }] : []),
   ];
 
   const dotSpan = (on) => React.createElement("span", {
@@ -2633,6 +2636,97 @@ function PageIntegrations() {
     React.createElement("p", null, "• Merchrules 401 — обнови логин/пароль в Settings."),
   );
 
+  const BackupsTab = () => {
+    const [items, setItems] = React.useState(null);
+    const [busy, setBusy] = React.useState(false);
+    const reload = React.useCallback(async () => {
+      try {
+        const r = await fetch("/api/admin/backups/list", { credentials: "include" });
+        if (!r.ok) { setItems([]); return; }
+        const d = await r.json();
+        setItems(Array.isArray(d.items) ? d.items : []);
+      } catch (_) { setItems([]); }
+    }, []);
+    React.useEffect(() => { reload(); }, [reload]);
+    const runAll = async () => {
+      setBusy(true);
+      try {
+        const r = await fetch("/api/admin/backups/run", { method: "POST", credentials: "include" });
+        const d = await r.json().catch(() => ({}));
+        if (typeof appToast === "function") {
+          appToast(r.ok ? ("✅ Готово: " + (d.count != null ? d.count : (d.files || []).length) + " файлов") : ("Ошибка: " + (d.detail || r.status)), r.ok ? "ok" : "error");
+        }
+        await reload();
+      } catch (e) {
+        if (typeof appToast === "function") appToast("Ошибка: " + e.message, "error");
+      } finally { setBusy(false); }
+    };
+    const del = async (filename) => {
+      if (!confirm("Удалить " + filename + "?")) return;
+      try {
+        const r = await fetch("/api/admin/backups/" + encodeURIComponent(filename), { method: "DELETE", credentials: "include" });
+        if (typeof appToast === "function") appToast(r.ok ? "Удалено" : "Ошибка удаления", r.ok ? "ok" : "error");
+        await reload();
+      } catch (e) {
+        if (typeof appToast === "function") appToast("Ошибка: " + e.message, "error");
+      }
+    };
+    const fmtSize = (n) => {
+      if (n == null) return "—";
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      return (n / 1024 / 1024).toFixed(2) + " MB";
+    };
+    return React.createElement("div", null,
+      React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10, lineHeight: 1.5 } },
+        "Ежедневно в 03:00 MSK. Хранение 30 дней. Каждый файл — gzip-JSON снимок данных одного менеджера (клиенты, задачи, встречи, чекапы, заметки, QBR, тикеты и др.)."),
+      React.createElement("div", { style: { marginBottom: 14 } },
+        React.createElement(Btn, { kind: "primary", size: "m", disabled: busy, onClick: runAll },
+          busy ? "Бэкап…" : "▶ Запустить для всех"),
+      ),
+      items == null
+        ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12 } }, "Загрузка…")
+        : items.length === 0
+          ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12 } }, "Файлов пока нет.")
+          : React.createElement("div", null,
+              items.map((it) =>
+                React.createElement("div", {
+                  key: it.filename,
+                  style: {
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 12px", marginBottom: 6,
+                    background: "var(--ink-2)", border: "1px solid var(--line)",
+                    borderRadius: 6,
+                  },
+                },
+                  React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                    React.createElement("div", { className: "mono", style: { fontSize: 12, color: "var(--ink-9)", wordBreak: "break-all" } }, it.filename),
+                    React.createElement("div", { style: { fontSize: 11, color: "var(--ink-6)", marginTop: 2 } },
+                      (it.mtime || "").replace("T", " ").slice(0, 16), " · ", fmtSize(it.size)),
+                  ),
+                  React.createElement("a", {
+                    href: "/api/admin/backups/download/" + encodeURIComponent(it.filename),
+                    style: {
+                      fontSize: 12, padding: "5px 10px", borderRadius: 4,
+                      border: "1px solid var(--line)", color: "var(--ink-8)",
+                      textDecoration: "none",
+                    },
+                  }, "Скачать"),
+                  React.createElement("button", {
+                    onClick: () => del(it.filename),
+                    style: {
+                      fontSize: 12, padding: "5px 10px", borderRadius: 4,
+                      border: "1px solid var(--line)", background: "transparent",
+                      color: "var(--critical)", cursor: "pointer",
+                    },
+                  }, "Удалить"),
+                )
+              )
+            ),
+    );
+  };
+  const renderBackups = () => React.createElement(BackupsTab, null);
+
   const content = ({
     overview: renderOverview,
     merchrules: renderMr,
@@ -2643,6 +2737,7 @@ function PageIntegrations() {
     diginetica: renderDig,
     extension: renderExt,
     help: renderHelp,
+    backups: renderBackups,
   })[tab]();
 
   return React.createElement("div", null,

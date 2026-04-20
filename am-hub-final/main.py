@@ -489,6 +489,8 @@ from routers import api_tokens as api_tokens_router
 app.include_router(api_tokens_router.router, tags=["api-tokens"])
 from routers import partner_logs as partner_logs_router
 app.include_router(partner_logs_router.router, tags=["partner-logs"])
+from routers import backups as backups_router
+app.include_router(backups_router.router, tags=["backups"])
 from routers import extension_api
 app.include_router(extension_api.router, tags=["extension"])
 app.include_router(account_dashboard.router, tags=["account-dashboard"])
