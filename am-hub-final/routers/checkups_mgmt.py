@@ -647,3 +647,104 @@ async def v2_analytics_queries(
         "queries": [],
         "message": "Источник аналитики не настроен — добавляйте запросы вручную или CSV-импортом.",
     }
+
+
+@router.post("/api/checkup/{checkup_id}/load-queries-from-merchrules")
+async def v2_load_queries_from_merchrules(
+    checkup_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Загрузить запросы из Merchrules analytics в чекап.
+
+    Body: {"kind": "top|random|null|zero", "limit": 30,
+           "date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}.
+    """
+    user = _require_user_v2(auth_token, db, request)
+
+    from models import CheckupV2, CheckupQuery
+    from integrations.merchrules_stats import fetch_queries, KIND_TO_ENDPOINT
+    import merchrules_sync
+    import httpx
+
+    checkup = db.query(CheckupV2).filter(CheckupV2.id == checkup_id).first()
+    if not checkup:
+        raise HTTPException(status_code=404, detail="Checkup not found")
+
+    client = db.query(Client).filter(Client.id == checkup.client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    site_id = (client.merchrules_account_id or "").strip()
+    if not site_id:
+        return {
+            "ok": False,
+            "error": "У клиента не задан merchrules_account_id (site_id) — задайте его в карточке клиента.",
+        }
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    kind = (body.get("kind") or "top").strip()
+    if kind not in KIND_TO_ENDPOINT:
+        raise HTTPException(status_code=400, detail=f"unknown kind: {kind}")
+    try:
+        limit = int(body.get("limit") or 30)
+    except (TypeError, ValueError):
+        limit = 30
+    date_from = body.get("date_from") or None
+    date_to = body.get("date_to") or None
+
+    settings = (user.settings or {}) if user else {}
+    mr = settings.get("merchrules", {}) or {}
+    login = mr.get("login") or mr.get("username") or _env("MERCHRULES_LOGIN")
+    password = mr.get("password") or _env("MERCHRULES_PASSWORD")
+    if not login or not password:
+        return {
+            "ok": False,
+            "error": "Нет кредов Merchrules — задайте логин/пароль в Настройках → Интеграции.",
+        }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await merchrules_sync.get_auth_token(hx, login, password)
+        if not token:
+            return {"ok": False, "error": "Не удалось авторизоваться в Merchrules."}
+
+        rows = await fetch_queries(
+            token=token,
+            site_id=site_id,
+            kind=kind,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+    except httpx.HTTPError as e:
+        logger.warning("Merchrules analytics HTTP error: %s", e)
+        return {"ok": False, "error": f"Merchrules API error: {e}"}
+    except Exception as e:
+        logger.exception("Merchrules analytics fetch error")
+        return {"ok": False, "error": str(e)[:200]}
+
+    added = 0
+    for row in rows:
+        q_text = (row.get("query") or "").strip()
+        if not q_text:
+            continue
+        db.add(CheckupQuery(
+            checkup_id=checkup_id,
+            group=kind,
+            query=q_text,
+            shows_count=int(row.get("count") or 0),
+        ))
+        added += 1
+
+    if added and checkup.status == "draft":
+        checkup.status = "in_progress"
+    db.commit()
+
+    return {"ok": True, "count": added, "kind": kind, "site_id": site_id}
