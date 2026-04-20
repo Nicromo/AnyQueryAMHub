@@ -2299,6 +2299,7 @@ Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PageA
 
 function PageIntegrations() {
   const [status, setStatus] = React.useState(null);
+  const [syncStatus, setSyncStatus] = React.useState(null);
   const [tab, setTab] = React.useState("overview");
 
   React.useEffect(() => {
@@ -2310,6 +2311,13 @@ function PageIntegrations() {
         const d = await r.json();
         if (!cancelled) setStatus(d || {});
       } catch (_) { if (!cancelled) setStatus({}); }
+      try {
+        const r2 = await fetch("/api/sync/status", { credentials: "include" });
+        if (r2.ok) {
+          const d2 = await r2.json();
+          if (!cancelled) setSyncStatus(d2 || {});
+        }
+      } catch (_) {}
     })();
     return () => { cancelled = true; };
   }, []);
@@ -2348,7 +2356,32 @@ function PageIntegrations() {
     );
   }
 
+  // Блок ошибок синков — показываем если хоть один sync упал с error.
+  const renderSyncErrors = () => {
+    if (!syncStatus) return null;
+    const errors = Object.entries(syncStatus).filter(([k, v]) => v && v.status === "error");
+    if (!errors.length) return null;
+    return React.createElement("div", {
+      style: {
+        padding: 14, marginBottom: 12,
+        background: "rgba(240,70,58,.08)", border: "1px solid var(--critical-dim)",
+        borderLeft: "3px solid var(--critical)", borderRadius: 4,
+      }
+    },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "var(--critical)", marginBottom: 8 } },
+        "⚠ Ошибки последних синхронизаций (" + errors.length + ")"),
+      errors.map(([k, v]) =>
+        React.createElement("div", { key: k, style: { fontSize: 12, color: "var(--ink-8)", marginBottom: 6, fontFamily: "var(--f-mono)" } },
+          React.createElement("span", { style: { color: "var(--critical)", fontWeight: 600 } }, k + ":"),
+          " ", (v.message || v.error || "—"),
+          v.ago && React.createElement("span", { style: { color: "var(--ink-5)", marginLeft: 8 } }, "· " + v.ago),
+        )
+      )
+    );
+  };
+
   const renderOverview = () => React.createElement("div", null,
+    renderSyncErrors(),
     React.createElement(Row, { label: "Merchrules", ok: status && status.merchrules },
       React.createElement(Btn, { kind: "ghost", size: "s", onClick: () => setTab("merchrules") }, "Настроить"),
     ),

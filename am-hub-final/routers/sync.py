@@ -36,6 +36,23 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
+def _log_sync(db, integration: str, status: str, message: str = None,
+               records: int = 0, data: dict = None):
+    """Записать строку в sync_logs — неблокирующе, ошибка логгера не роняет синк."""
+    try:
+        now = datetime.utcnow()
+        db.add(SyncLog(
+            integration=integration, resource_type="clients", action="sync",
+            status=status, message=(message or "")[:2000],
+            records_processed=records,
+            started_at=now, completed_at=now,
+            sync_data=data or {},
+        ))
+        db.commit()
+    except Exception as _e:
+        logger.warning(f"sync_log write failed: {_e}")
+
+
 @router.post("/api/sync/extension")
 async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
     """
@@ -256,6 +273,19 @@ async def api_sync_airtable(
             result["payment_error"] = pay_result.get("error")
     except Exception as _pe:
         logger.warning(f"payment sync failed: {_pe}")
+
+    # Лог успеха/ошибки в sync_logs — видно в UI/API /api/sync/status
+    try:
+        has_error = bool(result.get("error"))
+        _log_sync(
+            db, "airtable",
+            "error" if has_error else "success",
+            message=result.get("error") or result.get("message"),
+            records=result.get("synced") or 0,
+            data={k: v for k, v in result.items() if k in ("created", "updated", "skipped", "payment_updated", "error", "total")},
+        )
+    except Exception:
+        pass
     return result
 
 
@@ -619,6 +649,10 @@ async def api_sync_merchrules(
                 synced_clients += 1
 
         db.commit()
+        _log_sync(db, "merchrules", "success",
+                  message=f"{synced_clients} клиентов, {synced_tasks} задач",
+                  records=synced_clients,
+                  data={"tasks": synced_tasks, "base_url": base_url})
         return {
             "ok": True,
             "clients_synced": synced_clients,
@@ -629,6 +663,7 @@ async def api_sync_merchrules(
     except Exception as e:
         db.rollback()
         logger.error(f"Merchrules sync error: {e}")
+        _log_sync(db, "merchrules", "error", message=str(e))
         return {"error": str(e)}
     finally:
         try: await hx.aclose()
