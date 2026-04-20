@@ -83,7 +83,8 @@ async def job_sync_merchrules():
             settings = u.settings or {}
             mr = settings.get("merchrules", {})
             login = mr.get("login", "")
-            password = mr.get("password", "")
+            from crypto import dec as _dec
+            password = _dec(mr.get("password", "")) or ""
             if login and password and login != env_login:
                 creds_list.append({"login": login, "password": password,
                                     "manager_email": u.email, "source": f"user:{u.email}"})

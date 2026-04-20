@@ -173,7 +173,8 @@ async def api_push_roadmap(task_id: int, db: Session = Depends(get_db), auth_tok
     settings = (user.settings or {}) if user else {}
     mr = settings.get("merchrules", {})
     login = mr.get("login") or _env("MERCHRULES_LOGIN")
-    password = mr.get("password") or _env("MERCHRULES_PASSWORD")
+    from crypto import dec as _dec
+    password = _dec(mr.get("password", "")) or _env("MERCHRULES_PASSWORD")
     base_url = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
 
     if not login or not password:
@@ -259,11 +260,12 @@ async def api_tasks_list(
     request: Request,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
+    am_scope: Optional[str] = Cookie(None),
     client_id: Optional[int] = None,
     source: Optional[str] = None,
     task_type: Optional[str] = None,
 ):
-    """Список задач с фильтрами. Используется для per-client роадмапа."""
+    """Список задач с фильтрами + scope (mine/group/all). Используется для per-client роадмапа."""
     if not auth_token:
         raise HTTPException(status_code=401)
     from auth import decode_access_token
@@ -274,7 +276,15 @@ async def api_tasks_list(
     if not user:
         raise HTTPException(status_code=401)
 
+    from scope import resolve_scope, get_manager_emails_for_scope
+    active = resolve_scope(user, am_scope)
+    emails = get_manager_emails_for_scope(db, user, active)
+
     q = db.query(Task)
+    if emails is not None and client_id is None:
+        q = q.join(Client, Task.client_id == Client.id, isouter=True).filter(
+            Client.manager_email.in_(emails)
+        )
     if client_id is not None:
         q = q.filter(Task.client_id == client_id)
     if source:
@@ -287,19 +297,31 @@ async def api_tasks_list(
         "priority": t.priority, "due_date": t.due_date.isoformat() if t.due_date else None,
         "client_id": t.client_id, "source": t.source, "task_type": t.task_type,
         "description": t.description,
+        "snoozed_count": getattr(t, "snoozed_count", 0) or 0,
+        "snoozed_until": t.snoozed_until.isoformat() if getattr(t, "snoozed_until", None) else None,
     } for t in tasks]}
 
 
 @router.get("/api/tasks/all")
-async def api_tasks_all(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
+async def api_tasks_all(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+    am_scope: Optional[str] = Cookie(None),
+):
     if not auth_token: raise HTTPException(status_code=401)
     from auth import decode_access_token
     payload = decode_access_token(auth_token)
     if not payload: raise HTTPException(status_code=401)
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user: raise HTTPException(status_code=401)
+
+    from scope import resolve_scope, get_manager_emails_for_scope
+    active = resolve_scope(user, am_scope)
+    emails = get_manager_emails_for_scope(db, user, active)
+
     q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
-    if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    if emails is not None:
+        q = q.filter(Client.manager_email.in_(emails))
     tasks = q.order_by(Task.due_date.asc().nullslast(), Task.created_at.desc()).all()
     return {"tasks": [{"id":t.id,"title":t.title,"status":t.status,"priority":t.priority,
                         "due_date":t.due_date.isoformat() if t.due_date else None,
@@ -340,7 +362,8 @@ async def api_update_task_status(task_id: int, request: Request, db: Session = D
             settings = (user.settings or {})
             mr = settings.get("merchrules", {})
             login = mr.get("login") or _env("MERCHRULES_LOGIN")
-            password = mr.get("password") or _env("MERCHRULES_PASSWORD")
+            from crypto import dec as _dec
+            password = _dec(mr.get("password", "")) or _env("MERCHRULES_PASSWORD")
             base_url = _env("MERCHRULES_API_URL", "https://merchrules.any-platform.ru")
             if login and password:
                 import httpx as _httpx

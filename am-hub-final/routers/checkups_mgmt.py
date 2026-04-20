@@ -702,7 +702,8 @@ async def v2_load_queries_from_merchrules(
     settings = (user.settings or {}) if user else {}
     mr = settings.get("merchrules", {}) or {}
     login = mr.get("login") or mr.get("username") or _env("MERCHRULES_LOGIN")
-    password = mr.get("password") or _env("MERCHRULES_PASSWORD")
+    from crypto import dec as _dec
+    password = _dec(mr.get("password", "")) or _env("MERCHRULES_PASSWORD")
     if not login or not password:
         return {
             "ok": False,

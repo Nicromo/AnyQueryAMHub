@@ -124,3 +124,77 @@ html, body {
     --signal-glow:  rgba(40, 160, 80, 0.15);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Mobile responsive — sidebar→off-canvas, grid→stack, topbar wrap
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* burger button visible <768px */
+.amhub-burger { display: none; }
+
+@media (max-width: 768px) {
+  .amhub-burger {
+    display: inline-flex;
+    width: 34px; height: 34px;
+    background: transparent; border: 1px solid var(--line);
+    border-radius: 4px; color: var(--ink-7); cursor: pointer;
+    align-items: center; justify-content: center;
+    padding: 0; margin-right: 4px;
+  }
+
+  .amhub-sidebar {
+    position: fixed !important;
+    top: 0; left: 0; bottom: 0;
+    width: 82vw !important; max-width: 300px;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 220ms var(--ease);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.25);
+  }
+  body.sidebar-open .amhub-sidebar { transform: translateX(0); }
+
+  body.sidebar-open::after {
+    content: ""; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 190;
+  }
+
+  /* KPI grid → 2-column */
+  div[style*="grid-template-columns: repeat(6"],
+  div[style*="grid-template-columns:repeat(6"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  div[style*="grid-template-columns: repeat(4"],
+  div[style*="grid-template-columns:repeat(4"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* 2fr/1fr page layout → stack */
+  div[style*="grid-template-columns: 2fr 1fr"],
+  div[style*="grid-template-columns:2fr 1fr"],
+  div[style*="grid-template-columns: 1fr 1fr"],
+  div[style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Topbar — wrap, tighter paddings */
+  header[style*="padding: 18px 28px"] {
+    padding: 12px 14px 10px !important;
+  }
+  header h1 { font-size: 18px !important; }
+
+  /* Page content — reduce side paddings */
+  div[style*="padding: 22px 28px"] { padding: 16px 14px !important; }
+  div[style*="padding: 18px 28px"] { padding: 14px 14px !important; }
+
+  /* Tables / data rows — smaller font */
+  .mono { font-size: 10px; }
+}
+
+@media (max-width: 480px) {
+  /* Any 3-col grids collapse to 1 */
+  div[style*="grid-template-columns: repeat(3"],
+  div[style*="grid-template-columns:repeat(3"] {
+    grid-template-columns: 1fr !important;
+  }
+  /* Button sizes shrink */
+  button { font-size: 12px !important; }
+}
