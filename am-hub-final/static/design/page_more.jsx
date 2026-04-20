@@ -570,8 +570,8 @@ function PageMeetings() {
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [meetModal, setMeetModal] = React.useState(null); // null or {type, label, dur}
 
-  // Маппинг из window.MEETINGS (server-shape: {when, day, client, type, seg, mood})
-  // в UI-shape: {d, cl, kind, seg, who, ch, mood}.
+  // Маппинг из window.MEETINGS (server-shape: {when, day, client, type, seg, mood, is_past})
+  // в UI-shape: {d, cl, kind, seg, who, ch, mood, is_past}.
   const meets = MT.map(m => ({
     d: `${m.day || "—"} · ${m.when || ""}`.trim(),
     cl: m.client || "—",
@@ -580,16 +580,21 @@ function PageMeetings() {
     who: "—",   // attendees не пробрасываются с сервера (JSONB поле)
     ch: "",     // channel не в шаблоне сервера
     mood: m.mood || "ok",
+    is_past: !!m.is_past,
   }));
 
-  // Агрегаты справа
-  const total = meets.length;
-  const withRisk = meets.filter(m => m.mood === "risk").length;
-  const withOk = meets.filter(m => m.mood === "ok").length;
+  const upcoming = meets.filter(m => !m.is_past);
+  // past уже приходит с сервера отсортированным desc; сохраняем порядок
+  const past = meets.filter(m => m.is_past);
+
+  // Агрегаты справа (по upcoming)
+  const total = upcoming.length;
+  const withRisk = upcoming.filter(m => m.mood === "risk").length;
+  const withOk = upcoming.filter(m => m.mood === "ok").length;
   return (
     <div>
       <TopBar breadcrumbs={["am hub","встречи"]} title="Встречи"
-        subtitle={total > 0 ? `${total} предстоящих · ${withRisk} с риском · ${withOk} ок` : "Нет предстоящих встреч"}
+        subtitle={total > 0 ? `${total} предстоящих · ${past.length} прошедших · ${withRisk} с риском · ${withOk} ок` : (past.length > 0 ? `0 предстоящих · ${past.length} прошедших` : "Нет встреч")}
         actions={<><Btn kind="ghost" size="m">Все</Btn><Btn kind="dim" size="m">Мои</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setMeetModal({ type: "sync", label: "Встреча", dur: 30 })}>Запланировать</Btn></>}/>
       {meetModal && (
         <FormModal
@@ -616,31 +621,59 @@ function PageMeetings() {
         />
       )}
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 320px", gap: 18 }}>
-        <Card title="Расписание · предстоящие">
-          {meets.length === 0 && (
-            <div style={{ padding: "28px 10px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
-              Нет предстоящих встреч в вашем календаре.
-            </div>
-          )}
-          {meets.map((m, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "150px 1fr 140px 90px 40px", gap: 14, padding: "14px 6px", borderBottom: i===meets.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 12.5, color: "var(--ink-9)", fontWeight: 500 }}>{m.d.split(" · ")[0]}</div>
-                <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{m.d.split(" · ")[1]}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <Card title="Предстоящие">
+            {upcoming.length === 0 && (
+              <div style={{ padding: "28px 10px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Нет предстоящих встреч в вашем календаре.
               </div>
-              <div>
-                <div style={{ fontSize: 13.5, color: "var(--ink-9)", fontWeight: 500 }}>{m.cl}</div>
-                <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{m.kind} · {m.ch}</div>
+            )}
+            {upcoming.map((m, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "150px 1fr 140px 90px 40px", gap: 14, padding: "14px 6px", borderBottom: i===upcoming.length-1?"none":"1px solid var(--line-soft)", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 12.5, color: "var(--ink-9)", fontWeight: 500 }}>{m.d.split(" · ")[0]}</div>
+                  <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)" }}>{m.d.split(" · ")[1]}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 13.5, color: "var(--ink-9)", fontWeight: 500 }}>{m.cl}</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{m.kind} · {m.ch}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Avatar name={m.who} size={22}/>
+                  <span style={{ fontSize: 12, color: "var(--ink-7)" }}>{m.who}</span>
+                </div>
+                <Seg value={m.seg}/>
+                <I.arrow_r size={14} stroke="var(--ink-5)"/>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Avatar name={m.who} size={22}/>
-                <span style={{ fontSize: 12, color: "var(--ink-7)" }}>{m.who}</span>
+            ))}
+          </Card>
+
+          <Card title="Прошедшие · 60 дней">
+            {past.length === 0 && (
+              <div style={{ padding: "28px 10px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                За последние 60 дней встреч не было.
               </div>
-              <Seg value={m.seg}/>
-              <I.arrow_r size={14} stroke="var(--ink-5)"/>
-            </div>
-          ))}
-        </Card>
+            )}
+            {past.map((m, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "150px 1fr 140px 90px 40px", gap: 14, padding: "14px 6px", borderBottom: i===past.length-1?"none":"1px solid var(--line-soft)", alignItems: "center", opacity: 0.78 }}>
+                <div>
+                  <div style={{ fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500 }}>{m.d.split(" · ")[0]}</div>
+                  <div className="mono" style={{ fontSize: 11, color: "var(--ink-5)" }}>{m.d.split(" · ")[1]}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 13.5, color: "var(--ink-8)", fontWeight: 500 }}>{m.cl}</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{m.kind} · {m.ch}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Avatar name={m.who} size={22}/>
+                  <span style={{ fontSize: 12, color: "var(--ink-6)" }}>{m.who}</span>
+                </div>
+                <Seg value={m.seg}/>
+                <I.arrow_r size={14} stroke="var(--ink-5)"/>
+              </div>
+            ))}
+          </Card>
+        </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <Card title="Статистика · предстоящие" dense>

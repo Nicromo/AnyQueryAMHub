@@ -1256,7 +1256,7 @@ function CheckupWizard({ checkup, clientId, onClose }) {
     // Actions
     React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
       React.createElement(Btn, {size: "s", kind: "ghost", onClick: loadFromAnalytics}, "⬇ Загрузить из аналитики"),
-      React.createElement(Btn, {size: "s", kind: "ghost", onClick: loadFromMerchrules}, "⬇ Из Merchrules"),
+      React.createElement(Btn, {size: "s", kind: "ghost", onClick: loadFromMerchrules, title: "за последние 30 дней"}, "⬇ Из Merchrules (30 дней)"),
       React.createElement("label", {
         style: { padding: "6px 11px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-7)", cursor: "pointer" },
       },

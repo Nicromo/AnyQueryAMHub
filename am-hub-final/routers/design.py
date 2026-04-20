@@ -772,8 +772,12 @@ def _build_context(db, user, request, now, *, page_id, component, breadcrumbs, t
 
     # ── Meetings ──────────────────────────────────────────────
     if "meetings" in needed:
-        meetings_q = meetings_base.filter(Meeting.date >= now) \
+        upcoming_q = meetings_base.filter(Meeting.date >= now) \
                                   .order_by(Meeting.date.asc()).limit(100).all()
+        past_cutoff = now - timedelta(days=60)
+        past_q = meetings_base.filter(Meeting.date < now, Meeting.date >= past_cutoff) \
+                              .order_by(Meeting.date.desc()).limit(100).all()
+        meetings_q = list(upcoming_q) + list(past_q)
     else:
         meetings_q = []
 
