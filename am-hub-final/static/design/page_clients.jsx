@@ -1734,3 +1734,172 @@ function ClientOnboardingCard({ clientId }) {
   );
 }
 window.ClientOnboardingCard = ClientOnboardingCard;
+
+
+// ── PageManagerGroups — admin CRUD групп менеджеров ────────────────────────
+function PageManagerGroups() {
+  const [groups, setGroups] = React.useState([]);
+  const [users, setUsers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [newName, setNewName] = React.useState("");
+
+  const load = React.useCallback(() => {
+    Promise.all([
+      fetch("/api/admin/groups", { credentials: "include" }).then(r => r.ok ? r.json() : []),
+      fetch("/api/admin/users",  { credentials: "include" }).then(r => r.ok ? r.json() : []),
+    ]).then(([g, u]) => {
+      setGroups(Array.isArray(g) ? g : []);
+      setUsers(Array.isArray(u) ? u : (u.users || []));
+      setLoading(false);
+    });
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+
+  const createGroup = () => {
+    const n = newName.trim();
+    if (!n) return;
+    fetch("/api/admin/groups", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: n }),
+    }).then(() => { setNewName(""); load(); });
+  };
+
+  const removeGroup = (id) => {
+    if (!window.confirm("Удалить группу? Менеджеры будут отвязаны.")) return;
+    fetch(`/api/admin/groups/${id}`, { method: "DELETE", credentials: "include" })
+      .then(load);
+  };
+
+  const setUserGroup = (userId, groupId, role) => {
+    fetch(`/api/admin/users/${userId}/group`, {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_id: groupId || null, role }),
+    }).then(load);
+  };
+
+  const setGroupHead = (gid, userId) => {
+    fetch(`/api/admin/groups/${gid}`, {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grouphead_id: userId || null }),
+    }).then(load);
+  };
+
+  return React.createElement(React.Fragment, null,
+    React.createElement(TopBar, {
+      breadcrumbs: ["am hub", "админ", "группы"],
+      title: "Группы менеджеров",
+      subtitle: "grouphead видит свою группу, leadership переключает scope",
+    }),
+    React.createElement("div", { style: { padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 } },
+
+      React.createElement(Card, { title: "Новая группа" },
+        React.createElement("div", { style: { display: "flex", gap: 8 } },
+          React.createElement("input", {
+            value: newName, onChange: e => setNewName(e.target.value),
+            placeholder: "Например: Команда Альфа",
+            style: {
+              flex: 1, background: "var(--ink-2)", border: "1px solid var(--line)",
+              borderRadius: 4, padding: "8px 12px", color: "var(--ink-8)", fontSize: 13,
+            },
+            onKeyDown: e => { if (e.key === "Enter") createGroup(); },
+          }),
+          React.createElement(Btn, { kind: "primary", size: "m", onClick: createGroup }, "Создать"),
+        ),
+      ),
+
+      loading
+        ? React.createElement(Card, { title: "Группы" }, "Загружаем…")
+        : groups.length === 0
+          ? React.createElement(Card, { title: "Группы" }, "Пока нет групп.")
+          : groups.map(g => React.createElement(Card, {
+              key: g.id,
+              title: g.name,
+              actions: React.createElement(Btn, { kind: "ghost", size: "s",
+                onClick: () => removeGroup(g.id) }, "Удалить"),
+            },
+              React.createElement("div", { style: { marginBottom: 12, fontSize: 12, color: "var(--ink-6)" } },
+                "Руководитель группы (grouphead):",
+              ),
+              React.createElement("select", {
+                value: g.grouphead_id || "",
+                onChange: e => setGroupHead(g.id, e.target.value ? Number(e.target.value) : null),
+                style: {
+                  width: "100%", marginBottom: 14, padding: "6px 10px", fontSize: 12.5,
+                  background: "var(--ink-2)", border: "1px solid var(--line)",
+                  borderRadius: 4, color: "var(--ink-8)",
+                },
+              },
+                React.createElement("option", { value: "" }, "— не назначен —"),
+                users.filter(u => ["admin","grouphead","manager"].includes(u.role))
+                     .map(u => React.createElement("option", { key: u.id, value: u.id },
+                       `${u.email} (${u.role})`)),
+              ),
+              React.createElement("div", { style: { fontSize: 12, color: "var(--ink-6)", marginBottom: 6 } },
+                `Менеджеры в группе (${g.members ? g.members.length : 0}):`),
+              React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+                (g.members || []).map(m => React.createElement("div", {
+                  key: m.id,
+                  style: {
+                    display: "flex", gap: 10, alignItems: "center",
+                    padding: "6px 10px", background: "var(--ink-2)",
+                    border: "1px solid var(--line-soft)", borderRadius: 4,
+                  },
+                },
+                  React.createElement("span", { style: { flex: 1, fontSize: 12.5, color: "var(--ink-8)" } }, m.email),
+                  React.createElement(Badge, { tone: "neutral" }, m.role),
+                  React.createElement(Btn, {
+                    kind: "ghost", size: "s",
+                    onClick: () => setUserGroup(m.id, null, m.role),
+                  }, "Убрать"),
+                )),
+              ),
+            )),
+
+      React.createElement(Card, { title: "Все менеджеры" },
+        users.length === 0 ? "Нет пользователей" :
+          React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+            users.map(u => React.createElement("div", {
+              key: u.id,
+              style: {
+                display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr",
+                gap: 10, padding: "6px 0", alignItems: "center",
+                borderBottom: "1px solid var(--line-soft)", fontSize: 12.5,
+              },
+            },
+              React.createElement("span", { style: { color: "var(--ink-8)" } }, u.email),
+              React.createElement("select", {
+                value: u.role || "manager",
+                onChange: e => setUserGroup(u.id, u.group_id, e.target.value),
+                style: {
+                  padding: "4px 8px", fontSize: 11,
+                  background: "var(--ink-2)", border: "1px solid var(--line)",
+                  borderRadius: 4, color: "var(--ink-8)",
+                },
+              },
+                ["admin","grouphead","leadership","manager","viewer"].map(r =>
+                  React.createElement("option", { key: r, value: r }, r)),
+              ),
+              React.createElement("select", {
+                value: u.group_id || "",
+                onChange: e => setUserGroup(u.id, e.target.value ? Number(e.target.value) : null, u.role),
+                style: {
+                  padding: "4px 8px", fontSize: 11,
+                  background: "var(--ink-2)", border: "1px solid var(--line)",
+                  borderRadius: 4, color: "var(--ink-8)",
+                },
+              },
+                React.createElement("option", { value: "" }, "— без группы —"),
+                groups.map(g => React.createElement("option", { key: g.id, value: g.id }, g.name)),
+              ),
+              React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } },
+                u.is_active ? "active" : "disabled"),
+            )),
+          ),
+      ),
+    )
+  );
+}
+window.PageManagerGroups = PageManagerGroups;

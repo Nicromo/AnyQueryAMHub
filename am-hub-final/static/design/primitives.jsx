@@ -400,4 +400,58 @@ const TaskCheck = ({ checked = false, onChange, size = 18, disabled = false }) =
   );
 };
 
-Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder, appConfirm, appToast, appPrompt, TaskCheck });
+// ── TaskSnoozeButton — dropdown «Отложить» для автотасок ───────────────────
+// POST /api/tasks/{id}/snooze {days}. onSnoozed() — колбэк для перезагрузки списка.
+function TaskSnoozeButton({ taskId, onSnoozed, compact = false }) {
+  const [open, setOpen] = React.useState(false);
+  const choose = async (days) => {
+    setOpen(false);
+    try {
+      const r = await fetch(`/api/tasks/${taskId}/snooze`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      if (r.ok) { onSnoozed && onSnoozed(); window.appToast && window.appToast(`Отложено на ${days} д.`); }
+    } catch (e) { /* swallow */ }
+  };
+  const customDays = async () => {
+    const d = window.prompt ? window.prompt("На сколько дней отложить?", "5") : "5";
+    const n = parseInt(d, 10);
+    if (!n || n < 1 || n > 90) return;
+    await choose(n);
+  };
+  return React.createElement("div", { style: { position: "relative", display: "inline-block" } },
+    React.createElement("button", {
+      onClick: (e) => { e.stopPropagation(); setOpen(!open); },
+      title: "Отложить задачу",
+      style: {
+        height: compact ? 24 : 28, padding: compact ? "0 8px" : "0 10px",
+        background: "transparent", border: "1px solid var(--line)", borderRadius: 4,
+        color: "var(--ink-6)", cursor: "pointer", fontSize: 11,
+      },
+    }, "⏱ Отложить"),
+    open && React.createElement("div", {
+      style: {
+        position: "absolute", top: (compact ? 26 : 30), right: 0, minWidth: 140,
+        background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6,
+        boxShadow: "0 6px 16px rgba(0,0,0,.18)", zIndex: 60,
+      },
+      onClick: (e) => e.stopPropagation(),
+    },
+      [1, 3, 7, 14].map(d => React.createElement("div", {
+        key: d, onClick: () => choose(d),
+        style: { padding: "7px 12px", fontSize: 12.5, color: "var(--ink-8)", cursor: "pointer" },
+      }, `+${d} ${d === 1 ? "день" : (d < 5 ? "дня" : "дней")}`)),
+      React.createElement("div", {
+        onClick: customDays,
+        style: {
+          padding: "7px 12px", fontSize: 12.5, color: "var(--ink-7)",
+          cursor: "pointer", borderTop: "1px solid var(--line-soft)",
+        },
+      }, "Другое…"),
+    ),
+  );
+}
+
+Object.assign(window, { Badge, Btn, Card, KPI, Spark, Seg, StatDot, Avatar, Progress, Kbd, Placeholder, appConfirm, appToast, appPrompt, TaskCheck, TaskSnoozeButton });

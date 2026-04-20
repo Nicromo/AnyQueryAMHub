@@ -132,6 +132,7 @@ PAGES = {
     "integrations": ("PageIntegrations", ["am hub", "интеграции"], "Интеграции"),
     "profile":   ("PageProfile",    ["am hub", "профиль"],                 "Мой профиль"),
     "assignments":("PageAssignments",["am hub", "админ", "назначения"],    "Назначения клиентов"),
+    "groups":    ("PageManagerGroups",["am hub", "админ", "группы"],       "Группы менеджеров"),
 }
 
 

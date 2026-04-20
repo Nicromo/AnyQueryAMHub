@@ -389,8 +389,9 @@ async def api_sync_merchrules(
         body = {}
     settings = user.settings or {}
     mr = settings.get("merchrules", {})
+    from crypto import dec as _dec, enc as _enc
     login = body.get("login") or mr.get("login") or _env("MERCHRULES_LOGIN")
-    password = body.get("password") or mr.get("password") or _env("MERCHRULES_PASSWORD")
+    password = body.get("password") or _dec(mr.get("password", "")) or _env("MERCHRULES_PASSWORD")
     site_ids_input = body.get("site_ids") or mr.get("site_ids") or settings.get("merchrules_site_ids", [])
 
     if not login or not password:
@@ -418,9 +419,9 @@ async def api_sync_merchrules(
         site_ids_input = [row[0] for row in q.all() if row[0]]
         logger.info(f"Auto-derived {len(site_ids_input)} site_ids from Airtable for {user.email}")
 
-    # Сохраняем креды и site_ids
+    # Сохраняем креды и site_ids (password — зашифрованный формат enc::v1::… если AMHUB_SECRETS_KEY задан)
     mr["login"] = login
-    mr["password"] = password
+    mr["password"] = _enc(password) if password else ""
     if site_ids_input:
         settings["merchrules_site_ids"] = site_ids_input
     settings["merchrules"] = mr

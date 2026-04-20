@@ -44,10 +44,11 @@ def _save_mr_creds(db: Session, request: Request, auth_token_cookie: Optional[st
         user = resolve_user(db, request, auth_token_cookie)
         if not user:
             return
+        from crypto import enc as _enc
         settings = dict(user.settings or {})
         mr = dict(settings.get("merchrules") or {})
         mr["login"] = login
-        mr["password"] = password
+        mr["password"] = _enc(password) if password else ""
         settings["merchrules"] = mr
         user.settings = settings
         from sqlalchemy.orm.attributes import flag_modified

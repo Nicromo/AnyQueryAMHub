@@ -118,7 +118,8 @@ async def api_create_meeting(
             u_settings = user.settings or {}
             mr = u_settings.get("merchrules", {}) or {}
             mr_login = mr.get("login") or os.environ.get("MERCHRULES_LOGIN")
-            mr_password = mr.get("password") or os.environ.get("MERCHRULES_PASSWORD")
+            from crypto import dec as _dec
+            mr_password = _dec(mr.get("password", "")) or os.environ.get("MERCHRULES_PASSWORD")
             site_ids = client.site_ids if isinstance(client.site_ids, list) else []
             if mr_login and mr_password and site_ids:
                 await push_meeting(
@@ -440,8 +441,12 @@ async def api_sync_meeting_slots(
 
 
 @router.get("/api/meetings/today")
-async def api_meetings_today(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Получить встречи сегодня с ссылками."""
+async def api_meetings_today(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+    am_scope: Optional[str] = Cookie(None),
+):
+    """Получить встречи сегодня с ссылками + scope."""
     if not auth_token:
         return {"meetings": []}
     from auth import decode_access_token
@@ -452,13 +457,17 @@ async def api_meetings_today(db: Session = Depends(get_db), auth_token: Optional
     if not user:
         return {"meetings": []}
 
+    from scope import resolve_scope, get_manager_emails_for_scope
+    active = resolve_scope(user, am_scope)
+    emails = get_manager_emails_for_scope(db, user, active)
+
     now_msk = datetime.now(MSK)
     today = now_msk.date()
     tomorrow = today + timedelta(days=1)
 
     q = db.query(Meeting).join(Client, Meeting.client_id == Client.id, isouter=True)
-    if user.role == "manager":
-        q = q.filter(Client.manager_email == user.email)
+    if emails is not None:
+        q = q.filter(Client.manager_email.in_(emails))
     meetings = q.filter(
         Meeting.date >= datetime.combine(today, datetime.min.time()),
         Meeting.date < datetime.combine(tomorrow, datetime.min.time()),

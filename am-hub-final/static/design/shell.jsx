@@ -22,6 +22,7 @@ function _buildNav() {
   ];
   if (isAdmin) {
     settingsItems.push({ id: "assignments", label: "Назначения", icon: "folder" });
+    settingsItems.push({ id: "groups",      label: "Группы",     icon: "users" });
   }
   return [
     { group: "", items: [
@@ -63,7 +64,7 @@ function Sidebar({ active = "command", onNav }) {
     if (onNav) onNav(item.id);
   };
   return (
-    <aside style={{
+    <aside className="amhub-sidebar" style={{
       width: 248, flexShrink: 0,
       background: "var(--ink-0)",
       borderRight: "1px solid var(--line)",
@@ -260,6 +261,18 @@ function Sidebar({ active = "command", onNav }) {
 
 // ── TopBar ──────────────────────────────────────────────────
 function TopBar({ title, subtitle, breadcrumbs = [], actions, meta }) {
+  const toggleSidebar = () => {
+    document.body.classList.toggle("sidebar-open");
+  };
+  React.useEffect(() => {
+    const onClick = (e) => {
+      if (!document.body.classList.contains("sidebar-open")) return;
+      if (e.target.closest(".amhub-sidebar") || e.target.closest(".amhub-burger")) return;
+      document.body.classList.remove("sidebar-open");
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, []);
   return (
     <header style={{
       display: "flex", alignItems: "center",
@@ -270,6 +283,13 @@ function TopBar({ title, subtitle, breadcrumbs = [], actions, meta }) {
       gap: 18,
       flexWrap: "wrap",
     }}>
+      <button className="amhub-burger" onClick={toggleSidebar} title="Меню" aria-label="Меню">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <line x1="3" y1="6"  x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
       <div style={{ flex: 1, minWidth: 0 }}>
         {breadcrumbs.length > 0 && (
           <div className="mono" style={{

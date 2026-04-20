@@ -158,6 +158,21 @@ async def groups_delete(
     return {"ok": True}
 
 
+@router.get("/api/admin/users")
+async def admin_users_list(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Плоский JSON-список пользователей для UI назначения ролей/групп."""
+    u = _user(auth_token, db)
+    _admin(u)
+    rows = db.query(User).order_by(User.email).all()
+    return [{"id": r.id, "email": r.email, "role": r.role,
+             "is_active": bool(r.is_active), "group_id": r.group_id,
+             "telegram_id": r.telegram_id}
+            for r in rows]
+
+
 @router.put("/api/admin/users/{user_id}/group")
 async def user_set_group(
     user_id: int, request: Request,

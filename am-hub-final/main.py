@@ -649,11 +649,13 @@ if _EXT_DIR.exists():
 # ============================================================================
 
 def _get_user_cred(user: User) -> tuple:
-    """Получить Merchrules логин/пароль: сначала из user.settings, потом из env."""
+    """Получить Merchrules логин/пароль: сначала из user.settings, потом из env.
+    Пароль в settings может быть зашифрован Fernet (crypto.enc) — прозрачно дешифруем."""
     settings = (user.settings or {}) if user else {}
     mr = settings.get("merchrules", {})
     login = mr.get("login") or env.MR_LOGIN
-    password = mr.get("password") or env.MR_PASSWORD
+    from crypto import dec as _dec
+    password = _dec(mr.get("password") or "") or env.MR_PASSWORD
     return login, password
 
 
