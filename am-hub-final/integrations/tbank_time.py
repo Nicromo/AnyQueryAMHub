@@ -439,9 +439,24 @@ async def get_all_channel_posts(token: str, channel_id: str, max_pages: int = 20
 async def ingest_tickets(db, user, limit_new: int = 100, fetch_threads: bool = True) -> Dict[str, Any]:
     """Главная функция: забирает посты из Mattermost, связывает с клиентами по ID, апсертит в БД."""
     from models import SupportTicket, TicketComment, Client
-    settings = user.settings or {}
+    settings = dict(user.settings or {})
+    # Сначала пытаемся OAuth access_token (с автоматическим рефрешем).
+    try:
+        from integrations.time_oauth import ensure_fresh_token
+        token = await ensure_fresh_token(settings)
+    except Exception:
+        token = None
+    if token and settings != (user.settings or {}):
+        # ensure_fresh_token мог обновить access_token — сохраняем
+        from sqlalchemy.orm.attributes import flag_modified
+        user.settings = settings
+        flag_modified(user, "settings")
+        db.commit()
     tm = settings.get("tbank_time", {})
-    token = tm.get("mmauthtoken") or tm.get("session_cookie") or tm.get("api_token") or os.environ.get("TIME_API_TOKEN")
+    if not token:
+        token = (tm.get("access_token") or tm.get("mmauthtoken")
+                 or tm.get("session_cookie") or tm.get("api_token")
+                 or os.environ.get("TIME_API_TOKEN"))
     if not token:
         return {"ok": False, "error": "no_token"}
 
