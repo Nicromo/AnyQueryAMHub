@@ -18,6 +18,7 @@ from models import (
     Client, Task, Meeting, CheckUp, User, SyncLog, AuditLog,
     Notification, QBR, AccountPlan, ClientNote, TaskComment,
     FollowupTemplate, VoiceNote,
+    NPSEntry, RevenueEntry, CheckupV2, CheckupQuery, PartnerLog,
 )
 from auth import (
     authenticate_user, create_user, create_access_token,
@@ -988,6 +989,327 @@ async def api_export_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={fname}"},
     )
+
+
+# ============================================================================
+# KPI: NPS, MRR trend, portfolio search KPI
+# ============================================================================
+
+@router.get("/api/nps")
+async def api_nps_list(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Список NPS-опросов текущего менеджера."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    cids = [c.id for c in q.all()]
+
+    entries = (
+        db.query(NPSEntry)
+        .filter(NPSEntry.client_id.in_(cids))
+        .order_by(NPSEntry.recorded_at.desc())
+        .limit(100)
+        .all()
+        if cids else []
+    )
+
+    clients_map = {c.id: c.name for c in db.query(Client).filter(Client.id.in_(cids)).all()} if cids else {}
+
+    rows = [{
+        "id": e.id,
+        "client_id": e.client_id,
+        "client_name": clients_map.get(e.client_id, "—"),
+        "score": e.score,
+        "type": e.type or "nps",
+        "comment": e.comment,
+        "created_at": e.recorded_at.isoformat() if e.recorded_at else None,
+    } for e in entries]
+
+    total = len(rows)
+    if total:
+        promoters  = sum(1 for r in rows if r["score"] >= 9)
+        detractors = sum(1 for r in rows if r["score"] <= 6)
+        avg_nps = round((promoters - detractors) / total * 100, 1)
+    else:
+        avg_nps = None
+
+    return {"entries": rows, "avg_nps": avg_nps, "total": total}
+
+
+@router.post("/api/nps")
+async def api_nps_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Создание NPS-опроса. Body: {client_id, score, comment}."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    body = await request.json()
+    client_id = body.get("client_id")
+    score = body.get("score")
+    comment = (body.get("comment") or "").strip() or None
+    if not client_id or score is None:
+        raise HTTPException(status_code=400, detail="client_id и score обязательны")
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="score должен быть числом")
+    if score < 0 or score > 10:
+        raise HTTPException(status_code=400, detail="score должен быть 0..10")
+
+    client = db.query(Client).filter(Client.id == int(client_id)).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    if user.role == "manager" and client.manager_email != user.email:
+        raise HTTPException(status_code=403, detail="Клиент не из вашего портфеля")
+
+    entry = NPSEntry(
+        client_id=client.id,
+        score=score,
+        type="nps",
+        comment=comment,
+        source="manual",
+        recorded_at=datetime.utcnow(),
+        recorded_by=user.email,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return {
+        "ok": True,
+        "id": entry.id,
+        "client_id": entry.client_id,
+        "client_name": client.name,
+        "score": entry.score,
+        "comment": entry.comment,
+        "created_at": entry.recorded_at.isoformat() if entry.recorded_at else None,
+    }
+
+
+@router.get("/api/me/mrr-trend")
+async def api_me_mrr_trend(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """MRR за последние 6 месяцев + NRR (текущий vs предыдущий)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    cids = [c.id for c in q.all()]
+
+    today = datetime.utcnow()
+    periods = []
+    y, m = today.year, today.month
+    for _ in range(6):
+        periods.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12; y -= 1
+    periods.reverse()
+
+    totals = {p: 0.0 for p in periods}
+    if cids:
+        entries = (
+            db.query(RevenueEntry)
+            .filter(RevenueEntry.client_id.in_(cids), RevenueEntry.period.in_(periods))
+            .all()
+        )
+        for e in entries:
+            if e.period in totals:
+                totals[e.period] += float(e.mrr or 0)
+
+    points = [{"period": p, "mrr": round(totals[p], 2)} for p in periods]
+    this_mrr = totals[periods[-1]] if len(periods) >= 1 else 0
+    last_mrr = totals[periods[-2]] if len(periods) >= 2 else 0
+    nrr = round(this_mrr / last_mrr * 100, 1) if last_mrr else None
+
+    return {
+        "points": points,
+        "this_mrr": round(this_mrr, 2),
+        "last_mrr": round(last_mrr, 2),
+        "nrr": nrr,
+    }
+
+
+@router.get("/api/me/kpi-summary")
+async def api_me_kpi_summary(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Сводка для PageKPI: NRR, NPS, клиенты ок, просроченные встречи."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+    cids = [c.id for c in clients]
+
+    def _is_ok(c):
+        h = c.health_score
+        if h is None:
+            return False
+        return (h >= 0.7) if h <= 1.0 else (h >= 70)
+    clients_ok = sum(1 for c in clients if _is_ok(c))
+
+    now = datetime.utcnow()
+    overdue_meetings = 0
+    if cids:
+        overdue_meetings = (
+            db.query(Meeting)
+            .filter(
+                Meeting.client_id.in_(cids),
+                Meeting.date != None,
+                Meeting.date < now,
+                Meeting.followup_status.in_(["pending", "filled"]),
+            )
+            .count()
+        )
+
+    today = datetime.utcnow()
+    this_p = f"{today.year:04d}-{today.month:02d}"
+    prev_y, prev_m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+    prev_p = f"{prev_y:04d}-{prev_m:02d}"
+    this_mrr = prev_mrr = 0.0
+    if cids:
+        entries = (
+            db.query(RevenueEntry)
+            .filter(RevenueEntry.client_id.in_(cids), RevenueEntry.period.in_([this_p, prev_p]))
+            .all()
+        )
+        for e in entries:
+            if e.period == this_p:
+                this_mrr += float(e.mrr or 0)
+            elif e.period == prev_p:
+                prev_mrr += float(e.mrr or 0)
+    nrr = round(this_mrr / prev_mrr * 100, 1) if prev_mrr else None
+
+    since = now - timedelta(days=90)
+    nps_avg = None
+    if cids:
+        nps_entries = (
+            db.query(NPSEntry)
+            .filter(NPSEntry.client_id.in_(cids), NPSEntry.recorded_at >= since)
+            .all()
+        )
+        total = len(nps_entries)
+        if total:
+            prom = sum(1 for e in nps_entries if e.score >= 9)
+            det  = sum(1 for e in nps_entries if e.score <= 6)
+            nps_avg = round((prom - det) / total * 100, 1)
+
+    return {
+        "nrr": nrr,
+        "nps": nps_avg,
+        "clients_ok": clients_ok,
+        "clients_total": len(clients),
+        "overdue_meetings": overdue_meetings,
+    }
+
+
+@router.get("/api/analytics/portfolio-search-kpi")
+async def api_portfolio_search_kpi(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Срез по качеству поиска: % нулевых, % с низкой позицией, чекапов за 30д, ср.конверсия."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+    cids = [c.id for c in clients]
+
+    zero_pct = None
+    low_pos_pct = None
+    checkups_30d = 0
+    avg_conversion = None
+
+    if cids:
+        checkups = db.query(CheckupV2).filter(CheckupV2.client_id.in_(cids)).all()
+        checkup_ids = [ck.id for ck in checkups]
+
+        if checkup_ids:
+            queries = db.query(CheckupQuery).filter(CheckupQuery.checkup_id.in_(checkup_ids)).all()
+            total_q = len(queries)
+            if total_q:
+                zero_q = sum(1 for q_ in queries if (q_.group or "").lower() in ("null", "zero"))
+                low_pos = sum(1 for q_ in queries if q_.score is not None and q_.score <= 1)
+                zero_pct = round(zero_q / total_q * 100, 1)
+                low_pos_pct = round(low_pos / total_q * 100, 1)
+
+        since = datetime.utcnow() - timedelta(days=30)
+        recent_checkup_clients = {
+            ck.client_id for ck in checkups
+            if ck.created_at and ck.created_at >= since
+        }
+        checkups_30d = len(recent_checkup_clients)
+
+        convs = []
+        for c in clients:
+            meta = c.integration_metadata or {}
+            top50 = meta.get("top50") or meta.get("top50_metrics") or {}
+            v = top50.get("conversion") if isinstance(top50, dict) else None
+            if v is None:
+                v = meta.get("conversion")
+            try:
+                v = float(v)
+                convs.append(v)
+            except (TypeError, ValueError):
+                pass
+        if convs:
+            avg_conversion = round(sum(convs) / len(convs), 2)
+
+    return {
+        "zero_pct": zero_pct,
+        "low_pos_pct": low_pos_pct,
+        "checkups_30d": checkups_30d,
+        "avg_conversion": avg_conversion,
+        "clients_total": len(clients),
+    }
 
 
 # ============================================================================

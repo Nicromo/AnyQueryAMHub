@@ -21,6 +21,7 @@ from models import (
     RevenueEntry, HealthSnapshot, NPSEntry, CheckupResult,
     ClientHistory, ClientContact, ClientProduct,
     ClientMerchRule, ClientFeed, SupportTicket, TicketComment,
+    CheckupV2,
 )
 from auth import (
     authenticate_user, create_user, create_access_token,
@@ -106,6 +107,139 @@ async def api_get_qbr(client_id: int, db: Session = Depends(get_db), auth_token:
         "completed_tasks": [{"id": t.id, "title": t.title, "confirmed_at": t.confirmed_at.isoformat() if t.confirmed_at else None} for t in tasks],
         "last_qbr_date": client.last_qbr_date.isoformat() if client.last_qbr_date else None,
         "next_qbr_date": client.next_qbr_date.isoformat() if client.next_qbr_date else None,
+    }
+
+
+@router.get("/api/clients/{client_id}/qbr-prep")
+async def api_qbr_prep(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Готовая сводка для карточки «Подготовка к QBR»:
+    gmv_trend, health, checkups_count, top50_metrics, open_tasks_count, meetings."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404)
+    if user.role == "manager" and client.manager_email != user.email:
+        raise HTTPException(status_code=403)
+
+    now = datetime.utcnow()
+    quarter_ago = now - timedelta(days=90)
+
+    # GMV trend: this month vs last month via RevenueEntry (fallback: integration_metadata.mrr)
+    meta = client.integration_metadata or {}
+    this_p = f"{now.year:04d}-{now.month:02d}"
+    prev_y, prev_m = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
+    prev_p = f"{prev_y:04d}-{prev_m:02d}"
+    rev_entries = (
+        db.query(RevenueEntry)
+        .filter(RevenueEntry.client_id == client_id, RevenueEntry.period.in_([this_p, prev_p]))
+        .all()
+    )
+    this_mrr = 0.0
+    prev_mrr = 0.0
+    for e in rev_entries:
+        if e.period == this_p:
+            this_mrr += float(e.mrr or 0)
+        elif e.period == prev_p:
+            prev_mrr += float(e.mrr or 0)
+
+    gmv_current = None
+    try:
+        gmv_current = float(meta.get("gmv") or 0) or None
+    except (TypeError, ValueError):
+        gmv_current = None
+    gmv_value = this_mrr if this_mrr else gmv_current
+    gmv_delta_pct = None
+    if prev_mrr and this_mrr:
+        gmv_delta_pct = round((this_mrr - prev_mrr) / prev_mrr * 100, 1)
+
+    # Health score + trend
+    health_current = client.health_score
+    prev_snap = (
+        db.query(HealthSnapshot)
+        .filter(HealthSnapshot.client_id == client_id, HealthSnapshot.calculated_at <= now - timedelta(days=30))
+        .order_by(HealthSnapshot.calculated_at.desc())
+        .first()
+    )
+    health_prev = prev_snap.score if prev_snap else None
+    health_trend = None
+    if health_current is not None and health_prev is not None:
+        try:
+            health_trend = round(float(health_current) - float(health_prev), 2)
+        except (TypeError, ValueError):
+            health_trend = None
+
+    # Чекапы за квартал (v2)
+    checkups_count = (
+        db.query(CheckupV2)
+        .filter(CheckupV2.client_id == client_id, CheckupV2.created_at >= quarter_ago)
+        .count()
+    )
+
+    # Top-50 metrics
+    top50_raw = meta.get("top50") or meta.get("top50_metrics") or {}
+    if isinstance(top50_raw, dict):
+        top50 = {
+            "ndcg": top50_raw.get("ndcg"),
+            "precision": top50_raw.get("precision"),
+            "conversion": top50_raw.get("conversion"),
+        }
+    else:
+        top50 = {"ndcg": None, "precision": None, "conversion": None}
+
+    # Открытые задачи
+    open_tasks_count = (
+        db.query(Task)
+        .filter(Task.client_id == client_id, Task.status != "done")
+        .count()
+    )
+
+    # Встречи за квартал
+    meetings_q = (
+        db.query(Meeting)
+        .filter(Meeting.client_id == client_id, Meeting.date != None, Meeting.date >= quarter_ago)
+        .order_by(Meeting.date.desc())
+        .limit(50)
+        .all()
+    )
+    meetings_list = [{
+        "id": m.id,
+        "date": m.date.isoformat() if m.date else None,
+        "title": m.title or m.type or "Встреча",
+        "type": m.type,
+        "is_qbr": bool(m.is_qbr),
+    } for m in meetings_q]
+
+    return {
+        "client": {"id": client.id, "name": client.name, "segment": client.segment},
+        "gmv": {
+            "value": gmv_value,
+            "this_mrr": this_mrr or None,
+            "prev_mrr": prev_mrr or None,
+            "delta_pct": gmv_delta_pct,
+        },
+        "health": {
+            "current": health_current,
+            "previous": health_prev,
+            "trend": health_trend,
+        },
+        "checkups_count": checkups_count,
+        "top50": top50,
+        "open_tasks_count": open_tasks_count,
+        "meetings": meetings_list,
+        "meetings_count": len(meetings_list),
     }
 
 
