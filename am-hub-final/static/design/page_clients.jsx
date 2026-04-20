@@ -282,8 +282,11 @@ function PageClient() {
   const payStr = payMap[c.payment_status] || "—";
   const payTone = payToneMap[c.payment_status] || "neutral";
 
+  const [followupModal, setFollowupModal] = React.useState(false);
+
   return (
     <div>
+      {followupModal && <FollowupModal client={c} onClose={() => setFollowupModal(false)}/>}
       <TopBar
         breadcrumbs={["am hub", "клиенты", c.name]}
         title={c.name}
@@ -291,21 +294,23 @@ function PageClient() {
         actions={
           <>
             <Btn kind="ghost" size="m" icon={<I.chat size={14}/>} onClick={async () => {
-              const txt = window.prompt("Новая заметка по клиенту:");
-              if (!txt) return;
-              const r = await fetch(`/api/clients/${c.id}/notes`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: txt }),
+              const txt = await appPrompt("Текст заметки по клиенту", {
+                title: "Новая заметка", placeholder: "О чём договорились / что заметил…",
+                okLabel: "Сохранить",
               });
-              if (r.ok) window.location.reload();
-              else appToast("Не удалось сохранить заметку");
+              if (!txt || !txt.trim()) return;
+              const r = await fetch(`/api/clients/${c.id}/notes`, {
+                method: "POST", credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: txt.trim() }),
+              });
+              if (r.ok) { appToast("Заметка сохранена", "ok"); window.location.reload(); }
+              else appToast("Не удалось сохранить заметку", "error");
             }}>Заметка</Btn>
             <Btn kind="ghost" size="m" icon={<I.cal size={14}/>} onClick={() => {
               window.location.href = `/design/meetings?client_id=${c.id}`;
             }}>Запланировать</Btn>
-            <Btn kind="primary" size="m" icon={<I.lightning size={14}/>} onClick={() => {
-              window.location.href = `/design/client/${c.id}`;
-            }}>Follow-up</Btn>
+            <Btn kind="primary" size="m" icon={<I.lightning size={14}/>} onClick={() => setFollowupModal(true)}>Follow-up</Btn>
           </>
         }
       />
@@ -469,6 +474,90 @@ window.ClientRoadmap = ClientRoadmap;
 
 window.PageClients = PageClients;
 window.PageClient = PageClient;
+
+// ── FollowupModal — AI-генерация фолоуапа + редактирование + копировать ──
+function FollowupModal({ client, onClose }) {
+  const [text, setText] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState(null);
+  const [copied, setCopied] = React.useState(false);
+
+  const run = React.useCallback(async () => {
+    setLoading(true); setErr(null);
+    try {
+      const r = await fetch("/api/ai/generate-followup", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: Number(client.id) }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      setText(d.text || d.brief || "");
+    } catch (e) { setErr(e.message || "не удалось получить"); }
+    finally { setLoading(false); }
+  }, [client.id]);
+
+  React.useEffect(() => { run(); }, [run]);
+
+  async function copyToClipboard() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (_) { appToast("Копирование не поддерживается браузером", "error"); }
+  }
+
+  return React.createElement("div", {
+    onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
+    style: {
+      position: "fixed", inset: 0, zIndex: 9998,
+      background: "rgba(0,0,0,.55)", backdropFilter: "blur(3px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    },
+  },
+    React.createElement("div", {
+      style: {
+        background: "var(--ink-1)", border: "1px solid var(--line)",
+        borderRadius: 10, maxWidth: 720, width: "100%",
+        maxHeight: "85vh", display: "flex", flexDirection: "column",
+        padding: 20, boxShadow: "0 24px 64px rgba(0,0,0,.5)",
+      },
+    },
+      React.createElement("div", {
+        style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
+      },
+        React.createElement("div", null,
+          React.createElement("div", { style: { fontSize: 15, fontWeight: 600, color: "var(--ink-9)" } }, "Follow-up · " + (client.name || "клиент")),
+          React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-6)", marginTop: 2 } }, "AI-черновик после встречи — отредактируй и скопируй"),
+        ),
+        React.createElement("button", {
+          onClick: onClose,
+          style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 18, padding: 0, lineHeight: 1 },
+        }, "×"),
+      ),
+      err && React.createElement("div", { style: { fontSize: 12.5, color: "var(--critical)", padding: "10px 0" } }, "Ошибка: " + err),
+      loading && React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "16px 0" } }, "Генерация через AI…"),
+      !loading && !err && React.createElement("textarea", {
+        value: text, onChange: (e) => setText(e.target.value), rows: 16,
+        style: {
+          flex: 1, width: "100%", resize: "vertical", minHeight: 260,
+          background: "var(--ink-2)", color: "var(--ink-8)",
+          border: "1px solid var(--line)", borderRadius: 4,
+          padding: "10px 12px", fontSize: 13, fontFamily: "inherit",
+          whiteSpace: "pre-wrap", lineHeight: 1.5,
+        },
+      }),
+      React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" } },
+        React.createElement(Btn, { size: "m", kind: "ghost", onClick: run, disabled: loading },
+          loading ? "…" : "🔄 Перегенерировать"),
+        React.createElement(Btn, { size: "m", kind: "ghost", onClick: copyToClipboard, disabled: !text },
+          copied ? "✓ Скопировано" : "📋 Копировать"),
+        React.createElement(Btn, { size: "m", kind: "primary", onClick: onClose }, "Закрыть"),
+      ),
+    ),
+  );
+}
+window.FollowupModal = FollowupModal;
 
 // Mini bar-chart trend indicator — 14 bars, color by direction.
 // Clearer than a line sparkline at this size; last bar is emphasized.
