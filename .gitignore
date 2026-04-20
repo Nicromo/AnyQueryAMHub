@@ -22,3 +22,6 @@ am-hub-final/data/*.db-shm
 # Файл кредов
 ~/.search-checkup-creds.json
 *.credentials.json
+
+# Claude Code worktrees (temporary, per-agent)
+.claude/worktrees/
