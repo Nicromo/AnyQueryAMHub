@@ -836,6 +836,26 @@ async def job_health_recalc_all():
             db.commit()
             logger.info(f"✅ Health recalculated: {updated} clients, {len(dropped)} dropped")
 
+            # Inbox-алерт в единый inbox для каждого клиента с падением
+            try:
+                from tg_notifications import notify_manager
+                for c, old_s, new_s in dropped:
+                    if not c.manager_email:
+                        continue
+                    mgr = db.query(User).filter(
+                        User.email == c.manager_email, User.is_active == True
+                    ).first()
+                    if not mgr:
+                        continue
+                    await notify_manager(db, mgr, "churn_risk", {
+                        "client": c.name,
+                        "health": f"{int(new_s * 100)}%",
+                        "reason": f"упал с {int(old_s*100)}% (-{int((old_s-new_s)*100)}%)",
+                    }, related_type="client", related_id=c.id)
+                db.commit()
+            except Exception as _ne:
+                logger.warning(f"notify churn_risk skipped: {_ne}")
+
             # TG алерт при падении health
             if dropped:
                 subs = db.query(TelegramSubscription).filter(

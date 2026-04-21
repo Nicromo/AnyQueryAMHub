@@ -202,4 +202,22 @@ async def collect_and_save(db: Session, client, quarter: Optional[str] = None, o
         pass
 
     db.commit()
+
+    # Уведомляем менеджера: бриф к QBR готов (можно открывать клиентскую карточку)
+    try:
+        if client.manager_email:
+            from models import User as _User
+            mgr = db.query(_User).filter(
+                _User.email == client.manager_email, _User.is_active == True
+            ).first()
+            if mgr:
+                from tg_notifications import notify_manager
+                await notify_manager(db, mgr, "qbr_ready", {
+                    "client": client.name,
+                    "link": f"/design/client/{client.id}",
+                }, related_type="client", related_id=client.id)
+                db.commit()
+    except Exception as _ne:
+        log.warning(f"notify qbr_ready skipped: {_ne}")
+
     return {"ok": True, "quarter": q, "metrics": current, "qbr_id": qbr.id, "overwrote_text": overwrite_text}

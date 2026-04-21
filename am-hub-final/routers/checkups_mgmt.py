@@ -129,6 +129,25 @@ async def api_save_checkup_results(
     client.last_checkup = datetime.utcnow()
     db.commit()
 
+    # Уведомляем менеджера в inbox: результат чекапа готов (особенно если средняя оценка низкая)
+    try:
+        if client.manager_email:
+            mgr = db.query(User).filter(
+                User.email == client.manager_email, User.is_active == True
+            ).first()
+            if mgr:
+                from tg_notifications import notify_manager
+                summary = (f"avg {avg_score:.2f} по {len(results)} запросам"
+                           if avg_score is not None else f"{len(results)} запросов")
+                if avg_score is not None and avg_score < 1.5:
+                    summary += " · критичный уровень"
+                await notify_manager(db, mgr, "checkup_result",
+                    {"client": client.name, "summary": summary},
+                    related_type="client", related_id=client.id)
+                db.commit()
+    except Exception as _ne:
+        logger.warning(f"notify checkup_result skipped: {_ne}")
+
     logger.info(f"CheckupResult saved: client={client.name}, queries={len(results)}, avg={avg_score:.2f if avg_score else 'N/A'}")
     return {"ok": True, "id": cr.id, "avg_score": avg_score, "total": len(results)}
 
