@@ -26,6 +26,9 @@ ALLOWED_MIME  = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.ms-excel", "text/plain", "text/csv",
     "application/zip",
+    # Audio (voice notes)
+    "audio/webm", "audio/ogg", "audio/mpeg", "audio/mp3", "audio/wav",
+    "audio/mp4", "audio/m4a", "audio/x-m4a",
 }
 
 

@@ -577,9 +577,11 @@ app.include_router(airtable_router.router, tags=["airtable"])
 from routers import onboarding as onboarding_flow_router
 from routers import scope_and_groups as scope_router
 from routers import merchrules_dashboard as mr_dashboard_router
+from routers import voice_notes as voice_notes_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
 app.include_router(mr_dashboard_router.router, tags=["merchrules-dashboard"])
+app.include_router(voice_notes_router.router, tags=["voice-notes"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router
