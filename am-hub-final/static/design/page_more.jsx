@@ -1801,6 +1801,21 @@ function PageRoadmap() {
   const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
   const canEdit = !!U.email;
   const [rmModal, setRmModal] = React.useState(null); // null or {col}
+  const [dragId, setDragId] = React.useState(null);
+  const [dropCol, setDropCol] = React.useState(null);
+  const [editId, setEditId] = React.useState(null);
+  const [editVal, setEditVal] = React.useState("");
+  // items флаттенятся сюда для локального оптимистичного апдейта
+  const [localItems, setLocalItems] = React.useState(() => {
+    const out = [];
+    for (const c of rawCols) {
+      for (const it of (c.items || [])) {
+        if (typeof it === "string") out.push({ id: null, title: it, column_key: c.key || c.column_key });
+        else out.push({ ...it, column_key: it.column_key || c.key || c.column_key });
+      }
+    }
+    return out;
+  });
 
   const DEFAULT = [
     { key: "q1",      title: "Q1 · готово",   tone: "ok" },
@@ -1809,14 +1824,46 @@ function PageRoadmap() {
     { key: "q4",      title: "Q4 · идеи",     tone: "warn" },
     { key: "backlog", title: "Бэклог",        tone: "neutral" },
   ];
-  const byKey = Object.fromEntries(rawCols.map(c => [c.key || c.column_key, c]));
-  const cols = DEFAULT.map(d => ({ ...d, ...(byKey[d.key] || {}), items: (byKey[d.key]?.items) || [] }));
+  const cols = DEFAULT.map(d => ({
+    ...d,
+    items: localItems.filter(it => (it.column_key || "backlog") === d.key),
+  }));
 
   const addItem = (col) => setRmModal({ col });
 
-  const delItem = (id, title) => {
-    fetch(`/design/api/roadmap/${id}`, { method: "DELETE", credentials: "include" })
-      .then(r => r.ok ? location.reload() : appToast("Ошибка удаления"));
+  const delItem = async (id) => {
+    const r = await fetch(`/design/api/roadmap/${id}`, { method: "DELETE", credentials: "include" });
+    if (r.ok) setLocalItems(items => items.filter(i => i.id !== id));
+    else if (typeof appToast === "function") appToast("Ошибка удаления", "error");
+  };
+
+  const moveItem = async (id, newKey) => {
+    // optimistic
+    setLocalItems(items => items.map(i => i.id === id ? { ...i, column_key: newKey } : i));
+    const r = await fetch(`/design/api/roadmap/${id}`, {
+      method: "PATCH", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ column_key: newKey }),
+    });
+    if (!r.ok) {
+      // revert on error — дёрнем reload
+      if (typeof appToast === "function") appToast("Ошибка перемещения", "error");
+      setTimeout(() => location.reload(), 800);
+    }
+  };
+
+  const startEdit = (it) => { setEditId(it.id); setEditVal(it.title || ""); };
+  const saveEdit = async () => {
+    const id = editId; const title = editVal.trim();
+    if (!id || !title) { setEditId(null); return; }
+    setLocalItems(items => items.map(i => i.id === id ? { ...i, title } : i));
+    const r = await fetch(`/design/api/roadmap/${id}`, {
+      method: "PATCH", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!r.ok && typeof appToast === "function") appToast("Не удалось сохранить", "error");
+    setEditId(null);
   };
 
   return (
@@ -1832,40 +1879,97 @@ function PageRoadmap() {
               body: JSON.stringify({ column_key: rmModal.col.key, column_title: rmModal.col.title, tone: rmModal.col.tone, title: vals.title }),
             });
             if (!r.ok) throw new Error(await r.text());
-            setRmModal(null); location.reload();
+            const d = await r.json().catch(() => ({}));
+            const newItem = { id: d.id, title: vals.title, column_key: rmModal.col.key };
+            setLocalItems(items => [...items, newItem]);
+            setRmModal(null);
           }}
         />
       )}
       <TopBar breadcrumbs={["am hub","роадмап"]} title="Роадмап"
-        subtitle={`Что команда строит в AM Hub · ${new Date().getFullYear()}`}/>
+        subtitle={canEdit ? `Перетаскивай карточки между кварталами · двойной клик — редактировать` : `Что команда строит в AM Hub · ${new Date().getFullYear()}`}/>
       <div style={{ padding: "22px 28px 40px" }}>
-        {!canEdit && rawCols.length === 0 && (
+        {!canEdit && localItems.length === 0 && (
           <div style={{ padding: "20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6, marginBottom: 14 }}>
             Роадмап пока пуст. Пункты добавляют администраторы.
           </div>
         )}
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols.length},1fr)`, gap: 14 }}>
           {cols.map((c, i) => (
-            <div key={c.key} style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderTop: `3px solid var(--${c.tone})`, borderRadius: "0 0 6px 6px", padding: 14 }}>
+            <div key={c.key}
+              onDragOver={canEdit ? (e) => { e.preventDefault(); setDropCol(c.key); } : undefined}
+              onDragLeave={canEdit ? () => setDropCol(null) : undefined}
+              onDrop={canEdit ? (e) => {
+                e.preventDefault();
+                const id = dragId;
+                setDragId(null); setDropCol(null);
+                if (!id) return;
+                const prevCol = (localItems.find(x => x.id === id) || {}).column_key;
+                if (prevCol === c.key) return;
+                moveItem(id, c.key);
+              } : undefined}
+              style={{
+                background: dropCol === c.key ? "color-mix(in oklch, var(--signal) 10%, var(--ink-2))" : "var(--ink-2)",
+                border: `1px ${dropCol === c.key ? "dashed var(--signal)" : "solid var(--line)"}`,
+                borderTop: `3px solid var(--${c.tone})`,
+                borderRadius: "0 0 6px 6px", padding: 14,
+                minHeight: 140, transition: "background .12s, border-color .12s",
+              }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{c.title}</div>
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{c.title} · {c.items.length}</div>
                 {canEdit && (
                   <button onClick={() => addItem(c)} title="Добавить"
                     style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--ink-7)", width: 22, height: 22, borderRadius: 3, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>+</button>
                 )}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {c.items.map((it, j) => (
-                  <div key={j} style={{ padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)", borderRadius: 4, display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}>{typeof it === "string" ? it : (it.title || it.name)}</div>
+                {c.items.map((it, j) => {
+                  const dragProps = (canEdit && it.id) ? {
+                    draggable: true,
+                    onDragStart: (e) => { setDragId(it.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(it.id)); },
+                    onDragEnd: () => { setDragId(null); setDropCol(null); },
+                  } : {};
+                  const isDragging = dragId === it.id;
+                  return (
+                  <div key={it.id || j}
+                    {...dragProps}
+                    onDoubleClick={canEdit && it.id ? () => startEdit(it) : undefined}
+                    style={{
+                      padding: 10,
+                      background: isDragging ? "color-mix(in oklch, var(--signal) 12%, var(--ink-1))" : "var(--ink-1)",
+                      border: `1px solid ${isDragging ? "var(--signal)" : "var(--line-soft)"}`,
+                      borderRadius: 4,
+                      display: "flex", alignItems: "center", gap: 8,
+                      cursor: canEdit && it.id ? "grab" : "default",
+                      opacity: isDragging ? 0.6 : 1,
+                    }}>
                     {canEdit && it.id && (
-                      <button onClick={() => delItem(it.id, it.title)} title="Удалить"
+                      <span title="Перетащить" style={{ color: "var(--ink-5)", fontSize: 12, userSelect: "none", cursor: "grab" }}>⋮⋮</span>
+                    )}
+                    {editId === it.id ? (
+                      <input
+                        autoFocus value={editVal}
+                        onChange={e => setEditVal(e.target.value)}
+                        onBlur={saveEdit}
+                        onKeyDown={e => { if (e.key === "Enter") saveEdit(); else if (e.key === "Escape") setEditId(null); }}
+                        style={{ flex: 1, padding: "4px 6px", background: "var(--ink-2)", border: "1px solid var(--signal)", borderRadius: 3, color: "var(--ink-9)", fontSize: 12.5, outline: "none" }}/>
+                    ) : (
+                      <div style={{ flex: 1, fontSize: 12.5, color: "var(--ink-8)" }}
+                        title={canEdit ? "Двойной клик — редактировать" : ""}>
+                        {it.title || ""}
+                      </div>
+                    )}
+                    {canEdit && it.id && editId !== it.id && (
+                      <button onClick={() => delItem(it.id)} title="Удалить"
                         style={{ background: "transparent", border: 0, color: "var(--ink-5)", cursor: "pointer", padding: 2, fontSize: 12 }}>✕</button>
                     )}
                   </div>
-                ))}
+                  );
+                })}
                 {c.items.length === 0 && (
-                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", fontStyle: "italic" }}>пусто</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", fontStyle: "italic", padding: "14px 0", textAlign: "center" }}>
+                    {dropCol === c.key ? "отпусти сюда" : "пусто"}
+                  </div>
                 )}
               </div>
             </div>

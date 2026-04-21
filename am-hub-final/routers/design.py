@@ -221,6 +221,50 @@ async def roadmap_delete(
     return {"ok": True}
 
 
+@router.patch("/api/roadmap/{item_id}")
+async def roadmap_update(
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """PATCH: смена колонки (DnD между Q1..Q4/backlog), title, description, order_idx."""
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401)
+    it = db.query(RoadmapItem).filter(RoadmapItem.id == item_id).first()
+    if not it:
+        raise HTTPException(status_code=404)
+    body = await request.json()
+    if "column_key" in body:
+        new_key = (body["column_key"] or "").lower()
+        allowed = {"q1", "q2", "q3", "q4", "backlog"}
+        if new_key not in allowed:
+            raise HTTPException(400, f"column_key must be in {allowed}")
+        tone_map = {"q1": "ok", "q2": "signal", "q3": "info", "q4": "warn", "backlog": "neutral"}
+        title_map = {"q1": "Q1 · готово", "q2": "Q2 · в работе",
+                     "q3": "Q3 · план", "q4": "Q4 · идеи", "backlog": "Бэклог"}
+        it.column_key = new_key
+        it.column_title = body.get("column_title") or title_map[new_key]
+        it.tone = body.get("tone") or tone_map[new_key]
+    if "title" in body:
+        t = (body["title"] or "").strip()
+        if not t:
+            raise HTTPException(400, "title cannot be empty")
+        it.title = t
+    if "description" in body:
+        it.description = body["description"] or ""
+    if "order_idx" in body:
+        try:
+            it.order_idx = int(body["order_idx"])
+        except Exception:
+            pass
+    db.commit()
+    db.refresh(it)
+    return {"ok": True, "id": it.id, "column_key": it.column_key,
+            "title": it.title, "order_idx": it.order_idx}
+
+
 @router.post("/api/roadmap/from-meeting/{meeting_id}")
 async def roadmap_from_meeting(
     meeting_id: int,
