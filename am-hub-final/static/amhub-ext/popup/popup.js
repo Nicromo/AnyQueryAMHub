@@ -161,7 +161,7 @@ async function tryRestoreFromHub() {
     const take = (field, val) => { if (!current[field] && val) patch[field] = val; };
     take("mr_login",     cfg.merchrules?.login);
     take("mr_password",  cfg.merchrules?.password);
-    take("mr_site_ids",  (cfg.merchrules?.site_ids || []).join(", "));
+    // mr_site_ids больше не заполняем — список site_ids редактируется в хабе
     take("groq_api_key", cfg.groq?.api_key);
     take("managerName",  cfg.manager_name);
     if (Object.keys(patch).length === 0) return;  // нечего восстанавливать
@@ -171,8 +171,7 @@ async function tryRestoreFromHub() {
     for (const [k, v] of Object.entries(patch)) {
       const idMap = {
         mr_login: "s-mr-login", mr_password: "s-mr-pass",
-        mr_site_ids: "s-mr-sites", groq_api_key: "s-groq",
-        managerName: "s-manager",
+        groq_api_key: "s-groq", managerName: "s-manager",
       };
       const el = document.getElementById(idMap[k]);
       if (el) el.value = v;
@@ -193,7 +192,7 @@ async function loadSettings() {
     set("s-hub-token", s.hub_token);
     set("s-mr-login",  s.mr_login);
     set("s-mr-pass",   s.mr_password);
-    set("s-mr-sites",  s.mr_site_ids);
+    // s-mr-sites больше нет в popup — site_ids теперь в /design/profile хаба.
     set("s-groq",      s.groq_api_key);
     set("s-manager",   s.managerName);
     // После загрузки — попробовать авто-восстановить креды с сервера
@@ -213,7 +212,6 @@ async function saveSettings() {
     hub_token:    get("s-hub-token").trim(),
     mr_login:     get("s-mr-login").trim(),
     mr_password:  get("s-mr-pass"),
-    mr_site_ids:  get("s-mr-sites").trim(),
     groq_api_key: get("s-groq").trim(),
     managerName:  get("s-manager").trim(),
   };
