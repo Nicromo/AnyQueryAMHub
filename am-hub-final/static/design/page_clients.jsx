@@ -361,6 +361,9 @@ function PageClient() {
             {/* Merchrules-дашборд — синонимы / whitelist / blacklist / merch-rules */}
             <ClientMerchrulesDashboard clientId={c.id}/>
 
+            {/* Голосовые заметки — запись/плеер/транскрипция */}
+            <ClientVoiceNotes clientId={c.id}/>
+
             {/* История партнёра — real /api/clients/{id}/logs */}
             <ClientLogsList clientId={c.id}/>
           </div>
@@ -2056,3 +2059,138 @@ function ClientMerchrulesDashboard({ clientId }) {
   );
 }
 window.ClientMerchrulesDashboard = ClientMerchrulesDashboard;
+
+
+// ── ClientVoiceNotes — запись в браузере + upload + плеер + транскрипция ────
+function ClientVoiceNotes({ clientId }) {
+  const [notes, setNotes] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [recording, setRecording] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const recorderRef = React.useRef(null);
+  const chunksRef = React.useRef([]);
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    fetch(`/api/clients/${clientId}/voice-notes`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : { items: [] })
+      .then(d => { setNotes(d.items || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [clientId]);
+  React.useEffect(() => { load(); }, [load]);
+
+  async function startRecord() {
+    setErr(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm"
+                 : MediaRecorder.isTypeSupported("audio/ogg") ? "audio/ogg" : "";
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+        await uploadBlob(blob);
+      };
+      rec.start();
+      recorderRef.current = rec;
+      setRecording(true);
+    } catch (e) {
+      setErr("Нет доступа к микрофону: " + (e.message || e));
+    }
+  }
+
+  function stopRecord() {
+    try { recorderRef.current && recorderRef.current.stop(); } catch (e) {}
+    setRecording(false);
+  }
+
+  async function uploadBlob(blob) {
+    setUploading(true); setErr(null);
+    try {
+      const ext = (blob.type.split("/")[1] || "webm").split(";")[0];
+      const fd = new FormData();
+      fd.append("client_id", String(clientId));
+      fd.append("audio", blob, `voice.${ext}`);
+      const r = await fetch("/api/voice-notes", {
+        method: "POST", credentials: "include", body: fd,
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      load();
+      window.appToast && window.appToast("✓ Голосовая заметка сохранена");
+    } catch (e) {
+      setErr(e.message || "upload failed");
+    } finally { setUploading(false); }
+  }
+
+  async function retranscribe(id) {
+    const r = await fetch(`/api/voice-notes/${id}/transcribe`, {
+      method: "POST", credentials: "include",
+    });
+    if (r.ok) { load(); window.appToast && window.appToast("✓ Перетранскрибировано"); }
+    else { window.appToast && window.appToast("Не удалось: HTTP " + r.status); }
+  }
+
+  async function removeNote(id) {
+    if (!window.confirm("Удалить заметку?")) return;
+    const r = await fetch(`/api/voice-notes/${id}`, {
+      method: "DELETE", credentials: "include",
+    });
+    if (r.ok) load();
+  }
+
+  return React.createElement(Card, {
+    title: "Голосовые заметки" + (notes.length ? ` · ${notes.length}` : ""),
+    actions: recording
+      ? React.createElement(Btn, { kind: "critical", size: "s", onClick: stopRecord }, "⏹ Стоп")
+      : React.createElement(Btn, { kind: "primary", size: "s", onClick: startRecord, disabled: uploading },
+          uploading ? "Загружаем…" : "🎙 Записать"),
+  },
+    err && React.createElement("div", { style: { fontSize: 11.5, color: "var(--critical)", marginBottom: 8 } }, err),
+
+    loading
+      ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5 } }, "Загружаем…")
+      : notes.length === 0
+        ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } },
+            "Пока нет заметок. Жми «Записать» или отправь voice в TG-бота.")
+        : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto" } },
+            notes.map((n) => React.createElement("div", {
+              key: n.id,
+              style: {
+                padding: "10px 12px", background: "var(--ink-2)",
+                border: "1px solid var(--line-soft)", borderRadius: 6,
+                display: "flex", flexDirection: "column", gap: 6,
+              },
+            },
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                n.audio_url && React.createElement("audio", {
+                  src: n.audio_url, controls: true,
+                  style: { height: 28, flex: 1 },
+                }),
+                React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } },
+                  n.created_at ? n.created_at.slice(0, 16).replace("T", " ") : ""),
+                React.createElement("button", {
+                  onClick: () => retranscribe(n.id),
+                  title: "Перетранскрибировать",
+                  style: { background: "transparent", border: "1px solid var(--line)", borderRadius: 3, color: "var(--ink-6)", cursor: "pointer", padding: "2px 6px", fontSize: 11 },
+                }, "🔁"),
+                React.createElement("button", {
+                  onClick: () => removeNote(n.id),
+                  title: "Удалить",
+                  style: { background: "transparent", border: "1px solid var(--line)", borderRadius: 3, color: "var(--ink-6)", cursor: "pointer", padding: "2px 6px", fontSize: 11 },
+                }, "✕"),
+              ),
+              React.createElement("div", {
+                style: {
+                  fontSize: 12.5, color: n.transcription ? "var(--ink-8)" : "var(--ink-5)",
+                  fontStyle: n.transcription ? "normal" : "italic",
+                  lineHeight: 1.5, whiteSpace: "pre-wrap",
+                },
+              }, n.transcription || "Транскрипция не готова (нужен GROQ_API_KEY)."),
+            )),
+          ),
+  );
+}
+window.ClientVoiceNotes = ClientVoiceNotes;
