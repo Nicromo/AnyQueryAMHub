@@ -956,3 +956,25 @@ class ClientBlacklistEntry(Base):
     last_synced   = Column(DateTime, nullable=True)
     updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     client        = relationship("Client", backref="blacklist_entries")
+
+
+# ── Client transfer request ─────────────────────────────────────────────────
+# Менеджер инициирует передачу клиента → AI-сводка → новый менеджер accept/decline.
+# Status: pending → accepted | declined | cancelled
+class ClientTransferRequest(Base):
+    __tablename__ = "client_transfer_requests"
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), nullable=False, index=True)
+    from_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    to_user_id   = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    ai_summary   = Column(Text, nullable=True)        # AI-сводка контекста клиента
+    manual_note  = Column(Text, nullable=True)        # Ручная заметка инициатора
+    status       = Column(String, default="pending", index=True)  # pending/accepted/declined/cancelled
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    resolved_at  = Column(DateTime, nullable=True)
+    resolved_by  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decline_reason = Column(Text, nullable=True)
+
+    client    = relationship("Client")
+    from_user = relationship("User", foreign_keys=[from_user_id])
+    to_user   = relationship("User", foreign_keys=[to_user_id])

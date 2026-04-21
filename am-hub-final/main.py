@@ -424,6 +424,19 @@ async def lifespan(app: FastAPI):
                         is_active BOOLEAN DEFAULT TRUE,
                         last_synced TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT NOW())""",
+                    # Client transfer requests (manager → manager with AI summary + accept)
+                    "client_transfer_requests": """CREATE TABLE IF NOT EXISTS client_transfer_requests (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER NOT NULL REFERENCES clients(id),
+                        from_user_id INTEGER NOT NULL REFERENCES users(id),
+                        to_user_id INTEGER NOT NULL REFERENCES users(id),
+                        ai_summary TEXT,
+                        manual_note TEXT,
+                        status VARCHAR DEFAULT 'pending',
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        resolved_at TIMESTAMP,
+                        resolved_by INTEGER REFERENCES users(id),
+                        decline_reason TEXT)""",
                 }
                 for tname, tsql in _new_tables.items():
                     db.execute(_text(tsql))
@@ -578,8 +591,11 @@ from routers import onboarding as onboarding_flow_router
 from routers import scope_and_groups as scope_router
 from routers import merchrules_dashboard as mr_dashboard_router
 from routers import voice_notes as voice_notes_router
+from routers import client_transfer as client_transfer_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
+app.include_router(client_transfer_router.router, tags=["client-transfer"])
+app.include_router(client_transfer_router.router, tags=["client-transfer"])
 app.include_router(mr_dashboard_router.router, tags=["merchrules-dashboard"])
 app.include_router(voice_notes_router.router, tags=["voice-notes"])
 
