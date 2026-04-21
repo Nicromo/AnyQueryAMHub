@@ -191,7 +191,6 @@ async def api_delete_meeting(
 
     # Cancel связанные автотаски (meeting_prep/followup/qbr_prep для этой встречи).
     try:
-        from sqlalchemy import or_
         keys = [f"meeting_prep:{meeting.id}",
                 f"meeting_followup:{meeting.id}",
                 f"qbr_prep:{meeting.id}"]
@@ -204,6 +203,15 @@ async def api_delete_meeting(
             t.status = "cancelled"
     except Exception as e:
         logger.warning(f"cancel autotasks on meeting delete failed: {e}")
+
+    # Отвязываем обычные задачи, созданные из этой встречи (Task.meeting_id)
+    # — не удаляем, задача может быть независимо важна; просто снимаем ссылку.
+    try:
+        orphans = db.query(Task).filter(Task.meeting_id == meeting.id).all()
+        for t in orphans:
+            t.meeting_id = None
+    except Exception as e:
+        logger.warning(f"detach orphan tasks from meeting failed: {e}")
 
     db.delete(meeting)
     db.commit()

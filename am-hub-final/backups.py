@@ -114,6 +114,8 @@ def cleanup_old_backups(out_dir: Path = BACKUP_DIR, keep_days: int = 30) -> int:
     for p in out_dir.glob("*.json.gz"):
         mt = datetime.fromtimestamp(p.stat().st_mtime)
         if mt < cutoff:
-            try: p.unlink(); removed += 1
-            except Exception: pass
+            try:
+                p.unlink(); removed += 1
+            except Exception as e:
+                logger.warning(f"cleanup_old_backups: cannot unlink {p}: {e}")
     return removed

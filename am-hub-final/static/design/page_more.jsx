@@ -568,9 +568,16 @@ window.TaskDetailModal = TaskDetailModal;
 function PageMeetings() {
   const MT = (typeof window !== "undefined" && window.MEETINGS) || [];
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
   const [meetModal, setMeetModal] = React.useState(null); // null or {type, label, dur}
+  const [scope, setScope] = React.useState(() => (typeof localStorage !== "undefined" ? (localStorage.getItem("amhub_meetings_scope") || "all") : "all"));
 
-  // Маппинг из window.MEETINGS (server-shape: {when, day, client, type, seg, mood, is_past})
+  const setScopeAndStore = (s) => {
+    setScope(s);
+    try { localStorage.setItem("amhub_meetings_scope", s); } catch (e) {}
+  };
+
+  // Маппинг из window.MEETINGS (server-shape: {when, day, client, type, seg, mood, is_past, manager_email})
   // в UI-shape: {d, cl, kind, seg, who, ch, mood, is_past}.
   const meets = MT.map(m => ({
     d: `${m.day || "—"} · ${m.when || ""}`.trim(),
@@ -581,7 +588,8 @@ function PageMeetings() {
     ch: "",     // channel не в шаблоне сервера
     mood: m.mood || "ok",
     is_past: !!m.is_past,
-  }));
+    manager_email: m.manager_email || "",
+  })).filter(m => scope === "all" ? true : (m.manager_email === (U.email || "")));
 
   const upcoming = meets.filter(m => !m.is_past);
   // past уже приходит с сервера отсортированным desc; сохраняем порядок
@@ -595,7 +603,11 @@ function PageMeetings() {
     <div>
       <TopBar breadcrumbs={["am hub","встречи"]} title="Встречи"
         subtitle={total > 0 ? `${total} предстоящих · ${past.length} прошедших · ${withRisk} с риском · ${withOk} ок` : (past.length > 0 ? `0 предстоящих · ${past.length} прошедших` : "Нет встреч")}
-        actions={<><Btn kind="ghost" size="m">Все</Btn><Btn kind="dim" size="m">Мои</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setMeetModal({ type: "sync", label: "Встреча", dur: 30 })}>Запланировать</Btn></>}/>
+        actions={<>
+          <Btn kind={scope === "all" ? "primary" : "ghost"} size="m" onClick={() => setScopeAndStore("all")}>Все</Btn>
+          <Btn kind={scope === "mine" ? "primary" : "ghost"} size="m" onClick={() => setScopeAndStore("mine")}>Мои</Btn>
+          <Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setMeetModal({ type: "sync", label: "Встреча", dur: 30 })}>Запланировать</Btn>
+        </>}/>
       {meetModal && (
         <FormModal
           title={"Запланировать · " + meetModal.label}
@@ -718,6 +730,11 @@ function PageMeetings() {
 // ── Portfolio ─────────────────────────────────────────────
 function PagePortfolio() {
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const [groupBy, setGroupBy] = React.useState("segment"); // "segment" | "manager"
+  const scrollTo = (id) => {
+    const el = document.getElementById(id);
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   // Группируем реальных клиентов по сегментам
   const segs = [
@@ -757,9 +774,15 @@ function PagePortfolio() {
     <div>
       <TopBar breadcrumbs={["am hub","портфель"]} title="Портфель · структура"
         subtitle={`${CL.length} клиентов · ${totalFmt} · ${pms.length} ${pms.length === 1 ? "менеджер" : "менеджеров"}`}
-        actions={<><Btn kind="ghost" size="m">По сегменту</Btn><Btn kind="dim" size="m">По менеджеру</Btn><Btn kind="primary" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF</Btn></>}/>
+        actions={<>
+          <Btn kind={groupBy === "segment" ? "primary" : "ghost"} size="m"
+            onClick={() => { setGroupBy("segment"); scrollTo("portfolio-segments"); }}>По сегменту</Btn>
+          <Btn kind={groupBy === "manager" ? "primary" : "ghost"} size="m"
+            onClick={() => { setGroupBy("manager"); scrollTo("portfolio-managers"); }}>По менеджеру</Btn>
+          <Btn kind="primary" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF</Btn>
+        </>}/>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12 }}>
+        <div id="portfolio-segments" style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12 }}>
           {segs.map((s,i)=>(
             <div key={i} style={{ padding: 16, background: "var(--ink-2)", border: "1px solid var(--line)", borderLeft: `3px solid var(--${s.t})`, borderRadius: 6 }}>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>сегмент</div>
@@ -770,7 +793,7 @@ function PagePortfolio() {
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        <div id="portfolio-managers" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
           <Card title="Распределение по менеджерам">
             {pms.length === 0 && (
               <div style={{ padding: "22px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>

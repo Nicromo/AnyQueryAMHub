@@ -347,8 +347,10 @@ async def api_checklist(
 
     path = str(request.url.path)
     body = {}
-    try: body = await request.json()
-    except: pass
+    try:
+        body = await request.json()
+    except Exception as _e:
+        logger.debug(f"request body parse: {_e}")
 
     from sqlalchemy.orm.attributes import flag_modified
     settings = dict(user.settings or {})
@@ -455,8 +457,10 @@ async def v2_create_checkup(
     from models import CheckupV2
     due = None
     if body.get("due_date"):
-        try: due = datetime.fromisoformat(str(body["due_date"])[:19])
-        except Exception: pass
+        try:
+            due = datetime.fromisoformat(str(body["due_date"])[:19])
+        except Exception as _e:
+            logger.warning(f"due_date parse failed ({body.get('due_date')!r}): {_e}")
     c = CheckupV2(
         client_id=client_id,
         name=body.get("name") or f"Чек-ап {datetime.utcnow().strftime('%b %Y')}",
@@ -511,8 +515,10 @@ async def v2_update_checkup(
         if field in body:
             setattr(c, field, body[field])
     if "due_date" in body and body["due_date"]:
-        try: c.due_date = datetime.fromisoformat(str(body["due_date"])[:19])
-        except Exception: pass
+        try:
+            c.due_date = datetime.fromisoformat(str(body["due_date"])[:19])
+        except Exception as _e:
+            logger.warning(f"update due_date parse failed ({body.get('due_date')!r}): {_e}")
     db.commit(); db.refresh(c)
     return _checkup_dict(c)
 

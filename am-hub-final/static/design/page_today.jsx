@@ -36,8 +36,24 @@ function PageToday() {
         title={`Сегодня · ${dateLabel}`}
         subtitle={`${todayMeetings.length} ${todayMeetings.length === 1 ? "встреча" : "встреч"} · ${todayTasks.length} задач на сегодня · ${overdueTasks.length} просрочено`}
         actions={<>
-          <Btn kind="ghost" size="m" icon={<I.mic size={14}/>}>Голосовая заметка</Btn>
-          <Btn kind="primary" size="m" icon={<I.lightning size={14}/>}>Сгенерить план</Btn>
+          <Btn kind="ghost" size="m" icon={<I.mic size={14}/>}
+            onClick={() => { window.location.href = "/design/cabinet?tab=voice"; }}>
+            Голосовая заметка
+          </Btn>
+          <Btn kind="primary" size="m" icon={<I.lightning size={14}/>}
+            onClick={async () => {
+              try {
+                const r = await fetch("/api/ai/generate-daily-plan", {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({}),
+                });
+                if (r.ok) { window.appToast && window.appToast("План готов"); window.location.reload(); }
+                else { window.appToast && window.appToast("Не удалось сгенерировать"); }
+              } catch (e) { window.appToast && window.appToast("Ошибка сети"); }
+            }}>
+            Сгенерить план
+          </Btn>
         </>}
       />
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 340px", gap: 18 }}>

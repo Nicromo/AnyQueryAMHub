@@ -122,8 +122,9 @@ def ai_draft(metrics: Dict[str, Any], deltas: Dict[str, Any], client) -> Dict[st
     try:
         from ai_assistant import generate_qbr_draft
         return generate_qbr_draft(client, metrics, deltas)
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging as _l
+        _l.getLogger(__name__).warning(f"ai_draft fallback to heuristic: {_e}")
     # Фоллбек: эвристика
     ach, iss, goals = [], [], []
     totals = metrics.get("totals") or {}

@@ -667,8 +667,10 @@ async def api_sync_merchrules(
         _log_sync(db, "merchrules", "error", message=str(e))
         return {"error": str(e)}
     finally:
-        try: await hx.aclose()
-        except Exception: pass
+        try:
+            await hx.aclose()
+        except Exception as _e:
+            logger.warning(f"httpx aclose failed: {_e}")
 
 
 
@@ -691,6 +693,33 @@ async def api_get_mr_creds(db: Session = Depends(get_db), auth_token: Optional[s
 
 # ============================================================================
 # API: TASK CRUD
+
+@router.post("/api/tickets/sync")
+async def api_tickets_sync(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Ручной синк тикетов из Tbank Time (Mattermost) для текущего менеджера."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+    try:
+        from integrations.tbank_time import ingest_tickets
+    except Exception as e:
+        raise HTTPException(503, f"tbank_time integration not available: {e}")
+    try:
+        result = await ingest_tickets(db, user, limit_new=100, fetch_threads=True)
+        return {"ok": True, "result": result}
+    except Exception as e:
+        logger.error(f"tickets sync failed for {user.email}: {e}")
+        raise HTTPException(500, f"sync failed: {e}")
+
 
 @router.get("/api/sync/status")
 async def api_sync_status(
