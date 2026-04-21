@@ -667,6 +667,21 @@ function showBox(id, msg, type) {
 
 init();
 
+// Live-refresh статуса токенов: как только background пишет last_*_token или
+// mr_last_* — перерисовываем карточки сразу, без перезагрузки popup.
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    const keys = Object.keys(changes);
+    const relevant = keys.some(k =>
+      k === "last_time_token" || k === "last_ktalk_token" ||
+      k === "mr_last_status"  || k === "mr_last_message"  ||
+      k === "mr_login"        || k === "mr_password"
+    );
+    if (relevant) refreshTokenStatus();
+  });
+} catch (_) {}
+
 // ── Журнал действий расширения: live update из background ──────────────────
 const AMH_LOG_KEY = "amhub_actions";
 const AMH_LOG_MAX_RENDER = 50;
