@@ -105,6 +105,7 @@ PAGES_DATA_MAP = {
     "integrations": [],
     "profile":    [],
     "assignments": ["clients"],
+    "client-groups": ["clients"],
 }
 
 
@@ -134,6 +135,7 @@ PAGES = {
     "assignments":("PageAssignments",["am hub", "админ", "назначения"],    "Назначения клиентов"),
     "groups":    ("PageManagerGroups",["am hub", "админ", "группы"],       "Группы менеджеров"),
     "renewal":   ("PageRenewal",    ["am hub", "клиенты", "renewal"],      "Renewal pipeline"),
+    "client-groups": ("PageClientGroups", ["am hub", "админ", "ГК"],       "Группы компаний"),
 }
 
 
