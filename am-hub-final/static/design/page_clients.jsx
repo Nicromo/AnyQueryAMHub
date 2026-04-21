@@ -32,27 +32,14 @@ function PageClients() {
   });
   const phantomCount = CL_RAW.filter(_isPhantomClient).length;
   const CL = hidePhantom ? CL_RAW.filter(c => !_isPhantomClient(c)) : CL_RAW;
-  // Tab switcher: список клиентов vs структура портфеля (бывшая страница /portfolio).
-  const [view, setView] = React.useState(() => {
-    try { return sessionStorage.getItem("amhub_portfolio_view") || "list"; } catch (_) { return "list"; }
+  // Сворачиваемость блока «Структура» (сверху страницы)
+  const [structureCollapsed, setStructureCollapsed] = React.useState(() => {
+    try { return localStorage.getItem("amhub_structure_collapsed") === "1"; } catch (_) { return false; }
   });
-  const switchView = (v) => {
-    setView(v);
-    try { sessionStorage.setItem("amhub_portfolio_view", v); } catch (_) {}
-  };
-
-  // Если выбран режим «структура», рендерим PagePortfolio (глобальный компонент).
-  if (view === "structure" && typeof window.PagePortfolio === "function") {
-    return React.createElement("div", null,
-      React.createElement("div", {
-        style: { padding: "16px 28px 0 28px", display: "flex", gap: 8 },
-      },
-        React.createElement(Btn, { kind: "dim",     size: "s", onClick: () => switchView("list") },      "Список"),
-        React.createElement(Btn, { kind: "primary", size: "s", onClick: () => switchView("structure") }, "Структура"),
-      ),
-      React.createElement(window.PagePortfolio),
-    );
-  }
+  const toggleStructure = () => setStructureCollapsed(v => {
+    const nv = !v; try { localStorage.setItem("amhub_structure_collapsed", nv ? "1" : "0"); } catch (_) {}
+    return nv;
+  });
 
   // Сегменты — реальные из models.py (ENT, SME+, SME, SME-, SMB, SS).
   // Плюс виртуальные: NEW (недавно добавлен) и RISK (churn).
@@ -105,8 +92,10 @@ function PageClients() {
         subtitle={`${P.total} клиентов · стр. ${P.page} из ${P.total_pages}`}
         actions={
           <>
-            <Btn kind="primary" size="m" onClick={() => switchView("list")}>Список</Btn>
-            <Btn kind="ghost"   size="m" onClick={() => switchView("structure")}>Структура</Btn>
+            <Btn kind="ghost" size="m" onClick={toggleStructure}
+              title={structureCollapsed ? "Показать структуру сверху" : "Свернуть блок структуры"}>
+              {structureCollapsed ? "▼ Структура" : "▲ Структура"}
+            </Btn>
             <Btn kind="ghost" size="m" onClick={pullFromAirtable} disabled={syncBusy}>
               {syncBusy ? "Тянем..." : "⟲ Из Airtable"}
             </Btn>
@@ -162,6 +151,12 @@ function PageClients() {
         }
       />
       <div style={{ padding: "22px 28px 40px" }}>
+        {/* Структура портфеля — сверху, схлопывается через кнопку */}
+        {!structureCollapsed && typeof window.PortfolioStructureSummary === "function" && (
+          <div style={{ marginBottom: 22, paddingBottom: 18, borderBottom: "1px solid var(--line-soft)" }}>
+            {React.createElement(window.PortfolioStructureSummary, { clients: CL })}
+          </div>
+        )}
         {selectedIds.size > 0 && (
           <BulkToolbar selectedIds={selectedIds} onClear={clearSel} busy={bulkBusy} setBusy={setBulkBusy}/>
         )}
