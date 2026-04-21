@@ -455,6 +455,15 @@ async def lifespan(app: FastAPI):
                     db.execute(_text("CREATE INDEX IF NOT EXISTS ix_clients_group_id ON clients(group_id)"))
                 except Exception as _cge:
                     logger.warning(f"clients.group_id migration skipped: {_cge}")
+                # client_onboarding_progress.skipped — чтобы клиенты с «уже был онбординг»
+                # могли отметить что дальнейшие шаги не нужны.
+                try:
+                    db.execute(_text("ALTER TABLE client_onboarding_progress ADD COLUMN IF NOT EXISTS skipped BOOLEAN DEFAULT FALSE"))
+                    db.execute(_text("ALTER TABLE client_onboarding_progress ADD COLUMN IF NOT EXISTS skipped_at TIMESTAMP"))
+                    db.execute(_text("ALTER TABLE client_onboarding_progress ADD COLUMN IF NOT EXISTS skipped_by VARCHAR"))
+                    db.execute(_text("ALTER TABLE client_onboarding_progress ADD COLUMN IF NOT EXISTS skipped_reason VARCHAR"))
+                except Exception as _oe:
+                    logger.warning(f"onboarding_progress.skipped migration skipped: {_oe}")
                 db.commit()
                 # Индекс для идемпотентного upsert по airtable_site_id
                 try:

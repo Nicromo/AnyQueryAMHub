@@ -837,6 +837,12 @@ class ClientOnboardingProgress(Base):
     current_step   = Column(Integer, default=0)     # 0..10, 10 = всё отправлено
     next_send_date = Column(Date, nullable=True)    # когда планируется следующее сообщение
     completed_at   = Column(DateTime, nullable=True)
+    # «Онбординг не нужен» — для клиентов, у которых уже был онбординг до AM Hub.
+    # UI: чекбокс на карточке. Если true — блок онбординга скрыт, автотаски не создаются.
+    skipped        = Column(Boolean, default=False)
+    skipped_at     = Column(DateTime, nullable=True)
+    skipped_by     = Column(String, nullable=True)
+    skipped_reason = Column(String, nullable=True)
 
     client = relationship("Client", backref="onboarding_progress_client")
 
