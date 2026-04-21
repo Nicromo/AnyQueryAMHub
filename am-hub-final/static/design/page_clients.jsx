@@ -1856,6 +1856,26 @@ function ClientOnboardingCard({ clientId }) {
     }).then(() => load());
   };
 
+  const skip = async () => {
+    const reason = window.prompt("Причина (опц.): например «уже был онбординг»", "уже был онбординг");
+    if (reason === null) return;  // отмена
+    await fetch(`/api/clients/${clientId}/onboarding/skip`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skip: true, reason }),
+    });
+    load();
+  };
+
+  const unskip = async () => {
+    await fetch(`/api/clients/${clientId}/onboarding/skip`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skip: false }),
+    });
+    load();
+  };
+
   const markSent = () => {
     fetch(`/api/clients/${clientId}/onboarding/mark-sent`, {
       method: "POST", credentials: "include",
@@ -1867,12 +1887,27 @@ function ClientOnboardingCard({ clientId }) {
       React.createElement("div", { style: { color: "var(--ink-5)", fontSize: 12.5 } }, "Загружаем…"));
   }
 
+  // Skipped — показываем компактный бейдж + кнопку «Вернуть»
+  if (data && data.skipped) {
+    return React.createElement(Card, { title: "Онбординг" },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+        React.createElement(Badge, { tone: "neutral", dot: true }, "Онбординг не нужен"),
+        data.skipped_reason && React.createElement("span", { style: { fontSize: 12, color: "var(--ink-6)" } },
+          "· " + data.skipped_reason),
+        React.createElement("div", { style: { flex: 1 } }),
+        React.createElement(Btn, { kind: "ghost", size: "s", onClick: unskip }, "↩ Вернуть онбординг"),
+      )
+    );
+  }
+
   if (!data || !data.active && !data.completed_at) {
     return React.createElement(Card, { title: "Онбординг" },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
         React.createElement("div", { style: { flex: 1, fontSize: 12.5, color: "var(--ink-6)" } },
           "Онбординг ещё не запущен. 10 сообщений × 5 недель, по 2 в неделю."),
-        React.createElement(Btn, { kind: "primary", size: "s", onClick: start }, "Запустить онбординг"),
+        React.createElement(Btn, { kind: "ghost", size: "s", onClick: skip, title: "Клиенту онбординг уже провели раньше" },
+          "Не нужен"),
+        React.createElement(Btn, { kind: "primary", size: "s", onClick: start }, "Запустить"),
       )
     );
   }

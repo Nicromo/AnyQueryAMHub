@@ -183,21 +183,22 @@ async def fetch_site_tasks(
 async def fetch_site_meetings(
     client: httpx.AsyncClient, headers: dict, site_id: str
 ) -> dict:
-    """Получаем последние встречи для site_id."""
-    result = {"last_meeting": None, "meetings_count": 0}
+    """Получаем встречи для site_id за последние 180 дней + возвращаем raw-список
+    для последующего upsert в Meeting-таблицу."""
+    result = {"last_meeting": None, "meetings_count": 0, "raw": []}
     try:
         resp = await client.get(
             f"{MERCHRULES_URL}/backend-v2/meetings",
-            params={"site_id": site_id, "limit": 5},
+            params={"site_id": site_id, "limit": 100},
             headers=headers,
-            timeout=15,
+            timeout=20,
         )
         if resp.status_code == 200:
             data = resp.json()
             meetings = data if isinstance(data, list) else data.get("meetings") or data.get("items") or []
             result["meetings_count"] = len(meetings)
+            result["raw"] = meetings
             if meetings:
-                # Берём самую свежую встречу
                 dates = [
                     m.get("date") or m.get("meeting_date") or m.get("createdAt", "")[:10]
                     for m in meetings
@@ -209,6 +210,52 @@ async def fetch_site_meetings(
         logger.warning("fetch_site_meetings(%s) error: %s", site_id, exc)
 
     return result
+
+
+def upsert_meeting_from_raw(db, client_id: int, raw: dict) -> bool:
+    """Создаёт/обновляет Meeting из raw-dict'а Merchrules API.
+    Ключи которые мы знаем: id, date/meeting_date/createdAt, type, title, summary, mood.
+    Возвращает True если запись создана/обновлена."""
+    from models import Meeting
+    ext_id = str(raw.get("id") or raw.get("meeting_id") or raw.get("_id") or "")
+    if not ext_id:
+        return False
+    date_raw = raw.get("date") or raw.get("meeting_date") or raw.get("createdAt") or ""
+    dt = None
+    try:
+        if isinstance(date_raw, str):
+            dt = datetime.fromisoformat(date_raw.replace("Z", "").split(".")[0])
+    except Exception:
+        dt = None
+    if dt is None:
+        return False
+    existing = db.query(Meeting).filter(
+        Meeting.external_id == ext_id,
+        Meeting.client_id == client_id,
+    ).first()
+    if existing:
+        # Обновляем только "мягкие" поля (не затираем followup_text если есть)
+        existing.date = dt
+        existing.type = raw.get("type") or existing.type or "sync"
+        existing.title = raw.get("title") or existing.title
+        if not existing.summary and raw.get("summary"):
+            existing.summary = raw.get("summary")
+        if raw.get("mood"):
+            existing.mood = raw.get("mood")
+        return True
+    m = Meeting(
+        client_id=client_id,
+        external_id=ext_id,
+        date=dt,
+        type=raw.get("type") or "sync",
+        title=raw.get("title") or "",
+        summary=raw.get("summary") or "",
+        source="merchrules",
+        mood=raw.get("mood"),
+        followup_status="pending",
+    )
+    db.add(m)
+    return True
 
 
 # ── Публичный API ─────────────────────────────────────────────────────────────

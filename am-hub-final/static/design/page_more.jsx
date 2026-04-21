@@ -1232,6 +1232,27 @@ function PageAI() {
   const dateLabel = now.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const user = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
 
+  // Библиотека предзаданных промптов — грамотно сформулированные запросы к AI
+  // с учётом конкретно наших данных (портфель клиентов, метрики, встречи).
+  const PRESET_PROMPTS = [
+    { k: "risk",    t: "Топ-10 клиентов в зоне риска",
+      prompt: "Проанализируй мой портфель и дай ТОП-10 клиентов в наибольшей зоне риска. Для каждого: имя, health_score, причина риска (падение метрик, отсутствие встреч, NPS≤6, нет оплаты, и т.д.) и рекомендуемое действие на ближайшие 7 дней. Ответ в виде таблицы." },
+    { k: "nba",     t: "Next Best Action по всему портфелю",
+      prompt: "Составь приоритизированный список Next Best Action для моего портфеля на эту неделю. Для каждого действия: клиент, тип (встреча/follow-up/upsell/фикс), ожидаемый результат (MRR impact / снижение риска), срочность (1-5). Максимум 15 пунктов." },
+    { k: "qbr",     t: "Кому пора QBR",
+      prompt: "Покажи клиентов, у которых не было QBR более 3 месяцев. Отсортируй по приоритету: сначала ENT и SME+ с высоким MRR. Для каждого — дата последнего QBR и рекомендация когда провести следующий." },
+    { k: "upsell",  t: "Где видно возможность upsell",
+      prompt: "Проанализируй метрики и активность клиентов. Найди клиентов с признаками для upsell: рост GMV 20%+ за 90 дней, health ≥ 70, NPS ≥ 8, open tickets мало. Для каждого — конкретное предложение (какой продукт/модуль добавить) и ожидаемый MRR delta." },
+    { k: "churn",   t: "Прогноз churn на квартал",
+      prompt: "Сделай прогноз churn-риска на ближайший квартал. Группировка: высокий/средний/низкий риск. Критерии: падение health, отсутствие контакта >30д, просроченная оплата, NPS≤6, snapshot MRR снижается. Для каждого клиента — вероятность churn (в %) и какая одна ключевая метрика это показывает." },
+    { k: "search",  t: "Качество поиска по портфелю",
+      prompt: "Сводка по качеству поиска в моём портфеле: % нулевых запросов, % запросов с низкой позицией (auto_score ≤ 1), клиенты с наихудшими показателями. Для топ-5 худших — что порекомендовать: merch-правила / синонимы / whitelist." },
+    { k: "nps",     t: "NPS-детракторы — план работы",
+      prompt: "Найди всех клиентов с NPS ≤ 6 за последние 90 дней. Для каждого: дата и скор NPS, комментарий клиента, как давно с ним не созванивались, 1-3 конкретных действия для повышения лояльности." },
+    { k: "brief",   t: "Бриф на неделю",
+      prompt: "Составь бриф на текущую неделю: встречи (что там обсудить), критические клиенты (что делать), ожидаемые сложности, 3 главных приоритета. Коротко, по делу, я AM-менеджер." },
+  ];
+
   return (
     <div>
       <TopBar breadcrumbs={["am hub","ai-ассистент"]} title="AI-ассистент"
@@ -1239,10 +1260,29 @@ function PageAI() {
         actions={<><Btn kind={showHistory ? "primary" : "ghost"} size="m" icon={<I.doc size={14}/>} onClick={() => setShowHistory(v => !v)}>История</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={newSession}>+ Новая сессия</Btn></>}/>
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
         <Card title={`Диалог · ${dateLabel}`} action={<Badge tone="signal">data-grounded</Badge>}>
+          {messages.length === 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                Готовые запросы по твоим данным
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+                {PRESET_PROMPTS.map(p => React.createElement("button", {
+                  key: p.k,
+                  onClick: () => send(p.prompt),
+                  style: {
+                    textAlign: "left", padding: "10px 12px",
+                    background: "var(--ink-2)", border: "1px solid var(--line-soft)",
+                    borderRadius: 4, color: "var(--ink-8)", fontSize: 12.5,
+                    cursor: "pointer",
+                  },
+                }, p.t))}
+              </div>
+            </div>
+          )}
           <div ref={listRef} style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: 540, minHeight: 200, overflow: "auto" }}>
             {messages.length === 0 && (
-              <div style={{ padding: "40px 20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
-                Задайте первый вопрос — ассистент отвечает с учётом данных вашего портфеля.
+              <div style={{ padding: "20px", color: "var(--ink-6)", textAlign: "center", fontSize: 13 }}>
+                Или задай свой вопрос — ассистент отвечает с учётом данных твоего портфеля.
               </div>
             )}
             {messages.map((m, i) => (
@@ -1321,12 +1361,24 @@ function PageKPI() {
     return () => { cancelled = true; };
   }, []);
 
+  const rub = (v) => {
+    if (v == null) return "—";
+    if (v >= 1_000_000) return `₽ ${(v/1_000_000).toFixed(1)}м`;
+    if (v >= 1_000) return `₽ ${Math.round(v/1000)}к`;
+    return `₽ ${Math.round(v)}`;
+  };
   const kpis = [
     {
       l: "NRR",
       v: summary && summary.nrr != null ? `${summary.nrr}%` : "—",
       sub: "MRR this / prev month",
       tone: !summary || summary.nrr == null ? "neutral" : summary.nrr >= 100 ? "ok" : summary.nrr >= 90 ? "warn" : "critical",
+    },
+    {
+      l: "Портфель MRR",
+      v: summary ? rub(summary.portfolio_mrr) : "—",
+      sub: summary ? `${summary.clients_total} клиентов` : "…",
+      tone: "signal",
     },
     {
       l: "NPS",
@@ -1339,6 +1391,20 @@ function PageKPI() {
       v: summary ? `${summary.clients_ok}/${summary.clients_total}` : "—",
       sub: "health ≥ 70%",
       tone: "signal",
+    },
+    {
+      l: "Встреч за 60 дней",
+      v: summary ? String(summary.meetings_past_60d || 0) : "—",
+      sub: summary && summary.next_meeting && summary.next_meeting.date ?
+        `след. ${summary.next_meeting.date.slice(0, 10)} · ${summary.next_meeting.client_name || "—"}` :
+        "нет предстоящих",
+      tone: "info",
+    },
+    {
+      l: "Открытых задач",
+      v: summary ? String(summary.open_tasks || 0) : "—",
+      sub: summary && summary.overdue_tasks > 0 ? `${summary.overdue_tasks} просрочено` : "в срок",
+      tone: summary && summary.overdue_tasks > 0 ? "warn" : "ok",
     },
     {
       l: "Просроченные встречи",
@@ -1358,11 +1424,11 @@ function PageKPI() {
             Ошибка загрузки KPI: {summaryErr}
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           {kpis.map((k,i)=>(
             <div key={i} style={{ padding: 18, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 }}>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{k.l}</div>
-              <div style={{ fontSize: 34, fontWeight: 500, color: `var(--${k.tone})`, letterSpacing: "-0.03em", lineHeight: 1, marginTop: 8 }}>{k.v}</div>
+              <div style={{ fontSize: 28, fontWeight: 500, color: `var(--${k.tone})`, letterSpacing: "-0.03em", lineHeight: 1.1, marginTop: 8 }}>{k.v}</div>
               <div className="mono" style={{ fontSize: 11, color: "var(--ink-6)", marginTop: 6 }}>{k.sub}</div>
             </div>
           ))}

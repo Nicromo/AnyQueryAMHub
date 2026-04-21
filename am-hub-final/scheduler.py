@@ -211,16 +211,23 @@ async def job_sync_merchrules():
                         except Exception as e:
                             logger.debug(f"Tasks fetch failed for {site_id}: {e}")
 
-                        # Meetings — last date
+                        # Meetings — upsert в БД все встречи за ~180 дней,
+                        # плюс обновляем last_meeting_date у клиента.
                         try:
                             r_m = await hx.get(
                                 f"{base_url}/backend-v2/meetings",
-                                params={"site_id": site_id, "limit": 10},
-                                headers=headers, timeout=15,
+                                params={"site_id": site_id, "limit": 100},
+                                headers=headers, timeout=20,
                             )
                             if r_m.status_code == 200:
                                 md = r_m.json()
                                 ml = md.get("meetings") or md.get("items") or (md if isinstance(md, list) else [])
+                                try:
+                                    from merchrules_sync import upsert_meeting_from_raw
+                                    for raw in ml:
+                                        upsert_meeting_from_raw(db, c.id, raw)
+                                except Exception as _uex:
+                                    logger.debug(f"meeting upsert failed: {_uex}")
                                 dates = [str(m.get("date") or m.get("meeting_date") or "")[:19]
                                          for m in ml if m.get("date") or m.get("meeting_date")]
                                 if dates:
@@ -1056,7 +1063,10 @@ def job_auto_task_rules():
         logger.warning(f"auto_actions not available: {e}")
         return
     planned = {"health_drop", "days_no_contact", "checkup_due",
-               "payment_overdue", "nps_low", "task_blocked_days"}
+               "payment_overdue", "nps_low", "task_blocked_days",
+               # новые триггеры
+               "mrr_drop", "contract_expiring", "ticket_spike", "upsell_window",
+               "stale_followup"}
     with SessionLocal() as db:
         rules = db.query(AutoTaskRule).filter(AutoTaskRule.is_active == True).all()
         now = datetime.utcnow()
@@ -1081,6 +1091,55 @@ def job_auto_task_rules():
                     match = getattr(c, "payment_status", None) == "overdue"
                 elif r.trigger == "nps_low":
                     match = c.nps_last is not None and c.nps_last <= cfg.get("threshold", 6)
+                elif r.trigger == "mrr_drop":
+                    # Сравниваем текущий MRR с MRR 30 дней назад из RevenueEntry.
+                    # threshold_pct=20 → падение на 20%+ триггерит.
+                    try:
+                        from models import RevenueEntry
+                        prev_month = (now - timedelta(days=30)).strftime("%Y-%m")
+                        prev = (db.query(RevenueEntry)
+                                  .filter(RevenueEntry.client_id == c.id,
+                                          RevenueEntry.period == prev_month)
+                                  .first())
+                        if prev and prev.mrr and c.mrr is not None:
+                            drop_pct = (1 - (c.mrr / prev.mrr)) * 100
+                            match = drop_pct >= cfg.get("threshold_pct", 20)
+                    except Exception:
+                        pass
+                elif r.trigger == "contract_expiring":
+                    if c.contract_end:
+                        days_left = (c.contract_end - now.date()).days
+                        match = 0 <= days_left <= cfg.get("days", 30)
+                elif r.trigger == "ticket_spike":
+                    match = (c.open_tickets or 0) >= cfg.get("threshold", 5)
+                elif r.trigger == "upsell_window":
+                    # Кандидат в upsell: health ≥ threshold_health, нет активного
+                    # UpsellEvent, последний NPS ≥ 8 (если есть).
+                    if (c.health_score or 0) >= cfg.get("threshold_health", 0.75):
+                        try:
+                            from models import UpsellEvent
+                            has_active = (db.query(UpsellEvent)
+                                            .filter(UpsellEvent.client_id == c.id,
+                                                    UpsellEvent.status.in_(["identified", "in_progress"]))
+                                            .first() is not None)
+                            nps_ok = (c.nps_last is None) or (c.nps_last >= 8)
+                            match = not has_active and nps_ok
+                        except Exception:
+                            pass
+                elif r.trigger == "stale_followup":
+                    # Прошла встреча, но follow-up не отправлен > N дней назад
+                    try:
+                        from models import Meeting
+                        cutoff = now - timedelta(days=cfg.get("days", 3))
+                        stale = (db.query(Meeting)
+                                   .filter(Meeting.client_id == c.id,
+                                           Meeting.followup_status != "sent",
+                                           Meeting.followup_skipped == False,
+                                           Meeting.date < cutoff)
+                                   .first())
+                        match = stale is not None
+                    except Exception:
+                        pass
                 if match:
                     try:
                         execute_actions(db, r, c)

@@ -11,7 +11,28 @@ function _pga(str) {
 }
 
 function PageAnalytics() {
-  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const CL_ALL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  // Фильтры по сегменту и по конкретному клиенту (точечная аналитика)
+  const [segFilter, setSegFilter] = React.useState(() => {
+    try { return localStorage.getItem("amhub_analytics_seg") || "all"; } catch (_) { return "all"; }
+  });
+  const [clientFilter, setClientFilter] = React.useState("");
+  const _setSeg = (v) => { setSegFilter(v); try { localStorage.setItem("amhub_analytics_seg", v); } catch (_) {} };
+
+  const _canon = (raw) => {
+    const s = (raw || "").toUpperCase().replace(/\s+/g, "");
+    if (s === "SME-") return "SME";
+    return s;
+  };
+  const CL = CL_ALL.filter(c => {
+    if (clientFilter) return String(c.id) === String(clientFilter);
+    if (segFilter === "all") return true;
+    return _canon(c.segment) === segFilter;
+  });
+
+  const SEGS = ["all", "ENT", "SME+", "SME", "SMB", "SS"];
+  const segCount = (s) => s === "all" ? CL_ALL.length : CL_ALL.filter(c => _canon(c.segment) === s).length;
+
   const totalGmv = CL.reduce((s, c) => s + _pga(c.gmv), 0);
   const gmvFmt = totalGmv >= 1_000_000 ? `₽ ${(totalGmv/1_000_000).toFixed(1)}м` : `₽ ${Math.round(totalGmv/1000)}к`;
 
@@ -19,12 +40,10 @@ function PageAnalytics() {
   const warnCount = CL.filter(c => c.status === "warn").length;
   const riskCount = CL.filter(c => c.status === "risk").length;
   const retentionPct = CL.length > 0 ? Math.round((okCount / CL.length) * 100) : 0;
-  // "Health" — среднее: ok=85, warn=60, risk=35
   const avgHealth = CL.length > 0
     ? Math.round((okCount * 85 + warnCount * 60 + riskCount * 35) / CL.length)
     : 0;
 
-  // Топ рисков
   const topRisks = CL
     .filter(c => c.status === "risk")
     .slice(0, 6)
@@ -35,16 +54,48 @@ function PageAnalytics() {
       score: 100 - (c.days_since || 0),
     }));
 
+  const subtitle = clientFilter
+    ? `Точечная аналитика · ${CL[0] ? CL[0].name : clientFilter}`
+    : segFilter === "all"
+      ? `${CL.length} клиентов в скоупе`
+      : `Сегмент ${segFilter} · ${CL.length} клиентов`;
+
   return (
     <div>
       <TopBar
         breadcrumbs={["am hub", "аналитика"]}
         title="Аналитика портфеля"
-        subtitle={`${CL.length} клиентов в скоупе`}
+        subtitle={subtitle}
         actions={<>
           <Btn kind="ghost" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF</Btn>
         </>}
       />
+      <div style={{ padding: "14px 28px 0 28px", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 4 }}>Сегмент</span>
+        {SEGS.map(s => {
+          const active = !clientFilter && s === segFilter;
+          return React.createElement("button", {
+            key: s,
+            onClick: () => { _setSeg(s); setClientFilter(""); },
+            style: {
+              padding: "5px 10px", fontSize: 11,
+              background: active ? "var(--signal)" : "var(--ink-2)",
+              color: active ? "var(--ink-0)" : "var(--ink-7)",
+              border: `1px solid ${active ? "var(--signal)" : "var(--line)"}`,
+              borderRadius: 3, fontFamily: "var(--f-mono)", textTransform: "uppercase",
+              letterSpacing: "0.06em", cursor: "pointer",
+            },
+          }, s === "all" ? `все · ${segCount(s)}` : `${s} · ${segCount(s)}`);
+        })}
+        <div style={{ width: 12 }}/>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Точечно</span>
+        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}
+          style={{ padding: "5px 8px", fontSize: 12, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 3, color: "var(--ink-8)", minWidth: 220 }}>
+          <option value="">— портфель целиком —</option>
+          {CL_ALL.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")).map(c =>
+            React.createElement("option", { key: c.id, value: c.id }, c.name || "—"))}
+        </select>
+      </div>
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
         <PortfolioSearchKPI/>
 

@@ -121,7 +121,11 @@ async def onboarding_status(
                        .first())
 
     return {
-        "active": prog.completed_at is None,
+        "active": prog.completed_at is None and not getattr(prog, "skipped", False),
+        "skipped": bool(getattr(prog, "skipped", False)),
+        "skipped_at": prog.skipped_at.isoformat() if getattr(prog, "skipped_at", None) else None,
+        "skipped_by": getattr(prog, "skipped_by", None),
+        "skipped_reason": getattr(prog, "skipped_reason", None),
         "progress_id": prog.id,
         "current_step": prog.current_step,
         "next_step": next_step if next_step <= 10 else None,
@@ -134,6 +138,59 @@ async def onboarding_status(
         } if tpl else None,
         "open_task_id": open_task.id if open_task else None,
     }
+
+
+@router.post("/api/clients/{client_id}/onboarding/skip")
+async def onboarding_skip(
+    client_id: int, request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Пометить что онбординг клиенту не нужен (был раньше / не требуется).
+    Создаёт или обновляет ClientOnboardingProgress с skipped=true."""
+    u = _user(auth_token, db)
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(404)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    reason = (body.get("reason") or "").strip() or None
+    skip = body.get("skip", True)
+
+    prog = (db.query(ClientOnboardingProgress)
+              .filter(ClientOnboardingProgress.client_id == client_id).first())
+    if not prog:
+        from datetime import date as _d
+        prog = ClientOnboardingProgress(
+            client_id=client_id,
+            started_by=u.email,
+            current_step=0,
+            next_send_date=_d.today(),
+        )
+        db.add(prog); db.flush()
+
+    if skip:
+        prog.skipped = True
+        prog.skipped_at = datetime.utcnow()
+        prog.skipped_by = u.email
+        prog.skipped_reason = reason
+        # Отменяем незакрытые онбординг-задачи
+        stale = (db.query(Task)
+                   .filter(Task.client_id == client_id,
+                           Task.task_type == "onboarding_message",
+                           Task.status != "done")
+                   .all())
+        for t in stale:
+            t.status = "cancelled"
+    else:
+        prog.skipped = False
+        prog.skipped_at = None
+        prog.skipped_by = None
+        prog.skipped_reason = None
+    db.commit()
+    return {"ok": True, "skipped": bool(prog.skipped)}
 
 
 @router.post("/api/clients/{client_id}/onboarding/mark-sent")

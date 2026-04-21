@@ -43,6 +43,8 @@ def _env_bool(key: str) -> bool:
 @cache(ttl=300)
 async def api_analytics_overview(
     days: int = 30,
+    segment: Optional[str] = None,
+    client_id: Optional[int] = None,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
@@ -56,6 +58,15 @@ async def api_analytics_overview(
     since = datetime.utcnow() - timedelta(days=days)
     q = db.query(Client)
     if user.role == "manager": q = q.filter(Client.manager_email == user.email)
+    if client_id:
+        q = q.filter(Client.id == int(client_id))
+    elif segment:
+        # Нормализация сегмента: SME = SME + SME- (зависимые псевдонимы)
+        seg_u = (segment or "").upper()
+        if seg_u == "SME":
+            q = q.filter(Client.segment.in_(["SME", "SME-"]))
+        else:
+            q = q.filter(Client.segment == seg_u)
     clients = q.all()
 
     health_vals = [c.health_score for c in clients if c.health_score is not None]
@@ -1219,6 +1230,9 @@ async def api_me_kpi_summary(
                 prev_mrr += float(e.mrr or 0)
     nrr = round(this_mrr / prev_mrr * 100, 1) if prev_mrr else None
 
+    # Fallback MRR — если RevenueEntry пусто, показываем общий snapshot из Client.mrr
+    portfolio_mrr = sum(float(c.mrr or 0) for c in clients)
+
     since = now - timedelta(days=90)
     nps_avg = None
     if cids:
@@ -1233,21 +1247,64 @@ async def api_me_kpi_summary(
             det  = sum(1 for e in nps_entries if e.score <= 6)
             nps_avg = round((prom - det) / total * 100, 1)
 
+    # Fallback NPS — из Client.nps_last если NPSEntry пуст
+    if nps_avg is None:
+        scored = [c.nps_last for c in clients if c.nps_last is not None]
+        if scored:
+            prom = sum(1 for s in scored if s >= 9)
+            det  = sum(1 for s in scored if s <= 6)
+            nps_avg = round((prom - det) / len(scored) * 100, 1)
+
+    # Прошедшие встречи (за 60 дней) и ближайшая встреча
+    meetings_past_60d = 0
+    next_meeting = None
+    if cids:
+        past_cut = now - timedelta(days=60)
+        meetings_past_60d = (db.query(Meeting)
+                               .filter(Meeting.client_id.in_(cids),
+                                       Meeting.date >= past_cut, Meeting.date < now)
+                               .count())
+        nxt = (db.query(Meeting)
+                 .filter(Meeting.client_id.in_(cids), Meeting.date >= now)
+                 .order_by(Meeting.date.asc()).first())
+        if nxt:
+            next_meeting = {
+                "date": nxt.date.isoformat() if nxt.date else None,
+                "client_name": nxt.client.name if nxt.client else None,
+                "type": nxt.type,
+            }
+
+    # Открытые задачи / просроченные задачи
+    open_tasks = overdue_tasks = 0
+    if cids:
+        open_tasks = (db.query(Task)
+                        .filter(Task.client_id.in_(cids), Task.status != "done").count())
+        overdue_tasks = (db.query(Task)
+                           .filter(Task.client_id.in_(cids), Task.status != "done",
+                                   Task.due_date < now).count())
+
     return {
         "nrr": nrr,
         "nps": nps_avg,
         "clients_ok": clients_ok,
         "clients_total": len(clients),
         "overdue_meetings": overdue_meetings,
+        "portfolio_mrr": round(portfolio_mrr, 2),
+        "meetings_past_60d": meetings_past_60d,
+        "next_meeting": next_meeting,
+        "open_tasks": open_tasks,
+        "overdue_tasks": overdue_tasks,
     }
 
 
 @router.get("/api/analytics/portfolio-search-kpi")
 async def api_portfolio_search_kpi(
+    segment: Optional[str] = None,
+    client_id: Optional[int] = None,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
-    """Срез по качеству поиска: % нулевых, % с низкой позицией, чекапов за 30д, ср.конверсия."""
+    """Срез по качеству поиска. Фильтры: ?segment=ENT, ?client_id=42."""
     if not auth_token:
         raise HTTPException(status_code=401)
     payload = decode_access_token(auth_token)
@@ -1260,6 +1317,14 @@ async def api_portfolio_search_kpi(
     q = db.query(Client)
     if user.role == "manager":
         q = q.filter(Client.manager_email == user.email)
+    if client_id:
+        q = q.filter(Client.id == int(client_id))
+    elif segment:
+        seg_u = (segment or "").upper()
+        if seg_u == "SME":
+            q = q.filter(Client.segment.in_(["SME", "SME-"]))
+        else:
+            q = q.filter(Client.segment == seg_u)
     clients = q.all()
     cids = [c.id for c in clients]
 
@@ -1440,12 +1505,29 @@ async def api_me_nrr_pulse(
 
     gmv_total = int(round(total_this))
 
+    # Fallback: если в RevenueEntry совсем пусто (total_this == 0), но у клиентов
+    # есть Client.mrr — используем их как текущий snapshot. NRR остаётся None
+    # (не с чем сравнивать), но пользователь хотя бы видит реальный оборот портфеля.
+    if total_this == 0:
+        gmv_total = int(round(sum(float(c.mrr or 0) for c in clients)))
+        # Посегментные суммы тоже — для отображения «оборот по сегменту»
+        for seg in segs:
+            cids = cids_by_seg[seg]
+            if not cids:
+                continue
+            seg_mrr = sum(float(c.mrr or 0) for c in clients if c.id in cids)
+            if seg_mrr > 0:
+                # Помечаем fallback — фронт может отобразить «из Client.mrr»
+                # Само значение NRR не задаём (None).
+                pass
+
     return {
         "nrr_total": nrr_total,
         "by_segment": by_segment,
         "gmv_total": gmv_total,
         "clients_count": len(clients),
         "period": period,
+        "source": "revenue_entry" if total_this > 0 else "client_mrr_fallback",
     }
 
 

@@ -648,7 +648,21 @@ async def api_tokens_push(
         db.commit()
         logger.info(f"✅ Extension pushed tokens for {user.email}: {updated}")
 
-    return {"ok": True, "updated": updated, "user": user.email}
+    # Auto-sync тикетов после того как пришёл свежий time_token —
+    # чтобы пользователю не приходилось жать «Синхронизировать» отдельно.
+    tickets_result = None
+    if "time" in updated:
+        try:
+            from integrations.tbank_time import ingest_tickets
+            tickets_result = await ingest_tickets(db, user, limit_new=100, fetch_threads=True)
+            logger.info(f"✅ Auto-synced tickets for {user.email}: {tickets_result}")
+        except Exception as e:
+            logger.warning(f"auto tickets sync failed for {user.email}: {e}")
+
+    return {
+        "ok": True, "updated": updated, "user": user.email,
+        "tickets_synced": tickets_result,
+    }
 
 
 
