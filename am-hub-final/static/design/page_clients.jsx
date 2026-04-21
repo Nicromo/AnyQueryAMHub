@@ -472,6 +472,9 @@ function PageClient() {
             {/* Чекапы — v2 */}
             <ClientCheckupsList clientId={c.id}/>
 
+            {/* Метрики клиента — полный дашборд (MRR/Health/NPS/Tasks/Meetings/Upsell) */}
+            <ClientMetricsDashboard clientId={c.id}/>
+
             {/* Роадмап клиента — per-client (Q1/Q2/Q3/Q4 + Бэклог) */}
             <ClientRoadmap clientId={c.id}/>
 
@@ -3279,3 +3282,152 @@ function PageClientGroups() {
   );
 }
 window.PageClientGroups = PageClientGroups;
+
+
+// ── ClientMetricsDashboard — полная панель метрик (MRR / Health / NPS / etc.) ──
+function ClientMetricsDashboard({ clientId }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    fetch(`/api/clients/${clientId}/metrics`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject("HTTP " + r.status))
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => { setErr(String(e)); setLoading(false); });
+  }, [clientId]);
+
+  if (loading) return React.createElement(Card, { title: "Метрики клиента" },
+    React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5 } }, "Загружаем…"));
+  if (err) return React.createElement(Card, { title: "Метрики клиента" },
+    React.createElement("div", { style: { color: "var(--critical)", fontSize: 12 } }, "Ошибка: " + err));
+  if (!data) return null;
+
+  const rub = (v) => {
+    if (v == null) return "—";
+    if (v >= 1_000_000) return "₽ " + (v/1_000_000).toFixed(1) + "м";
+    if (v >= 1_000) return "₽ " + Math.round(v/1000) + "к";
+    return "₽ " + Math.round(v);
+  };
+  const dateShort = (iso) => iso ? iso.slice(0, 10) : "—";
+
+  // Мини-спарклайн MRR через SVG
+  const renderSpark = (values, color = "var(--signal)") => {
+    if (!values || values.length === 0) return React.createElement("span", { style: { color: "var(--ink-5)" } }, "—");
+    const W = 120, H = 30, P = 2;
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const range = max - min || 1;
+    const pts = values.map((v, i) => {
+      const x = P + (i / Math.max(1, values.length - 1)) * (W - 2*P);
+      const y = H - P - ((v - min) / range) * (H - 2*P);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    return React.createElement("svg", { width: W, height: H, style: { display: "block" } },
+      React.createElement("polyline", {
+        points: pts, fill: "none", stroke: color, strokeWidth: 1.5,
+      }),
+    );
+  };
+
+  const mrrValues = (data.revenue_history || []).map(r => r.mrr || 0);
+  const healthValues = (data.health_history || []).map(h => (h.score || 0) * (h.score > 1 ? 1 : 100));
+  const npsValues = (data.nps_history || []).map(n => n.score || 0);
+
+  const lastMrr = mrrValues[mrrValues.length - 1];
+  const prevMrr = mrrValues[mrrValues.length - 2];
+  const mrrDeltaPct = (prevMrr && lastMrr != null) ? ((lastMrr - prevMrr) / prevMrr * 100) : null;
+
+  const cellBase = {
+    padding: 12, background: "var(--ink-2)",
+    border: "1px solid var(--line)", borderRadius: 6,
+  };
+
+  return React.createElement(Card, { title: "Метрики клиента · полный дашборд" },
+    React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 },
+    },
+      // MRR
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "MRR"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 500, color: "var(--ink-9)", fontFamily: "var(--f-mono)", marginTop: 4 } },
+          rub(lastMrr)),
+        mrrDeltaPct != null && React.createElement("div", { className: "mono",
+          style: { fontSize: 11, color: mrrDeltaPct >= 0 ? "var(--ok)" : "var(--critical)", marginTop: 2 } },
+          (mrrDeltaPct >= 0 ? "+" : "") + mrrDeltaPct.toFixed(1) + "% vs прошлый месяц"),
+        React.createElement("div", { style: { marginTop: 6 } }, renderSpark(mrrValues, "var(--signal)")),
+      ),
+      // Health
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Health"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 500,
+          color: healthValues.length ? (healthValues[healthValues.length - 1] >= 70 ? "var(--ok)" : healthValues[healthValues.length - 1] >= 40 ? "var(--warn)" : "var(--critical)") : "var(--ink-9)",
+          marginTop: 4 } },
+          healthValues.length ? Math.round(healthValues[healthValues.length - 1]) + "%" : "—"),
+        React.createElement("div", { style: { marginTop: 10 } }, renderSpark(healthValues, "var(--ok)")),
+      ),
+      // NPS
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "NPS"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 500,
+          color: npsValues.length ? (npsValues[npsValues.length - 1] >= 9 ? "var(--ok)" : npsValues[npsValues.length - 1] >= 7 ? "var(--warn)" : "var(--critical)") : "var(--ink-9)",
+          marginTop: 4 } },
+          npsValues.length ? String(npsValues[npsValues.length - 1]) : "—"),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)", marginTop: 2 } },
+          (data.nps_history || []).length + " записей"),
+        React.createElement("div", { style: { marginTop: 6 } }, renderSpark(npsValues, "var(--info)")),
+      ),
+      // Tasks
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Задачи"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 500, color: "var(--ink-9)", marginTop: 4 } },
+          (data.tasks.open || 0) + " / " + (data.tasks.total || 0)),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: data.tasks.overdue > 0 ? "var(--critical)" : "var(--ink-6)", marginTop: 2 } },
+          data.tasks.overdue > 0 ? data.tasks.overdue + " просрочено" : "в срок"),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } },
+          "закрыто за 90д: " + (data.tasks.done_90d || 0)),
+      ),
+      // Meetings
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Встречи · 90д"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 500, color: "var(--ink-9)", marginTop: 4 } },
+          String(data.meetings.total_90d || 0)),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } },
+          (data.meetings.upcoming || 0) + " предстоящих"),
+        Object.keys(data.meetings.by_type || {}).length > 0 &&
+          React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", marginTop: 4 } },
+            Object.entries(data.meetings.by_type).map(([t, n]) => `${t}:${n}`).join(" · ")),
+      ),
+      // Tickets
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Открытых тикетов"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 500,
+          color: (data.tickets.open || 0) > 0 ? "var(--warn)" : "var(--ok)", marginTop: 4 } },
+          String(data.tickets.open || 0)),
+        data.tickets.last_days_ago != null && React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } },
+          "последний " + data.tickets.last_days_ago + " дн. назад"),
+      ),
+      // Upsell
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Upsell"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 500, color: "var(--ok)", marginTop: 4 } },
+          "+" + rub(data.upsell.delta_won || 0)),
+        React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } },
+          "won " + (data.upsell.won || 0) + " · active " + (data.upsell.active || 0) + " · lost " + (data.upsell.lost || 0)),
+      ),
+      // Checkups
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Чекапы · последние"),
+        (data.checkups_recent || []).length === 0
+          ? React.createElement("div", { style: { fontSize: 12, color: "var(--ink-5)", marginTop: 6 } }, "нет данных")
+          : React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 3 } },
+              data.checkups_recent.slice(0, 4).map((cp, i) => React.createElement("div", {
+                key: i, className: "mono",
+                style: { fontSize: 10.5, color: "var(--ink-7)" },
+              },
+                `${dateShort(cp.date)} · ${cp.type || "?"} · ${cp.avg_score != null ? cp.avg_score.toFixed(2) : "—"} (${cp.total})`))),
+      ),
+    ),
+  );
+}
+window.ClientMetricsDashboard = ClientMetricsDashboard;
