@@ -316,6 +316,10 @@ function PageClient() {
       />
       <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
 
+        {/* Баннер передачи клиента (если есть pending incoming или outgoing) */}
+        <ClientTransferSection client={c} currentUser={(typeof window !== "undefined" && window.__CURRENT_USER) || {}}
+          onRefresh={() => window.location.reload()}/>
+
         {/* top strip — реальные данные клиента */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12 }}>
           <KPI label="Сегмент" value={segment} tone={segment !== "—" ? "signal" : "neutral"}/>
@@ -2194,3 +2198,236 @@ function ClientVoiceNotes({ clientId }) {
   );
 }
 window.ClientVoiceNotes = ClientVoiceNotes;
+// ── ClientTransferBanner + Modal ────────────────────────────────────────────
+// На карточке клиента: если есть pending входящий запрос — баннер с accept/decline.
+// Если текущий manager и нет pending — кнопка «Передать клиента» → модалка.
+function ClientTransferSection({ client, currentUser, onRefresh }) {
+  const [pending, setPending] = React.useState(null);
+  const [users, setUsers] = React.useState([]);
+  const [modalOpen, setModalOpen] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    fetch(`/api/clients/${client.id}/transfer`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setPending(d || null))
+      .catch(() => {});
+  }, [client.id]);
+  React.useEffect(() => { load(); }, [load]);
+
+  React.useEffect(() => {
+    fetch("/api/admin/users", { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setUsers(Array.isArray(d) ? d : (d.users || [])))
+      .catch(() => {});
+  }, []);
+
+  const isIncoming = pending && currentUser && pending.to_email === currentUser.email;
+  const isOutgoing = pending && currentUser && pending.from_email === currentUser.email;
+  const isOwner = currentUser && client.manager_email === currentUser.email;
+
+  const accept = async () => {
+    if (!window.confirm("Принять передачу клиента?")) return;
+    const r = await fetch(`/api/transfers/${pending.id}/accept`, {
+      method: "POST", credentials: "include",
+    });
+    if (r.ok) {
+      const d = await r.json();
+      window.appToast && window.appToast(`✓ Клиент принят. Задач переназначено: ${d.tasks_reassigned}`);
+      load();
+      onRefresh && onRefresh();
+    }
+  };
+  const decline = async () => {
+    const reason = window.prompt("Причина отказа (опционально):", "") || "";
+    const r = await fetch(`/api/transfers/${pending.id}/decline`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    if (r.ok) { window.appToast && window.appToast("Передача отклонена"); load(); }
+  };
+  const cancel = async () => {
+    if (!window.confirm("Отозвать запрос на передачу?")) return;
+    const r = await fetch(`/api/transfers/${pending.id}/cancel`, {
+      method: "POST", credentials: "include",
+    });
+    if (r.ok) { window.appToast && window.appToast("Запрос отозван"); load(); }
+  };
+
+  // Incoming pending → баннер
+  if (isIncoming) {
+    return React.createElement("div", {
+      style: {
+        padding: 14, background: "color-mix(in oklch, var(--signal) 8%, var(--ink-2))",
+        border: "1px solid var(--signal)", borderRadius: 6, marginBottom: 12,
+      },
+    },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "var(--ink-9)", marginBottom: 6 } },
+        "🤝 Входящий запрос на передачу клиента от " + (pending.from_email || "—")),
+      pending.manual_note && React.createElement("div", { style: { fontSize: 12, color: "var(--ink-7)", marginBottom: 6 } },
+        "Заметка: " + pending.manual_note),
+      pending.ai_summary && React.createElement("details", { style: { marginBottom: 10 } },
+        React.createElement("summary", { style: { fontSize: 12, color: "var(--ink-7)", cursor: "pointer" } }, "AI-сводка"),
+        React.createElement("pre", {
+          style: { fontSize: 12, color: "var(--ink-8)", whiteSpace: "pre-wrap", marginTop: 6, fontFamily: "inherit", lineHeight: 1.5 },
+        }, pending.ai_summary),
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8 } },
+        React.createElement(Btn, { kind: "primary", size: "s", onClick: accept }, "✓ Принять"),
+        React.createElement(Btn, { kind: "ghost", size: "s", onClick: decline }, "✕ Отклонить"),
+      ),
+    );
+  }
+
+  // Outgoing pending → статус + отозвать
+  if (isOutgoing) {
+    return React.createElement("div", {
+      style: {
+        padding: 12, background: "var(--ink-2)",
+        border: "1px dashed var(--warn)", borderRadius: 6, marginBottom: 12,
+      },
+    },
+      React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-8)", marginBottom: 6 } },
+        `⏳ Ожидает подтверждения от ${pending.to_email}`),
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: cancel }, "Отозвать"),
+    );
+  }
+
+  // Не owner и нет pending → ничего
+  if (!isOwner) return null;
+
+  return React.createElement(React.Fragment, null,
+    React.createElement(Btn, {
+      kind: "ghost", size: "s",
+      onClick: () => setModalOpen(true),
+    }, "🤝 Передать клиента"),
+    modalOpen && React.createElement(ClientTransferModal, {
+      client, users, onClose: () => setModalOpen(false),
+      onDone: () => { setModalOpen(false); load(); },
+    }),
+  );
+}
+
+function ClientTransferModal({ client, users, onClose, onDone }) {
+  const [toUserId, setToUserId] = React.useState("");
+  const [manualNote, setManualNote] = React.useState("");
+  const [aiSummary, setAiSummary] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [requestId, setRequestId] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  const eligible = users.filter(u =>
+    ["manager", "grouphead", "admin"].includes(u.role) &&
+    u.email !== (client.manager_email || ""));
+
+  const generate = async () => {
+    if (!toUserId) { setErr("Выбери менеджера"); return; }
+    setLoading(true); setErr(null);
+    try {
+      const r = await fetch(`/api/clients/${client.id}/transfer`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to_user_id: Number(toUserId),
+          manual_note: manualNote,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.detail || "HTTP " + r.status); return; }
+      setRequestId(d.id);
+      setAiSummary(d.ai_summary || "");
+    } catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  };
+
+  const saveEdit = async () => {
+    if (!requestId) return;
+    const r = await fetch(`/api/transfers/${requestId}`, {
+      method: "PATCH", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ai_summary: aiSummary, manual_note: manualNote }),
+    });
+    if (r.ok) {
+      window.appToast && window.appToast("✓ Запрос отправлен новому менеджеру");
+      onDone && onDone();
+    } else {
+      setErr("Не удалось обновить");
+    }
+  };
+
+  return React.createElement("div", {
+    onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
+    style: {
+      position: "fixed", inset: 0, zIndex: 9998,
+      background: "rgba(0,0,0,.55)", backdropFilter: "blur(3px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    },
+  },
+    React.createElement("div", {
+      style: {
+        background: "var(--ink-1)", border: "1px solid var(--line)",
+        borderRadius: 10, maxWidth: 720, width: "100%",
+        maxHeight: "88vh", display: "flex", flexDirection: "column",
+        padding: 20, boxShadow: "0 24px 64px rgba(0,0,0,.5)",
+      },
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 14 } },
+        React.createElement("div", { style: { fontSize: 16, fontWeight: 600 } }, "🤝 Передать клиента " + client.name),
+        React.createElement("button", { onClick: onClose, style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 20 } }, "×"),
+      ),
+
+      err && React.createElement("div", { style: { fontSize: 12, color: "var(--critical)", marginBottom: 10 } }, err),
+
+      !requestId && React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 12, color: "var(--ink-6)", marginBottom: 4 } }, "Кому передаём:"),
+        React.createElement("select", {
+          value: toUserId, onChange: e => setToUserId(e.target.value),
+          style: {
+            width: "100%", padding: "8px 10px", marginBottom: 12,
+            background: "var(--ink-2)", border: "1px solid var(--line)",
+            borderRadius: 4, color: "var(--ink-8)",
+          },
+        },
+          React.createElement("option", { value: "" }, "— выбери менеджера —"),
+          eligible.map(u => React.createElement("option", { key: u.id, value: u.id },
+            `${u.email} (${u.role})`)),
+        ),
+        React.createElement("div", { style: { fontSize: 12, color: "var(--ink-6)", marginBottom: 4 } }, "Заметка для нового менеджера (опционально):"),
+        React.createElement("textarea", {
+          value: manualNote, onChange: e => setManualNote(e.target.value), rows: 3,
+          placeholder: "Например: «клиент сейчас в активной фазе upsell, хочет интеграцию с X»",
+          style: {
+            width: "100%", resize: "vertical", padding: "8px 10px", marginBottom: 14,
+            background: "var(--ink-2)", border: "1px solid var(--line)",
+            borderRadius: 4, color: "var(--ink-8)", fontSize: 12.5, fontFamily: "inherit",
+          },
+        }),
+        React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 } },
+          React.createElement(Btn, { kind: "ghost", size: "m", onClick: onClose }, "Отмена"),
+          React.createElement(Btn, { kind: "primary", size: "m", onClick: generate, disabled: loading || !toUserId },
+            loading ? "AI думает…" : "Сгенерировать сводку"),
+        ),
+      ),
+
+      requestId && React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 12, color: "var(--ink-6)", marginBottom: 4 } }, "AI-сводка (можно править):"),
+        React.createElement("textarea", {
+          value: aiSummary, onChange: e => setAiSummary(e.target.value), rows: 18,
+          style: {
+            width: "100%", resize: "vertical", padding: "10px 12px", marginBottom: 14,
+            background: "var(--ink-2)", border: "1px solid var(--line)",
+            borderRadius: 4, color: "var(--ink-8)", fontSize: 12.5, lineHeight: 1.5,
+            fontFamily: "inherit", whiteSpace: "pre-wrap",
+          },
+        }),
+        React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 } },
+          React.createElement(Btn, { kind: "ghost", size: "m", onClick: onClose }, "Отмена"),
+          React.createElement(Btn, { kind: "primary", size: "m", onClick: saveEdit }, "📤 Отправить запрос"),
+        ),
+      ),
+    ),
+  );
+}
+
+window.ClientTransferSection = ClientTransferSection;
+window.ClientTransferModal = ClientTransferModal;
