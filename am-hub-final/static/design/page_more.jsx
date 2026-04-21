@@ -872,7 +872,20 @@ window.MeetingsCalendar = MeetingsCalendar;
 // ── Portfolio ─────────────────────────────────────────────
 function PagePortfolio() {
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
-  const [groupBy, setGroupBy] = React.useState("segment"); // "segment" | "manager"
+  return (
+    <div>
+      <TopBar breadcrumbs={["am hub","портфель"]} title="Портфель · структура"
+        subtitle={`${CL.length} клиентов`}/>
+      <div style={{ padding: "22px 28px 40px" }}>
+        <PortfolioStructureSummary clients={CL}/>
+      </div>
+    </div>
+  );
+}
+
+function PortfolioStructureSummary({ clients }) {
+  const CL = clients || [];
+  const [groupBy, setGroupBy] = React.useState("segment");
   const scrollTo = (id) => {
     const el = document.getElementById(id);
     if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -914,16 +927,7 @@ function PagePortfolio() {
 
   return (
     <div>
-      <TopBar breadcrumbs={["am hub","портфель"]} title="Портфель · структура"
-        subtitle={`${CL.length} клиентов · ${totalFmt} · ${pms.length} ${pms.length === 1 ? "менеджер" : "менеджеров"}`}
-        actions={<>
-          <Btn kind={groupBy === "segment" ? "primary" : "ghost"} size="m"
-            onClick={() => { setGroupBy("segment"); scrollTo("portfolio-segments"); }}>По сегменту</Btn>
-          <Btn kind={groupBy === "manager" ? "primary" : "ghost"} size="m"
-            onClick={() => { setGroupBy("manager"); scrollTo("portfolio-managers"); }}>По менеджеру</Btn>
-          <Btn kind="primary" size="m" icon={<I.download size={14}/>} onClick={() => window.print()}>PDF</Btn>
-        </>}/>
-      <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div id="portfolio-segments" style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12 }}>
           {segs.map((s,i)=>(
             <div key={i} style={{ padding: 16, background: "var(--ink-2)", border: "1px solid var(--line)", borderLeft: `3px solid var(--${s.t})`, borderRadius: 6 }}>
@@ -3047,7 +3051,7 @@ function PageQBR() {
   );
 }
 
-Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PageAI, PageKanban, PageKPI, PageCabinet, PageTemplates, PageAuto, PageRoadmap, PageInternal, PageExtInstall, PageHelp, PageProfile, PageAssignments, PageQBR });
+Object.assign(window, { PageTop50, PageTasks, PageMeetings, PagePortfolio, PortfolioStructureSummary, PageAI, PageKanban, PageKPI, PageCabinet, PageTemplates, PageAuto, PageRoadmap, PageInternal, PageExtInstall, PageHelp, PageProfile, PageAssignments, PageQBR });
 
 
 // ── PageIntegrations — единая страница всех интеграций ─────────────────────
