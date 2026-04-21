@@ -903,3 +903,50 @@ DEFAULT_ONBOARDING_TEMPLATES = [
      "Если что-то появится — пишите, я рядом. "
      "Спасибо за доверие, работаем дальше!"),
 ]
+
+
+# ── Merchrules dashboard cache: synonyms / white list / black list ───────────
+# ClientMerchRule уже есть (выше). Эти три — мирроринг того же дашборда.
+class ClientSynonym(Base):
+    """Пара «термин → синонимы», синкается из Merchrules."""
+    __tablename__ = "client_synonyms"
+    id            = Column(Integer, primary_key=True, index=True)
+    client_id     = Column(Integer, ForeignKey("clients.id"), index=True)
+    merchrules_id = Column(String, nullable=True, index=True)
+    term          = Column(String, nullable=False)
+    synonyms      = Column(JSONB, default=list)   # list[str]
+    is_active     = Column(Boolean, default=True)
+    last_synced   = Column(DateTime, nullable=True)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client        = relationship("Client", backref="synonyms")
+
+
+class ClientWhitelistEntry(Base):
+    """Whitelist — «всегда показывать» для запроса."""
+    __tablename__ = "client_whitelist_entries"
+    id            = Column(Integer, primary_key=True, index=True)
+    client_id     = Column(Integer, ForeignKey("clients.id"), index=True)
+    merchrules_id = Column(String, nullable=True, index=True)
+    query         = Column(String, nullable=False)
+    product_id    = Column(String, nullable=True)
+    product_name  = Column(String, nullable=True)
+    position      = Column(Integer, nullable=True)
+    is_active     = Column(Boolean, default=True)
+    last_synced   = Column(DateTime, nullable=True)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client        = relationship("Client", backref="whitelist_entries")
+
+
+class ClientBlacklistEntry(Base):
+    """Blacklist — «никогда не показывать» для запроса."""
+    __tablename__ = "client_blacklist_entries"
+    id            = Column(Integer, primary_key=True, index=True)
+    client_id     = Column(Integer, ForeignKey("clients.id"), index=True)
+    merchrules_id = Column(String, nullable=True, index=True)
+    query         = Column(String, nullable=False)
+    product_id    = Column(String, nullable=True)
+    product_name  = Column(String, nullable=True)
+    is_active     = Column(Boolean, default=True)
+    last_synced   = Column(DateTime, nullable=True)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client        = relationship("Client", backref="blacklist_entries")
