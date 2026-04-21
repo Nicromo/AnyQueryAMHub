@@ -603,3 +603,74 @@ function showBox(id, msg, type) {
 }
 
 init();
+
+// ── Журнал действий расширения: live update из background ──────────────────
+const AMH_LOG_KEY = "amhub_actions";
+const AMH_LOG_MAX_RENDER = 50;
+
+function _fmtLogTime(ts) {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+function _logIcon(kind) {
+  if (kind === "ok")    return { s: "✓", c: "#23d18b" };
+  if (kind === "err")   return { s: "✕", c: "#ef4444" };
+  if (kind === "sync")  return { s: "⟲", c: "#6474ff" };
+  if (kind === "info")  return { s: "·", c: "#f0b429" };
+  return { s: "·", c: "#8b93a7" };
+}
+
+function renderLogList(list) {
+  const box = document.getElementById("amhub-log-list");
+  if (!box) return;
+  if (!list || !list.length) {
+    box.innerHTML = '<div id="amhub-log-empty" style="color:var(--text-muted);padding:6px 0">— пока тихо —</div>';
+    return;
+  }
+  box.innerHTML = "";
+  for (const e of list.slice(0, AMH_LOG_MAX_RENDER)) {
+    const ic = _logIcon(e.kind);
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:6px;padding:2px 0;align-items:baseline";
+    const time = document.createElement("span");
+    time.textContent = _fmtLogTime(e.ts);
+    time.style.cssText = "color:var(--text-muted);flex-shrink:0";
+    const icon = document.createElement("span");
+    icon.textContent = ic.s;
+    icon.style.cssText = `color:${ic.c};width:10px;flex-shrink:0;text-align:center`;
+    const text = document.createElement("span");
+    text.textContent = e.text || "";
+    text.style.cssText = "color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    row.appendChild(time); row.appendChild(icon); row.appendChild(text);
+    box.appendChild(row);
+  }
+}
+
+async function loadLog() {
+  try {
+    const data = await chrome.storage.local.get(AMH_LOG_KEY);
+    renderLogList(data[AMH_LOG_KEY] || []);
+  } catch (_) {}
+}
+
+// Live update: background шлёт runtime message при каждой новой записи
+try {
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === "ACTION_LOG_APPEND") {
+      loadLog();
+    }
+  });
+} catch (_) {}
+
+document.addEventListener("click", async (e) => {
+  if (e.target && e.target.id === "amhub-log-clear") {
+    try { await chrome.storage.local.set({ [AMH_LOG_KEY]: [] }); } catch (_) {}
+    renderLogList([]);
+  }
+});
+
+loadLog();
