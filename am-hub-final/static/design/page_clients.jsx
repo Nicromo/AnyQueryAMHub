@@ -1,8 +1,19 @@
 // page_clients.jsx — Clients list & Client detail
 
+// Клиент-фантом = нет manager_email и нет связей ни с одной внешней системой.
+// Такие записи появляются от кривых синков и засоряют портфель.
+function _isPhantomClient(c) {
+  if (!c) return false;
+  const noManager = !c.manager_email;
+  const noMR = !c.merchrules_account_id;
+  const noAT = !c.airtable_record_id;
+  const noSites = !(c.site_ids && c.site_ids.length);
+  return noManager && noMR && noAT && noSites;
+}
+
 function PageClients() {
   const P = (typeof window !== "undefined" && window.__PAGINATION) || { page: 1, total: 0, total_pages: 1, has_prev: false, has_next: false };
-  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const CL_RAW = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [segFilter, setSegFilter] = React.useState("all");
   const [selectedIds, setSelectedIds] = React.useState(() => new Set());
   const [bulkBusy, setBulkBusy] = React.useState(false);
@@ -12,6 +23,15 @@ function PageClients() {
     return s;
   });
   const clearSel = () => setSelectedIds(new Set());
+  const [hidePhantom, setHidePhantom] = React.useState(() => {
+    try { return localStorage.getItem("amhub_hide_phantom") !== "0"; } catch (_) { return true; }
+  });
+  const toggleHidePhantom = () => setHidePhantom(v => {
+    const nv = !v; try { localStorage.setItem("amhub_hide_phantom", nv ? "1" : "0"); } catch (_) {}
+    return nv;
+  });
+  const phantomCount = CL_RAW.filter(_isPhantomClient).length;
+  const CL = hidePhantom ? CL_RAW.filter(c => !_isPhantomClient(c)) : CL_RAW;
   // Tab switcher: список клиентов vs структура портфеля (бывшая страница /portfolio).
   const [view, setView] = React.useState(() => {
     try { return sessionStorage.getItem("amhub_portfolio_view") || "list"; } catch (_) { return "list"; }
@@ -131,6 +151,11 @@ function PageClients() {
               appToast(`Готово:\n  удалено мусора: ${deleted}\n  объединено дублей: ${d2.merged || 0}`);
               location.reload();
             }}>✨ Всё сразу</Btn>
+            <Btn kind={hidePhantom ? "primary" : "ghost"} size="m"
+              title={phantomCount > 0 ? `${phantomCount} фантомов скрыто` : "Нет фантомов"}
+              onClick={toggleHidePhantom}>
+              {hidePhantom ? `👻 Скрыты · ${phantomCount}` : `👻 Показать ${phantomCount}`}
+            </Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
               onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
           </>

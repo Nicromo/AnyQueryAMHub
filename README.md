@@ -4,6 +4,25 @@
 
 ---
 
+## 0. Основные фичи
+
+- **Командный центр** — единый инбокс событий (NPS детракторы / sync failures / ближайшие встречи / дедлайны)
+- **Мой портфель** — клиенты с bulk-actions (mark-checkup / onboarding / transfer), скрытие phantom-клиентов, dedupe
+- **Передача клиентов** — manager → manager с AI-сводкой + accept/decline
+- **Follow-up send** — AI-драфт → copy → отправка в TG → фиксация в Merchrules/Airtable/PartnerLog
+- **Voice notes** — запись в браузере (MediaRecorder) → Groq Whisper транскрипция → R2 storage
+- **Onboarding** — 10-шаговый чеклист, автотаски, шаблоны писем
+- **Renewal pipeline** — Kanban по срокам контрактов (overdue/<7/7-14/14-30/30-90/90+)
+- **Upsell карточка** — события расширения MRR, статусы, дельты
+- **Merchrules dashboard** — синонимы, whitelist, blacklist, merch-rules (sync + create from checkup)
+- **NPS workflow** — детрактор (≤6) → inbox + TG + автотаска менеджеру
+- **Health score** — ежедневный recalc (3:00 МСК), тренды, PartnerLog
+- **Встречи** — список + месячный календарь, prep-слоты, follow-up tasks
+- **Scope switcher** — «мои / моя группа / все» на всех страницах (для grouphead/admin)
+- **Command Bar на мобилке** — нативный ощущающийся bottom-sheet на узких экранах
+- **Чекапы** — результаты из Chrome расширения → кнопка «Создать правило в Merchrules»
+- **Health probe** — `/health` и `/health/deep` для мониторинга
+
 ## 1. Что внутри
 
 Репо содержит **три продукта**, которые работают вместе:
@@ -158,6 +177,10 @@ git push                 # Railway подхватит
 | `KTALK_SPACE`, `KTALK_API_TOKEN` | Встречи |
 | `TG_BOT_TOKEN`, `TG_NOTIFY_CHAT_ID` | Telegram-уведомления |
 | `GROQ_API_KEY` / `QWEN_API_KEY` | AI (один из) |
+| `GROQ_WHISPER_MODEL` | Модель голоса (default `whisper-large-v3`) |
+| `CF_R2_ACCOUNT_ID`, `CF_R2_ACCESS_KEY`, `CF_R2_SECRET_KEY`, `CF_R2_BUCKET`, `CF_R2_PUBLIC_URL` | R2 storage для voice-notes + вложений (fallback — локальный `/tmp`) |
+| `AMHUB_CRYPTO_KEY` | Fernet-ключ для шифрования паролей Merchrules/Ktalk в user.settings (44 символа base64, без него пароли сохраняются в plaintext) |
+| `REDIS_URL` / `UPSTASH_REDIS_URL` | Redis для `/health/deep` probe (опционально) |
 
 ### Редизайн (настраиваемые пороги)
 | Variable | Default | Назначение |
@@ -287,6 +310,23 @@ git push
 - **Автозадачи** `/design/auto` — задачи, созданные AI из встреч
 
 ---
+
+## 7.5. Тесты
+
+Базовые smoke-тесты в `am-hub-final/tests/`:
+```bash
+cd am-hub-final
+pip install pytest
+DATABASE_URL=sqlite:///./_test.db SECRET_KEY=x pytest -q tests/
+```
+
+Проверяют: импорты всех ключевых роутеров, registered paths, бизнес-функции (renewal bucket, Fernet roundtrip, audio MIME whitelist).
+БД-зависимые тесты требуют Postgres — будут добавлены отдельно.
+
+CI-пайплайн (GitHub Actions):
+- **Lint Python** — ruff + `py_compile` (hard gate)
+- **Check JS** — `node --check` по всем `.js`
+- **Pytest smoke** — новый smoke-job с sqlite DATABASE_URL
 
 ## 8. Разработка
 
