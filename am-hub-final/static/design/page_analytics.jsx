@@ -111,23 +111,8 @@ function PageAnalytics() {
             <Heatmap/>
           </Card>
 
-          <Card title="Воронка чекапов · Q2">
-            <Funnel rows={(function(){
-              const MT = (typeof window !== "undefined" && window.MEETINGS) || [];
-              const planned = MT.length;
-              const held = MT.filter(m => m.status === "held" || m.status === "done").length;
-              const risk  = MT.filter(m => (m.client && m.client.status === "risk")).length;
-              const action = MT.filter(m => m.has_action_item).length;
-              const closed = MT.filter(m => m.action_closed_7d).length;
-              const pct = (n) => planned ? Math.round(n/planned*100) : 0;
-              return [
-                { l: "Запланировано",    v: planned, pct: planned ? 100 : 0 },
-                { l: "Состоялось",       v: held,    pct: pct(held) },
-                { l: "С риском",         v: risk,    pct: pct(risk) },
-                { l: "Экшн-итем создан", v: action,  pct: pct(action) },
-                { l: "Закрыто в 7д",     v: closed,  pct: pct(closed) },
-              ];
-            })()}/>
+          <Card title="Воронка чекапов · 90 дней">
+            <FunnelLive segment={segFilter === "all" ? null : segFilter} clientId={clientFilter}/>
           </Card>
         </div>
 
@@ -229,6 +214,28 @@ function Heatmap() {
       ))}
     </div>
   );
+}
+
+function FunnelLive({ segment, clientId }) {
+  const [rows, setRows] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState(null);
+  React.useEffect(() => {
+    setLoading(true); setErr(null);
+    const qs = new URLSearchParams();
+    if (segment) qs.set("segment", segment);
+    if (clientId) qs.set("client_id", String(clientId));
+    fetch("/api/analytics/checkup-funnel?" + qs.toString(), { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject("HTTP " + r.status))
+      .then(d => {
+        const mapped = (d.rows || []).map(r => ({ l: r.label, v: r.value, pct: r.pct }));
+        setRows(mapped); setLoading(false);
+      })
+      .catch(e => { setErr(String(e)); setLoading(false); });
+  }, [segment, clientId]);
+  if (loading) return React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12, padding: "10px 0" } }, "Загружаем…");
+  if (err) return React.createElement("div", { style: { color: "var(--critical)", fontSize: 12 } }, err);
+  return React.createElement(Funnel, { rows: rows || [] });
 }
 
 function Funnel({ rows }) {

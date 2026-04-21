@@ -878,14 +878,17 @@ def _heatmap_activity_cached(user: Any, db: Any, now: datetime,
     week_labels = [f"W{ws.isocalendar()[1]}" for ws in week_starts]
 
     earliest = week_starts[0]
+    cids = [c.id for c in clients]
+
+    counts: Dict[int, Dict[int, int]] = {c.id: {i: 0 for i in range(weeks)} for c in clients}
+
+    # 1) AuditLog — основной источник
     aq = db.query(AuditLog).filter(
         AuditLog.resource_type == "client",
-        AuditLog.resource_id.in_([c.id for c in clients]),
+        AuditLog.resource_id.in_(cids),
         AuditLog.created_at >= earliest,
     )
     audits = aq.all()
-
-    counts: Dict[int, Dict[int, int]] = {c.id: {i: 0 for i in range(weeks)} for c in clients}
     for a in audits:
         if not a.created_at:
             continue
@@ -894,6 +897,32 @@ def _heatmap_activity_cached(user: Any, db: Any, now: datetime,
             if ws <= a.created_at < we:
                 counts[a.resource_id][i] = counts[a.resource_id].get(i, 0) + 1
                 break
+
+    # 2) Fallback: если AuditLog даёт пусто — добираем активность из Meeting,
+    # Task (created_at) и CheckupResult. Это решает кейс «heatmap пустой» для
+    # инсталляций где AuditLog не заполнен.
+    total_from_audit = sum(sum(r.values()) for r in counts.values())
+    if total_from_audit == 0:
+        try:
+            from models import Meeting as _Meeting, Task as _Task, CheckupResult as _CR
+            for rows_q in (
+                db.query(_Meeting.client_id, _Meeting.date).filter(
+                    _Meeting.client_id.in_(cids), _Meeting.date >= earliest),
+                db.query(_Task.client_id, _Task.created_at).filter(
+                    _Task.client_id.in_(cids), _Task.created_at >= earliest),
+                db.query(_CR.client_id, _CR.created_at).filter(
+                    _CR.client_id.in_(cids), _CR.created_at >= earliest),
+            ):
+                for cid, ts in rows_q.all():
+                    if not ts or cid not in counts:
+                        continue
+                    for i, ws in enumerate(week_starts):
+                        we = ws + timedelta(days=7)
+                        if ws <= ts < we:
+                            counts[cid][i] = counts[cid].get(i, 0) + 1
+                            break
+        except Exception:
+            pass
 
     max_v = max((v for c in counts.values() for v in c.values()), default=1) or 1
     matrix = []
