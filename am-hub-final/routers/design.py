@@ -66,7 +66,7 @@ def _list_extensions() -> List[dict]:
                 "встреч и таймтрекинга."
             ),
             "version": _read_manifest_version(hub_ext_dir / "manifest.json"),
-            "zip_url":     "/static/amhub-ext.zip",
+            "zip_url":     "/api/extension/download",
             "zip_size_kb": _file_size_kb(_EXT_BASE / "amhub-ext.zip"),
             "modules": [
                 {"icon": "refresh", "name": "Sync",    "desc": "Merchrules → AM Hub · каждые 30 мин"},

@@ -151,7 +151,7 @@ function ExtensionPopup({ state = "empty" }) {
           URL и токен — скопируйте из блока справа.
         </div>
 
-        <Btn kind="ghost" full size="m" onClick={() => window.open("/static/amhub-ext.zip")}
+        <Btn kind="ghost" full size="m" onClick={() => window.open("/api/extension/download")}
              icon={<I.download size={14}/>}>
           Скачать расширение (.zip)
         </Btn>
