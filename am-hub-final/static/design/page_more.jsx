@@ -3098,6 +3098,14 @@ function PageIntegrations() {
     catch (_) { if (typeof appToast === "function") appToast("Копирование не поддерживается", "error"); }
   };
 
+  // Lazy-load токенов при первом открытии вкладки extension
+  React.useEffect(() => {
+    if (tab === "extension" && extTokens.length === 0 && !extTokensLoading) {
+      reloadExtTokens();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -3270,13 +3278,6 @@ function PageIntegrations() {
   );
 
   const renderExt = () => {
-    // Lazy-load токенов при первом открытии вкладки
-    React.useEffect(() => {
-      if (tab === "extension" && extTokens.length === 0 && !extTokensLoading) {
-        reloadExtTokens();
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tab]);
     return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
       React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)" } },
         "Chrome-расширение AM Hub — синк Merchrules, чекап Diginetica. Скачай .zip, установи в chrome://extensions → Load unpacked, и вставь URL+токен ниже в popup расширения."),
