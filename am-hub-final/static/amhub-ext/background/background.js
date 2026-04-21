@@ -69,6 +69,28 @@ function amhSetBadge(text, color) {
   } catch (e) { /* noop */ }
 }
 
+// ── Action log: хранит последние 50 записей в chrome.storage.local ─────────
+// Использование: amhLog("sync", "Merchrules sync запущен") / amhLog("ok"|"err", ...)
+const AMH_LOG_KEY = "amhub_actions";
+const AMH_LOG_MAX = 50;
+async function amhLog(kind, text, extra) {
+  const entry = {
+    ts: Date.now(),
+    kind: String(kind || "info"),
+    text: String(text || "").slice(0, 240),
+    extra: extra || null,
+  };
+  try {
+    const data = await chrome.storage.local.get(AMH_LOG_KEY);
+    const list = Array.isArray(data[AMH_LOG_KEY]) ? data[AMH_LOG_KEY] : [];
+    list.unshift(entry);
+    if (list.length > AMH_LOG_MAX) list.length = AMH_LOG_MAX;
+    await chrome.storage.local.set({ [AMH_LOG_KEY]: list });
+  } catch (_) { /* noop */ }
+  // Нотификация popup'у если он открыт
+  try { chrome.runtime.sendMessage({ type: "ACTION_LOG_APPEND", entry }); } catch (_) {}
+}
+
 // ── Heartbeat: раз в 5 мин пингуем /api/auth/me, 3 подряд 401 → алерт ────────
 let _amhAuthFailCount = 0;
 async function runHeartbeat() {
@@ -127,6 +149,7 @@ async function pushTokenToHub(tokenType, rawToken) {
       amhNotify("amhub_token", `🔑 Токен ${tokenType} обновлён`,
         "Токен автоматически отправлен в AM Hub");
       amhSetBadge("🔑", "#23d18b");
+      amhLog("ok", `Токен ${tokenType} отправлен в AM Hub`);
       setTimeout(() => {
         chrome.action.getBadgeText({}, txt => {
           if (txt === "🔑") amhSetBadge("", null);
@@ -134,9 +157,11 @@ async function pushTokenToHub(tokenType, rawToken) {
       }, 5000);
     } else {
       console.warn("[AM Hub] pushTokenToHub: HTTP", r.status);
+      amhLog("err", `Не удалось отправить ${tokenType}-токен: HTTP ${r.status}`);
     }
   } catch (e) {
     console.warn("[AM Hub] pushTokenToHub:", e);
+    amhLog("err", `Ошибка отправки ${tokenType}-токена: ${e.message || e}`);
   }
 }
 
@@ -188,6 +213,7 @@ async function checkForUpdate() {
       buttons: [{ title: "Обновить" }],
       requireInteraction: true,
     });
+    amhLog("info", `Доступна новая версия ${latest} (текущая ${CURRENT_VERSION})`);
   } catch (e) { /* silently ignore */ }
 }
 
@@ -306,14 +332,17 @@ async function runMrSync(manual = false) {
               : !CONFIG.MR_LOGIN || !CONFIG.MR_PASSWORD ? "Не указан логин/пароль Merchrules"
               : "Настройки неполные";
     syncState = { status: "error", error: msg, lastSync: null, lastResult: null };
+    amhLog("err", "Sync: " + msg);
     return { ok: false, error: msg };
   }
   syncState.status = "running";
+  amhLog("sync", manual ? "Sync запущен вручную" : "Авто-sync (каждые 30 мин)");
   try {
     const result = await doSync();
     const now = new Date().toLocaleString("ru-RU");
     syncState = { status: "ok", lastSync: now, lastResult: result, error: null };
     amhSetBadge("", null);  // убираем ! при успехе
+    amhLog("ok", `Sync OK: ${result.clients_synced || 0} клиентов, ${result.tasks_synced || 0} задач`);
     if (manual) {
       chrome.notifications.create({
         type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),
@@ -325,6 +354,7 @@ async function runMrSync(manual = false) {
   } catch (e) {
     syncState = { status: "error", error: e.message, lastSync: syncState.lastSync, lastResult: null };
     amhSetBadge("!", "#f0556a");  // ! при ошибке
+    amhLog("err", "Sync error: " + (e.message || e).slice(0, 200));
     if (manual) {
       chrome.notifications.create({
         type: "basic", iconUrl: chrome.runtime.getURL("icons/icon48.png"),
@@ -496,11 +526,17 @@ async function handleCaptureTokens(system, url, tabId) {
       if (ktCookies.length) tokens.ktalk_cookie = ktCookies[0].value;
     }
 
-    if (!Object.keys(tokens).length) return { ok: false, error: "Токен не найден в cookies/storage" };
+    if (!Object.keys(tokens).length) {
+      amhLog("err", `Токен ${system} не найден в cookies/storage`);
+      return { ok: false, error: "Токен не найден в cookies/storage" };
+    }
 
     const result = await pushTokens(tokens);
+    if (result.ok) amhLog("ok", `${system} токен захвачен`);
+    else amhLog("err", `${system} токен не ушёл в хаб`);
     return { ok: result.ok || false };
   } catch (e) {
+    amhLog("err", `Capture ${system} error: ${e.message || e}`);
     return { ok: false, error: e.message };
   }
 }
