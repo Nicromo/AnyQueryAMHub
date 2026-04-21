@@ -240,6 +240,10 @@ async def lifespan(app: FastAPI):
                     ("tasks", "snoozed_count", "ALTER TABLE tasks ADD COLUMN snoozed_count INTEGER DEFAULT 0"),
                     # RBAC: group_id for grouphead/leadership scope
                     ("users", "group_id", "ALTER TABLE users ADD COLUMN group_id INTEGER"),
+                    # Unified inbox: snooze / dismiss / kind
+                    ("notifications", "snoozed_until", "ALTER TABLE notifications ADD COLUMN snoozed_until TIMESTAMP"),
+                    ("notifications", "dismissed_at",  "ALTER TABLE notifications ADD COLUMN dismissed_at TIMESTAMP"),
+                    ("notifications", "kind",          "ALTER TABLE notifications ADD COLUMN kind VARCHAR"),
                 ]
                 # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:

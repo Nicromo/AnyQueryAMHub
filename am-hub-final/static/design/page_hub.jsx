@@ -359,6 +359,9 @@ function PageHub() {
               </div>
             </Card>
 
+            {/* Единый инбокс — лента событий с фильтрами */}
+            <InboxFeed />
+
             {/* weekly snapshot — заполняет пустое пространство под лентой */}
             <WeeklySnapshot clients={CL} tasks={TK} meetings={MT}/>
 
@@ -720,3 +723,143 @@ function WeeklySnapshot({ clients, tasks, meetings }) {
   );
 }
 window.WeeklySnapshot = WeeklySnapshot;
+
+
+// ── InboxFeed — единая лента событий в Командном центре ─────────────────────
+// Источники: GET /api/inbox (Notification + derived: overdue checkups, blocked tasks).
+// Фильтры: all | unread | sync_fail | task_deadline | meeting_soon | nps_incoming | churn_risk
+// Действия: mark-read, snooze 24h, dismiss.
+function InboxFeed() {
+  const [items, setItems] = React.useState([]);
+  const [unread, setUnread] = React.useState(0);
+  const [filter, setFilter] = React.useState("unread");
+  const [loading, setLoading] = React.useState(true);
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    const qs = filter === "all" ? ""
+      : filter === "unread" ? "?read=0"
+      : `?kind=${filter}`;
+    fetch("/api/inbox" + qs, { credentials: "include" })
+      .then(r => r.ok ? r.json() : { items: [], unread: 0 })
+      .then(d => {
+        setItems(d.items || []);
+        setUnread(d.unread || 0);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [filter]);
+  React.useEffect(() => { load(); }, [load]);
+
+  const markRead = (id) => {
+    if (String(id).startsWith("overdue-") || String(id).startsWith("blocked-")) return;
+    fetch(`/api/inbox/${id}/read`, { method: "PATCH", credentials: "include" }).then(load);
+  };
+  const snooze = (id) => {
+    if (String(id).startsWith("overdue-") || String(id).startsWith("blocked-")) return;
+    fetch(`/api/inbox/${id}/snooze`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hours: 24 }),
+    }).then(load);
+  };
+  const dismiss = (id) => {
+    if (String(id).startsWith("overdue-") || String(id).startsWith("blocked-")) return;
+    fetch(`/api/inbox/${id}/dismiss`, { method: "POST", credentials: "include" }).then(load);
+  };
+
+  const kindIcon = {
+    sync_fail: "⚠️", task_deadline: "⏰", meeting_soon: "📞",
+    checkup_result: "🩺", qbr_ready: "📊", nps_incoming: "📉", churn_risk: "🚨",
+    overdue_checkup: "⏳", blocked_task: "🛑",
+  };
+  const kindLabel = {
+    sync_fail: "Синк", task_deadline: "Дедлайн", meeting_soon: "Встреча",
+    checkup_result: "Чекап", qbr_ready: "QBR", nps_incoming: "NPS", churn_risk: "Churn",
+    overdue_checkup: "Чекап", blocked_task: "Задача",
+  };
+
+  const filters = [
+    { k: "unread",     l: "Непрочитано", c: unread },
+    { k: "all",        l: "Все" },
+    { k: "sync_fail",  l: "Синки" },
+    { k: "task_deadline", l: "Дедлайны" },
+    { k: "meeting_soon", l: "Встречи" },
+    { k: "nps_incoming", l: "NPS" },
+    { k: "churn_risk", l: "Churn" },
+  ];
+
+  return React.createElement(Card, {
+    title: "Инбокс" + (unread ? ` · ${unread}` : ""),
+    action: React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+      filters.map(f => React.createElement("button", {
+        key: f.k, onClick: () => setFilter(f.k),
+        style: {
+          padding: "3px 8px", borderRadius: 4, fontSize: 10.5,
+          background: filter === f.k ? "var(--signal)" : "var(--ink-2)",
+          color: filter === f.k ? "var(--ink-0)" : "var(--ink-7)",
+          border: `1px solid ${filter === f.k ? "var(--signal)" : "var(--line)"}`,
+          cursor: "pointer", fontFamily: "var(--f-mono)",
+          textTransform: "uppercase", letterSpacing: "0.06em",
+        },
+      }, f.l + (f.c ? ` · ${f.c}` : ""))),
+    ),
+  },
+    loading
+      ? React.createElement("div", { style: { padding: "20px 0", color: "var(--ink-6)", textAlign: "center" } }, "Загружаем…")
+      : items.length === 0
+        ? React.createElement("div", { style: { padding: "20px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 } },
+            filter === "unread" ? "Всё прочитано. Отдыхай." : "Пусто.")
+        : React.createElement("div", { style: { maxHeight: 500, overflowY: "auto" } },
+            items.map((it, i) => {
+              const isUnread = !it.is_read;
+              const timeAgo = it.date ? (function(d){
+                const diff = (Date.now() - new Date(d).getTime()) / 60000;
+                if (diff < 60) return Math.round(diff) + " мин";
+                if (diff < 1440) return Math.round(diff/60) + " ч";
+                return Math.round(diff/1440) + " дн";
+              })(it.date) : "";
+              const toneBg = it.type === "alert" ? "color-mix(in oklch, var(--critical) 5%, var(--ink-2))"
+                : it.type === "warning" ? "color-mix(in oklch, var(--warn) 5%, var(--ink-2))"
+                : "var(--ink-2)";
+              return React.createElement("div", {
+                key: it.id || i,
+                onClick: () => isUnread && markRead(it.id),
+                style: {
+                  padding: "12px 14px", marginBottom: 6,
+                  background: isUnread ? toneBg : "transparent",
+                  border: `1px solid ${isUnread ? "var(--line)" : "var(--line-soft)"}`,
+                  borderRadius: 6,
+                  cursor: isUnread ? "pointer" : "default",
+                  display: "grid", gridTemplateColumns: "24px 1fr auto",
+                  gap: 10, alignItems: "start",
+                },
+              },
+                React.createElement("span", { style: { fontSize: 16, lineHeight: 1 } }, kindIcon[it.kind] || "📢"),
+                React.createElement("div", { style: { minWidth: 0 } },
+                  React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 4 } },
+                    React.createElement("span", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, kindLabel[it.kind] || it.kind),
+                    React.createElement("span", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)" } }, timeAgo),
+                    isUnread && React.createElement("span", { style: { width: 6, height: 6, borderRadius: 999, background: "var(--signal)" } }),
+                  ),
+                  React.createElement("div", { style: { fontSize: 13, color: "var(--ink-9)", fontWeight: isUnread ? 500 : 400, marginBottom: 2 } }, it.title),
+                  React.createElement("div", { style: { fontSize: 12, color: "var(--ink-7)", lineHeight: 1.45 } }, it.message),
+                  it.client_id && React.createElement("a", {
+                    href: `/design/client/${it.client_id}`,
+                    onClick: (e) => e.stopPropagation(),
+                    className: "mono",
+                    style: { fontSize: 10.5, color: "var(--signal)", textDecoration: "none", marginTop: 4, display: "inline-block" },
+                  }, "→ к клиенту"),
+                ),
+                typeof it.id === "number" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, onClick: (e) => e.stopPropagation() },
+                  React.createElement("button", { onClick: () => snooze(it.id), title: "Отложить на 24ч",
+                    style: { background: "transparent", border: "1px solid var(--line-soft)", borderRadius: 3, color: "var(--ink-6)", cursor: "pointer", padding: "2px 6px", fontSize: 10 } }, "⏱"),
+                  React.createElement("button", { onClick: () => dismiss(it.id), title: "Убрать",
+                    style: { background: "transparent", border: "1px solid var(--line-soft)", borderRadius: 3, color: "var(--ink-6)", cursor: "pointer", padding: "2px 6px", fontSize: 10 } }, "✕"),
+                ),
+              );
+            })
+          ),
+  );
+}
+window.InboxFeed = InboxFeed;

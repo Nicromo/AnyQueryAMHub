@@ -532,6 +532,24 @@ async def add_nps_entry(
         client.nps_date = datetime.utcnow()
 
     db.commit()
+
+    # Детрактор (NPS ≤ 6) → уведомление менеджеру в inbox + TG
+    try:
+        if int(score) <= 6 and client and client.manager_email:
+            from models import User as _User
+            mgr = db.query(_User).filter(_User.email == client.manager_email,
+                                          _User.is_active == True).first()
+            if mgr:
+                from tg_notifications import notify_manager
+                await notify_manager(db, mgr, "nps_incoming", {
+                    "client": client.name, "score": int(score),
+                    "comment": (data.get("comment") or "")[:200] or "—",
+                }, related_type="client", related_id=client.id)
+                db.commit()
+    except Exception as _ne:
+        import logging as _l
+        _l.getLogger(__name__).warning(f"notify nps_incoming skipped: {_ne}")
+
     return {"ok": True, "id": entry.id}
 
 

@@ -79,19 +79,37 @@ async def notify_manager(
         return False
     title, body, ntype = _format(kind, payload)
 
-    # 1. Inbox
+    # 1. Inbox — dedupe: если такой же kind+related для user есть в последние 6 часов
+    #    и ещё не прочитан, обновляем его (не плодим дубликаты sync_fail)
     try:
-        n = Notification(
-            user_id=user.id,
-            title=title,
-            message=body,
-            type=ntype,
-            related_resource_type=related_type,
-            related_resource_id=related_id,
-            is_read=False,
-            created_at=datetime.utcnow(),
-        )
-        db.add(n)
+        dedupe_window = datetime.utcnow() - __import__("datetime").timedelta(hours=6)
+        existing = None
+        if related_type or related_id:
+            existing = (db.query(Notification)
+                .filter(Notification.user_id == user.id,
+                        Notification.kind == kind,
+                        Notification.related_resource_type == related_type,
+                        Notification.related_resource_id == related_id,
+                        Notification.is_read == False,
+                        Notification.dismissed_at.is_(None),
+                        Notification.created_at >= dedupe_window)
+                .first())
+        if existing:
+            existing.title = title
+            existing.message = body
+            existing.type = ntype
+            existing.created_at = datetime.utcnow()
+        else:
+            n = Notification(
+                user_id=user.id,
+                title=title, message=body, type=ntype,
+                kind=kind,
+                related_resource_type=related_type,
+                related_resource_id=related_id,
+                is_read=False,
+                created_at=datetime.utcnow(),
+            )
+            db.add(n)
         db.flush()
     except Exception as e:
         logger.warning(f"notify_manager inbox write failed: {e}")

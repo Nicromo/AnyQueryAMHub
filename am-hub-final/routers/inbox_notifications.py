@@ -111,44 +111,195 @@ async def api_notifications(db: Session = Depends(get_db), auth_token: Optional[
 
 
 @router.get("/api/inbox")
-async def api_inbox(db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
-    """Получить сообщения Inbox."""
+async def api_inbox(
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+    read: Optional[str] = None,        # "0" — только непрочитанные, "1" — только прочитанные, None — все
+    type: Optional[str] = None,        # info/warning/alert/success
+    kind: Optional[str] = None,        # sync_fail / task_deadline / meeting_soon / ...
+    client_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """
+    Единый inbox: Notification + derived события (просроченные чекапы, blocked tasks).
+    Фильтры: ?read=0&type=alert&kind=sync_fail&client_id=5&limit=20&offset=0
+
+    Snoozed-записи (snoozed_until > now) скрываются.
+    Dismissed (dismissed_at != NULL) — скрыты всегда.
+    """
     if not auth_token:
-        return {"items": []}
+        return {"items": [], "total": 0}
     from auth import decode_access_token
     payload = decode_access_token(auth_token)
     if not payload:
-        return {"items": []}
+        return {"items": [], "total": 0}
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    items = []
-    now = datetime.now()
+    if not user:
+        return {"items": [], "total": 0}
 
-    # Новые уведомления
-    notifs = db.query(Notification).filter(Notification.user_id == user.id, Notification.is_read == False).order_by(Notification.created_at.desc()).limit(20).all()
-    for n in notifs:
-        items.append({"type": "notification", "title": n.title, "message": n.message, "date": n.created_at.isoformat() if n.created_at else None, "priority": n.type})
+    now = datetime.utcnow()
 
-    # Просроченные чекапы
-    q = db.query(Client)
-    if user.role == "manager":
-        q = q.filter(Client.manager_email == user.email)
-    clients = q.all()
-    for c in clients:
-        interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
-        last = c.last_meeting_date or c.last_checkup
-        if last and (now - last).days > interval:
-            items.append({"type": "overdue", "title": f"Просрочен чекап: {c.name}", "message": f"Последний контакт {(now-last).days} дн. назад (норма: {interval})", "date": last.isoformat(), "priority": "high", "client_id": c.id})
+    # 1. Реальные Notification (с фильтрами)
+    q = db.query(Notification).filter(
+        Notification.user_id == user.id,
+        Notification.dismissed_at.is_(None),
+    )
+    q = q.filter((Notification.snoozed_until.is_(None)) | (Notification.snoozed_until < now))
+    if read == "0":
+        q = q.filter(Notification.is_read == False)
+    elif read == "1":
+        q = q.filter(Notification.is_read == True)
+    if type:
+        q = q.filter(Notification.type == type)
+    if kind:
+        q = q.filter(Notification.kind == kind)
+    if client_id is not None:
+        q = q.filter(
+            (Notification.related_resource_type == "client") &
+            (Notification.related_resource_id == client_id)
+        )
+    total = q.count()
+    rows = q.order_by(Notification.created_at.desc()).offset(max(0, offset)).limit(max(1, min(200, limit))).all()
+    items = [{
+        "id": n.id,
+        "source": "notification",
+        "kind": n.kind or n.type,
+        "type": n.type,
+        "title": n.title,
+        "message": n.message,
+        "is_read": bool(n.is_read),
+        "snoozed_until": n.snoozed_until.isoformat() if n.snoozed_until else None,
+        "related_type": n.related_resource_type,
+        "related_id": n.related_resource_id,
+        "client_id": n.related_resource_id if n.related_resource_type == "client" else None,
+        "date": n.created_at.isoformat() if n.created_at else None,
+    } for n in rows]
 
-    # Blocked tasks
-    task_q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
-    if user.role == "manager":
-        task_q = task_q.filter(Client.manager_email == user.email)
-    blocked = task_q.filter(Task.status == "blocked").all()
-    for t in blocked:
-        items.append({"type": "blocked", "title": f"Заблокирована: {t.title}", "message": t.client.name if t.client else "", "priority": "high", "client_id": t.client_id})
+    # 2. Derived: overdue checkups + blocked tasks (без пагинации, дешевые запросы)
+    if offset == 0 and not kind and not client_id:
+        client_q = db.query(Client)
+        if user.role == "manager":
+            client_q = client_q.filter(Client.manager_email == user.email)
+        clients = client_q.all()
+        for c in clients:
+            interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+            last = c.last_meeting_date or c.last_checkup
+            if last and (now - last).days > interval:
+                items.append({
+                    "id": f"overdue-{c.id}",
+                    "source": "derived", "kind": "overdue_checkup",
+                    "type": "alert",
+                    "title": f"Просрочен чекап: {c.name}",
+                    "message": f"Последний контакт {(now-last).days} дн. назад (норма: {interval})",
+                    "is_read": False, "snoozed_until": None,
+                    "related_type": "client", "related_id": c.id, "client_id": c.id,
+                    "date": last.isoformat(),
+                })
+
+        task_q = db.query(Task).join(Client, Task.client_id == Client.id, isouter=True)
+        if user.role == "manager":
+            task_q = task_q.filter(Client.manager_email == user.email)
+        for t in task_q.filter(Task.status == "blocked").all():
+            items.append({
+                "id": f"blocked-{t.id}",
+                "source": "derived", "kind": "blocked_task",
+                "type": "warning",
+                "title": f"Заблокирована: {t.title}",
+                "message": t.client.name if t.client else "",
+                "is_read": False, "snoozed_until": None,
+                "related_type": "task", "related_id": t.id,
+                "client_id": t.client_id,
+                "date": (t.created_at or now).isoformat(),
+            })
 
     items.sort(key=lambda x: x.get("date") or "", reverse=True)
-    return {"items": items[:50]}
+    return {"items": items[:limit] if offset == 0 else items,
+            "total": total,
+            "unread": db.query(Notification).filter(
+                Notification.user_id == user.id,
+                Notification.is_read == False,
+                Notification.dismissed_at.is_(None),
+            ).count()}
+
+
+@router.patch("/api/inbox/{notif_id}/read")
+async def api_inbox_read_one(
+    notif_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token:
+        raise HTTPException(401)
+    from auth import decode_access_token
+    p = decode_access_token(auth_token)
+    if not p:
+        raise HTTPException(401)
+    user = db.query(User).filter(User.id == int(p.get("sub"))).first()
+    n = db.query(Notification).filter(
+        Notification.id == notif_id, Notification.user_id == user.id
+    ).first()
+    if not n:
+        raise HTTPException(404)
+    n.is_read = True
+    n.read_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/inbox/{notif_id}/snooze")
+async def api_inbox_snooze(
+    notif_id: int, request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Скрыть нотификацию до snoozed_until = now + hours (default 24)."""
+    if not auth_token:
+        raise HTTPException(401)
+    from auth import decode_access_token
+    p = decode_access_token(auth_token)
+    if not p:
+        raise HTTPException(401)
+    user = db.query(User).filter(User.id == int(p.get("sub"))).first()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    hours = int(body.get("hours", 24))
+    if hours < 1 or hours > 24 * 30:
+        raise HTTPException(400, "hours must be 1..720")
+    n = db.query(Notification).filter(
+        Notification.id == notif_id, Notification.user_id == user.id
+    ).first()
+    if not n:
+        raise HTTPException(404)
+    n.snoozed_until = datetime.utcnow() + timedelta(hours=hours)
+    db.commit()
+    return {"ok": True, "snoozed_until": n.snoozed_until.isoformat()}
+
+
+@router.post("/api/inbox/{notif_id}/dismiss")
+async def api_inbox_dismiss(
+    notif_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    if not auth_token:
+        raise HTTPException(401)
+    from auth import decode_access_token
+    p = decode_access_token(auth_token)
+    if not p:
+        raise HTTPException(401)
+    user = db.query(User).filter(User.id == int(p.get("sub"))).first()
+    n = db.query(Notification).filter(
+        Notification.id == notif_id, Notification.user_id == user.id
+    ).first()
+    if not n:
+        raise HTTPException(404)
+    n.dismissed_at = datetime.utcnow()
+    n.is_read = True
+    db.commit()
+    return {"ok": True}
 
 
 
