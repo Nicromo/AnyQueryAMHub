@@ -342,6 +342,116 @@ async def api_send_followup(meeting_id: int, request: Request, db: Session = Dep
     return {"ok": True, "task_id": task.id}
 
 
+@router.post("/api/clients/{client_id}/followup/send")
+async def api_client_followup_send(
+    client_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Client-level follow-up (не привязан к конкретной встрече): менеджер отправил клиенту
+    follow-up в групповой TG-чат, жмёт «Отправлено».
+    Фиксируем: PartnerLog, Task done, Meeting.followup_status (последняя встреча если есть),
+    push в Merchrules (meeting), push в Airtable (дата коммуникации)."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(404, "client not found")
+
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text required")
+
+    now = datetime.now()
+
+    # Последняя встреча — помечаем followup=sent
+    last_meeting = (db.query(Meeting)
+                      .filter(Meeting.client_id == client_id)
+                      .order_by(Meeting.date.desc())
+                      .first())
+    if last_meeting:
+        last_meeting.followup_status = "sent"
+        last_meeting.followup_text = text
+        last_meeting.followup_sent_at = now
+
+    # Task done
+    task = Task(
+        client_id=client.id,
+        title=f"📧 Follow-up отправлен ({client.name})",
+        description=text[:500],
+        status="done",
+        priority="medium",
+        source="followup",
+        created_from_meeting_id=last_meeting.id if last_meeting else None,
+        confirmed_at=now,
+        confirmed_by=user.email if user else None,
+    )
+    db.add(task)
+
+    # PartnerLog
+    try:
+        from routers.partner_logs import log_event
+        log_event(db, client_id=client.id,
+                  event_type="followup_sent",
+                  title=f"Follow-up отправлен в TG ({(user.email if user else '—')})",
+                  body=text,
+                  payload={"channel": "telegram_group",
+                           "meeting_id": last_meeting.id if last_meeting else None,
+                           "length": len(text)},
+                  source="followup",
+                  created_by=user.email if user else None)
+    except Exception as e:
+        logger.warning(f"PartnerLog followup_sent failed: {e}")
+
+    client.last_meeting_date = now
+    db.commit()
+
+    # Push в Merchrules (если есть site_ids) — как meeting с type=followup
+    if user and client.site_ids:
+        try:
+            from merchrules import push_meeting
+            u_settings = user.settings or {}
+            mr = u_settings.get("merchrules", {}) or {}
+            mr_login = mr.get("login") or os.environ.get("MERCHRULES_LOGIN")
+            from crypto import dec as _dec
+            mr_password = _dec(mr.get("password", "")) or os.environ.get("MERCHRULES_PASSWORD")
+            site_ids = client.site_ids if isinstance(client.site_ids, list) else []
+            if mr_login and mr_password and site_ids:
+                await push_meeting(
+                    site_ids=[str(s) for s in site_ids],
+                    meeting_date=now.strftime("%Y-%m-%d"),
+                    meeting_type="followup",
+                    summary=text[:500],
+                    mood="ok",
+                    next_meeting=None,
+                    login=mr_login,
+                    password=mr_password,
+                )
+        except Exception as e:
+            logger.warning(f"Merchrules followup push failed: {e}")
+
+    # Push в Airtable (дата коммуникации)
+    if client.name:
+        try:
+            from airtable_sync import sync_meeting_to_airtable
+            await sync_meeting_to_airtable(
+                client_name=client.name,
+                meeting_date=now,
+                comment=f"Follow-up в TG: {text[:100]}",
+            )
+        except Exception as e:
+            logger.warning(f"Airtable followup sync failed: {e}")
+
+    return {"ok": True, "task_id": task.id,
+            "meeting_id": last_meeting.id if last_meeting else None}
+
 
 @router.post("/api/meetings/{meeting_id}/followup/skip")
 async def api_skip_followup(meeting_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):

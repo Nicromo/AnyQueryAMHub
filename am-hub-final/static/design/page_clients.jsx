@@ -484,12 +484,30 @@ window.ClientRoadmap = ClientRoadmap;
 window.PageClients = PageClients;
 window.PageClient = PageClient;
 
-// ── FollowupModal — AI-генерация фолоуапа + редактирование + копировать ──
+// ── FollowupModal — AI-генерация фолоуапа + редактирование + копировать + send ──
 function FollowupModal({ client, onClose }) {
   const [text, setText] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState(null);
   const [copied, setCopied] = React.useState(false);
+  const [sending, setSending] = React.useState(false);
+
+  async function markSent() {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    try {
+      const r = await fetch(`/api/clients/${client.id}/followup/send`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      window.appToast && window.appToast("✓ Follow-up отмечен как отправленный");
+      onClose();
+    } catch (e) {
+      window.appToast && window.appToast("Ошибка: " + e.message);
+    } finally { setSending(false); }
+  }
 
   const run = React.useCallback(async () => {
     setLoading(true); setErr(null);
@@ -556,12 +574,14 @@ function FollowupModal({ client, onClose }) {
           whiteSpace: "pre-wrap", lineHeight: 1.5,
         },
       }),
-      React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" } },
+      React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end", flexWrap: "wrap" } },
         React.createElement(Btn, { size: "m", kind: "ghost", onClick: run, disabled: loading },
           loading ? "…" : "🔄 Перегенерировать"),
         React.createElement(Btn, { size: "m", kind: "ghost", onClick: copyToClipboard, disabled: !text },
           copied ? "✓ Скопировано" : "📋 Копировать"),
-        React.createElement(Btn, { size: "m", kind: "primary", onClick: onClose }, "Закрыть"),
+        React.createElement(Btn, { size: "m", kind: "ghost", onClick: onClose }, "Закрыть"),
+        React.createElement(Btn, { size: "m", kind: "primary", onClick: markSent, disabled: !text.trim() || sending },
+          sending ? "…" : "📤 Отправлено в TG"),
       ),
     ),
   );
