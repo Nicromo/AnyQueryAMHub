@@ -69,10 +69,106 @@ async def api_checkup_queries(
 
     meta = client.integration_metadata or {}
     checkup_queries = meta.get("checkup_queries", {})
-    queries = checkup_queries.get(type, [])
+    queries = list(checkup_queries.get(type, []) or [])
+    source = "saved" if queries else None
 
-    # Если нет сохранённых — возвращаем пустой список (расширение попросит ввести вручную)
-    return {"ok": True, "queries": queries, "type": type, "client": client.name}
+    # Главный источник: Merchrules /analytics/{top|zero|null}_queries для site_id клиента.
+    # Унифицированный endpoint — работает для любого клиента с настроенным
+    # merchrules_account_id + user-уровневыми или env-кредами MR.
+    if not queries and client.merchrules_account_id:
+        try:
+            from merchrules_sync import fetch_checkup_queries
+            # Креды текущего менеджера имеют приоритет над env
+            mr_settings = (user.settings or {}).get("merchrules", {}) or {}
+            login = mr_settings.get("login") or ""
+            try:
+                from crypto import dec as _dec
+                password = _dec(mr_settings.get("password", "")) or ""
+            except Exception:
+                password = mr_settings.get("password") or ""
+            queries = await fetch_checkup_queries(
+                site_id=client.merchrules_account_id,
+                type_=type, login=login, password=password,
+            )
+            if queries:
+                source = "merchrules"
+        except Exception as e:
+            logger.warning(f"merchrules queries fetch failed: {e}")
+
+    # Fallback: уникальные запросы из последнего CheckupResult
+    if not queries:
+        try:
+            from models import CheckupResult
+            last = (db.query(CheckupResult)
+                      .filter(CheckupResult.client_id == client.id,
+                              CheckupResult.query_type == type)
+                      .order_by(CheckupResult.created_at.desc())
+                      .first())
+            if last and last.results:
+                seen: set = set()
+                for r in last.results:
+                    q = (r.get("query") or "").strip()
+                    if q and q not in seen:
+                        seen.add(q)
+                        queries.append(q)
+                if queries:
+                    source = "last_result"
+        except Exception as e:
+            logger.debug(f"checkup queries fallback failed: {e}")
+
+    if not source:
+        source = "empty"
+
+    return {
+        "ok": True,
+        "queries": queries,
+        "type": type,
+        "client": client.name,
+        "source": source,
+    }
+
+
+@router.post("/api/checkup/{cabinet_id}/queries")
+async def api_checkup_queries_save(
+    cabinet_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Сохраняет вручную введённые запросы в integration_metadata[checkup_queries][type].
+    Расширение вызывает после того, как менеджер ввёл список запросов в textarea —
+    чтобы следующий раз подтянулись автоматически.
+
+    Body: {type: "top"|"random"|"zero"|"zeroquery", queries: ["пуховик", ...]}
+    """
+    user = _checkup_auth(auth_token, db, request)
+
+    client = None
+    if cabinet_id.isdigit():
+        client = db.query(Client).filter(Client.id == int(cabinet_id)).first()
+    if not client:
+        client = db.query(Client).filter(Client.merchrules_account_id == cabinet_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Кабинет не найден")
+
+    body = await request.json()
+    type_ = (body.get("type") or "top").lower()
+    queries = body.get("queries") or []
+    if isinstance(queries, str):
+        queries = [q.strip() for q in queries.splitlines() if q.strip()]
+    if not isinstance(queries, list):
+        raise HTTPException(400, "queries must be list")
+    queries = [str(q).strip() for q in queries if str(q).strip()][:100]
+
+    meta = dict(client.integration_metadata or {})
+    cq = dict(meta.get("checkup_queries") or {})
+    cq[type_] = queries
+    meta["checkup_queries"] = cq
+    client.integration_metadata = meta
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(client, "integration_metadata")
+    db.commit()
+    return {"ok": True, "saved": len(queries), "type": type_}
 
 
 

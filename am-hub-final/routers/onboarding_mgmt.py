@@ -239,6 +239,44 @@ async def api_get_cabinet(
     if site_url and not site_url.startswith("http"):
         site_url = "https://" + site_url
 
+    # Fallback: тянем apiKey из Merchrules /api/site/all — этот endpoint
+    # отдаёт все сайты с их apiKey, удобно чтобы менеджер не вводил вручную.
+    # Пробуем по merchrules_account_id и по всем site_ids из JSONB.
+    fetched_from_mr = False
+    if not api_key and (client.merchrules_account_id or client.site_ids):
+        try:
+            from merchrules_sync import fetch_site_api_keys
+            mr_settings = (user.settings or {}).get("merchrules", {}) or {}
+            login = mr_settings.get("login") or ""
+            try:
+                from crypto import dec as _dec
+                password = _dec(mr_settings.get("password", "")) or ""
+            except Exception:
+                password = mr_settings.get("password") or ""
+            site_keys = await fetch_site_api_keys(login=login, password=password)
+            candidates = []
+            if client.merchrules_account_id:
+                candidates.append(str(client.merchrules_account_id))
+            if isinstance(client.site_ids, list):
+                candidates.extend([str(s) for s in client.site_ids])
+            for sid in candidates:
+                info = site_keys.get(sid)
+                if info and info.get("apiKey"):
+                    api_key = info["apiKey"]
+                    fetched_from_mr = True
+                    # Сохраняем в meta чтобы в следующий раз не ходить
+                    new_meta = dict(meta)
+                    new_meta["diginetica_api_key"] = api_key
+                    if info.get("domain") and not site_url:
+                        site_url = "https://" + info["domain"] if not info["domain"].startswith("http") else info["domain"]
+                    client.integration_metadata = new_meta
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(client, "integration_metadata")
+                    db.commit()
+                    break
+        except Exception as _e:
+            logger.warning(f"fetch_site_api_keys fallback failed: {_e}")
+
     digi = meta.get("diginetica", {})
 
     products = {}
