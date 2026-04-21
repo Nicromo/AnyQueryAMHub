@@ -348,38 +348,91 @@ async def api_ai_chat(
     if not message:
         return {"reply": "Напишите что-нибудь."}
 
-    # Собираем контекст клиента
+    # ── Собираем контекст для grounding AI ────────────────────────────────
+    # Задача: дать модели реальные данные портфеля чтобы ответы на запросы
+    # типа «топ 10 в риске» / «кому пора QBR» / «где upsell» были по делу,
+    # а не общими отписками.
     context_parts = []
     client = None
     if client_id:
         client = db.query(Client).filter(Client.id == client_id).first()
+
     if client:
         open_tasks = db.query(Task).filter(Task.client_id == client.id, Task.status != "done").all()
         last_meeting = db.query(Meeting).filter(Meeting.client_id == client.id).order_by(Meeting.date.desc()).first()
+        from datetime import timedelta as _td
+        days_since_meeting = None
+        if last_meeting and last_meeting.date:
+            days_since_meeting = (datetime.utcnow() - last_meeting.date).days
         context_parts.append(f"""Данные клиента:
 - Название: {client.name}
 - Сегмент: {client.segment or '—'}
-- Health Score: {client.health_score or 0:.0f}%
+- Health Score: {(client.health_score or 0) * (100 if client.health_score and client.health_score <= 1 else 1):.0f}%
 - Домен: {client.domain or '—'}
+- MRR: {client.mrr or 0:.0f} ₽
+- GMV 30d: {client.gmv or 0:.0f} ₽
+- NPS last: {client.nps_last if client.nps_last is not None else '—'}
+- Дата окончания контракта: {client.contract_end.isoformat() if client.contract_end else '—'}
+- Статус оплаты: {client.payment_status or 'active'}
 - Открытых задач: {len(open_tasks)}
-- Последняя встреча: {last_meeting.date.strftime('%d.%m.%Y') if last_meeting and last_meeting.date else 'нет'}
-- Топ задачи: {', '.join(t.title for t in open_tasks[:3])}""")
-    else:
-        # Общий контекст менеджера
-        q = db.query(Client)
-        if user.role == "manager": q = q.filter(Client.manager_email == user.email)
-        clients = q.all()
-        health_vals = [c.health_score for c in clients if c.health_score is not None]
-        avg_h = sum(health_vals) / len(health_vals) if health_vals else 0
-        open_t = db.query(Task).join(Client, Task.client_id == Client.id).filter(
-            Task.status != "done"
-        )
-        if user.role == "manager": open_t = open_t.filter(Client.manager_email == user.email)
-        context_parts.append(f"""Портфель менеджера {user.name}:
+- Открытых тикетов: {client.open_tickets or 0}
+- Последняя встреча: {last_meeting.date.strftime('%d.%m.%Y') if last_meeting and last_meeting.date else 'нет'}{f' ({days_since_meeting} дн. назад)' if days_since_meeting is not None else ''}
+- Последний QBR: {client.last_qbr_date.strftime('%d.%m.%Y') if client.last_qbr_date else 'нет'}
+- Топ-5 задач: {'; '.join(t.title for t in open_tasks[:5]) or '—'}""")
+
+    # Всегда добавляем общий контекст портфеля — даже для per-client чата
+    # (модель может сослаться «у других клиентов в похожем сегменте»).
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    clients = q.all()
+    health_vals = [c.health_score for c in clients if c.health_score is not None]
+    # Нормализуем health в 0..100 (в БД может быть 0..1)
+    def _h100(h):
+        if h is None: return None
+        return h * 100 if h <= 1 else h
+    h100 = [_h100(h) for h in health_vals]
+    avg_h = sum(h100) / len(h100) if h100 else 0
+    risk_count = sum(1 for h in h100 if h < 50)
+    portfolio_mrr = sum(float(c.mrr or 0) for c in clients)
+    open_t = db.query(Task).join(Client, Task.client_id == Client.id).filter(Task.status != "done")
+    if user.role == "manager":
+        open_t = open_t.filter(Client.manager_email == user.email)
+    open_tasks_total = open_t.count()
+
+    context_parts.append(f"""Портфель менеджера {user.name or user.email}:
 - Клиентов: {len(clients)}
-- Средний Health Score: {avg_h:.0f}%
-- Открытых задач: {open_t.count()}
-- Клиенты с low health: {sum(1 for h in health_vals if h < 50)}""")
+- Суммарный MRR: {portfolio_mrr:.0f} ₽
+- Средний Health: {avg_h:.0f}%
+- Клиентов с low health (<50%): {risk_count}
+- Открытых задач всего: {open_tasks_total}""")
+
+    # ── Детальный срез клиентов (до 40 ТОП по важности) ───────────────────
+    # Важность = risk + MRR. Даём модели имя+ключевые метрики каждому клиенту.
+    def _client_importance(c):
+        h = _h100(c.health_score) or 50
+        mrr_w = min((c.mrr or 0) / 10000, 10)  # нормируем
+        risk_bonus = 20 if h < 50 else 10 if h < 70 else 0
+        overdue_bonus = 5 if (c.payment_status or "") == "overdue" else 0
+        return mrr_w + risk_bonus + overdue_bonus
+    sorted_clients = sorted(clients, key=_client_importance, reverse=True)[:40]
+    now_dt = datetime.utcnow()
+    lines = ["Список клиентов (name · segment · MRR · health · дней без встречи · NPS · payment · open_tasks · open_tickets · contract_end):"]
+    for c in sorted_clients:
+        d_meet = "—"
+        if c.last_meeting_date:
+            d_meet = str((now_dt - c.last_meeting_date).days) + "д"
+        tasks_n = db.query(Task).filter(Task.client_id == c.id, Task.status != "done").count()
+        h_pct = _h100(c.health_score)
+        lines.append(
+            f"- {c.name} · {c.segment or '—'} · {int(c.mrr or 0)}₽ · "
+            f"{int(h_pct) if h_pct is not None else '—'}% · {d_meet} · "
+            f"NPS {c.nps_last if c.nps_last is not None else '—'} · "
+            f"{c.payment_status or 'active'} · tasks {tasks_n} · "
+            f"tickets {c.open_tickets or 0} · "
+            f"contract {c.contract_end.isoformat() if c.contract_end else '—'}"
+        )
+    context_parts.append("\n".join(lines))
 
     system_prompt = f"""Ты — AI-ассистент AM Hub, помощник аккаунт-менеджера.
 Ты помогаешь управлять портфелем клиентов, составлять планы, писать фолоуапы и анализировать данные.
@@ -408,7 +461,7 @@ async def api_ai_chat(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                 json={"model": "llama-3.3-70b-versatile", "messages": messages,
-                      "max_tokens": 800, "temperature": 0.7},
+                      "max_tokens": 2000, "temperature": 0.5},
             )
         if r.status_code != 200:
             return {"reply": f"Groq API error {r.status_code}. Проверьте API ключ."}
