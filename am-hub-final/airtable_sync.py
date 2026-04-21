@@ -18,6 +18,80 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def _emit_csm_change_notification(db, client, old_email: str, new_email: str):
+    """Сигнализирует что в Airtable у клиента сменился CSM.
+    1) Создаёт Notification старому менеджеру: «клиент переназначен на X,
+       хотите передать клиента в AM Hub?» с deeplink на приём передачи.
+    2) Dedupe — не слать повторно в рамках 48 часов.
+    3) Если pending ClientTransferRequest уже есть — не создаём новую запись."""
+    from models import User, Notification, ClientTransferRequest
+    old_email = (old_email or "").strip().lower()
+    new_email = (new_email or "").strip().lower()
+    if not old_email or old_email == new_email:
+        return
+    old_user = db.query(User).filter(User.email == old_email).first()
+    new_user = db.query(User).filter(User.email == new_email).first()
+
+    # Dedupe: не слать повторно в 48ч
+    try:
+        recent_cutoff = datetime.utcnow().timestamp() - 48 * 3600
+        meta = client.integration_metadata or {}
+        last_ts = meta.get("csm_change_notified_ts")
+        if last_ts and float(last_ts) >= recent_cutoff:
+            return
+    except Exception:
+        pass
+
+    # 1. Notification старому менеджеру
+    if old_user:
+        msg_lines = [
+            f"Клиент «{client.name}» переназначен в Airtable на {new_email}.",
+            "Хотите создать запрос на передачу клиента в AM Hub?",
+        ]
+        n = Notification(
+            user_id=old_user.id,
+            title="🔄 CSM изменён в Airtable",
+            message="\n".join(msg_lines),
+            type="info",
+            kind="csm_change",
+            related_resource_type="client",
+            related_resource_id=client.id,
+            is_read=False,
+            created_at=datetime.utcnow(),
+        )
+        db.add(n)
+
+    # 2. Также сразу создаём черновой ClientTransferRequest (pending) если нет
+    # уже открытого — чтобы новый менеджер тоже видел у себя в инбоксе
+    if old_user and new_user:
+        existing = (db.query(ClientTransferRequest)
+                      .filter(ClientTransferRequest.client_id == client.id,
+                              ClientTransferRequest.status == "pending")
+                      .first())
+        if not existing:
+            tr = ClientTransferRequest(
+                client_id=client.id,
+                from_user_id=old_user.id,
+                to_user_id=new_user.id,
+                ai_summary=None,
+                manual_note=f"Авто-создано: в Airtable CSM изменён на {new_email}.",
+                status="pending",
+            )
+            db.add(tr)
+
+    # Пишем timestamp в meta чтобы не дублировать уведомления
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        meta = dict(client.integration_metadata or {})
+        meta["csm_change_notified_ts"] = datetime.utcnow().timestamp()
+        meta["csm_change_last_old"] = old_email
+        meta["csm_change_last_new"] = new_email
+        client.integration_metadata = meta
+        flag_modified(client, "integration_metadata")
+    except Exception:
+        pass
+
 AIRTABLE_TOKEN        = os.getenv("AIRTABLE_TOKEN", "")
 # Defaults hardcoded — user's specific base/tables, no Railway var needed
 AIRTABLE_BASE_ID      = os.getenv("AIRTABLE_BASE_ID", "appEAS1rPKpevoIel")
@@ -491,7 +565,29 @@ async def sync_clients_from_airtable(
                 c.name = name
                 if segment:
                     c.segment = segment
-                if manager_email:
+                # CSM-change detection: если в Airtable сменился менеджер,
+                # уведомляем старого менеджера в AM Hub и предлагаем создать
+                # ClientTransferRequest на нового. Сам manager_email пока
+                # оставляем старый — пусть менеджер через accept передаст
+                # клиента явно. Админ всё равно увидит смену в следующем синке.
+                if manager_email and c.manager_email and \
+                        c.manager_email.lower() != (manager_email or "").lower():
+                    try:
+                        _emit_csm_change_notification(
+                            db, c, old_email=c.manager_email, new_email=manager_email
+                        )
+                    except Exception as _ne:
+                        logger.warning(f"csm_change notify failed for {c.id}: {_ne}")
+                    # Сохраняем новый manager_email в метаданных для показа
+                    # «в Airtable теперь X». Сам Client.manager_email не трогаем.
+                    meta = dict(c.integration_metadata or {})
+                    meta["airtable_manager_email"] = manager_email
+                    meta["airtable_csm_changed_at"] = datetime.utcnow().isoformat()
+                    c.integration_metadata = meta
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(c, "integration_metadata")
+                elif manager_email and not c.manager_email:
+                    # Клиент был без менеджера → присваиваем
                     c.manager_email = manager_email
                 if site_id:
                     c.airtable_site_id = site_id

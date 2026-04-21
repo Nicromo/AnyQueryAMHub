@@ -2972,8 +2972,6 @@ function PageProfile() {
               { l: "Клиентов (assigned)", v: prof.clients_assigned },
               { l: "Telegram",            v: prof.telegram_id ? "✓" : "не привязан" },
             ].map((r, i) => {
-              // Валидные значения: строки, включая пустые; числа включая 0;
-              // только null/undefined показываем как "—".
               const shown = r.v == null || r.v === "" ? "—" : String(r.v);
               return (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
@@ -2984,10 +2982,142 @@ function PageProfile() {
             })}
           </div>
         </Card>
+
+        {/* Мои кабинеты Merchrules — занимает оба столбца */}
+        <div style={{ gridColumn: "1 / -1" }}>
+          <MerchrulesSitesCard/>
+        </div>
       </div>
     </div>
   );
 }
+
+// ── MerchrulesSitesCard — менеджер вводит свои site_ids + таблица по ним ──
+function MerchrulesSitesCard() {
+  const [raw, setRaw] = React.useState("");
+  const [savedIds, setSavedIds] = React.useState([]);
+  const [rows, setRows] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  const reloadTable = React.useCallback(() => {
+    setLoading(true);
+    fetch("/api/me/merchrules/my-sites-table", { credentials: "include" })
+      .then(r => r.ok ? r.json() : { items: [] })
+      .then(d => {
+        setRows(d.items || []);
+        const ids = (d.items || []).map(x => x.site_id);
+        setSavedIds(ids);
+        if (!raw) setRaw(ids.join(", "));
+      })
+      .finally(() => setLoading(false));
+  }, [raw]);
+  React.useEffect(() => { reloadTable(); /* eslint-disable-next-line */ }, []);
+
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    try {
+      const r = await fetch("/api/me/merchrules/my-sites", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site_ids: raw }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "HTTP " + r.status);
+      setSavedIds(d.site_ids || []);
+      setMsg(`✓ Сохранено · ${d.count} кабинетов`);
+      reloadTable();
+    } catch (e) { setMsg("Ошибка: " + e.message); }
+    finally { setSaving(false); setTimeout(() => setMsg(null), 4000); }
+  };
+
+  const rub = (v) => {
+    if (v == null) return "—";
+    if (v >= 1_000_000) return "₽ " + (v/1_000_000).toFixed(1) + "м";
+    if (v >= 1_000) return "₽ " + Math.round(v/1000) + "к";
+    return "₽ " + Math.round(v);
+  };
+
+  return React.createElement(Card, { title: "Мои кабинеты Merchrules" },
+    React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", marginBottom: 10, lineHeight: 1.5 } },
+      "Впиши ID своих сайтов в Merchrules (через запятую, пробел или с новой строки). ",
+      "Sync будет тянуть данные только по ним — без глобального листинга accounts (который часто возвращает неверный список)."),
+    React.createElement("textarea", {
+      value: raw, onChange: e => setRaw(e.target.value),
+      rows: 3,
+      placeholder: "221, 715, 1003\n2345\n3421",
+      style: {
+        width: "100%", padding: "8px 10px", marginBottom: 8,
+        background: "var(--ink-2)", border: "1px solid var(--line)",
+        borderRadius: 4, color: "var(--ink-9)", fontSize: 13,
+        fontFamily: "var(--f-mono)", resize: "vertical", outline: "none",
+      },
+    }),
+    React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 14 } },
+      React.createElement(Btn, { kind: "primary", size: "s", onClick: save, disabled: saving },
+        saving ? "…" : "Сохранить"),
+      msg && React.createElement("span", { className: "mono", style: { fontSize: 11, color: msg.startsWith("✓") ? "var(--ok)" : "var(--critical)" } }, msg),
+      React.createElement("div", { style: { flex: 1 } }),
+      savedIds.length > 0 && React.createElement("span", { className: "mono", style: { fontSize: 11, color: "var(--ink-5)" } },
+        `Сохранено: ${savedIds.length}`),
+    ),
+
+    // Таблица клиентов по site_ids
+    loading && React.createElement("div", { style: { fontSize: 12, color: "var(--ink-5)" } }, "Загружаем…"),
+    !loading && rows.length === 0 && React.createElement("div", { style: { fontSize: 12, color: "var(--ink-5)", padding: "8px 0" } },
+      "Таблица пуста. Добавь site_ids выше и нажми «Сохранить»."),
+    !loading && rows.length > 0 && React.createElement("div", { style: { overflowX: "auto", border: "1px solid var(--line)", borderRadius: 6 } },
+      React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12 } },
+        React.createElement("thead", null,
+          React.createElement("tr", { style: { background: "var(--ink-2)" } },
+            ["ID", "Клиент / URL", "Сегмент", "Оплата", "Подключённые продукты"].map((h, i) =>
+              React.createElement("th", {
+                key: i,
+                style: {
+                  padding: "8px 10px", textAlign: i >= 2 ? "left" : "left",
+                  fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--ink-5)",
+                  textTransform: "uppercase", letterSpacing: "0.08em",
+                  borderBottom: "1px solid var(--line)",
+                },
+              }, h)))),
+        React.createElement("tbody", null,
+          rows.map((r, i) => React.createElement("tr", {
+            key: i,
+            style: { borderBottom: "1px solid var(--line-soft)",
+              opacity: r.resolved ? 1 : 0.55 },
+          },
+            React.createElement("td", { className: "mono", style: { padding: "8px 10px", color: "var(--ink-7)" } }, r.site_id),
+            React.createElement("td", { style: { padding: "8px 10px" } },
+              React.createElement("div", { style: { color: "var(--ink-9)", fontWeight: 500 } },
+                r.name || "— не найден в БД —"),
+              r.domain && React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } },
+                r.domain),
+            ),
+            React.createElement("td", { style: { padding: "8px 10px" } },
+              React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)" } }, r.segment || "—")),
+            React.createElement("td", { style: { padding: "8px 10px" } },
+              r.payment_amount > 0
+                ? React.createElement("span", { style: { color: "var(--warn)", fontFamily: "var(--f-mono)", fontSize: 11 } },
+                    rub(r.payment_amount) + (r.payment_due_date ? " · " + r.payment_due_date : ""))
+                : React.createElement("span", { className: "mono", style: { fontSize: 11, color: r.payment_status === "active" ? "var(--ok)" : "var(--ink-5)" } },
+                    r.payment_status || "—")),
+            React.createElement("td", { style: { padding: "8px 10px" } },
+              (r.products || []).length === 0
+                ? React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)" } }, "—")
+                : React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 4 } },
+                    r.products.map((p, j) => React.createElement("span", {
+                      key: j,
+                      style: {
+                        padding: "2px 6px", fontSize: 10.5, fontFamily: "var(--f-mono)",
+                        background: "var(--ink-2)", border: "1px solid var(--line)",
+                        borderRadius: 3, color: p.status === "active" ? "var(--ok)" : "var(--ink-7)",
+                      },
+                    }, p.code || p.name || "?")))),
+          )))))
+  );
+}
+window.MerchrulesSitesCard = MerchrulesSitesCard;
 
 // ── Assignments admin ─────────────────────────────────────
 function PageAssignments() {
@@ -3547,7 +3677,8 @@ function PageIntegrations() {
 
   const renderMr = () => React.createElement("div", null,
     React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } },
-      "Креды Merchrules — в Настройках. Плановый синк раз в час + кнопка на Командном центре."),
+      "Креды Merchrules — в Настройках. Плановый синк раз в час + кнопка на Командном центре. " +
+      "Свои кабинеты (site_ids) → в Моём профиле."),
     React.createElement(Btn, { kind: "primary", size: "m", onClick: async () => {
       try {
         const r = await fetch("/api/sync/merchrules", { method: "POST", credentials: "include", headers: {"Content-Type": "application/json"}, body: "{}" });

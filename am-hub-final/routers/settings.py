@@ -38,6 +38,113 @@ def _env(key: str, default: str = "") -> str:
 def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
+def _parse_site_ids(raw) -> list:
+    """Нормализует ввод site_ids: поддерживает строку с запятыми / переводами строк /
+    точками с запятой / пробелами, либо уже готовый массив."""
+    import re as _re
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        parts = [str(x) for x in raw]
+    else:
+        parts = _re.split(r"[\s,;]+", str(raw))
+    out = []
+    for p in parts:
+        p = p.strip()
+        if p:
+            out.append(p)
+    # дедупликация с сохранением порядка
+    seen = set()
+    result = []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            result.append(p)
+    return result
+
+
+@router.post("/api/me/merchrules/my-sites")
+async def api_save_my_site_ids(request: Request, db: Session = Depends(get_db),
+                                auth_token: Optional[str] = Cookie(None)):
+    """Менеджер вводит свои Merchrules site_ids (через запятую, с новой строки, etc)."""
+    if not auth_token:
+        raise HTTPException(401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(401)
+    body = await request.json()
+    ids = _parse_site_ids(body.get("site_ids"))
+    settings = dict(user.settings or {})
+    mr = dict(settings.get("merchrules") or {})
+    mr["my_site_ids"] = ids
+    settings["merchrules"] = mr
+    user.settings = settings
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(user, "settings")
+    db.commit()
+    return {"ok": True, "site_ids": ids, "count": len(ids)}
+
+
+@router.get("/api/me/merchrules/my-sites-table")
+async def api_my_sites_table(db: Session = Depends(get_db),
+                              auth_token: Optional[str] = Cookie(None)):
+    """Табличный preview: для каждого site_id из user.settings.merchrules.my_site_ids
+    возвращаем name/url/segment/payment/products (из локальной БД, Client + ClientProduct).
+    """
+    if not auth_token:
+        raise HTTPException(401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(401)
+
+    ids_raw = (user.settings or {}).get("merchrules", {}).get("my_site_ids") or []
+    if isinstance(ids_raw, str):
+        ids = _parse_site_ids(ids_raw)
+    else:
+        ids = [str(x) for x in ids_raw]
+
+    from models import Client
+    rows = []
+    for sid in ids:
+        c = (db.query(Client)
+               .filter((Client.merchrules_account_id == sid) |
+                       (Client.airtable_site_id == sid))
+               .first())
+        products = []
+        if c:
+            try:
+                from models import ClientProduct
+                prods = db.query(ClientProduct).filter(ClientProduct.client_id == c.id).all()
+                products = [{"code": p.code, "name": p.name, "status": p.status} for p in prods]
+            except Exception:
+                products = []
+        rows.append({
+            "site_id": sid,
+            "name": c.name if c else None,
+            "client_id": c.id if c else None,
+            "domain": (c.domain if c else None) or (f"site-{sid}"),
+            "url": (f"https://{c.domain}" if c and c.domain else None),
+            "segment": c.segment if c else None,
+            "payment_status": (c.payment_status if c else None),
+            "payment_amount": (c.payment_amount if c else None),
+            "payment_due_date": (c.payment_due_date.isoformat() if c and c.payment_due_date else None),
+            "mrr": (c.mrr if c else None),
+            "products": products,
+            "health": (c.health_score if c else None),
+            "last_meeting": (c.last_meeting_date.isoformat() if c and c.last_meeting_date else None),
+            "resolved": c is not None,
+        })
+    return {"items": rows, "count": len(rows)}
+
+
 @router.post("/api/settings/creds")
 async def api_save_creds(request: Request, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
     """Сохранить персональные креды пользователя для ВСЕХ сервисов."""

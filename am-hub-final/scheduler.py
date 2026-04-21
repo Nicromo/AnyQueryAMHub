@@ -137,26 +137,64 @@ async def job_sync_merchrules():
 
                     headers = {"Authorization": f"Bearer {token}"}
 
-                    # Тянем аккаунты
+                    # Тянем аккаунты. Если менеджер указал свои site_ids в
+                    # user.settings.merchrules.my_site_ids — используем их
+                    # и запрашиваем каждый сайт поштучно (более надёжно чем
+                    # глобальный accounts-листинг, который иногда возвращает
+                    # только 1 сайт из-за фильтрации Merchrules по роли).
                     accounts = []
-                    for ep in (
-                        f"{base_url}/backend-v2/accounts?limit=500",
-                        f"{base_url}/backend-v2/sites?limit=500",
-                    ):
+                    my_site_ids = []
+                    if manager_email:
                         try:
-                            r = await hx.get(ep, headers=headers, timeout=20)
-                            if r.status_code == 200:
-                                data = r.json()
-                                for key in ("accounts", "sites", "items", "data"):
-                                    if isinstance(data.get(key), list) and data[key]:
-                                        accounts = data[key]
+                            mgr_user = db.query(User).filter(User.email == manager_email,
+                                                             User.is_active == True).first()
+                            if mgr_user:
+                                mr_settings = (mgr_user.settings or {}).get("merchrules", {}) or {}
+                                raw_ids = mr_settings.get("my_site_ids") or ""
+                                if isinstance(raw_ids, list):
+                                    my_site_ids = [str(x).strip() for x in raw_ids if str(x).strip()]
+                                else:
+                                    my_site_ids = [s.strip() for s in str(raw_ids).split(",") if s.strip()]
+                        except Exception as _me:
+                            logger.debug(f"my_site_ids fetch failed: {_me}")
+
+                    if my_site_ids:
+                        # Ручной список: подтягиваем метаданные каждого site отдельно
+                        for sid in my_site_ids:
+                            try:
+                                r = await hx.get(f"{base_url}/backend-v2/sites/{sid}",
+                                                 headers=headers, timeout=15)
+                                if r.status_code == 200:
+                                    acc = r.json()
+                                    if isinstance(acc, dict):
+                                        accounts.append(acc)
+                                    continue
+                                # Если endpoint /sites/{id} недоступен — кладём
+                                # псевдо-запись с id, чтобы дальше fetch_tasks
+                                # всё равно сработал для этого site_id.
+                                accounts.append({"id": sid, "name": f"Site {sid}"})
+                            except Exception:
+                                accounts.append({"id": sid, "name": f"Site {sid}"})
+                    else:
+                        # Старое поведение: листинг всех accounts
+                        for ep in (
+                            f"{base_url}/backend-v2/accounts?limit=500",
+                            f"{base_url}/backend-v2/sites?limit=500",
+                        ):
+                            try:
+                                r = await hx.get(ep, headers=headers, timeout=20)
+                                if r.status_code == 200:
+                                    data = r.json()
+                                    for key in ("accounts", "sites", "items", "data"):
+                                        if isinstance(data.get(key), list) and data[key]:
+                                            accounts = data[key]
+                                            break
+                                    if not accounts and isinstance(data, list):
+                                        accounts = data
+                                    if accounts:
                                         break
-                                if not accounts and isinstance(data, list):
-                                    accounts = data
-                                if accounts:
-                                    break
-                        except Exception:
-                            continue
+                            except Exception:
+                                continue
 
                     for acc in accounts:
                         aid = acc.get("id") or acc.get("site_id") or acc.get("siteId")
