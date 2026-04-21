@@ -1297,6 +1297,108 @@ async def api_me_kpi_summary(
     }
 
 
+@router.get("/api/analytics/checkup-funnel")
+async def api_checkup_funnel(
+    days: int = 90,
+    segment: Optional[str] = None,
+    client_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Воронка: Запланировано → Состоялось → С риском → Экшн-итем → Закрыто в 7д.
+
+    Считается из реальных Meeting + Task (не требует спец-полей has_action_item).
+    Фильтры segment/client_id как у остальных аналитик-endpoint'ов.
+    """
+    if not auth_token:
+        raise HTTPException(401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(401)
+
+    # Scope клиентов
+    q = db.query(Client)
+    if user.role == "manager":
+        q = q.filter(Client.manager_email == user.email)
+    if client_id:
+        q = q.filter(Client.id == int(client_id))
+    elif segment:
+        seg_u = (segment or "").upper()
+        if seg_u == "SME":
+            q = q.filter(Client.segment.in_(["SME", "SME-"]))
+        else:
+            q = q.filter(Client.segment == seg_u)
+    clients = q.all()
+    cids = [c.id for c in clients]
+    if not cids:
+        return {"rows": [
+            {"label": "Запланировано",    "value": 0, "pct": 0},
+            {"label": "Состоялось",       "value": 0, "pct": 0},
+            {"label": "С риском",         "value": 0, "pct": 0},
+            {"label": "Экшн-итем создан", "value": 0, "pct": 0},
+            {"label": "Закрыто в 7д",     "value": 0, "pct": 0},
+        ], "total_clients": 0}
+
+    now = datetime.utcnow()
+    since = now - timedelta(days=days)
+
+    # Meetings в окне
+    meetings = (db.query(Meeting)
+                  .filter(Meeting.client_id.in_(cids),
+                          Meeting.date.isnot(None),
+                          Meeting.date >= since)
+                  .all())
+
+    planned = len(meetings)
+    # «состоялось» — встреча прошла (date < now)
+    held_set = {m.id for m in meetings if m.date and m.date < now}
+    held = len(held_set)
+    # «с риском» — mood=risk или followup_status=pending после недели
+    risk = sum(1 for m in meetings
+               if (m.mood or "") == "risk" or
+                  (m.id in held_set and
+                   m.followup_status in (None, "pending") and
+                   m.followup_skipped is not True and
+                   m.date and (now - m.date).days >= 7))
+
+    # Экшн-итем создан: найдём Task с created_from_meeting_id в held
+    from models import Task as _T
+    action_tasks = []
+    if held_set:
+        action_tasks = (db.query(_T)
+                          .filter(_T.created_from_meeting_id.in_(list(held_set)))
+                          .all())
+    # Уникальные meeting_id с хотя бы одной action task
+    action_meeting_ids = {t.created_from_meeting_id for t in action_tasks
+                          if t.created_from_meeting_id}
+    action = len(action_meeting_ids)
+
+    # Закрыто в 7д: Task done с confirmed_at в течение 7 дней после meeting.date
+    m_dates = {m.id: m.date for m in meetings}
+    closed = 0
+    for t in action_tasks:
+        if t.status != "done":
+            continue
+        md = m_dates.get(t.created_from_meeting_id)
+        ca = t.confirmed_at
+        if md and ca and 0 <= (ca - md).days <= 7:
+            closed += 1
+
+    def _pct(n): return int(round(n / planned * 100)) if planned else 0
+    rows = [
+        {"label": "Запланировано",    "value": planned, "pct": 100 if planned else 0},
+        {"label": "Состоялось",       "value": held,    "pct": _pct(held)},
+        {"label": "С риском",         "value": risk,    "pct": _pct(risk)},
+        {"label": "Экшн-итем создан", "value": action,  "pct": _pct(action)},
+        {"label": "Закрыто в 7д",     "value": closed,  "pct": _pct(closed)},
+    ]
+    return {"rows": rows, "total_clients": len(clients), "window_days": days}
+
+
 @router.get("/api/analytics/portfolio-search-kpi")
 async def api_portfolio_search_kpi(
     segment: Optional[str] = None,
