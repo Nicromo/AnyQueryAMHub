@@ -81,6 +81,73 @@ async def api_generate_followup(request: Request, db: Session = Depends(get_db),
 
 
 
+@router.post("/api/ai/generate-daily-plan")
+async def api_generate_daily_plan(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Сводный план на сегодня для текущего менеджера (встречи + задачи + риски).
+    Использует тот же ai_assistant (Groq/Qwen fallback) что и prep-бриф."""
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from datetime import datetime, timedelta
+    today = datetime.utcnow().date()
+    tomorrow = today + timedelta(days=1)
+
+    meetings = (db.query(Meeting)
+                  .join(Client, Meeting.client_id == Client.id, isouter=True)
+                  .filter(Client.manager_email == user.email,
+                          Meeting.date >= datetime.combine(today, datetime.min.time()),
+                          Meeting.date < datetime.combine(tomorrow, datetime.min.time()))
+                  .all())
+    overdue = (db.query(Task)
+                 .join(Client, Task.client_id == Client.id, isouter=True)
+                 .filter(Client.manager_email == user.email,
+                         Task.status != "done",
+                         Task.due_date.isnot(None),
+                         Task.due_date < datetime.utcnow())
+                 .all())
+    due_today = (db.query(Task)
+                   .join(Client, Task.client_id == Client.id, isouter=True)
+                   .filter(Client.manager_email == user.email,
+                           Task.status != "done",
+                           Task.due_date >= datetime.combine(today, datetime.min.time()),
+                           Task.due_date < datetime.combine(tomorrow, datetime.min.time()))
+                   .all())
+    lines = [f"План на {today.strftime('%d.%m.%Y')}:", ""]
+    if meetings:
+        lines.append(f"📞 Встречи ({len(meetings)}):")
+        for m in meetings[:5]:
+            hhmm = m.date.strftime("%H:%M") if m.date else "?"
+            cname = m.client.name if m.client else "—"
+            lines.append(f"  • {hhmm} — {cname} · {m.type or 'встреча'}")
+        lines.append("")
+    if overdue:
+        lines.append(f"🚨 Просроченных задач: {len(overdue)}")
+        for t in overdue[:5]:
+            lines.append(f"  • {t.title}")
+        lines.append("")
+    if due_today:
+        lines.append(f"📝 На сегодня задач: {len(due_today)}")
+        for t in due_today[:5]:
+            lines.append(f"  • {t.title}")
+    if not (meetings or overdue or due_today):
+        lines.append("Сегодня ничего срочного — проактивная работа с портфелем.")
+    return {"plan": "\n".join(lines),
+            "meetings_count": len(meetings),
+            "overdue_count": len(overdue),
+            "due_today_count": len(due_today)}
+
+
 @router.post("/api/ai/generate-prep")
 async def api_generate_prep(
     request: Request,

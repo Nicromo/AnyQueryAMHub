@@ -216,7 +216,12 @@ async def auto_qbr(client_id: int, db: Session = Depends(get_db), auth_token: Op
 # ============================================================================
 
 @router.get("/integrations/test/merchrules")
-async def test_merchrules(login: str = "", password: str = ""):
+async def test_merchrules(
+    login: str = "", password: str = "",
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    _get_user(auth_token, db)
     if not login or not password:
         return {"error": "Need login and password"}
     import httpx
@@ -229,7 +234,12 @@ async def test_merchrules(login: str = "", password: str = ""):
 
 
 @router.get("/integrations/test/ktalk")
-async def test_ktalk(space: str = "", token: str = ""):
+async def test_ktalk(
+    space: str = "", token: str = "",
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    _get_user(auth_token, db)
     if not space or not token:
         return {"error": "Need space and token"}
     import httpx
@@ -242,7 +252,12 @@ async def test_ktalk(space: str = "", token: str = ""):
 
 
 @router.get("/integrations/test/tbank")
-async def test_tbank(token: str = ""):
+async def test_tbank(
+    token: str = "",
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    _get_user(auth_token, db)
     if not token:
         return {"error": "Need token"}
     import httpx
