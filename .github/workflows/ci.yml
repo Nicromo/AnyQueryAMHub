@@ -58,6 +58,29 @@ jobs:
             -not -name 'app.js' \
             | xargs -I{} node --check {}
 
+  pytest-smoke:
+    name: Pytest smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        working-directory: am-hub-final
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run smoke tests
+        working-directory: am-hub-final
+        env:
+          DATABASE_URL: "sqlite:///./_ci_smoke.db"
+          SECRET_KEY: "ci-smoke-key-not-for-prod"
+        run: pytest -q tests/ -x
+
   # TODO: alembic check требует живой БД. Добавить postgres service
   #       и подсунуть DATABASE_URL=postgresql://postgres:postgres@localhost:5432/test
   #       перед тем как включать этот шаг. Пока отключён чтобы не давать
