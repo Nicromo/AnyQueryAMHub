@@ -2612,42 +2612,42 @@ window.ClientTransferSection = ClientTransferSection;
 window.ClientTransferModal = ClientTransferModal;
 
 
-// ── PageRenewal — Kanban по срокам истечения контракта ─────────────────────
+// ── PageRenewal (переиспользует URL /design/renewal) → Оплаты: неоплатившие ──
 function PageRenewal() {
   const [data, setData] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    fetch("/api/me/renewal-pipeline", { credentials: "include" })
+    fetch("/api/me/payments-pending", { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
-  const mrrFmt = (v) => {
+  const rub = (v) => {
     if (v == null) return "—";
     if (v >= 1_000_000) return `₽ ${(v/1_000_000).toFixed(1)}м`;
     if (v >= 1_000) return `₽ ${Math.round(v/1000)}к`;
     return `₽ ${Math.round(v)}`;
   };
 
-  const order = ["overdue", "critical", "week", "month", "quarter", "later"];
+  const order = ["overdue", "today", "week", "later", "no_date"];
 
   return React.createElement(React.Fragment, null,
     React.createElement(TopBar, {
-      breadcrumbs: ["am hub", "клиенты", "renewal"],
-      title: "Renewal pipeline",
+      breadcrumbs: ["am hub", "клиенты", "оплаты"],
+      title: "Оплаты · неоплатившие клиенты",
       subtitle: loading ? "…" :
-        (data ? `${data.total_clients} клиентов · MRR ${mrrFmt(data.total_mrr)}` : "Нет данных"),
+        (data ? `${data.total_clients} клиентов · Σ ₽ ${Math.round(data.total_unpaid_amount || 0)}` : "Нет данных"),
     }),
     React.createElement("div", { style: { padding: "22px 28px 40px" } },
       loading
         ? React.createElement("div", { style: { color: "var(--ink-6)" } }, "Загружаем…")
         : !data || data.total_clients === 0
           ? React.createElement("div", { style: { color: "var(--ink-6)", padding: "40px 0", textAlign: "center" } },
-              "Нет клиентов с заполненным полем contract_end. Добавь дату окончания контракта в карточке клиента.")
+              "Всё оплачено 🎉. Клиентов с просроченными или неоплаченными счетами нет.")
           : React.createElement("div", {
-              style: { display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, alignItems: "start" },
+              style: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, alignItems: "start" },
             },
               order.map(k => {
                 const col = data.columns[k];
@@ -2681,9 +2681,17 @@ function PageRenewal() {
                           React.createElement("div", { style: { fontWeight: 500, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
                             it.name),
                           React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-6)" } },
-                            `${it.segment || "—"} · MRR ${mrrFmt(it.mrr)}`),
+                            `${it.segment || "—"} · MRR ${rub(it.mrr)}`),
+                          it.payment_amount > 0 && React.createElement("div", {
+                            className: "mono",
+                            style: { fontSize: 11, color: "var(--warn)", marginTop: 2, fontWeight: 500 },
+                          }, `К оплате: ${rub(it.payment_amount)}`),
                           React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", marginTop: 2 } },
-                            `${it.contract_end} · ${it.days_left < 0 ? `просрочено ${-it.days_left}д` : it.days_left + ' дн'} · health ${it.health}%`),
+                            it.payment_due_date
+                              ? (it.days_from_today < 0 ? `Дедлайн ${it.payment_due_date} · просрочено ${-it.days_from_today}д`
+                                  : it.days_from_today === 0 ? `Дедлайн сегодня (${it.payment_due_date})`
+                                  : `Дедлайн ${it.payment_due_date} · через ${it.days_from_today}д`)
+                              : "Без даты · " + (it.payment_status || "—")),
                         )),
                       ),
                 );
