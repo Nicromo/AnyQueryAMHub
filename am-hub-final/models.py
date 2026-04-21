@@ -298,6 +298,12 @@ class Notification(Base):
     related_resource_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     read_at = Column(DateTime, nullable=True)
+    # Unified inbox: snooze/dismiss
+    snoozed_until = Column(DateTime, nullable=True, index=True)
+    dismissed_at = Column(DateTime, nullable=True)
+    # Группировка событий (дедуп): ключ вида "sync_fail:merchrules" — повторные события
+    # могут апдейтить существующее вместо создания нового.
+    kind = Column(String, nullable=True, index=True)
 
 
 class SyncLog(Base):

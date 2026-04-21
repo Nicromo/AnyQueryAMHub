@@ -241,6 +241,18 @@ async def job_sync_merchrules():
                 sync_log.status = "error"
                 sync_log.message = str(e)
                 logger.error(f"❌ MR sync error [{cred['source']}]: {e}")
+                # Уведомление менеджеру через inbox+TG
+                try:
+                    from tg_notifications import notify_manager
+                    mgr_email = cred.get("manager_email")
+                    if mgr_email:
+                        mgr = db.query(User).filter(User.email == mgr_email).first()
+                        if mgr:
+                            await notify_manager(db, mgr, "sync_fail",
+                                {"integration": "Merchrules", "error": str(e)[:200]},
+                                related_type="integration", related_id=None)
+                except Exception as _ne:
+                    logger.warning(f"notify_manager sync_fail skipped: {_ne}")
 
             db.add(sync_log)
             db.commit()
@@ -475,7 +487,8 @@ async def job_deadline_reminders():
         today = now_msk.date()
         tomorrow = today + timedelta(days=1)
 
-        users = db.query(User).filter(User.telegram_id != None, User.is_active == True).all()
+        # Уведомляем всех активных (TG — опционально, inbox — всем)
+        users = db.query(User).filter(User.is_active == True).all()
         for user in users:
             # Задачи со сроком сегодня
             today_tasks = db.query(Task).join(
@@ -496,6 +509,18 @@ async def job_deadline_reminders():
                 Task.status.in_(["plan", "in_progress"]),
                 Client.manager_email == user.email,
             ).all()
+
+            # Inbox-уведомления по каждой задаче завтра (dedupe по task_id за 6 часов)
+            try:
+                from tg_notifications import notify_manager
+                for t in tmr_tasks:
+                    cn = t.client.name if t.client else "—"
+                    await notify_manager(db, user, "task_deadline",
+                        {"title": t.title, "client": cn,
+                         "due": t.due_date.strftime("%d.%m %H:%M") if t.due_date else "—"},
+                        related_type="task", related_id=t.id)
+            except Exception as _ne:
+                logger.warning(f"notify task_deadline skipped: {_ne}")
 
             # Просроченные
             overdue = db.query(Task).join(
@@ -534,8 +559,10 @@ async def job_deadline_reminders():
                     client_name = t.client.name if t.client else "—"
                     msg += f"• {t.title} <i>[{client_name}]</i>\n"
 
-            await send_telegram(int(user.telegram_id), msg)
+            if user.telegram_id:
+                await send_telegram(int(user.telegram_id), msg)
 
+        db.commit()
         db.close()
         logger.info(f"✅ Deadline reminders sent to {len(users)} users")
     except Exception as e:
@@ -1187,6 +1214,41 @@ _CHECKUP_DUE_RECENT_GUARD_DAYS = 30  # dedupe: не чаще 1 раза в 30 д
 _QBR_TRIGGER_OFFSET_DAYS = 83  # 90−7 — за неделю до квартала
 
 
+async def job_meeting_reminder_30min():
+    """Каждые 15 мин: если до встречи 25..40 минут — уведомить менеджера (inbox + TG)."""
+    try:
+        from database import SessionLocal
+        from models import Client, Meeting, User
+        from tg_notifications import notify_manager
+
+        with SessionLocal() as db:
+            now = datetime.utcnow()
+            hi = now + timedelta(minutes=40)
+            lo = now + timedelta(minutes=25)
+            meetings = (db.query(Meeting)
+                          .filter(Meeting.date >= lo, Meeting.date <= hi)
+                          .all())
+            for m in meetings:
+                if not m.client_id:
+                    continue
+                client = db.query(Client).filter(Client.id == m.client_id).first()
+                if not client or not client.manager_email:
+                    continue
+                u = db.query(User).filter(User.email == client.manager_email,
+                                           User.is_active == True).first()
+                if not u:
+                    continue
+                await notify_manager(db, u, "meeting_soon", {
+                    "client": client.name,
+                    "time": m.date.strftime("%H:%M"),
+                    "type": m.type or "встреча",
+                    "prep_url": f"/design/client/{client.id}",
+                }, related_type="meeting", related_id=m.id)
+            db.commit()
+    except Exception as e:
+        logger.error(f"❌ job_meeting_reminder_30min: {e}")
+
+
 async def job_daily_meeting_prep():
     """Ежедневно 10:00 МСК: задача «Подготовиться к встрече» на каждую встречу сегодня."""
     logger.info("📋 daily_meeting_prep…")
@@ -1498,6 +1560,8 @@ def start_scheduler():
                   id="daily_backup", name="Daily per-manager backups", replace_existing=True)
 
     # Autotasks: meeting prep/followup, checkup due, QBR sync, onboarding
+    sched.add_job(job_meeting_reminder_30min, "interval", minutes=15,
+                  id="meeting_reminder_30min", name="Meeting reminder (T−30min)", replace_existing=True)
     sched.add_job(job_daily_meeting_prep, "cron", hour=10, minute=0,
                   id="meeting_prep", name="Daily Meeting Prep 10:00 MSK", replace_existing=True)
     sched.add_job(job_hourly_meeting_followup, "interval", hours=1,
