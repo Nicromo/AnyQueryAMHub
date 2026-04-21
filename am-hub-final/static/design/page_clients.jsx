@@ -2612,10 +2612,13 @@ window.ClientTransferSection = ClientTransferSection;
 window.ClientTransferModal = ClientTransferModal;
 
 
-// ── PageRenewal (переиспользует URL /design/renewal) → Оплаты: неоплатившие ──
+// ── PageRenewal → Оплаты: таблица неоплативших клиентов ───────────────────
 function PageRenewal() {
   const [data, setData] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
+  const [sortBy, setSortBy] = React.useState("days");
+  const [sortDir, setSortDir] = React.useState("asc");
+  const [filterBucket, setFilterBucket] = React.useState("all");
 
   React.useEffect(() => {
     fetch("/api/me/payments-pending", { credentials: "include" })
@@ -2630,72 +2633,178 @@ function PageRenewal() {
     if (v >= 1_000) return `₽ ${Math.round(v/1000)}к`;
     return `₽ ${Math.round(v)}`;
   };
+  const bucketLabel = {
+    overdue: "Просрочено", today: "Сегодня", week: "На неделе",
+    later: "Позже", no_date: "Без даты",
+  };
+  const bucketTone = {
+    overdue: "critical", today: "warn", week: "warn",
+    later: "info", no_date: "neutral",
+  };
 
-  const order = ["overdue", "today", "week", "later", "no_date"];
+  // Плоский список всех клиентов с меткой бакета
+  const items = React.useMemo(() => {
+    if (!data) return [];
+    const out = [];
+    for (const [bucket, col] of Object.entries(data.columns || {})) {
+      for (const it of (col.items || [])) {
+        out.push({ ...it, bucket });
+      }
+    }
+    return out;
+  }, [data]);
+
+  const filtered = filterBucket === "all" ? items : items.filter(x => x.bucket === filterBucket);
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    let va, vb;
+    if (sortBy === "name") { va = (a.name || "").toLowerCase(); vb = (b.name || "").toLowerCase(); }
+    else if (sortBy === "segment") { va = a.segment || ""; vb = b.segment || ""; }
+    else if (sortBy === "mrr") { va = a.mrr || 0; vb = b.mrr || 0; }
+    else if (sortBy === "amount") { va = a.payment_amount || 0; vb = b.payment_amount || 0; }
+    else if (sortBy === "status") { va = a.payment_status || ""; vb = b.payment_status || ""; }
+    else if (sortBy === "manager") { va = a.manager_email || ""; vb = b.manager_email || ""; }
+    else { // days
+      // overdue впереди: days_from_today < 0 — самый приоритет, null в конец
+      const x = a.days_from_today, y = b.days_from_today;
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      va = x; vb = y;
+    }
+    if (va < vb) return -dir;
+    if (va > vb) return dir;
+    return 0;
+  });
+
+  const Th = ({ k, label, right, w }) => React.createElement("th", {
+    onClick: () => {
+      if (sortBy === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
+      else { setSortBy(k); setSortDir(k === "days" || k === "amount" || k === "mrr" ? "desc" : "asc"); }
+    },
+    style: {
+      padding: "10px 12px",
+      textAlign: right ? "right" : "left",
+      fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--ink-5)",
+      textTransform: "uppercase", letterSpacing: "0.08em",
+      borderBottom: "1px solid var(--line)",
+      cursor: "pointer", userSelect: "none", width: w,
+    },
+  }, label + (sortBy === k ? (sortDir === "asc" ? " ▲" : " ▼") : ""));
+
+  const totalsByBucket = data ? Object.fromEntries(
+    Object.entries(data.columns || {}).map(([k, v]) => [k, (v.items || []).length])
+  ) : {};
 
   return React.createElement(React.Fragment, null,
     React.createElement(TopBar, {
       breadcrumbs: ["am hub", "клиенты", "оплаты"],
       title: "Оплаты · неоплатившие клиенты",
       subtitle: loading ? "…" :
-        (data ? `${data.total_clients} клиентов · Σ ₽ ${Math.round(data.total_unpaid_amount || 0)}` : "Нет данных"),
+        (data ? `${data.total_clients} клиентов · Σ ${rub(data.total_unpaid_amount || 0)}` : "Нет данных"),
     }),
     React.createElement("div", { style: { padding: "22px 28px 40px" } },
+      // Фильтр-чипы по бакетам
+      !loading && data && data.total_clients > 0 && React.createElement("div", {
+        style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 },
+      },
+        ["all", "overdue", "today", "week", "later", "no_date"].map(k => {
+          const active = k === filterBucket;
+          const count = k === "all" ? data.total_clients : (totalsByBucket[k] || 0);
+          const label = k === "all" ? "все" : bucketLabel[k];
+          const tone = k === "all" ? null : bucketTone[k];
+          return React.createElement("button", {
+            key: k, onClick: () => setFilterBucket(k),
+            style: {
+              padding: "6px 11px",
+              background: active ? (tone ? `var(--${tone})` : "var(--signal)") : "var(--ink-2)",
+              color: active ? "var(--ink-0)" : "var(--ink-7)",
+              border: `1px solid ${active ? (tone ? `var(--${tone})` : "var(--signal)") : "var(--line)"}`,
+              borderRadius: 4, fontFamily: "var(--f-mono)", fontSize: 11,
+              textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+            },
+          }, `${label} · ${count}`);
+        }),
+      ),
+
       loading
         ? React.createElement("div", { style: { color: "var(--ink-6)" } }, "Загружаем…")
         : !data || data.total_clients === 0
           ? React.createElement("div", { style: { color: "var(--ink-6)", padding: "40px 0", textAlign: "center" } },
               "Всё оплачено 🎉. Клиентов с просроченными или неоплаченными счетами нет.")
           : React.createElement("div", {
-              style: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, alignItems: "start" },
+              style: { background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" },
             },
-              order.map(k => {
-                const col = data.columns[k];
-                return React.createElement("div", {
-                  key: k,
-                  style: {
-                    background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6,
-                    padding: 10, minHeight: 200,
-                  },
+              React.createElement("div", { style: { overflowX: "auto" } },
+                React.createElement("table", {
+                  style: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
                 },
-                  React.createElement("div", {
-                    style: { display: "flex", justifyContent: "space-between", marginBottom: 10, alignItems: "center" },
-                  },
-                    React.createElement("div", { style: { fontSize: 11.5, fontWeight: 500, color: `var(--${col.tone})`, textTransform: "uppercase", letterSpacing: "0.06em" } },
-                      col.label),
-                    React.createElement("span", { className: "mono", style: { fontSize: 11, color: "var(--ink-6)" } },
-                      String(col.items.length)),
+                  React.createElement("thead", null,
+                    React.createElement("tr", { style: { background: "var(--ink-1)" } },
+                      React.createElement(Th, { k: "name",    label: "Клиент" }),
+                      React.createElement(Th, { k: "segment", label: "Сегмент", w: "80px" }),
+                      React.createElement(Th, { k: "mrr",     label: "MRR", right: true, w: "90px" }),
+                      React.createElement(Th, { k: "amount",  label: "К оплате", right: true, w: "110px" }),
+                      React.createElement(Th, { k: "days",    label: "Дедлайн", w: "150px" }),
+                      React.createElement(Th, { k: "status",  label: "Статус", w: "90px" }),
+                      React.createElement(Th, { k: "manager", label: "Менеджер", w: "18%" }),
+                    ),
                   ),
-                  col.items.length === 0
-                    ? React.createElement("div", { style: { color: "var(--ink-5)", fontSize: 11, padding: "12px 0", textAlign: "center" } }, "—")
-                    : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
-                        col.items.map(it => React.createElement("a", {
-                          key: it.id,
-                          href: `/design/client/${it.id}`,
-                          style: {
-                            padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)",
-                            borderRadius: 4, fontSize: 12, color: "var(--ink-8)",
-                            textDecoration: "none", display: "block",
-                          },
+                  React.createElement("tbody", null,
+                    sorted.map((it, i) => {
+                      const tone = bucketTone[it.bucket];
+                      const bg = it.bucket === "overdue" ? "color-mix(in oklch, var(--critical) 6%, transparent)"
+                              : it.bucket === "today"   ? "color-mix(in oklch, var(--warn) 6%, transparent)"
+                              : "transparent";
+                      return React.createElement("tr", {
+                        key: it.id || i,
+                        onClick: () => { window.location.href = "/design/client/" + it.id; },
+                        style: {
+                          borderBottom: "1px solid var(--line-soft)",
+                          cursor: "pointer", background: bg,
                         },
-                          React.createElement("div", { style: { fontWeight: 500, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-                            it.name),
-                          React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-6)" } },
-                            `${it.segment || "—"} · MRR ${rub(it.mrr)}`),
-                          it.payment_amount > 0 && React.createElement("div", {
+                      },
+                        React.createElement("td", { style: { padding: "10px 12px", color: "var(--ink-9)", fontWeight: 500 } }, it.name),
+                        React.createElement("td", { style: { padding: "10px 12px" } },
+                          React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)" } }, it.segment || "—")),
+                        React.createElement("td", {
+                          className: "mono",
+                          style: { padding: "10px 12px", textAlign: "right", color: "var(--ink-8)", fontSize: 11.5 },
+                        }, rub(it.mrr)),
+                        React.createElement("td", {
+                          className: "mono",
+                          style: { padding: "10px 12px", textAlign: "right",
+                            color: it.payment_amount > 0 ? "var(--warn)" : "var(--ink-6)",
+                            fontWeight: it.payment_amount > 0 ? 500 : 400, fontSize: 11.5 },
+                        }, it.payment_amount > 0 ? rub(it.payment_amount) : "—"),
+                        React.createElement("td", {
+                          className: "mono",
+                          style: { padding: "10px 12px", color: `var(--${tone})`, fontSize: 11 },
+                        },
+                          it.payment_due_date
+                            ? (it.days_from_today < 0 ? `${it.payment_due_date} · просрочено ${-it.days_from_today}д`
+                                : it.days_from_today === 0 ? `${it.payment_due_date} · сегодня`
+                                : `${it.payment_due_date} · через ${it.days_from_today}д`)
+                            : "—",
+                        ),
+                        React.createElement("td", { style: { padding: "10px 12px" } },
+                          React.createElement("span", {
                             className: "mono",
-                            style: { fontSize: 11, color: "var(--warn)", marginTop: 2, fontWeight: 500 },
-                          }, `К оплате: ${rub(it.payment_amount)}`),
-                          React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", marginTop: 2 } },
-                            it.payment_due_date
-                              ? (it.days_from_today < 0 ? `Дедлайн ${it.payment_due_date} · просрочено ${-it.days_from_today}д`
-                                  : it.days_from_today === 0 ? `Дедлайн сегодня (${it.payment_due_date})`
-                                  : `Дедлайн ${it.payment_due_date} · через ${it.days_from_today}д`)
-                              : "Без даты · " + (it.payment_status || "—")),
-                        )),
-                      ),
-                );
-              }),
+                            style: { fontSize: 10, color: `var(--${tone})`, textTransform: "uppercase", letterSpacing: "0.06em",
+                              padding: "2px 6px", border: `1px solid color-mix(in oklch, var(--${tone}) 40%, transparent)`,
+                              borderRadius: 3 },
+                          }, it.payment_status || "—"),
+                        ),
+                        React.createElement("td", {
+                          className: "mono",
+                          style: { padding: "10px 12px", color: "var(--ink-6)", fontSize: 10.5,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                        }, it.manager_email || "—"),
+                      );
+                    }),
+                  ),
+                ),
+              ),
             ),
     ),
   );
