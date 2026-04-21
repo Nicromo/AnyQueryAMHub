@@ -134,7 +134,7 @@ PAGES = {
     "profile":   ("PageProfile",    ["am hub", "профиль"],                 "Мой профиль"),
     "assignments":("PageAssignments",["am hub", "админ", "назначения"],    "Назначения клиентов"),
     "groups":    ("PageManagerGroups",["am hub", "админ", "группы"],       "Группы менеджеров"),
-    "renewal":   ("PageRenewal",    ["am hub", "клиенты", "renewal"],      "Renewal pipeline"),
+    "renewal":   ("PageRenewal",    ["am hub", "клиенты", "оплаты"],       "Оплаты"),
     "client-groups": ("PageClientGroups", ["am hub", "админ", "ГК"],       "Группы компаний"),
 }
 
