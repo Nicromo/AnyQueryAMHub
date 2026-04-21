@@ -187,9 +187,6 @@ function PageTop50() {
               ))}
             </div>
 
-            {/* AI-разбор раздела — шлём данные в /api/ai/analyze-top50 */}
-            <Top50AIAnalysis data={data} metric={activeMetric}/>
-
             <Card title={`${activeMetric} · по месяцам`}>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -241,6 +238,9 @@ function PageTop50() {
                 </table>
               </div>
             </Card>
+
+            {/* AI-разбор раздела — под таблицей. Шлём данные в /api/ai/analyze-top50. */}
+            <Top50AIAnalysis data={data} metric={activeMetric}/>
           </>
         )}
       </div>
@@ -251,6 +251,10 @@ function PageTop50() {
 // ── Tasks ─────────────────────────────────────────────────
 function PageTasks() {
   const [filter, setFilter] = React.useState("mine");
+  const [view, setView] = React.useState(() => {
+    try { return localStorage.getItem("amhub_tasks_view") || "kanban"; } catch (_) { return "kanban"; }
+  });
+  const setViewAndStore = (v) => { setView(v); try { localStorage.setItem("amhub_tasks_view", v); } catch (_) {} };
   const ALL_TK = (typeof window !== "undefined" && window.TASKS) || [];
   const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
   const CL_TASKS = (typeof window !== "undefined" && window.CLIENTS) || [];
@@ -395,13 +399,21 @@ function PageTasks() {
           }}
         />
       )}
-      <TopBar breadcrumbs={["am hub","задачи"]} title="Задачи · канбан"
+      <TopBar breadcrumbs={["am hub","задачи"]} title={view === "table" ? "Задачи · таблица" : "Задачи · канбан"}
         subtitle={`${totalActive} активных · ${overdue.length} просрочено · ${today.length} на сегодня`}
-        actions={<><Btn kind={filter === "mine" ? "primary" : "ghost"} size="m" onClick={() => setFilter("mine")}>Мои</Btn><Btn kind={filter === "all" ? "primary" : "dim"} size="m" onClick={() => setFilter("all")}>Вся команда</Btn><Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
-          // Клик на "+" открывает глобальную модалку из shell (FAB всегда в DOM)
-          document.querySelector('button[title="Новая задача"]')?.click();
-        }}>Задача</Btn></>}/>
+        actions={<>
+          <Btn kind={view === "kanban" ? "primary" : "ghost"} size="m" onClick={() => setViewAndStore("kanban")}>Канбан</Btn>
+          <Btn kind={view === "table" ? "primary" : "ghost"} size="m" onClick={() => setViewAndStore("table")}>Таблица</Btn>
+          <div style={{ width: 6 }}/>
+          <Btn kind={filter === "mine" ? "primary" : "ghost"} size="m" onClick={() => setFilter("mine")}>Мои</Btn>
+          <Btn kind={filter === "all" ? "primary" : "dim"} size="m" onClick={() => setFilter("all")}>Вся команда</Btn>
+          <Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => {
+            document.querySelector('button[title="Новая задача"]')?.click();
+          }}>Задача</Btn>
+        </>}/>
       <div style={{ padding: "22px 28px 40px" }}>
+        {view === "table" && <TasksTableView tasks={TK}/>}
+        {view === "kanban" && (
         <div style={{ display: "flex", gap: 14, alignItems: "flex-start", overflowX: "auto", paddingBottom: 8 }}>
           {cols.map((c, i) => (
             <div key={c.key || i}
@@ -469,11 +481,152 @@ function PageTasks() {
               letterSpacing: "0.08em", textTransform: "uppercase",
             }}>+ Колонка</button>
         </div>
+        )}
       </div>
       {detail && <TaskDetailModal task={detail} onClose={() => setDetail(null)} onReload={() => location.reload()}/>}
     </div>
   );
 }
+
+// ── TasksTableView — плоская таблица всех задач ────────────────────────────
+function TasksTableView({ tasks }) {
+  const [sortBy, setSortBy] = React.useState("due");
+  const [sortDir, setSortDir] = React.useState("asc");
+  const [filterStatus, setFilterStatus] = React.useState("all");
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const clientNameById = React.useMemo(() => {
+    const m = {}; for (const c of CL) m[c.id] = c.name; return m;
+  }, [CL]);
+
+  const filtered = tasks.filter(t => {
+    if (filterStatus === "all") return true;
+    if (filterStatus === "active") return t.status !== "done";
+    return t.status === filterStatus;
+  });
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    let va, vb;
+    if (sortBy === "title") { va = (a.title || "").toLowerCase(); vb = (b.title || "").toLowerCase(); }
+    else if (sortBy === "client") { va = (clientNameById[a.client_id] || "").toLowerCase(); vb = (clientNameById[b.client_id] || "").toLowerCase(); }
+    else if (sortBy === "priority") { const rk = { high: 3, med: 2, medium: 2, low: 1 }; va = rk[a.priority] || 0; vb = rk[b.priority] || 0; }
+    else if (sortBy === "status") { va = a.status || ""; vb = b.status || ""; }
+    else { va = a.due || ""; vb = b.due || ""; } // due string
+    if (va < vb) return -dir;
+    if (va > vb) return dir;
+    return 0;
+  });
+
+  const updateStatus = async (id, newStatus) => {
+    try {
+      const r = await fetch(`/api/tasks/${id}/status`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (r.ok) location.reload();
+    } catch (_) {}
+  };
+
+  const Th = ({ k, label, w }) => React.createElement("th", {
+    onClick: () => {
+      if (sortBy === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
+      else { setSortBy(k); setSortDir("asc"); }
+    },
+    style: {
+      padding: "10px 12px", textAlign: "left",
+      fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--ink-5)",
+      textTransform: "uppercase", letterSpacing: "0.08em",
+      borderBottom: "1px solid var(--line)",
+      cursor: "pointer", width: w, userSelect: "none",
+    },
+  }, label + (sortBy === k ? (sortDir === "asc" ? " ▲" : " ▼") : ""));
+
+  const priColor = (p) => p === "high" ? "var(--critical)" : p === "med" || p === "medium" ? "var(--warn)" : "var(--ink-6)";
+
+  return React.createElement("div", null,
+    React.createElement("div", {
+      style: { display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" },
+    },
+      ["all", "active", "plan", "in_progress", "review", "blocked", "done"].map(s =>
+        React.createElement("button", {
+          key: s, onClick: () => setFilterStatus(s),
+          style: {
+            padding: "5px 10px", fontSize: 11,
+            background: filterStatus === s ? "var(--signal)" : "var(--ink-2)",
+            color: filterStatus === s ? "var(--ink-0)" : "var(--ink-7)",
+            border: `1px solid ${filterStatus === s ? "var(--signal)" : "var(--line)"}`,
+            borderRadius: 3, cursor: "pointer",
+            fontFamily: "var(--f-mono)", textTransform: "uppercase", letterSpacing: "0.06em",
+          },
+        }, s)),
+    ),
+
+    sorted.length === 0
+      ? React.createElement("div", {
+          style: { padding: "40px 0", color: "var(--ink-6)", textAlign: "center", fontSize: 13 },
+        }, "Нет задач под текущие фильтры")
+      : React.createElement("div", {
+          style: { overflowX: "auto", background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6 },
+        },
+          React.createElement("table", {
+            style: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+          },
+            React.createElement("thead", null,
+              React.createElement("tr", { style: { background: "var(--ink-1)" } },
+                React.createElement(Th, { k: "title", label: "Задача" }),
+                React.createElement(Th, { k: "client", label: "Клиент", w: "22%" }),
+                React.createElement(Th, { k: "status", label: "Статус", w: "110px" }),
+                React.createElement(Th, { k: "priority", label: "Приоритет", w: "90px" }),
+                React.createElement(Th, { k: "due", label: "Срок", w: "100px" }),
+              ),
+            ),
+            React.createElement("tbody", null,
+              sorted.map((t, i) => React.createElement("tr", {
+                key: t.id || i,
+                style: { borderBottom: "1px solid var(--line-soft)",
+                  opacity: t.status === "done" ? 0.55 : 1 },
+              },
+                React.createElement("td", { style: { padding: "10px 12px" } },
+                  t.client_id
+                    ? React.createElement("a", {
+                        href: "/design/client/" + t.client_id + "#task-" + t.id,
+                        style: { color: "var(--ink-9)", textDecoration: "none" },
+                      }, t.title || "—")
+                    : React.createElement("span", { style: { color: "var(--ink-9)" } }, t.title || "—"),
+                ),
+                React.createElement("td", { style: { padding: "10px 12px", color: "var(--ink-7)" } },
+                  t.client_id && clientNameById[t.client_id]
+                    ? React.createElement("a", {
+                        href: "/design/client/" + t.client_id,
+                        style: { color: "var(--ink-7)", textDecoration: "none" },
+                      }, clientNameById[t.client_id])
+                    : React.createElement("span", { className: "mono", style: { fontSize: 11, color: "var(--ink-5)" } }, "— internal —"),
+                ),
+                React.createElement("td", { style: { padding: "10px 12px" } },
+                  React.createElement("select", {
+                    value: t.status || "plan",
+                    onChange: (e) => updateStatus(t.id, e.target.value),
+                    onClick: (e) => e.stopPropagation(),
+                    style: { background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 3, color: "var(--ink-8)", fontSize: 11, padding: "3px 6px", fontFamily: "var(--f-mono)" },
+                  },
+                    ["plan", "in_progress", "review", "blocked", "done"].map(s =>
+                      React.createElement("option", { key: s, value: s }, s)),
+                  ),
+                ),
+                React.createElement("td", {
+                  style: { padding: "10px 12px", color: priColor(t.priority), fontFamily: "var(--f-mono)", fontSize: 11, textTransform: "uppercase" },
+                }, t.priority || "—"),
+                React.createElement("td", {
+                  className: "mono",
+                  style: { padding: "10px 12px", color: "var(--ink-6)", fontSize: 11 },
+                }, t.due || "—"),
+              )),
+            ),
+          ),
+        ),
+  );
+}
+window.TasksTableView = TasksTableView;
 
 // ── TaskDetailModal — модалка с деталями задачи + смена статуса ────────────
 
