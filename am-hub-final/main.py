@@ -595,6 +595,7 @@ from routers import client_transfer as client_transfer_router
 from routers import renewal as renewal_router
 from routers import health as health_router
 from routers import bulk_actions as bulk_actions_router
+from routers import client_roadmap as client_roadmap_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
 app.include_router(client_transfer_router.router, tags=["client-transfer"])
@@ -603,6 +604,7 @@ app.include_router(voice_notes_router.router, tags=["voice-notes"])
 app.include_router(renewal_router.router, tags=["renewal"])
 app.include_router(health_router.router, tags=["health"])
 app.include_router(bulk_actions_router.router, tags=["bulk-actions"])
+app.include_router(client_roadmap_router.router, tags=["client-roadmap"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router

@@ -265,6 +265,50 @@ async def roadmap_update(
             "title": it.title, "order_idx": it.order_idx}
 
 
+@router.post("/api/roadmap/reorder")
+async def roadmap_reorder(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Batch update order_idx (+опционально column_key) для сортировки внутри колонки
+    и перемещения между колонками за один запрос.
+    Body: {items: [{id, order_idx, column_key?}]}
+    """
+    user = _get_user(auth_token, db)
+    if not user:
+        raise HTTPException(status_code=401)
+    body = await request.json()
+    items = body.get("items") or []
+    if not isinstance(items, list):
+        raise HTTPException(400, "items must be a list")
+    allowed_cols = {"q1", "q2", "q3", "q4", "backlog"}
+    tone_map = {"q1": "ok", "q2": "signal", "q3": "info", "q4": "warn", "backlog": "neutral"}
+    title_map = {"q1": "Q1 · готово", "q2": "Q2 · в работе",
+                 "q3": "Q3 · план", "q4": "Q4 · идеи", "backlog": "Бэклог"}
+    updated = 0
+    for raw in items:
+        try:
+            iid = int(raw.get("id"))
+        except Exception:
+            continue
+        it = db.query(RoadmapItem).filter(RoadmapItem.id == iid).first()
+        if not it:
+            continue
+        if "order_idx" in raw:
+            try: it.order_idx = int(raw["order_idx"])
+            except Exception: pass
+        if "column_key" in raw:
+            k = (raw["column_key"] or "").lower()
+            if k in allowed_cols:
+                it.column_key = k
+                it.column_title = title_map[k]
+                it.tone = tone_map[k]
+        updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated}
+
+
 @router.post("/api/roadmap/from-meeting/{meeting_id}")
 async def roadmap_from_meeting(
     meeting_id: int,

@@ -446,22 +446,25 @@ function PageClient() {
 // POST /api/tasks → создать новый элемент в колонке
 function ClientRoadmap({ clientId }) {
   const [items, setItems] = React.useState(null);
-  const [adding, setAdding] = React.useState(null); // Q1 / Q2 / ... / backlog
+  const [dragId, setDragId] = React.useState(null);
+  const [dropCol, setDropCol] = React.useState(null);
+  const [editId, setEditId] = React.useState(null);
+  const [editVal, setEditVal] = React.useState("");
 
   const COLS = [
-    { key: "Q1",      l: "Q1 · готово",   tone: "ok"      },
-    { key: "Q2",      l: "Q2 · в работе", tone: "signal"  },
-    { key: "Q3",      l: "Q3 · план",     tone: "info"    },
-    { key: "Q4",      l: "Q4 · идеи",     tone: "warn"    },
+    { key: "q1",      l: "Q1 · готово",   tone: "ok"      },
+    { key: "q2",      l: "Q2 · в работе", tone: "signal"  },
+    { key: "q3",      l: "Q3 · план",     tone: "info"    },
+    { key: "q4",      l: "Q4 · идеи",     tone: "warn"    },
     { key: "backlog", l: "бэклог",        tone: "neutral" },
   ];
 
   const reload = React.useCallback(async () => {
     try {
-      const r = await fetch(`/api/tasks?client_id=${clientId}&source=roadmap`, { credentials: "include" });
+      const r = await fetch(`/api/clients/${clientId}/roadmap-tasks`, { credentials: "include" });
       if (!r.ok) { setItems([]); return; }
       const d = await r.json();
-      setItems(d.tasks || []);
+      setItems(d.items || []);
     } catch (e) { setItems([]); }
   }, [clientId]);
 
@@ -471,45 +474,85 @@ function ClientRoadmap({ clientId }) {
     const title = (window.prompt(`Добавить в «${colKey}»:`) || "").trim();
     if (!title) return;
     try {
-      const r = await fetch("/api/tasks", {
+      const r = await fetch(`/api/clients/${clientId}/roadmap-tasks`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title, client_id: clientId, source: "roadmap",
-          task_type: colKey, priority: "med", status: "plan",
-        }),
+        body: JSON.stringify({ title, roadmap_quarter: colKey }),
       });
       if (!r.ok) throw new Error(await r.text());
-      appToast("Добавлено в " + colKey, "ok");
-      reload();
+      const d = await r.json();
+      setItems(prev => [...(prev || []), d]);
     } catch (e) { appToast("Ошибка: " + e.message, "error"); }
   }
 
   async function removeItem(id) {
     if (!await appConfirm("Удалить пункт?")) return;
+    setItems(prev => (prev || []).filter(t => t.id !== id));
     try {
-      await fetch("/api/tasks/" + id, { method: "DELETE", credentials: "include" });
-      reload();
-    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+      await fetch(`/api/clients/${clientId}/roadmap-tasks/${id}`, { method: "DELETE", credentials: "include" });
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); reload(); }
+  }
+
+  async function moveItem(id, quarter) {
+    setItems(prev => (prev || []).map(t => t.id === id ? { ...t, roadmap_quarter: quarter } : t));
+    try {
+      const r = await fetch(`/api/clients/${clientId}/roadmap-tasks/${id}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roadmap_quarter: quarter }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); reload(); }
+  }
+
+  async function renameItem(id, title) {
+    title = (title || "").trim();
+    if (!title) { setEditId(null); return; }
+    setItems(prev => (prev || []).map(t => t.id === id ? { ...t, title } : t));
+    setEditId(null);
+    try {
+      await fetch(`/api/clients/${clientId}/roadmap-tasks/${id}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); reload(); }
   }
 
   const grouped = {};
   COLS.forEach(c => { grouped[c.key] = []; });
   (items || []).forEach(t => {
-    const key = (t.task_type || "backlog").toUpperCase() === "BACKLOG" ? "backlog" : (t.task_type || "backlog");
-    if (grouped[key]) grouped[key].push(t);
-    else grouped["backlog"].push(t);
+    const k = (t.roadmap_quarter || "backlog").toLowerCase();
+    (grouped[k] || grouped["backlog"]).push(t);
   });
 
-  return React.createElement(Card, { title: "Роадмап клиента" },
+  return React.createElement(Card, {
+    title: "Роадмап клиента",
+    action: React.createElement("span", {
+      className: "mono",
+      style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" },
+    }, "drag · двойной клик"),
+  },
     items === null
       ? React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", padding: "10px 0" } }, "Загрузка…")
       : COLS.map((c, ci) =>
           React.createElement("div", {
             key: c.key,
+            onDragOver: (e) => { e.preventDefault(); setDropCol(c.key); },
+            onDragLeave: () => setDropCol(null),
+            onDrop: (e) => {
+              e.preventDefault();
+              const id = dragId; setDragId(null); setDropCol(null);
+              if (!id) return;
+              const prev = (items || []).find(x => x.id === id);
+              if (prev && prev.roadmap_quarter === c.key) return;
+              moveItem(id, c.key);
+            },
             style: {
               padding: "10px 0",
               borderBottom: ci === COLS.length - 1 ? "none" : "1px solid var(--line-soft)",
+              background: dropCol === c.key ? "color-mix(in oklch, var(--signal) 8%, transparent)" : "transparent",
+              transition: "background .12s",
             },
           },
             React.createElement("div", {
@@ -517,34 +560,54 @@ function ClientRoadmap({ clientId }) {
             },
               React.createElement("span", {
                 className: "mono",
-                style: { fontSize: 10.5, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em" },
-              }, c.l),
+                style: { fontSize: 10.5, color: `var(--${c.tone})`, textTransform: "uppercase", letterSpacing: "0.08em" },
+              }, c.l + " · " + grouped[c.key].length),
               React.createElement("button", {
                 onClick: () => addItem(c.key),
-                style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 },
+                style: { background: "none", border: "1px solid var(--line)", color: "var(--ink-6)", cursor: "pointer", fontSize: 12, padding: "1px 8px", lineHeight: 1, borderRadius: 3 },
                 title: "Добавить",
               }, "+"),
             ),
             grouped[c.key].length === 0
-              ? React.createElement("div", { style: { fontSize: 12, color: "var(--ink-5)", padding: "2px 0 4px" } }, "пусто")
-              : grouped[c.key].map(t =>
-                  React.createElement("div", {
+              ? React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-5)", padding: "4px 0", fontStyle: "italic" } },
+                  dropCol === c.key ? "отпусти сюда" : "пусто")
+              : grouped[c.key].map(t => {
+                  const isDragging = dragId === t.id;
+                  return React.createElement("div", {
                     key: t.id,
+                    draggable: true,
+                    onDragStart: (e) => { setDragId(t.id); e.dataTransfer.effectAllowed = "move"; },
+                    onDragEnd: () => { setDragId(null); setDropCol(null); },
+                    onDoubleClick: () => { setEditId(t.id); setEditVal(t.title); },
                     style: {
-                      display: "flex", justifyContent: "space-between", gap: 8,
-                      padding: "4px 0", alignItems: "center",
+                      display: "flex", justifyContent: "space-between", gap: 6,
+                      padding: "5px 6px", alignItems: "center",
+                      background: isDragging ? "color-mix(in oklch, var(--signal) 10%, var(--ink-1))" : "var(--ink-2)",
+                      border: `1px solid ${isDragging ? "var(--signal)" : "var(--line-soft)"}`,
+                      borderRadius: 3, marginBottom: 3,
+                      cursor: "grab", opacity: isDragging ? 0.5 : 1,
                     },
                   },
-                    React.createElement("span", {
-                      style: { fontSize: 12.5, color: "var(--ink-8)", flex: 1 },
-                    }, t.title),
-                    React.createElement("button", {
-                      onClick: () => removeItem(t.id),
+                    React.createElement("span", { title: "drag", style: { color: "var(--ink-5)", fontSize: 11, userSelect: "none" } }, "⋮⋮"),
+                    editId === t.id
+                      ? React.createElement("input", {
+                          autoFocus: true, value: editVal,
+                          onChange: e => setEditVal(e.target.value),
+                          onBlur: () => renameItem(t.id, editVal),
+                          onKeyDown: e => { if (e.key === "Enter") renameItem(t.id, editVal); else if (e.key === "Escape") setEditId(null); },
+                          onClick: e => e.stopPropagation(),
+                          style: { flex: 1, padding: "2px 6px", fontSize: 12.5, background: "var(--ink-1)", border: "1px solid var(--signal)", borderRadius: 2, color: "var(--ink-9)", outline: "none" },
+                        })
+                      : React.createElement("span", {
+                          style: { fontSize: 12.5, color: "var(--ink-8)", flex: 1 },
+                        }, t.title),
+                    editId !== t.id && React.createElement("button", {
+                      onClick: (e) => { e.stopPropagation(); removeItem(t.id); },
                       style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 12, padding: 0 },
                       title: "Удалить",
                     }, "×"),
-                  )
-                )
+                  );
+                })
           )
         )
   );

@@ -1852,6 +1852,54 @@ function PageRoadmap() {
     }
   };
 
+  // Переставить карточку в порядке колонки: insertBeforeId=null → в конец.
+  const reorderItem = async (id, targetKey, insertBeforeId) => {
+    // Расcчитываем новый порядок массива items колонки.
+    // 1) вынимаем dragged; 2) ставим в позицию по targetKey/insertBeforeId.
+    setLocalItems(items => {
+      const out = [...items];
+      const src = out.findIndex(i => i.id === id);
+      if (src < 0) return items;
+      const [picked] = out.splice(src, 1);
+      picked.column_key = targetKey;
+      let insertAt = out.length;
+      if (insertBeforeId != null) {
+        const idx = out.findIndex(i => i.id === insertBeforeId);
+        if (idx >= 0) insertAt = idx;
+      }
+      out.splice(insertAt, 0, picked);
+      // Пересчитываем order_idx в колонке target
+      let n = 0;
+      for (const it of out) {
+        if (it.column_key === targetKey) { it.order_idx = n; n++; }
+      }
+      return out;
+    });
+    // Batch PATCH — шлём items текущей колонки
+    const batch = [];
+    setLocalItems(items => {
+      let n = 0;
+      for (const it of items) {
+        if (it.column_key === targetKey) {
+          batch.push({ id: it.id, column_key: targetKey, order_idx: n });
+          n++;
+        }
+      }
+      return items;
+    });
+    try {
+      const r = await fetch("/design/api/roadmap/reorder", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: batch }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+    } catch (e) {
+      if (typeof appToast === "function") appToast("Не удалось сохранить порядок", "error");
+      setTimeout(() => location.reload(), 800);
+    }
+  };
+
   const startEdit = (it) => { setEditId(it.id); setEditVal(it.title || ""); };
   const saveEdit = async () => {
     const id = editId; const title = editVal.trim();
@@ -1904,9 +1952,8 @@ function PageRoadmap() {
                 const id = dragId;
                 setDragId(null); setDropCol(null);
                 if (!id) return;
-                const prevCol = (localItems.find(x => x.id === id) || {}).column_key;
-                if (prevCol === c.key) return;
-                moveItem(id, c.key);
+                // Если дроп прилетел прямо в колонку (не на карточку) — ставим в конец
+                reorderItem(id, c.key, null);
               } : undefined}
               style={{
                 background: dropCol === c.key ? "color-mix(in oklch, var(--signal) 10%, var(--ink-2))" : "var(--ink-2)",
@@ -1928,6 +1975,29 @@ function PageRoadmap() {
                     draggable: true,
                     onDragStart: (e) => { setDragId(it.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(it.id)); },
                     onDragEnd: () => { setDragId(null); setDropCol(null); },
+                    onDragOver: (e) => {
+                      if (!dragId || dragId === it.id) return;
+                      e.preventDefault(); e.stopPropagation();
+                      setDropCol(c.key);
+                    },
+                    onDrop: (e) => {
+                      if (!dragId) return;
+                      e.preventDefault(); e.stopPropagation();
+                      const id = dragId;
+                      setDragId(null); setDropCol(null);
+                      if (id === it.id) return;
+                      // Определяем insert before/after по Y курсора относительно центра
+                      const box = e.currentTarget.getBoundingClientRect();
+                      const isAbove = (e.clientY - box.top) < (box.height / 2);
+                      // Если above → вставляем перед it.id; иначе — перед следующим (или null = конец)
+                      let insertBefore = it.id;
+                      if (!isAbove) {
+                        const idx = c.items.findIndex(x => x.id === it.id);
+                        const nxt = c.items[idx + 1];
+                        insertBefore = nxt ? nxt.id : null;
+                      }
+                      reorderItem(id, c.key, insertBefore);
+                    },
                   } : {};
                   const isDragging = dragId === it.id;
                   return (
