@@ -521,12 +521,83 @@ async def send_followup_to_channel(
     meeting_date: Optional[datetime] = None,
     token: str = "",
 ) -> bool:
-    """
-    Отправить оформленный фолоуап в канал Ktalk.
-    """
+    """Отправить оформленный фолоуап в канал Ktalk."""
     date_str = meeting_date.strftime("%d.%m.%Y") if meeting_date else ""
     header = f"**📋 Итоги встречи: {client_name}**"
     if date_str:
         header += f" ({date_str})"
     full_text = f"{header}\n\n{followup_text}"
     return await send_message(channel_id, full_text, token)
+
+
+# ── Создание встречи в Ktalk/TBank calendar ───────────────────────────────────
+
+async def create_meeting(
+    title: str,
+    start: datetime,
+    end: datetime,
+    attendees: Optional[List[str]] = None,
+    description: str = "",
+    online: bool = True,
+    token: str = "",
+    space: str = "",
+) -> Dict[str, Any]:
+    """
+    Создать встречу в Ktalk через POST /api/calendar.
+    Использует tbank.ktalk.ru (Exchange-backed calendar API).
+
+    Args:
+        title:      Название встречи
+        start:      Начало (datetime с tzinfo или naive UTC)
+        end:        Конец
+        attendees:  Список email участников
+        description: Описание/повестка
+        online:     Создать как онлайн-встречу с ссылкой
+        token:      Bearer токен пользователя (захваченный расширением)
+        space:      Ktalk space (например "tbank")
+
+    Returns:
+        {"ok": True, "event_id": str} или {"ok": False, "error": str}
+    """
+    sp   = space or KTALK_SPACE
+    base = f"https://{sp}.ktalk.ru" if sp else KTALK_BASE_URL
+    tok  = token or KTALK_API_TOKEN
+
+    if not base or not tok:
+        return {"ok": False, "error": "KTALK_SPACE / KTALK_API_TOKEN / token не заданы"}
+
+    def _iso(dt: datetime) -> str:
+        # Если нет tzinfo — считаем UTC+3 (Москва)
+        if dt.tzinfo is None:
+            from datetime import timezone, timedelta as _td
+            dt = dt.replace(tzinfo=timezone(timedelta(hours=3)))
+        return dt.isoformat()
+
+    payload: Dict[str, Any] = {
+        "subject": title,
+        "start":   _iso(start),
+        "end":     _iso(end),
+        "isOnline": online,
+    }
+    if description:
+        payload["body"] = description
+    if attendees:
+        payload["attendees"] = [
+            {"email": email, "name": email.split("@")[0]} for email in attendees
+        ]
+
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tok}"}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(f"{base}/api/calendar", headers=headers, json=payload)
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                event_id = data.get("id") or data.get("eventId") or data.get("itemId") or ""
+                logger.info(f"✅ Ktalk meeting created: {event_id} — {title}")
+                return {"ok": True, "event_id": event_id, "title": title}
+            err = resp.text[:300]
+            logger.warning(f"Ktalk create_meeting error: {resp.status_code} {err}")
+            return {"ok": False, "error": f"HTTP {resp.status_code}: {err}"}
+    except Exception as e:
+        logger.error(f"❌ Ktalk create_meeting exception: {e}")
+        return {"ok": False, "error": str(e)}

@@ -232,6 +232,20 @@ async def api_send_followup(meeting_id: int, request: Request, db: Session = Dep
         except Exception as e:
             logger.warning(f"Ktalk followup push failed: {e}")
 
+    # Сохраняем последний фолоуап в клиенте (для быстрого доступа)
+    if client and followup_text:
+        try:
+            from sqlalchemy.orm.attributes import flag_modified
+            meta = dict(client.integration_metadata or {})
+            meta["last_followup_text"] = followup_text
+            meta["last_followup_at"] = datetime.now().isoformat()
+            meta["last_followup_meeting_id"] = meeting.id
+            client.integration_metadata = meta
+            flag_modified(client, "integration_metadata")
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Client last_followup save failed: {e}")
+
     # Push в Airtable — обновляем дату последней встречи
     if client and client.airtable_record_id:
         try:
@@ -483,6 +497,15 @@ async def api_meeting_transcribe(
     # Сохраняем summary в meeting
     from sqlalchemy.orm.attributes import flag_modified
     meeting.summary = summary
+    # Дублируем в client.integration_metadata для быстрого доступа
+    client_obj = db.query(Client).filter(Client.id == meeting.client_id).first()
+    if client_obj:
+        meta = dict(client_obj.integration_metadata or {})
+        meta["last_meeting_summary"] = summary
+        meta["last_meeting_summary_at"] = datetime.utcnow().isoformat()
+        meta["last_meeting_summary_id"] = meeting.id
+        client_obj.integration_metadata = meta
+        flag_modified(client_obj, "integration_metadata")
     db.commit()
 
     # Извлекаем задачи из summary и создаём их
@@ -497,6 +520,99 @@ async def api_meeting_transcribe(
     if created_tasks: db.commit()
 
     return {"ok": True, "summary": summary, "tasks_created": created_tasks}
+
+
+# ============================================================================
+# KTALK: CREATE MEETING
+# ============================================================================
+
+@router.post("/api/meetings/ktalk-create")
+async def api_ktalk_create_meeting(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Создать встречу в Ktalk (tbank.ktalk.ru).
+    Использует токен пользователя (захваченный расширением).
+
+    Body:
+      title:       str — название встречи
+      start:       str — ISO дата/время начала
+      end:         str — ISO дата/время конца
+      client_id:   int — ID клиента (опционально)
+      attendees:   [str] — email участников
+      description: str — описание/повестка
+      online:      bool — онлайн-встреча (default: true)
+      ktalk_token: str — Bearer токен из Ktalk (из настроек пользователя или из расширения)
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    title       = data.get("title", "").strip()
+    start_str   = data.get("start", "")
+    end_str     = data.get("end", "")
+    client_id   = data.get("client_id")
+    attendees   = data.get("attendees", [])
+    description = data.get("description", "")
+    online      = data.get("online", True)
+
+    if not title or not start_str or not end_str:
+        return {"error": "title, start, end обязательны"}
+
+    try:
+        start_dt = datetime.fromisoformat(start_str[:19])
+        end_dt   = datetime.fromisoformat(end_str[:19])
+    except Exception:
+        return {"error": "Неверный формат даты — ожидается ISO (YYYY-MM-DDTHH:MM:SS)"}
+
+    # Берём ktalk_token: из body → из настроек пользователя → из integration_metadata
+    settings = user.settings or {}
+    kt = settings.get("ktalk", {})
+    ktalk_token = (
+        data.get("ktalk_token")
+        or kt.get("access_token")
+        or kt.get("token")
+        or settings.get("ktalk_token", "")
+    )
+
+    from integrations.ktalk import create_meeting as ktalk_create
+    result = await ktalk_create(
+        title=title,
+        start=start_dt,
+        end=end_dt,
+        attendees=attendees if isinstance(attendees, list) else [],
+        description=description,
+        online=online,
+        token=ktalk_token,
+    )
+
+    if result.get("ok"):
+        # Сохраняем встречу локально в AM Hub
+        client = db.query(Client).filter(Client.id == int(client_id)).first() if client_id else None
+        mtg = Meeting(
+            client_id=client.id if client else None,
+            date=start_dt,
+            type="sync",
+            title=title,
+            summary=description or None,
+            source="ktalk",
+            external_id=f"ktalk_{result.get('event_id', '')}",
+            followup_status="pending",
+        )
+        db.add(mtg)
+        db.commit()
+        result["meeting_id"] = mtg.id
+
+    return result
 
 
 # ============================================================================

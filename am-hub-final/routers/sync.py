@@ -66,6 +66,7 @@ async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
     clients_synced = 0
     tasks_synced = 0
     meetings_synced = 0
+    analytics_synced = 0
 
     for acc in accounts:
         site_id = str(acc.get("id", "")).strip()
@@ -162,12 +163,83 @@ async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
                     if not client.last_meeting_date or meeting_date > client.last_meeting_date:
                         client.last_meeting_date = meeting_date
 
-        # Метрики
+        # Старые метрики (legacy compat)
         metrics = acc.get("metrics")
         if metrics and isinstance(metrics, dict):
             hs = metrics.get("health_score") or metrics.get("healthScore")
             if hs is not None:
                 client.health_score = float(hs)
+
+        # Diginetica API-ключ от /api/site/all → нужен для чекапа
+        api_key = acc.get("api_key")
+        if api_key:
+            meta = dict(client.integration_metadata or {})
+            meta["diginetica_api_key"] = api_key
+            client.integration_metadata = meta
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(client, "integration_metadata")
+
+        # Аналитика Merchrules (report/agg, report/daily, top/null/zero queries)
+        analytics_synced += 1 if acc.get("analytics") else 0
+        analytics = acc.get("analytics")
+        if analytics and isinstance(analytics, dict):
+            meta = dict(client.integration_metadata or {})
+            meta["analytics"] = analytics
+            meta["analytics_period"] = analytics.get("period", {})
+
+            # Извлекаем запросы для чекапа
+            def _extract_queries(data, max_n=100):
+                if not data:
+                    return []
+                items = data.get("items") or data.get("queries") or data.get("data") or []
+                if not isinstance(items, list):
+                    return []
+                out = []
+                for item in items:
+                    if isinstance(item, str):
+                        out.append(item)
+                    elif isinstance(item, dict):
+                        q = item.get("query") or item.get("q") or item.get("text") or ""
+                        if q:
+                            cnt = item.get("count") or item.get("frequency") or 0
+                            out.append({"query": q, "impressions": cnt})
+                return out[:max_n]
+
+            cq = meta.get("checkup_queries", {})
+            top = _extract_queries(analytics.get("top_queries"), 120)
+            if top:
+                cq["top"] = top
+            null_q = _extract_queries(analytics.get("null_queries"), 90)
+            if null_q:
+                cq["zero"] = null_q
+            zero_q = _extract_queries(analytics.get("zero_queries"), 90)
+            if zero_q:
+                cq["zeroquery"] = zero_q
+            if cq:
+                meta["checkup_queries"] = cq
+
+            # Обновляем health_score из агрегированных метрик
+            agg = analytics.get("agg")
+            if agg and isinstance(agg, dict):
+                # Пробуем разные форматы ответа report API
+                for key in ("CONVERSION", "conversion"):
+                    val = (agg.get(key) or (agg.get("data") or {}).get(key))
+                    if val is not None:
+                        try:
+                            # Конверсия 0–100 или 0–1 → нормализуем в 0–100
+                            score = float(val)
+                            if score <= 1.0:
+                                score *= 100
+                            client.health_score = round(min(score, 100.0), 1)
+                        except Exception:
+                            pass
+                        break
+
+            client.integration_metadata = meta
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(client, "integration_metadata")
+
+        client.last_sync_at = datetime.utcnow()
 
     db.commit()
 
@@ -182,12 +254,13 @@ async def api_sync_extension(request: Request, db: Session = Depends(get_db)):
     ))
     db.commit()
 
-    logger.info(f"Extension sync: {clients_synced} clients, {tasks_synced} tasks, {meetings_synced} meetings (user={user.email})")
+    logger.info(f"Extension sync: {clients_synced} clients, {tasks_synced} tasks, {meetings_synced} meetings, {analytics_synced} with analytics (user={user.email})")
     return {
         "ok": True,
         "clients_synced": clients_synced,
         "tasks_synced": tasks_synced,
         "meetings_synced": meetings_synced,
+        "analytics_synced": analytics_synced,
     }
 
 
@@ -662,6 +735,157 @@ async def api_sheets_batch_update(
         return {"ok": result, "count": len(updates)}
     except Exception as e:
         return {"error": str(e)}
+
+# ============================================================================
+# QBR CALENDAR: Airtable ↔ AM Hub sync
+
+@router.post("/api/sync/qbr-calendar")
+async def api_sync_qbr_calendar(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Pull QBR-записи из Airtable и синхронизировать с локальной таблицей QBR.
+    Создаёт QBR если нет, обновляет статус если есть.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
+    if not user:
+        raise HTTPException(status_code=401)
+
+    try:
+        from integrations.airtable import sync_qbr_calendar
+    except ImportError as e:
+        return {"error": f"Airtable integration not available: {e}"}
+
+    events = await sync_qbr_calendar()
+    if not events:
+        return {"ok": True, "synced": 0, "note": "Airtable вернул 0 QBR записей"}
+
+    created = 0
+    updated = 0
+
+    for ev in events:
+        client_name = ev.get("client")
+        date_str    = ev.get("date")
+        status      = ev.get("status", "planned")
+        quarter     = ev.get("quarter")
+        manager_val = ev.get("manager")
+        at_rec_id   = ev.get("id")
+
+        if not client_name or not date_str:
+            continue
+
+        try:
+            qbr_date = datetime.fromisoformat(date_str[:19])
+        except Exception:
+            continue
+
+        # Определяем квартал из даты если не пришёл
+        if not quarter:
+            q_num = (qbr_date.month - 1) // 3 + 1
+            quarter = f"Q{q_num}-{qbr_date.year}"
+
+        year_val = qbr_date.year
+
+        # Ищем клиента по имени
+        client = (
+            db.query(Client).filter(Client.name == client_name).first()
+            or db.query(Client).filter(Client.name.ilike(f"%{client_name}%")).first()
+        )
+        if not client:
+            continue
+
+        # Upsert QBR
+        existing = db.query(QBR).filter(
+            QBR.client_id == client.id,
+            QBR.quarter   == quarter,
+        ).first()
+
+        if existing:
+            if status and existing.status != status:
+                existing.status = status
+            updated += 1
+        else:
+            db.add(QBR(
+                client_id=client.id,
+                quarter=quarter,
+                year=year_val,
+                date=qbr_date,
+                status=status,
+            ))
+            created += 1
+
+        # Обновляем next_qbr_date на клиенте если это будущее QBR
+        if qbr_date > datetime.utcnow():
+            if not client.next_qbr_date or qbr_date < client.next_qbr_date:
+                client.next_qbr_date = qbr_date
+        else:
+            if not client.last_qbr_date or qbr_date > client.last_qbr_date:
+                client.last_qbr_date = qbr_date
+
+    db.commit()
+    logger.info(f"QBR calendar sync: {created} created, {updated} updated (user={user.email})")
+    return {"ok": True, "created": created, "updated": updated, "total_from_airtable": len(events)}
+
+
+@router.post("/api/sync/qbr-push")
+async def api_push_qbr_to_airtable(
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """
+    Push одного QBR из AM Hub в Airtable QBR-таблицу.
+    Body: {client_id, quarter, date, status}
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401)
+    from auth import decode_access_token
+    payload = decode_access_token(auth_token)
+    if not payload:
+        raise HTTPException(status_code=401)
+
+    data = await request.json()
+    client_id = data.get("client_id")
+    quarter   = data.get("quarter")
+    status    = data.get("status", "planned")
+    date_str  = data.get("date")
+
+    if not client_id or not quarter:
+        return {"error": "client_id и quarter обязательны"}
+
+    client = db.query(Client).filter(Client.id == int(client_id)).first()
+    if not client:
+        return {"error": "Клиент не найден"}
+
+    try:
+        qbr_date = datetime.fromisoformat(date_str[:10]) if date_str else datetime.utcnow()
+    except Exception:
+        qbr_date = datetime.utcnow()
+
+    try:
+        from integrations.airtable import push_qbr_to_airtable
+        rec_id = await push_qbr_to_airtable(
+            client_name=client.name,
+            qbr_date=qbr_date,
+            status=status,
+            quarter=quarter,
+            manager=client.manager_email,
+        )
+        if rec_id:
+            return {"ok": True, "airtable_record_id": rec_id}
+        return {"ok": False, "error": "Airtable вернул ошибку — проверьте поля таблицы"}
+    except Exception as e:
+        logger.error(f"QBR push to Airtable failed: {e}")
+        return {"error": str(e)}
+
 
 # ============================================================================
 # ИНТЕГРАЦИИ: тест персональных кредов
