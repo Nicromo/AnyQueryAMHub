@@ -2740,6 +2740,47 @@ function PageIntegrations() {
   const [status, setStatus] = React.useState(null);
   const [syncStatus, setSyncStatus] = React.useState(null);
   const [tab, setTab] = React.useState("overview");
+  // Extension tab — tokens state
+  const [extTokens, setExtTokens] = React.useState([]);
+  const [extTokensLoading, setExtTokensLoading] = React.useState(false);
+  const [extNewName, setExtNewName] = React.useState("");
+  const [extNewToken, setExtNewToken] = React.useState(null);
+  const HUB_URL = (typeof window !== "undefined" && window.__HUB_URL) || window.location.origin;
+
+  const reloadExtTokens = React.useCallback(async () => {
+    setExtTokensLoading(true);
+    try {
+      const r = await fetch("/api/me/api-tokens", { credentials: "include" });
+      const d = r.ok ? await r.json() : { tokens: [] };
+      setExtTokens(d.tokens || []);
+    } catch (_) { setExtTokens([]); }
+    finally { setExtTokensLoading(false); }
+  }, []);
+
+  const createExtToken = async () => {
+    const name = (extNewName || "").trim();
+    if (!name) return;
+    const r = await fetch("/api/me/api-tokens", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      setExtNewToken(d.token);
+      setExtNewName("");
+      reloadExtTokens();
+    } else { if (typeof appToast === "function") appToast("Ошибка: " + r.status, "error"); }
+  };
+  const revokeExtToken = async (id) => {
+    if (!await appConfirm("Отозвать токен?")) return;
+    const r = await fetch(`/api/me/api-tokens/${id}`, { method: "DELETE", credentials: "include" });
+    if (r.ok) reloadExtTokens();
+  };
+  const copyToClip = (text, label) => {
+    try { navigator.clipboard.writeText(text); if (typeof appToast === "function") appToast(`✓ ${label} скопирован`); }
+    catch (_) { if (typeof appToast === "function") appToast("Копирование не поддерживается", "error"); }
+  };
 
   React.useEffect(() => {
     let cancelled = false;
@@ -2912,10 +2953,116 @@ function PageIntegrations() {
     React.createElement(Btn, { kind: "ghost", size: "m", onClick: () => { window.location.href = "/design/profile"; } }, "Привязать Telegram"),
   );
 
-  const renderExt = () => React.createElement("div", null,
-    React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)", marginBottom: 10 } }, "Chrome-расширение AM Hub — синк Merchrules, чекап Diginetica."),
-    React.createElement(Btn, { kind: "primary", size: "m", onClick: () => { window.open("/static/amhub-ext.zip", "_blank"); } }, "⬇ Скачать .zip"),
-  );
+  const renderExt = () => {
+    // Lazy-load токенов при первом открытии вкладки
+    React.useEffect(() => {
+      if (tab === "extension" && extTokens.length === 0 && !extTokensLoading) {
+        reloadExtTokens();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tab]);
+    return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+      React.createElement("div", { style: { fontSize: 13, color: "var(--ink-8)" } },
+        "Chrome-расширение AM Hub — синк Merchrules, чекап Diginetica. Скачай .zip, установи в chrome://extensions → Load unpacked, и вставь URL+токен ниже в popup расширения."),
+
+      React.createElement(Btn, {
+        kind: "primary", size: "m",
+        onClick: () => { window.open("/static/amhub-ext.zip", "_blank"); },
+      }, "⬇ Скачать .zip"),
+
+      // Блок: URL хаба
+      React.createElement("div", null,
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } },
+          "AM Hub · URL"),
+        React.createElement("div", { style: { display: "flex", gap: 6 } },
+          React.createElement("input", {
+            readOnly: true, value: HUB_URL,
+            style: {
+              flex: 1, padding: "8px 10px",
+              background: "var(--ink-1)", border: "1px solid var(--line)",
+              borderRadius: 4, color: "var(--ink-9)",
+              fontFamily: "var(--f-mono)", fontSize: 12, outline: "none",
+            },
+          }),
+          React.createElement(Btn, {
+            size: "s", kind: "ghost",
+            onClick: () => copyToClip(HUB_URL, "Hub URL"),
+          }, "📋 Копия"),
+        ),
+      ),
+
+      // Блок: токены
+      React.createElement("div", null,
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } },
+          "AM Hub · токен (постоянный, отзывный)"),
+
+        // Список существующих
+        React.createElement("div", { style: { marginBottom: 8 } },
+          extTokensLoading && React.createElement("div", { style: { fontSize: 11, color: "var(--ink-5)", padding: "4px 0" } }, "Загрузка…"),
+          !extTokensLoading && extTokens.length === 0 && React.createElement("div", { style: { fontSize: 11, color: "var(--ink-5)", padding: "4px 0" } },
+            "Нет активных токенов — создай первый ↓"),
+          extTokens.map(t => React.createElement("div", {
+            key: t.id,
+            style: {
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 8px", background: "var(--ink-1)",
+              border: "1px solid var(--line)", borderRadius: 4, marginBottom: 4,
+            },
+          },
+            React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+              React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--ink-9)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, t.name),
+              React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)" } },
+                t.prefix + "… " + (t.last_used_at ? "· использовался " + new Date(t.last_used_at).toLocaleDateString("ru-RU") : "· не использовался")),
+            ),
+            React.createElement("button", {
+              onClick: () => revokeExtToken(t.id), title: "Отозвать",
+              style: { background: "transparent", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-6)", cursor: "pointer", padding: "3px 8px", fontSize: 11 },
+            }, "✕"),
+          )),
+        ),
+
+        // Форма создания
+        React.createElement("div", { style: { display: "flex", gap: 6 } },
+          React.createElement("input", {
+            value: extNewName, onChange: e => setExtNewName(e.target.value),
+            placeholder: "Название (например: Chrome на ноуте)",
+            onKeyDown: e => { if (e.key === "Enter") createExtToken(); },
+            style: { flex: 1, padding: "7px 10px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontSize: 12 },
+          }),
+          React.createElement(Btn, { size: "s", kind: "primary", onClick: createExtToken, disabled: !extNewName.trim() }, "+ Создать"),
+        ),
+
+        // Показ свежесозданного
+        extNewToken && React.createElement("div", {
+          style: {
+            marginTop: 10, padding: 10,
+            background: "rgba(163,230,53,.10)", border: "1px solid rgba(163,230,53,.35)",
+            borderRadius: 4,
+          },
+        },
+          React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "#a3e635", marginBottom: 6 } },
+            "⚠️ Сохрани токен — больше не покажем"),
+          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+            React.createElement("code", {
+              className: "mono",
+              style: { flex: 1, fontSize: 11, color: "var(--ink-9)", wordBreak: "break-all" },
+            }, extNewToken),
+            React.createElement(Btn, {
+              size: "s", kind: "ghost",
+              onClick: () => copyToClip(extNewToken, "Токен"),
+            }, "📋"),
+            React.createElement("button", {
+              onClick: () => setExtNewToken(null),
+              style: { background: "transparent", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-6)", cursor: "pointer", padding: "3px 8px", fontSize: 11 },
+            }, "✕"),
+          ),
+        ),
+      ),
+
+      React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-6)", lineHeight: 1.5 } },
+        "Подсказка: в popup расширения есть поля «AM Hub · URL» и «AM Hub · Token». Скопируй URL и токен отсюда и вставь туда."),
+    );
+  };
 
   const renderHelp = () => React.createElement("div", { style: { fontSize: 13, lineHeight: 1.6, color: "var(--ink-7)" } },
     React.createElement("h3", { style: { fontSize: 15, color: "var(--ink-9)", marginBottom: 8 } }, "FAQ"),
