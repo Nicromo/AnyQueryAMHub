@@ -622,6 +622,7 @@ from routers import bulk_actions as bulk_actions_router
 from routers import client_roadmap as client_roadmap_router
 from routers import client_groups as client_groups_router
 from routers import payments as payments_router
+from routers import client_metrics as client_metrics_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
 app.include_router(client_transfer_router.router, tags=["client-transfer"])
@@ -633,6 +634,7 @@ app.include_router(bulk_actions_router.router, tags=["bulk-actions"])
 app.include_router(client_roadmap_router.router, tags=["client-roadmap"])
 app.include_router(client_groups_router.router, tags=["client-groups"])
 app.include_router(payments_router.router, tags=["payments"])
+app.include_router(client_metrics_router.router, tags=["client-metrics"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router

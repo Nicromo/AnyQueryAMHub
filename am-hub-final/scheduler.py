@@ -846,6 +846,61 @@ async def job_sync_meetings_and_slots():
 
 
 
+async def job_revenue_trend_update():
+    """Ежедневно обновляет Client.revenue_trend — строку вида «12,15,18,17,20»
+    из последних 12 MRR-значений (RevenueEntry). Если RevenueEntry пусто —
+    добавляем текущий Client.mrr как snapshot текущего месяца и продолжаем
+    наполнять trend на каждом запуске.
+
+    Это поле читает UI TrendBars в списке клиентов — раньше он отдавал
+    пустые прочерки потому что revenue_trend нигде не заполнялся.
+    """
+    logger.info("📈 revenue_trend update job started")
+    try:
+        from database import SessionLocal
+        from models import Client, RevenueEntry
+        db = SessionLocal()
+        try:
+            now = datetime.utcnow()
+            cur_period = now.strftime("%Y-%m")
+            clients = db.query(Client).all()
+            updated = 0
+            for c in clients:
+                try:
+                    # 1. Если нет RevenueEntry текущего месяца — создаём из Client.mrr
+                    if c.mrr and c.mrr > 0:
+                        existing = (db.query(RevenueEntry)
+                                      .filter(RevenueEntry.client_id == c.id,
+                                              RevenueEntry.period == cur_period)
+                                      .first())
+                        if not existing:
+                            db.add(RevenueEntry(
+                                client_id=c.id,
+                                period=cur_period,
+                                mrr=float(c.mrr),
+                                arr=float(c.mrr) * 12,
+                                currency="RUB",
+                                note="auto-snapshot",
+                            ))
+
+                    # 2. Тянем последние 12 периодов по client_id
+                    rows = (db.query(RevenueEntry)
+                              .filter(RevenueEntry.client_id == c.id)
+                              .order_by(RevenueEntry.period).all())
+                    vals = [float(r.mrr or 0) for r in rows[-12:]]
+                    if vals:
+                        c.revenue_trend = ",".join(str(int(v)) for v in vals)
+                        updated += 1
+                except Exception as _e:
+                    logger.debug(f"revenue_trend update failed for client={c.id}: {_e}")
+            db.commit()
+            logger.info(f"📈 revenue_trend updated for {updated} clients")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"revenue_trend job failed: {e}")
+
+
 async def job_health_recalc_all():
     """Ночной пересчёт health score всех клиентов + TG алерт при падении."""
     logger.info("🔄 Recalculating health scores for all clients...")
@@ -1652,6 +1707,8 @@ def start_scheduler():
                   id="weekly_digest", name="Weekly Digest", replace_existing=True)
     sched.add_job(job_health_recalc_all, "cron", hour=3, minute=0,
                   id="health_recalc", name="Nightly Health Recalc", replace_existing=True)
+    sched.add_job(job_revenue_trend_update, "cron", hour=3, minute=30,
+                  id="revenue_trend", name="Daily Revenue Trend Update", replace_existing=True)
     sched.add_job(job_ktalk_sync, "interval", hours=2,
                   id="ktalk_sync", name="Ktalk Meeting Sync", replace_existing=True)
     sched.add_job(job_renewal_alerts, "cron", hour=9, minute=30, day_of_week="mon",
