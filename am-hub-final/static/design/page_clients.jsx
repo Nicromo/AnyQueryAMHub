@@ -362,6 +362,9 @@ function PageClient() {
             {/* Роадмап клиента — per-client (Q1/Q2/Q3/Q4 + Бэклог) */}
             <ClientRoadmap clientId={c.id}/>
 
+            {/* Upsell — активные предложения расширения */}
+            <ClientUpsellCard clientId={c.id}/>
+
             {/* Merchrules-дашборд — синонимы / whitelist / blacklist / merch-rules */}
             <ClientMerchrulesDashboard clientId={c.id}/>
 
@@ -2431,3 +2434,212 @@ function ClientTransferModal({ client, users, onClose, onDone }) {
 
 window.ClientTransferSection = ClientTransferSection;
 window.ClientTransferModal = ClientTransferModal;
+
+
+// ── PageRenewal — Kanban по срокам истечения контракта ─────────────────────
+function PageRenewal() {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    fetch("/api/me/renewal-pipeline", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const mrrFmt = (v) => {
+    if (v == null) return "—";
+    if (v >= 1_000_000) return `₽ ${(v/1_000_000).toFixed(1)}м`;
+    if (v >= 1_000) return `₽ ${Math.round(v/1000)}к`;
+    return `₽ ${Math.round(v)}`;
+  };
+
+  const order = ["overdue", "critical", "week", "month", "quarter", "later"];
+
+  return React.createElement(React.Fragment, null,
+    React.createElement(TopBar, {
+      breadcrumbs: ["am hub", "клиенты", "renewal"],
+      title: "Renewal pipeline",
+      subtitle: loading ? "…" :
+        (data ? `${data.total_clients} клиентов · MRR ${mrrFmt(data.total_mrr)}` : "Нет данных"),
+    }),
+    React.createElement("div", { style: { padding: "22px 28px 40px" } },
+      loading
+        ? React.createElement("div", { style: { color: "var(--ink-6)" } }, "Загружаем…")
+        : !data || data.total_clients === 0
+          ? React.createElement("div", { style: { color: "var(--ink-6)", padding: "40px 0", textAlign: "center" } },
+              "Нет клиентов с заполненным полем contract_end. Добавь дату окончания контракта в карточке клиента.")
+          : React.createElement("div", {
+              style: { display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, alignItems: "start" },
+            },
+              order.map(k => {
+                const col = data.columns[k];
+                return React.createElement("div", {
+                  key: k,
+                  style: {
+                    background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6,
+                    padding: 10, minHeight: 200,
+                  },
+                },
+                  React.createElement("div", {
+                    style: { display: "flex", justifyContent: "space-between", marginBottom: 10, alignItems: "center" },
+                  },
+                    React.createElement("div", { style: { fontSize: 11.5, fontWeight: 500, color: `var(--${col.tone})`, textTransform: "uppercase", letterSpacing: "0.06em" } },
+                      col.label),
+                    React.createElement("span", { className: "mono", style: { fontSize: 11, color: "var(--ink-6)" } },
+                      String(col.items.length)),
+                  ),
+                  col.items.length === 0
+                    ? React.createElement("div", { style: { color: "var(--ink-5)", fontSize: 11, padding: "12px 0", textAlign: "center" } }, "—")
+                    : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+                        col.items.map(it => React.createElement("a", {
+                          key: it.id,
+                          href: `/design/client/${it.id}`,
+                          style: {
+                            padding: 10, background: "var(--ink-1)", border: "1px solid var(--line-soft)",
+                            borderRadius: 4, fontSize: 12, color: "var(--ink-8)",
+                            textDecoration: "none", display: "block",
+                          },
+                        },
+                          React.createElement("div", { style: { fontWeight: 500, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                            it.name),
+                          React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-6)" } },
+                            `${it.segment || "—"} · MRR ${mrrFmt(it.mrr)}`),
+                          React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", marginTop: 2 } },
+                            `${it.contract_end} · ${it.days_left < 0 ? `просрочено ${-it.days_left}д` : it.days_left + ' дн'} · health ${it.health}%`),
+                        )),
+                      ),
+                );
+              }),
+            ),
+    ),
+  );
+}
+window.PageRenewal = PageRenewal;
+
+
+// ── ClientUpsellCard — активное предложение апсейла на странице клиента ────
+function ClientUpsellCard({ clientId }) {
+  const [events, setEvents] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [adding, setAdding] = React.useState(false);
+  const [form, setForm] = React.useState({ event_type: "upsell", description: "", amount_after: "" });
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    fetch(`/api/clients/${clientId}/upsell`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { setEvents(Array.isArray(d) ? d : (d.items || [])); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [clientId]);
+  React.useEffect(() => { load(); }, [load]);
+
+  const create = async () => {
+    const payload = {
+      client_id: clientId,
+      event_type: form.event_type,
+      description: form.description.trim(),
+      amount_after: form.amount_after ? Number(form.amount_after) : null,
+    };
+    const r = await fetch("/api/upsell/event", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (r.ok) {
+      setAdding(false); setForm({ event_type: "upsell", description: "", amount_after: "" });
+      load();
+    }
+  };
+
+  const updateStatus = async (id, status) => {
+    const r = await fetch(`/api/upsell/event/${id}`, {
+      method: "PATCH", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (r.ok) load();
+  };
+
+  const active = (events || []).filter(e => !["won", "lost"].includes(e.status));
+  const closed = (events || []).filter(e => ["won", "lost"].includes(e.status));
+
+  const statusColor = {
+    identified: "info", in_progress: "warn", won: "ok", lost: "critical", postponed: "neutral",
+  };
+
+  return React.createElement(Card, {
+    title: "Upsell" + (active.length ? ` · ${active.length}` : ""),
+    actions: React.createElement(Btn, {
+      kind: "ghost", size: "s", onClick: () => setAdding(v => !v),
+    }, adding ? "Отмена" : "+ Новый"),
+  },
+    adding && React.createElement("div", {
+      style: { padding: 10, background: "var(--ink-2)", borderRadius: 4, marginBottom: 10, display: "flex", flexDirection: "column", gap: 6 },
+    },
+      React.createElement("select", {
+        value: form.event_type, onChange: e => setForm(f => ({ ...f, event_type: e.target.value })),
+        style: { padding: "6px 8px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 3, color: "var(--ink-8)", fontSize: 12 },
+      },
+        React.createElement("option", { value: "upsell" }, "Upsell"),
+        React.createElement("option", { value: "expansion" }, "Expansion"),
+        React.createElement("option", { value: "downsell" }, "Downsell"),
+      ),
+      React.createElement("input", {
+        value: form.description, onChange: e => setForm(f => ({ ...f, description: e.target.value })),
+        placeholder: "Описание (например, подключаем рекомендации на карточке)",
+        style: { padding: "6px 8px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 3, color: "var(--ink-8)", fontSize: 12 },
+      }),
+      React.createElement("input", {
+        value: form.amount_after, onChange: e => setForm(f => ({ ...f, amount_after: e.target.value })),
+        placeholder: "Ожидаемый MRR после (₽/мес)", type: "number",
+        style: { padding: "6px 8px", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 3, color: "var(--ink-8)", fontSize: 12 },
+      }),
+      React.createElement(Btn, { kind: "primary", size: "s", onClick: create, disabled: !form.description.trim() }, "Создать"),
+    ),
+
+    loading
+      ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12 } }, "Загружаем…")
+      : active.length === 0 && closed.length === 0
+        ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12 } },
+            "Нет активных апсейлов. Жми «+ Новый» если заметил возможность расширения.")
+        : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            active.map(e => React.createElement("div", {
+              key: e.id,
+              style: {
+                padding: 10, background: "var(--ink-2)", border: "1px solid var(--line-soft)", borderRadius: 4,
+              },
+            },
+              React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 4 } },
+                React.createElement(Badge, { tone: statusColor[e.status] || "neutral", dot: true }, e.status),
+                React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)", textTransform: "uppercase" } }, e.event_type),
+                e.amount_after && React.createElement("span", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-7)", marginLeft: "auto" } },
+                  "+" + Math.round(e.amount_after) + "₽"),
+              ),
+              React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-8)", marginBottom: 6, lineHeight: 1.4 } },
+                e.description || "—"),
+              React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
+                ["identified", "in_progress", "won", "lost", "postponed"].filter(s => s !== e.status).map(s =>
+                  React.createElement("button", {
+                    key: s,
+                    onClick: () => updateStatus(e.id, s),
+                    style: {
+                      padding: "2px 8px", fontSize: 10.5,
+                      background: "transparent", border: "1px solid var(--line)",
+                      borderRadius: 3, color: "var(--ink-6)", cursor: "pointer",
+                    },
+                  }, "→ " + s))),
+            )),
+            closed.length > 0 && React.createElement("details", { style: { marginTop: 6 } },
+              React.createElement("summary", { style: { fontSize: 11, color: "var(--ink-5)", cursor: "pointer" } },
+                `Закрытые · ${closed.length}`),
+              React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginTop: 6 } },
+                closed.map(e => React.createElement("div", {
+                  key: e.id, style: { fontSize: 11, color: "var(--ink-6)", padding: "4px 0" },
+                }, `${e.status === "won" ? "✓" : "✕"} ${e.description || "—"}`))),
+            ),
+          ),
+  );
+}
+window.ClientUpsellCard = ClientUpsellCard;

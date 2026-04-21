@@ -533,7 +533,7 @@ async def add_nps_entry(
 
     db.commit()
 
-    # Детрактор (NPS ≤ 6) → уведомление менеджеру в inbox + TG
+    # Детрактор (NPS ≤ 6) → уведомление + автотаска «связаться»
     try:
         if int(score) <= 6 and client and client.manager_email:
             from models import User as _User
@@ -545,7 +545,28 @@ async def add_nps_entry(
                     "client": client.name, "score": int(score),
                     "comment": (data.get("comment") or "")[:200] or "—",
                 }, related_type="client", related_id=client.id)
-                db.commit()
+
+            # Автотаска менеджеру с dedupe (одна активная на client)
+            try:
+                from scheduler_utils import get_or_create_autotask
+                from datetime import date as _date, timedelta as _td
+                today = _date.today()
+                get_or_create_autotask(
+                    db,
+                    client_id=client.id,
+                    rule_key=f"nps_detractor:{entry.id}",
+                    target_date=today,
+                    manager_email=client.manager_email,
+                    title=f"Связаться с {client.name} — NPS {int(score)}",
+                    task_type="nps_followup",
+                    due_date=datetime.utcnow() + _td(days=2),
+                    meta={"nps_entry_id": entry.id, "score": int(score)},
+                    priority="high",
+                )
+            except Exception as _te:
+                import logging as _l
+                _l.getLogger(__name__).warning(f"nps autotask skipped: {_te}")
+            db.commit()
     except Exception as _ne:
         import logging as _l
         _l.getLogger(__name__).warning(f"notify nps_incoming skipped: {_ne}")

@@ -32,6 +32,7 @@ function _buildNav() {
     { group: "Клиенты", items: [
       { id: "clients",   label: "Мой портфель", icon: "folder", count: num(s.clientsTotal) },
       { id: "top50",     label: "Top-50",       icon: "trophy" },
+      { id: "renewal",   label: "Renewal",      icon: "map" },
     ]},
     { group: "Работа", items: [
       { id: "tasks",    label: "Задачи",     icon: "check",  count: num(s.tasksActive) },
