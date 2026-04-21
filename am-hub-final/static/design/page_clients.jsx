@@ -443,7 +443,10 @@ function PageClient() {
           <KPI label="Последний контакт" value={lastContactStr} sub={c.domain ? "домен: " + c.domain : undefined}/>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
+        {/* Дашборд метрик — full width сверху, чтобы не ужимался в 1fr колонку */}
+        <ClientMetricsDashboard clientId={c.id}/>
+
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, alignItems: "start" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
 
             {/* Онбординг — per-client 10-step flow */}
@@ -455,8 +458,20 @@ function PageClient() {
             {/* QBR prep — /api/clients/{id}/qbr-prep */}
             <ClientQBRPrep clientId={c.id}/>
 
+            {/* Роадмап клиента — широкий, 5 Q-колонок нужны место */}
+            <ClientRoadmap clientId={c.id}/>
+
+            {/* Merchrules-дашборд — синонимы / whitelist / blacklist / merch-rules */}
+            <ClientMerchrulesDashboard clientId={c.id}/>
+
+            {/* Голосовые заметки — запись/плеер/транскрипция */}
+            <ClientVoiceNotes clientId={c.id}/>
+
             {/* activity timeline — real /api/clients/{id}/timeline */}
             <ClientTimeline clientId={c.id}/>
+
+            {/* История партнёра — real /api/clients/{id}/logs */}
+            <ClientLogsList clientId={c.id}/>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
@@ -472,23 +487,8 @@ function PageClient() {
             {/* Чекапы — v2 */}
             <ClientCheckupsList clientId={c.id}/>
 
-            {/* Метрики клиента — полный дашборд (MRR/Health/NPS/Tasks/Meetings/Upsell) */}
-            <ClientMetricsDashboard clientId={c.id}/>
-
-            {/* Роадмап клиента — per-client (Q1/Q2/Q3/Q4 + Бэклог) */}
-            <ClientRoadmap clientId={c.id}/>
-
             {/* Upsell — активные предложения расширения */}
             <ClientUpsellCard clientId={c.id}/>
-
-            {/* Merchrules-дашборд — синонимы / whitelist / blacklist / merch-rules */}
-            <ClientMerchrulesDashboard clientId={c.id}/>
-
-            {/* Голосовые заметки — запись/плеер/транскрипция */}
-            <ClientVoiceNotes clientId={c.id}/>
-
-            {/* История партнёра — real /api/clients/{id}/logs */}
-            <ClientLogsList clientId={c.id}/>
           </div>
         </div>
       </div>
