@@ -3041,12 +3041,12 @@ function MerchrulesSitesCard() {
 
   return React.createElement(Card, { title: "Мои кабинеты Merchrules" },
     React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-6)", marginBottom: 10, lineHeight: 1.5 } },
-      "Впиши ID своих сайтов в Merchrules (через запятую, пробел или с новой строки). ",
+      "Впиши ID своих сайтов в Merchrules — каждый с новой строки. ",
       "Sync будет тянуть данные только по ним — без глобального листинга accounts (который часто возвращает неверный список)."),
     React.createElement("textarea", {
       value: raw, onChange: e => setRaw(e.target.value),
       rows: 3,
-      placeholder: "221, 715, 1003\n2345\n3421",
+      placeholder: "221\n715\n1003\n2345\n3421",
       style: {
         width: "100%", padding: "8px 10px", marginBottom: 8,
         background: "var(--ink-2)", border: "1px solid var(--line)",
@@ -3087,7 +3087,8 @@ function MerchrulesSitesCard() {
             style: { borderBottom: "1px solid var(--line-soft)",
               opacity: r.resolved ? 1 : 0.55 },
           },
-            React.createElement("td", { className: "mono", style: { padding: "8px 10px", color: "var(--ink-7)" } }, r.site_id),
+            React.createElement("td", { className: "mono", style: { padding: "8px 10px", color: "var(--ink-7)" } },
+              (r.site_ids && r.site_ids.length > 1) ? r.site_ids.join(", ") : (r.site_id || "—")),
             React.createElement("td", { style: { padding: "8px 10px" } },
               React.createElement("div", { style: { color: "var(--ink-9)", fontWeight: 500 } },
                 r.name || "— не найден в БД —"),

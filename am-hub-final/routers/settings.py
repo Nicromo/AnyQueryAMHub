@@ -39,21 +39,24 @@ def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
 def _parse_site_ids(raw) -> list:
-    """Нормализует ввод site_ids: поддерживает строку с запятыми / переводами строк /
-    точками с запятой / пробелами, либо уже готовый массив."""
+    """Нормализует ввод site_ids: принимает только переводы строк,
+    пробельные символы (whitespace) и точки с запятой как разделители.
+    Запятая НЕ разделитель — в Airtable бывают значения вида «1462, 7655»
+    где запятая означает «один клиент с двумя site_id»."""
     import re as _re
     if raw is None:
         return []
     if isinstance(raw, list):
         parts = [str(x) for x in raw]
     else:
-        parts = _re.split(r"[\s,;]+", str(raw))
+        # \s — любой whitespace включая \n; ; — точка с запятой.
+        # Запятую убрали намеренно.
+        parts = _re.split(r"[\s;]+", str(raw))
     out = []
     for p in parts:
         p = p.strip()
         if p:
             out.append(p)
-    # дедупликация с сохранением порядка
     seen = set()
     result = []
     for p in out:
@@ -112,36 +115,77 @@ async def api_my_sites_table(db: Session = Depends(get_db),
         ids = [str(x) for x in ids_raw]
 
     from models import Client
-    rows = []
+    # По каждому sid ищем клиента. Если одного клиента указали несколькими
+    # site_id — объединяем в одну строку таблицы (поле site_ids = [1462, 7655]).
+    rows_by_client: dict = {}
+    orphans: list = []
     for sid in ids:
+        c = None
+        # 1. По merchrules_account_id или airtable_site_id
         c = (db.query(Client)
                .filter((Client.merchrules_account_id == sid) |
                        (Client.airtable_site_id == sid))
                .first())
-        products = []
-        if c:
+        # 2. Fallback: внутри JSONB Client.site_ids (строка в списке)
+        if not c:
             try:
-                from models import ClientProduct
-                prods = db.query(ClientProduct).filter(ClientProduct.client_id == c.id).all()
-                products = [{"code": p.code, "name": p.name, "status": p.status} for p in prods]
+                c = (db.query(Client)
+                       .filter(Client.site_ids.contains([sid]))
+                       .first())
             except Exception:
-                products = []
-        rows.append({
+                # Если JSONB.contains не работает (напр. SQLite в тестах) —
+                # ручная фильтрация по памяти
+                try:
+                    for cand in db.query(Client).filter(Client.site_ids.isnot(None)).all():
+                        sids = cand.site_ids or []
+                        if isinstance(sids, list) and sid in [str(x) for x in sids]:
+                            c = cand
+                            break
+                except Exception:
+                    pass
+        if not c:
+            orphans.append(sid)
+            continue
+        if c.id in rows_by_client:
+            rows_by_client[c.id]["site_ids"].append(sid)
+            continue
+        products = []
+        try:
+            from models import ClientProduct
+            prods = db.query(ClientProduct).filter(ClientProduct.client_id == c.id).all()
+            products = [{"code": p.code, "name": p.name, "status": p.status} for p in prods]
+        except Exception:
+            products = []
+        rows_by_client[c.id] = {
             "site_id": sid,
-            "name": c.name if c else None,
-            "client_id": c.id if c else None,
-            "domain": (c.domain if c else None) or (f"site-{sid}"),
-            "url": (f"https://{c.domain}" if c and c.domain else None),
-            "segment": c.segment if c else None,
-            "payment_status": (c.payment_status if c else None),
-            "payment_amount": (c.payment_amount if c else None),
-            "payment_due_date": (c.payment_due_date.isoformat() if c and c.payment_due_date else None),
-            "mrr": (c.mrr if c else None),
+            "site_ids": [sid],
+            "name": c.name,
+            "client_id": c.id,
+            "domain": c.domain or (f"site-{sid}"),
+            "url": (f"https://{c.domain}" if c.domain else None),
+            "segment": c.segment,
+            "payment_status": c.payment_status,
+            "payment_amount": c.payment_amount,
+            "payment_due_date": (c.payment_due_date.isoformat() if c.payment_due_date else None),
+            "mrr": c.mrr,
             "products": products,
-            "health": (c.health_score if c else None),
-            "last_meeting": (c.last_meeting_date.isoformat() if c and c.last_meeting_date else None),
-            "resolved": c is not None,
-        })
+            "health": c.health_score,
+            "last_meeting": (c.last_meeting_date.isoformat() if c.last_meeting_date else None),
+            "resolved": True,
+        }
+    # Orphans — site_id без match'а в БД
+    for sid in orphans:
+        rows_by_client[f"__orphan_{sid}"] = {
+            "site_id": sid, "site_ids": [sid],
+            "name": None, "client_id": None,
+            "domain": f"site-{sid}", "url": None,
+            "segment": None, "payment_status": None,
+            "payment_amount": None, "payment_due_date": None,
+            "mrr": None, "products": [],
+            "health": None, "last_meeting": None,
+            "resolved": False,
+        }
+    rows = list(rows_by_client.values())
     return {"items": rows, "count": len(rows)}
 
 
