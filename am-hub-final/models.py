@@ -57,9 +57,14 @@ class Client(Base):
     payment_amount   = Column(Float, nullable=True)
     diginetica_api_key = Column(String, nullable=True)
 
+    # Группа компаний (ГК) — один клиент может относиться к одной ГК.
+    # В UI портфеля toggle: «по клиентам» vs «по ГК» (агрегат MRR/GMV).
+    group_id = Column(Integer, ForeignKey("client_groups.id"), nullable=True, index=True)
+
     tasks = relationship("Task", back_populates="client", cascade="all, delete-orphan")
     meetings = relationship("Meeting", back_populates="client", cascade="all, delete-orphan")
     checkups = relationship("CheckUp", back_populates="client", cascade="all, delete-orphan")
+    group = relationship("ClientGroup", back_populates="clients", foreign_keys=[group_id])
 
 
 class Task(Base):
@@ -978,3 +983,20 @@ class ClientTransferRequest(Base):
     client    = relationship("Client")
     from_user = relationship("User", foreign_keys=[from_user_id])
     to_user   = relationship("User", foreign_keys=[to_user_id])
+
+
+class ClientGroup(Base):
+    """Группа компаний (ГК) — объединяет несколько юр.лиц под одной «крышей»,
+    например «Ромашка» из 4 компаний. Клиенты ГК могут быть в разных сегментах.
+    В UI портфеля можно переключать отображение: «по ГК» (одна строка с суммой)
+    vs «по клиентам» (каждая компания отдельно)."""
+    __tablename__ = "client_groups"
+    id          = Column(Integer, primary_key=True, index=True)
+    name        = Column(String, nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    segment     = Column(String, nullable=True)
+    manager_email = Column(String, nullable=True)
+    created_by  = Column(String, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    clients     = relationship("Client", back_populates="group", foreign_keys="Client.group_id")

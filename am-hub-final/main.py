@@ -437,9 +437,24 @@ async def lifespan(app: FastAPI):
                         resolved_at TIMESTAMP,
                         resolved_by INTEGER REFERENCES users(id),
                         decline_reason TEXT)""",
+                    "client_groups": """CREATE TABLE IF NOT EXISTS client_groups (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR NOT NULL UNIQUE,
+                        description TEXT,
+                        segment VARCHAR,
+                        manager_email VARCHAR,
+                        created_by VARCHAR,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW())""",
                 }
                 for tname, tsql in _new_tables.items():
                     db.execute(_text(tsql))
+                # clients.group_id → FK на client_groups
+                try:
+                    db.execute(_text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES client_groups(id)"))
+                    db.execute(_text("CREATE INDEX IF NOT EXISTS ix_clients_group_id ON clients(group_id)"))
+                except Exception as _cge:
+                    logger.warning(f"clients.group_id migration skipped: {_cge}")
                 db.commit()
                 # Индекс для идемпотентного upsert по airtable_site_id
                 try:
@@ -596,6 +611,7 @@ from routers import renewal as renewal_router
 from routers import health as health_router
 from routers import bulk_actions as bulk_actions_router
 from routers import client_roadmap as client_roadmap_router
+from routers import client_groups as client_groups_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
 app.include_router(client_transfer_router.router, tags=["client-transfer"])
@@ -605,6 +621,7 @@ app.include_router(renewal_router.router, tags=["renewal"])
 app.include_router(health_router.router, tags=["health"])
 app.include_router(bulk_actions_router.router, tags=["bulk-actions"])
 app.include_router(client_roadmap_router.router, tags=["client-roadmap"])
+app.include_router(client_groups_router.router, tags=["client-groups"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router

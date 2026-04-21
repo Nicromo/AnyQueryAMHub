@@ -32,6 +32,15 @@ function PageClients() {
   });
   const phantomCount = CL_RAW.filter(_isPhantomClient).length;
   const CL = hidePhantom ? CL_RAW.filter(c => !_isPhantomClient(c)) : CL_RAW;
+  // Toggle группировки по ГК: один ряд на группу с суммой MRR/GMV.
+  const [groupByGK, setGroupByGK] = React.useState(() => {
+    try { return localStorage.getItem("amhub_group_by_gk") === "1"; } catch (_) { return false; }
+  });
+  const toggleGroupByGK = () => setGroupByGK(v => {
+    const nv = !v; try { localStorage.setItem("amhub_group_by_gk", nv ? "1" : "0"); } catch (_) {}
+    return nv;
+  });
+  const groupedClientsCount = CL.filter(c => c.group_id != null).length;
   // Сворачиваемость блока «Структура» (сверху страницы)
   const [structureCollapsed, setStructureCollapsed] = React.useState(() => {
     try { return localStorage.getItem("amhub_structure_collapsed") === "1"; } catch (_) { return false; }
@@ -57,7 +66,37 @@ function PageClients() {
   ];
   const counted = segments.map(s => ({ ...s, n: CL.filter(s.match).length }));
   const activeSeg = counted.find(s => s.key === segFilter) || counted[0];
-  const visibleClients = CL.filter(activeSeg.match);
+  const rawVisible = CL.filter(activeSeg.match);
+  // Если groupByGK — схлопываем клиентов с group_id в одну «виртуальную» строку-ГК.
+  // Клиенты без group_id — остаются как есть.
+  const visibleClients = React.useMemo(() => {
+    if (!groupByGK) return rawVisible;
+    const byGroup = {};
+    const out = [];
+    for (const c of rawVisible) {
+      if (c.group_id != null) {
+        const g = byGroup[c.group_id] || { __gk: true, id: "gk_" + c.group_id, group_id: c.group_id, group_name: c.group_name || "ГК #" + c.group_id, name: c.group_name || "ГК #" + c.group_id, members: [], gmv_raw: 0, mrr: 0, health_score: 0, _health_n: 0, seg: "—", segment: "—", status: "ok", trend: [], delta: "", stage: "ГК", next: "—" };
+        g.members.push(c);
+        g.gmv_raw += (c.gmv_raw || c.mrr || 0);
+        g.mrr += (c.mrr || 0);
+        if (c.health_score != null) { g.health_score += c.health_score; g._health_n += 1; }
+        // Worst status wins: risk > warn > ok
+        const rank = { risk: 3, warn: 2, ok: 1 };
+        if ((rank[c.status] || 0) > (rank[g.status] || 0)) g.status = c.status;
+        byGroup[c.group_id] = g;
+      } else {
+        out.push(c);
+      }
+    }
+    // Финализируем ГК-строки
+    for (const g of Object.values(byGroup)) {
+      if (g._health_n > 0) g.health_score = g.health_score / g._health_n;
+      else g.health_score = null;
+      g.gmv = (function fmt(v){ if (v == null) return "—"; if (v >= 1_000_000) return "₽ " + (v/1_000_000).toFixed(1) + "м"; if (v >= 1_000) return "₽ " + Math.round(v/1000) + "к"; return "₽ " + Math.round(v); })(g.gmv_raw);
+      out.unshift(g); // ГК сверху
+    }
+    return out;
+  }, [rawVisible, groupByGK]);
 
   // Вытянуть клиентов из Airtable прямо здесь — одна кнопка.
   // reset:true очищает manager_email у всех клиентов текущего юзера,
@@ -145,6 +184,16 @@ function PageClients() {
               onClick={toggleHidePhantom}>
               {hidePhantom ? `👻 Скрыты · ${phantomCount}` : `👻 Показать ${phantomCount}`}
             </Btn>
+            <Btn kind={groupByGK ? "primary" : "ghost"} size="m"
+              title={groupedClientsCount > 0 ? `${groupedClientsCount} клиентов в ГК` : "Клиентов в ГК нет"}
+              onClick={toggleGroupByGK}>
+              {groupByGK ? `🧩 По ГК · вкл` : `🧩 По ГК · выкл`}
+            </Btn>
+            <Btn kind="ghost" size="m"
+              title="Управление группами компаний (только admin/grouphead)"
+              onClick={() => { window.location.href = "/design/client-groups"; }}>
+              ⚙ ГК
+            </Btn>
             <Btn kind="ghost" size="m" icon={<I.download size={14}/>}
               onClick={() => window.open("/api/clients/export?format=csv", "_blank")}>Экспорт</Btn>
           </>
@@ -223,9 +272,13 @@ function PageClients() {
           {visibleClients.map((c, i) => {
             const statusTone = c.status === "risk" ? "critical" : c.status === "warn" ? "warn" : "ok";
             const isDown = (c.delta || "").startsWith("−");
+            const isGK = !!c.__gk;
             return (
               <div key={c.id}
-                onClick={() => { window.location.href = "/design/client/" + c.id; }}
+                onClick={() => {
+                  if (isGK) { window.location.href = "/design/client-groups#g" + c.group_id; return; }
+                  window.location.href = "/design/client/" + c.id;
+                }}
                 style={{
                 display: "grid",
                 gridTemplateColumns: "26px 6px 2.2fr 1fr 1.4fr 1.2fr 30px",
@@ -234,13 +287,16 @@ function PageClients() {
                 borderBottom: i === visibleClients.length - 1 ? "none" : "1px solid var(--line-soft)",
                 alignItems: "center",
                 cursor: "pointer",
-                background: selectedIds.has(c.id) ? "color-mix(in oklch, var(--signal) 8%, transparent)" : undefined,
+                background: isGK ? "color-mix(in oklch, var(--signal) 5%, var(--ink-2))" :
+                  (selectedIds.has(c.id) ? "color-mix(in oklch, var(--signal) 8%, transparent)" : undefined),
               }}>
                 <span onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox"
-                    checked={selectedIds.has(c.id)}
-                    onChange={() => toggleSel(c.id)}
-                    style={{ margin: 0, cursor: "pointer" }}/>
+                  {isGK ? <span className="mono" style={{ fontSize: 10, color: "var(--signal)" }}>ГК</span> : (
+                    <input type="checkbox"
+                      checked={selectedIds.has(c.id)}
+                      onChange={() => toggleSel(c.id)}
+                      style={{ margin: 0, cursor: "pointer" }}/>
+                  )}
                 </span>
                 <span style={{
                   width: 6, height: 36, borderRadius: 2,
@@ -249,10 +305,12 @@ function PageClients() {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--ink-9)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
-                    <Seg value={c.seg}/>
+                    {isGK ? <Badge tone="info" dot>{c.members.length} комп.</Badge> : <Seg value={c.seg}/>}
                     <StatDot tone={statusTone}>{c.status}</StatDot>
                   </div>
-                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>#{String(1000+c.id)} · {c.stage}</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>
+                    {isGK ? ("Σ MRR: ₽" + Math.round(c.mrr || 0)) : "#" + String(1000+c.id) + " · " + (c.stage || "—")}
+                  </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "var(--ink-9)", fontFamily: "var(--f-mono)", letterSpacing: "-0.01em" }}>{c.gmv}</div>
@@ -2898,3 +2956,171 @@ function BulkTransferModal({ ids, users, onClose, onDone }) {
   );
 }
 window.BulkTransferModal = BulkTransferModal;
+
+
+// ── PageClientGroups — управление группами компаний (admin/grouphead) ──────
+function PageClientGroups() {
+  const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+  const canEdit = ["admin", "grouphead"].includes(U.role);
+
+  const [groups, setGroups] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState(null);
+  const [creating, setCreating] = React.useState(false);
+  const [newName, setNewName] = React.useState("");
+
+  const reload = React.useCallback(() => {
+    setLoading(true); setErr(null);
+    fetch("/api/client-groups?include_members=true", { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject("HTTP " + r.status))
+      .then(d => { setGroups(d.items || []); setLoading(false); })
+      .catch(e => { setErr(String(e)); setLoading(false); });
+  }, []);
+  React.useEffect(() => { reload(); }, [reload]);
+
+  async function createGroup() {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true);
+    try {
+      const r = await fetch("/api/client-groups", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || "HTTP " + r.status); }
+      setNewName(""); reload();
+    } catch (e) { appToast("Ошибка: " + e.message, "error"); }
+    finally { setCreating(false); }
+  }
+
+  async function deleteGroup(gid) {
+    if (!await appConfirm("Удалить ГК? Клиенты останутся, но без привязки.")) return;
+    const r = await fetch(`/api/client-groups/${gid}`, { method: "DELETE", credentials: "include" });
+    if (r.ok) reload();
+    else appToast("Ошибка: HTTP " + r.status, "error");
+  }
+
+  async function renameGroup(gid, oldName) {
+    const name = window.prompt("Новое название:", oldName);
+    if (!name || name === oldName) return;
+    const r = await fetch(`/api/client-groups/${gid}`, {
+      method: "PATCH", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    if (r.ok) reload();
+    else { const d = await r.json().catch(() => ({})); appToast("Ошибка: " + (d.detail || r.status), "error"); }
+  }
+
+  async function toggleMember(gid, clientId, currentlyIn) {
+    if (currentlyIn) {
+      const r = await fetch(`/api/client-groups/${gid}/members/${clientId}`, { method: "DELETE", credentials: "include" });
+      if (r.ok) reload();
+    } else {
+      const r = await fetch(`/api/client-groups/${gid}/members`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "add", client_ids: [clientId] }),
+      });
+      if (r.ok) reload();
+    }
+  }
+
+  const clientInGroup = React.useMemo(() => {
+    const map = {};
+    for (const g of groups) for (const m of (g.members || [])) map[m.id] = g.id;
+    return map;
+  }, [groups]);
+
+  return (
+    <div>
+      <TopBar breadcrumbs={["am hub","админ","ГК"]} title="Группы компаний"
+        subtitle={loading ? "…" : `${groups.length} ГК · ${Object.keys(clientInGroup).length} клиентов в ГК из ${CL.length}`}/>
+      <div style={{ padding: "22px 28px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+        {err && <div style={{ fontSize: 12.5, color: "var(--critical)" }}>{err}</div>}
+
+        {canEdit && (
+          <Card title="Новая ГК">
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={newName} onChange={e => setNewName(e.target.value)}
+                placeholder="Например: Ромашка"
+                onKeyDown={e => { if (e.key === "Enter") createGroup(); }}
+                style={{ flex: 1, padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontSize: 13, outline: "none" }}/>
+              <Btn kind="primary" size="m" onClick={createGroup} disabled={creating || !newName.trim()}>+ Создать</Btn>
+            </div>
+          </Card>
+        )}
+
+        {loading && <div style={{ color: "var(--ink-6)" }}>Загружаем…</div>}
+
+        {!loading && groups.length === 0 && (
+          <div style={{ padding: "30px 0", color: "var(--ink-6)", fontSize: 13, textAlign: "center" }}>
+            Пока нет ГК. Создай первую выше.
+          </div>
+        )}
+
+        {groups.map(g => (
+          <Card key={g.id} title={g.name + " · " + (g.members_count || 0) + " компаний"}
+            action={canEdit && (
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn kind="ghost" size="s" onClick={() => renameGroup(g.id, g.name)}>Переименовать</Btn>
+                <Btn kind="ghost" size="s" onClick={() => deleteGroup(g.id)}>Удалить</Btn>
+              </div>
+            )}>
+            <div id={"g" + g.id} style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 12 }}>
+              <div><div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>MRR</div>
+                <div style={{ fontSize: 16, color: "var(--ink-9)", fontFamily: "var(--f-mono)" }}>₽ {Math.round(g.mrr || 0)}</div></div>
+              <div><div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>GMV</div>
+                <div style={{ fontSize: 16, color: "var(--ink-9)", fontFamily: "var(--f-mono)" }}>₽ {Math.round(g.gmv || 0)}</div></div>
+              <div><div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>Health avg</div>
+                <div style={{ fontSize: 16, color: "var(--ink-9)", fontFamily: "var(--f-mono)" }}>{g.avg_health != null ? Math.round(g.avg_health * 100) + "%" : "—"}</div></div>
+              <div><div className="mono" style={{ fontSize: 10, color: "var(--ink-5)" }}>Сегменты</div>
+                <div style={{ fontSize: 13, color: "var(--ink-8)" }}>{(g.segments || []).join(", ") || "—"}</div></div>
+            </div>
+
+            <div style={{ fontSize: 11, color: "var(--ink-6)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, fontFamily: "var(--f-mono)" }}>
+              Компании в ГК
+            </div>
+            {(g.members || []).length === 0 && (
+              <div style={{ fontSize: 12, color: "var(--ink-5)", padding: "4px 0" }}>пусто</div>
+            )}
+            {(g.members || []).map(m => (
+              <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr 80px 100px 80px", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--line-soft)", alignItems: "center", fontSize: 12.5 }}>
+                <div style={{ color: "var(--ink-8)" }}>{m.name}</div>
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink-5)" }}>{m.segment || "—"}</div>
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink-5)" }}>₽ {Math.round(m.mrr || 0)}</div>
+                {canEdit && (
+                  <Btn kind="ghost" size="s" onClick={() => toggleMember(g.id, m.id, true)}>Убрать</Btn>
+                )}
+              </div>
+            ))}
+
+            {canEdit && (
+              <details style={{ marginTop: 10 }}>
+                <summary style={{ fontSize: 11.5, color: "var(--ink-6)", cursor: "pointer" }}>+ Добавить компанию в ГК</summary>
+                <div style={{ maxHeight: 220, overflow: "auto", marginTop: 8, border: "1px solid var(--line-soft)", borderRadius: 4, padding: 6 }}>
+                  {CL.filter(c => !clientInGroup[c.id]).map(c => (
+                    <div key={c.id}
+                      onClick={() => toggleMember(g.id, c.id, false)}
+                      style={{ padding: "5px 8px", fontSize: 12, color: "var(--ink-8)", cursor: "pointer", borderRadius: 3, display: "flex", justifyContent: "space-between" }}
+                      onMouseOver={e => e.currentTarget.style.background = "var(--ink-2)"}
+                      onMouseOut={e => e.currentTarget.style.background = "transparent"}>
+                      <span>{c.name}</span>
+                      <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-5)" }}>{c.segment || "—"} · ₽{Math.round(c.mrr || 0)}</span>
+                    </div>
+                  ))}
+                  {CL.filter(c => !clientInGroup[c.id]).length === 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--ink-5)", padding: "8px 4px", textAlign: "center" }}>Нет свободных клиентов</div>
+                  )}
+                </div>
+              </details>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+window.PageClientGroups = PageClientGroups;
