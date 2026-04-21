@@ -157,6 +157,83 @@ async def api_extension_version(request: Request, auth_token: Optional[str] = Co
     }
 
 
+@router.get("/api/extension/config")
+async def api_extension_config(request: Request, db: Session = Depends(get_db)):
+    """
+    Возвращает сохранённые креды пользователя для автозаполнения popup расширения.
+    Нужно при переустановке / на другом устройстве: пользователь вводит только
+    AM Hub токен, остальное подтягивается автоматически.
+
+    Авторизация — через Bearer api-token (hub_token) в заголовке Authorization.
+    Поддерживаем оба формата: hub-token из user.settings.api_tokens (hashed)
+    и JWT (для cookie-auth fallback).
+
+    Возвращает plaintext пароли — расшифровываем Fernet.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    bearer = auth_header.replace("Bearer ", "").strip()
+
+    user = None
+    if bearer:
+        # 1) JWT?
+        try:
+            from auth import decode_access_token
+            payload = decode_access_token(bearer)
+            if payload:
+                user = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
+        except Exception:
+            pass
+        # 2) Hashed API token в user.settings.api_tokens?
+        if not user:
+            try:
+                import hashlib
+                h = hashlib.sha256(bearer.encode()).hexdigest()
+                all_users = db.query(User).filter(User.is_active == True).all()
+                for u in all_users:
+                    tokens = (u.settings or {}).get("api_tokens", [])
+                    for t in tokens:
+                        if t.get("hashed") == h or t.get("hashed_token") == h:
+                            user = u
+                            break
+                    if user: break
+            except Exception:
+                pass
+
+    if not user:
+        raise HTTPException(401, "invalid token")
+
+    settings = user.settings or {}
+    mr = settings.get("merchrules", {}) or {}
+    kt = settings.get("ktalk", {}) or {}
+    tm = settings.get("tbank_time", {}) or {}
+
+    # Расшифровываем пароли через Fernet если ключ есть
+    try:
+        from crypto import dec as _dec
+    except Exception:
+        _dec = lambda v: v
+
+    return {
+        "user": {"email": user.email, "name": getattr(user, "name", "") or ""},
+        "merchrules": {
+            "login": mr.get("login") or "",
+            "password": (_dec(mr.get("password", "")) or "") if mr.get("password") else "",
+            "site_ids": mr.get("site_ids") or [],
+        },
+        "ktalk": {
+            "channel_id": kt.get("followup_channel_id") or kt.get("channel_id") or "",
+        },
+        "tbank_time": {
+            "has_token": bool(tm.get("mmauthtoken") or tm.get("session_cookie")),
+            "username": tm.get("username") or "",
+        },
+        "groq": {
+            "api_key": (settings.get("groq") or {}).get("api_key") or "",
+        },
+        "manager_name": getattr(user, "name", "") or user.email,
+    }
+
+
 @router.get("/settings/extension", response_class=HTMLResponse)
 async def settings_extension_page(
     request: Request,

@@ -124,12 +124,70 @@ function wireEvents() {
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
+// Храним в chrome.storage.sync (переживает uninstall/reinstall через Google-аккаунт)
+// и в chrome.storage.local (быстрый доступ, fallback).
+const SYNC_KEYS = ["hub_url", "hub_token", "mr_login", "mr_password", "mr_site_ids",
+                   "groq_api_key", "cf_account_id", "cf_api_token", "managerName"];
+
+async function _readBoth(keys) {
+  // sync имеет приоритет, local перекрывает (если пользователь локально менял позже)
+  let out = {};
+  try { if (chrome.storage.sync) out = await chrome.storage.sync.get(keys); } catch (_) {}
+  try {
+    const loc = await chrome.storage.local.get(keys);
+    out = { ...out, ...Object.fromEntries(Object.entries(loc).filter(([,v]) => v !== undefined && v !== "")) };
+  } catch (_) {}
+  return out;
+}
+
+async function _writeBoth(data) {
+  try { await chrome.storage.local.set(data); } catch (_) {}
+  try { if (chrome.storage.sync) await chrome.storage.sync.set(data); } catch (_) {}
+}
+
+// Пытаемся восстановить креды с сервера AM Hub по сохранённому hub_token.
+// Не перезатираем уже заполненные поля — только пустые.
+async function tryRestoreFromHub() {
+  try {
+    const s = await _readBoth(["hub_url", "hub_token"]);
+    if (!s.hub_url || !s.hub_token) return;
+    const r = await fetch(s.hub_url.replace(/\/$/, "") + "/api/extension/config", {
+      headers: { "Authorization": "Bearer " + s.hub_token },
+    });
+    if (!r.ok) return;
+    const cfg = await r.json();
+    const current = await _readBoth(SYNC_KEYS);
+    const patch = {};
+    const take = (field, val) => { if (!current[field] && val) patch[field] = val; };
+    take("mr_login",     cfg.merchrules?.login);
+    take("mr_password",  cfg.merchrules?.password);
+    take("mr_site_ids",  (cfg.merchrules?.site_ids || []).join(", "));
+    take("groq_api_key", cfg.groq?.api_key);
+    take("managerName",  cfg.manager_name);
+    if (Object.keys(patch).length === 0) return;  // нечего восстанавливать
+
+    await _writeBoth(patch);
+    // Подставить в поля формы
+    for (const [k, v] of Object.entries(patch)) {
+      const idMap = {
+        mr_login: "s-mr-login", mr_password: "s-mr-pass",
+        mr_site_ids: "s-mr-sites", groq_api_key: "s-groq",
+        managerName: "s-manager",
+      };
+      const el = document.getElementById(idMap[k]);
+      if (el) el.value = v;
+    }
+    showBox("s-result", `✨ Восстановлено с AM Hub: ${Object.keys(patch).length} полей`, "ok");
+    // Триггер reload config в background SW
+    try { chrome.runtime.sendMessage({ type: "RELOAD_CONFIG" }); } catch (_) {}
+  } catch (e) {
+    // Non-fatal
+  }
+}
+
 async function loadSettings() {
   try {
-    const s = await chrome.storage.local.get([
-      "hub_url", "hub_token", "mr_login", "mr_password", "mr_site_ids",
-      "groq_api_key", "managerName"
-    ]);
+    const s = await _readBoth(SYNC_KEYS);
     const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
     set("s-hub-url",   s.hub_url);
     set("s-hub-token", s.hub_token);
@@ -138,6 +196,11 @@ async function loadSettings() {
     set("s-mr-sites",  s.mr_site_ids);
     set("s-groq",      s.groq_api_key);
     set("s-manager",   s.managerName);
+    // После загрузки — попробовать авто-восстановить креды с сервера
+    // если есть hub_url+hub_token но пусто остальное (типовой случай после reinstall)
+    if (s.hub_url && s.hub_token && (!s.mr_login || !s.mr_password)) {
+      tryRestoreFromHub();
+    }
   } catch (e) {
     // Storage not available yet — non-fatal
   }
@@ -155,7 +218,7 @@ async function saveSettings() {
     managerName:  get("s-manager").trim(),
   };
   try {
-    await chrome.storage.local.set(data);
+    await _writeBoth(data);
   } catch (e) {
     showBox("s-result", "❌ Ошибка сохранения: " + e.message, "err");
     return;
