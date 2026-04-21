@@ -54,11 +54,40 @@ async def payments_pending(
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
     am_scope: Optional[str] = Cookie(None),
+    source: Optional[str] = None,  # "airtable" | "db" | None (auto)
 ):
     """Клиенты менеджера с неоплаченными / просроченными счетами.
-    Scope-aware (mine/group/all). Группировка по бакетам срочности."""
+
+    Основной источник — Airtable (отдельная таблица «просроченные оплаты»,
+    поддерживается вашим финансовым отделом). Fallback — БД (Client.payment_*).
+
+    ?source=db  — принудительно из БД.
+    ?source=airtable — принудительно из Airtable (без fallback).
+    """
     u = _user(auth_token, db)
 
+    # 1. Попытка из Airtable
+    if source != "db":
+        try:
+            from integrations.airtable_payments import get_payments_for_manager
+            # admin видит все записи — передаём пустой email чтобы не фильтровать
+            is_admin = u.role in ("admin", "grouphead")
+            payer_email = "" if is_admin else (u.email or "")
+            payer_name = getattr(u, "name", "") or ""
+            at_res = await get_payments_for_manager(payer_email, payer_name)
+            if at_res.get("available"):
+                at_res["scope_user"] = u.email
+                return at_res
+            if source == "airtable":
+                raise HTTPException(503, f"Airtable недоступен: {at_res.get('reason')}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"airtable payments load failed, fallback to db: {e}")
+            if source == "airtable":
+                raise HTTPException(503, f"Airtable ошибка: {e}")
+
+    # 2. Fallback: читаем из Client.payment_* в БД
     try:
         from scope import resolve_scope, get_manager_emails_for_scope
         active_scope = resolve_scope(u, am_scope)
@@ -106,6 +135,8 @@ async def payments_pending(
         total_unpaid += (c.payment_amount or 0)
     totals = {k: len(v["items"]) for k, v in columns.items()}
     return {
+        "source": "db",
+        "available": True,
         "columns": columns,
         "totals": totals,
         "total_clients": sum(totals.values()),
