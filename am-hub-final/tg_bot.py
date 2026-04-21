@@ -163,7 +163,8 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
             "👋 <b>AM Hub Bot</b>\n\n"
             "Доступные команды:\n"
             "/today — мой день: встречи + слоты подготовки\n"
-            "/status — общая статистика\n"
+            "/status — общая статистика портфеля\n"
+            "/inbox — непрочитанные алерты\n"
             "/alert — клиенты с высоким риском\n"
             "/client &lt;name&gt; — карточка клиента\n"
             "/renewal — прогноз продления портфеля\n"
@@ -228,24 +229,96 @@ async def handle_update(update: dict, get_clients_fn, get_top50_fn) -> None:
             logger.error(f"TG /today error: {e}")
             await send_message(chat_id, "❌ Ошибка при загрузке слотов дня.")
 
-
-        clients = get_clients_fn()
-        from database import checkup_status
-        for c in clients:
-            c["status"] = checkup_status(
-                c.get("last_checkup") or c.get("last_meeting"), c["segment"]
+    elif cmd == "/status":
+        # Сводка по портфелю менеджера: клиенты, просрочки, задачи
+        try:
+            from database import SessionLocal
+            from models import (
+                User as UserModel, Client as ClientModel, Task as TaskModel,
+                CHECKUP_INTERVALS,
             )
-        overdue = [c for c in clients if c.get("status", {}).get("color") == "red"]
-        warning = [c for c in clients if c.get("status", {}).get("color") == "yellow"]
-        all_tasks = get_all_tasks("open") if "get_all_tasks" in dir() else []
-        msg = (
-            f"📊 <b>Статус AM Hub</b>\n\n"
-            f"👥 Всего клиентов: {len(clients)}\n"
-            f"🔴 Просроченных: {len(overdue)}\n"
-            f"🟡 Требуют внимания: {len(warning)}\n"
-            f"📋 Открытых задач: {len([t for t in all_tasks if t.get('status') == 'open'])}"
-        )
-        await send_message(chat_id, msg)
+            db = SessionLocal()
+            tg_user = db.query(UserModel).filter(UserModel.telegram_id == str(user_id)).first()
+            if not tg_user:
+                db.close()
+                await send_message(chat_id, "❌ Telegram не привязан к аккаунту AM Hub.")
+                return
+            q = db.query(ClientModel)
+            if tg_user.role == "manager":
+                q = q.filter(ClientModel.manager_email == tg_user.email)
+            clients = q.all()
+            now = datetime.now()
+            overdue_cnt = 0; warn_cnt = 0
+            for c in clients:
+                interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
+                last = c.last_meeting_date or c.last_checkup
+                if last:
+                    days = (now - last).days
+                    if days > interval:
+                        overdue_cnt += 1
+                    elif days > interval * 0.8:
+                        warn_cnt += 1
+                else:
+                    overdue_cnt += 1
+            tq = db.query(TaskModel).join(ClientModel, TaskModel.client_id == ClientModel.id, isouter=True)
+            if tg_user.role == "manager":
+                tq = tq.filter(ClientModel.manager_email == tg_user.email)
+            open_tasks = tq.filter(TaskModel.status.in_(["plan", "in_progress"])).count()
+            blocked_tasks = tq.filter(TaskModel.status == "blocked").count()
+            db.close()
+            await send_message(chat_id, (
+                f"📊 <b>Статус портфеля</b>\n\n"
+                f"👥 Клиентов: {len(clients)}\n"
+                f"🔴 Просрочено чекапов: {overdue_cnt}\n"
+                f"🟡 Скоро срок: {warn_cnt}\n"
+                f"📋 Открытых задач: {open_tasks}\n"
+                f"🛑 Заблокированных: {blocked_tasks}"
+            ))
+        except Exception as e:
+            logger.error(f"TG /status error: {e}")
+            await send_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+
+    elif cmd == "/inbox":
+        # Непрочитанные нотификации из единого инбокса
+        try:
+            from database import SessionLocal
+            from models import User as UserModel, Notification as NotifModel
+            db = SessionLocal()
+            tg_user = db.query(UserModel).filter(UserModel.telegram_id == str(user_id)).first()
+            if not tg_user:
+                db.close()
+                await send_message(chat_id, "❌ Telegram не привязан к аккаунту AM Hub.")
+                return
+            now = datetime.now()
+            rows = (db.query(NotifModel)
+                      .filter(NotifModel.user_id == tg_user.id,
+                              NotifModel.is_read == False,
+                              NotifModel.dismissed_at.is_(None))
+                      .order_by(NotifModel.created_at.desc())
+                      .limit(20).all())
+            # Skip snoozed
+            rows = [n for n in rows if not n.snoozed_until or n.snoozed_until < now]
+            db.close()
+            if not rows:
+                await send_message(chat_id, "✅ Инбокс чист — всё прочитано.")
+                return
+            icon = {"sync_fail": "⚠️", "task_deadline": "⏰", "meeting_soon": "📞",
+                    "checkup_result": "🩺", "qbr_ready": "📊", "nps_incoming": "📉",
+                    "churn_risk": "🚨"}
+            lines = [f"📥 <b>Инбокс ({len(rows)} непрочитано)</b>", ""]
+            for n in rows[:15]:
+                ic = icon.get(n.kind or "", "📢")
+                tm = n.created_at.strftime("%d.%m %H:%M") if n.created_at else ""
+                lines.append(f"{ic} <b>{n.title}</b>  <i>{tm}</i>")
+                if n.message:
+                    lines.append(f"   {n.message[:140]}")
+            if len(rows) > 15:
+                lines.append(f"\n…и ещё {len(rows)-15}")
+            lines.append("\nОткрыть всё: /design/command")
+            await send_message(chat_id, "\n".join(lines))
+        except Exception as e:
+            logger.error(f"TG /inbox error: {e}")
+            await send_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
 
     elif cmd == "/checkups":
         clients = get_clients_fn()
