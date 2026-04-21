@@ -6,22 +6,45 @@
 
 ## 0. Основные фичи
 
+### Портфель и клиенты
 - **Командный центр** — единый инбокс событий (NPS детракторы / sync failures / ближайшие встречи / дедлайны)
-- **Мой портфель** — клиенты с bulk-actions (mark-checkup / onboarding / transfer), скрытие phantom-клиентов, dedupe
-- **Передача клиентов** — manager → manager с AI-сводкой + accept/decline
+- **Мой портфель** — таблица клиентов + структура портфеля сверху, bulk-actions (mark-checkup / onboarding / transfer), фильтр phantom-клиентов, тоггл «По ГК» (группы компаний с агрегатом MRR/GMV)
+- **Карточка клиента** — AI-бриф, онбординг (с чекбоксом «не нужен»), voice notes, roadmap с DnD, upsell, merchrules dashboard (синонимы/whitelist/blacklist/rules), полный **дашборд метрик клиента** (MRR+sparkline / Health / NPS / Tasks / Meetings / Tickets / Upsell / Checkups)
+- **Метрики клиента** — `/api/clients/{id}/metrics` отдаёт revenue_history / health_history / nps_history / tasks stats / meetings stats / tickets / upsell / checkups_recent
+- **Группы компаний (ГК)** — объединение нескольких юр.лиц под одним брендом, админ-страница + toggle в портфеле (агрегат по MRR/GMV + worst-wins health)
+- **Передача клиентов** — manager → manager с AI-сводкой + accept/decline; bulk-передача
 - **Follow-up send** — AI-драфт → copy → отправка в TG → фиксация в Merchrules/Airtable/PartnerLog
-- **Voice notes** — запись в браузере (MediaRecorder) → Groq Whisper транскрипция → R2 storage
-- **Onboarding** — 10-шаговый чеклист, автотаски, шаблоны писем
-- **Renewal pipeline** — Kanban по срокам контрактов (overdue/<7/7-14/14-30/30-90/90+)
+- **Voice notes** — запись в браузере → Groq Whisper транскрипция → R2 storage
+- **Onboarding** — 10-шаговый чеклист, автотаски, шаблоны писем, чекбокс «не нужен»
+
+### Финансы и встречи
+- **Оплаты** (заменили Renewal pipeline) — таблица неоплативших клиентов из **Airtable** таблицы финотдела `tblLEQYWypaYtAcp6`, fallback на БД. Фильтры и сортировка, бакеты срочности
+- **Пульс портфеля NRR** — с fallback на `Client.mrr` если RevenueEntry пуст
+- **Revenue trend** — ежедневный job пишет последние 12 MRR в `Client.revenue_trend` → бары «Динамика» в списке клиентов реально заполняются
+- **Renewal (contract_end)** — отдельно в `/api/me/renewal-pipeline` (legacy, используется отдельно)
 - **Upsell карточка** — события расширения MRR, статусы, дельты
-- **Merchrules dashboard** — синонимы, whitelist, blacklist, merch-rules (sync + create from checkup)
+- **Встречи** — список + месячный календарь (pure JSX без CDN), prep-слоты, follow-up tasks, подтягиваются прошлые встречи из Merchrules в Meeting таблицу
+
+### Аналитика и AI
+- **Аналитика портфеля** — фильтры по сегменту и точечно по клиенту, KPI / Heatmap активности (с fallback Meeting+Task+CheckupResult) / **Воронка чекапов** (реальная из Meeting+Task) / топ-риски
+- **KPI** — NRR, NPS, portfolio MRR (с fallback), встречи за 60д, open/overdue tasks, следующая встреча
+- **AI-ассистент** — 8 предзаданных промптов («Топ-10 в риске», «Кому пора QBR», «Где upsell», «Прогноз churn», «Бриф на неделю» и др.) + **data-grounding**: модель получает сводку портфеля и топ-40 клиентов с метриками в system prompt
+- **Автозадачи** — 11 триггеров: health_drop, days_no_contact, checkup_due, payment_overdue, nps_low, task_blocked_days, **mrr_drop, contract_expiring, ticket_spike, upsell_window, stale_followup**
+
+### Workflow и автоматизация
+- **Merchrules dashboard** — синонимы, whitelist, blacklist, merch-rules (sync + create-rule из чекапа)
 - **NPS workflow** — детрактор (≤6) → inbox + TG + автотаска менеджеру
 - **Health score** — ежедневный recalc (3:00 МСК), тренды, PartnerLog
-- **Встречи** — список + месячный календарь, prep-слоты, follow-up tasks
+- **Задачи** — канбан/таблица toggle, внутренние задачи с полем «Исполнитель» (assignee), время выполнения (HH:MM) для точных напоминаний
 - **Scope switcher** — «мои / моя группа / все» на всех страницах (для grouphead/admin)
-- **Command Bar на мобилке** — нативный ощущающийся bottom-sheet на узких экранах
-- **Чекапы** — результаты из Chrome расширения → кнопка «Создать правило в Merchrules»
+- **Chrome-расширение** — action log внизу popup, креды переживают reinstall (storage.sync + /api/extension/config restore), ZIP всегда свежий (dynamic endpoint), авторефреш статуса токенов
+- **Roadmap** — DnD между Q1-Q4/backlog + sort внутри колонки, inline-edit, per-client roadmap через Task.meta
+- **CSM-change detection** — если в Airtable сменился CSM у клиента → старый менеджер получает notification, pending `ClientTransferRequest` создаётся автоматически
+
+### Остальное
+- **Чекапы** — результаты из Chrome расширения → кнопка «Создать правило в Merchrules» → draft rule + PartnerLog + задача
 - **Health probe** — `/health` и `/health/deep` для мониторинга
+- **Command Bar на мобилке** — нативный bottom-sheet на узких экранах
 
 ## 1. Что внутри
 
@@ -171,8 +194,11 @@ git push                 # Railway подхватит
 ### Интеграции (опционально, включаются по наличию)
 | Variable | Интеграция |
 |---|---|
-| `MERCHRULES_LOGIN`, `MERCHRULES_PASSWORD`, `MERCHRULES_API_URL` | Основной источник данных |
-| `AIRTABLE_TOKEN` (или `AIRTABLE_PAT`), `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_ID` | Синхронизация клиентов |
+| `MERCHRULES_LOGIN`, `MERCHRULES_PASSWORD`, `MERCHRULES_API_URL` | Основной источник клиентов/задач/встреч |
+| `AIRTABLE_TOKEN` (или `AIRTABLE_PAT`), `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_ID` | Синхронизация клиентов (default base `appEAS1rPKpevoIel`) |
+| `AIRTABLE_PAYMENTS_TABLE_ID`, `AIRTABLE_PAYMENTS_VIEW_ID` | Таблица просроченных оплат для `/design/renewal` (default `tblLEQYWypaYtAcp6` / `viw977k6GUNrkeRRy`) |
+| `AIRTABLE_QBR_TABLE_ID` | QBR-события (default `tblqQbChhRYoZoxWu`) |
+| `HUB_URL` | Абсолютный URL хаба для Chrome-расширения. Используется в `/api/extension/version` → `download_url` и `install_url`. Если не задан — подставится `request.base_url` |
 | `SHEETS_SPREADSHEET_ID` | Google Sheets экспорт |
 | `KTALK_SPACE`, `KTALK_API_TOKEN` | Встречи |
 | `TG_BOT_TOKEN`, `TG_NOTIFY_CHAT_ID` | Telegram-уведомления |
@@ -181,6 +207,7 @@ git push                 # Railway подхватит
 | `CF_R2_ACCOUNT_ID`, `CF_R2_ACCESS_KEY`, `CF_R2_SECRET_KEY`, `CF_R2_BUCKET`, `CF_R2_PUBLIC_URL` | R2 storage для voice-notes + вложений (fallback — локальный `/tmp`) |
 | `AMHUB_CRYPTO_KEY` | Fernet-ключ для шифрования паролей Merchrules/Ktalk в user.settings (44 символа base64, без него пароли сохраняются в plaintext) |
 | `REDIS_URL` / `UPSTASH_REDIS_URL` | Redis для `/health/deep` probe (опционально) |
+| `EXT_CHANGELOG` | Текст changelog для уведомления об апдейте расширения |
 
 ### Редизайн (настраиваемые пороги)
 | Variable | Default | Назначение |
@@ -397,8 +424,47 @@ python -c "import design_mappers as dm; print(dm.HEALTH_RISK_MAX)"
 | Бандл устарел после правки JSX | `cd am-hub-final && npm run build:design && git add static/design/dist/bundle.js` |
 | Первая загрузка медленная | Шрифты подгружаются с bunny.net. Для прода можно self-hosted (как в extension) |
 | Empty nav stats | Нет клиентов в БД либо нет прав (проверьте role и UserClientAssignment) |
-| Extension не синхронизирует | Проверьте `hub_url` — должен быть без trailing slash. Смотрите Console расширения |
+| Extension не синхронизирует | В popup внизу «Журнал действий» покажет ошибку. Проверьте HUB_URL/HUB_TOKEN. После uninstall креды подтянутся автоматически из storage.sync или `/api/extension/config` |
+| Extension: «Токен не найден» после логина в time.tbank.ru | Обновите расширение до v3.3.2+ — раньше была ошибка с ключом `tbank_time_token` vs `time_token` |
 | Admin не создан | Задайте `INITIAL_ADMIN_EMAIL` + `INITIAL_ADMIN_PASSWORD` и рестартуйте — сработает на пустой БД |
+| MR sync возвращает «1 клиент» | Зайдите в `/design/profile` → «Мои кабинеты Merchrules», впишите свои `site_id` (через запятую/новую строку) и «Сохранить». Sync будет тянуть их поштучно, а не глобальный `/accounts` |
+| NRR показывает 0 / «Failed to fetch» | После PR #87 endpoint возвращает soft-empty вместо 500. После PR #99 добавлен fallback на `Client.mrr`. Запустите job: `POST /api/revenue-trend/update` (только admin) |
+| Heatmap активности пустой | PR #101: добавлен fallback на Meeting+Task+CheckupResult если AuditLog пуст |
+| Воронка чекапов 0/0/0 | PR #101: новый endpoint `/api/analytics/checkup-funnel` считает из реальных данных |
+| Страница `/design/renewal` пустая | PR #97: теперь тянет из Airtable-таблицы финотдела по manager_email. Если таблица не настроена → fallback на БД `Client.payment_*`. Проверьте `AIRTABLE_TOKEN` и что в таблице `♥️Оплачено CSM` указан ваш email |
+| CSM поменялся в Airtable, но в AM Hub — старый | PR #98: смена CSM не затирает `manager_email` автоматически. В инбоксе старого менеджера появляется уведомление и pending `ClientTransferRequest` — нужно явно Accept |
+
+---
+
+## 9.5. Архитектура интеграций (cheat sheet)
+
+```
+Airtable (appEAS1rPKpevoIel)
+├── tblIKAi1gcFayRJTn        → Clients (sync раз в 30 мин)
+├── tblLEQYWypaYtAcp6 (view) → Payments pending → /design/renewal
+└── tblqQbChhRYoZoxWu        → QBR events
+
+Merchrules
+├── /backend-v2/sites/{id}  → по user.settings.merchrules.my_site_ids (PR #98)
+└── /backend-v2/meetings    → upsert в Meeting (PR #96)
+
+Chrome Extension (v3.3.3+)
+├── storage.sync            → переживает reinstall
+├── /api/extension/config   → восстановление кредов с хаба
+├── /api/extension/download → dynamic ZIP, всегда свежий
+└── /api/auth/tokens/push   → time_token + ktalk_token, auto-sync тикетов
+
+AI (Groq + Qwen)
+├── /api/ai/chat            → data-grounding (топ-40 клиентов с метриками)
+└── PageAI presets          → 8 промпт-шаблонов
+
+Scheduler (APScheduler, МСК)
+├── mr_sync        :30min   → Merchrules
+├── health_recalc  03:00    → пересчёт health_score
+├── revenue_trend  03:30    → Client.revenue_trend для спарклайнов
+├── auto_task_rules: 11 триггеров (+5 новых из PR #96)
+└── qbr_auto_collect, weekly_digest, morning_plan, meeting_reminder_30min, …
+```
 
 ---
 
