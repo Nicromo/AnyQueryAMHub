@@ -4,6 +4,14 @@ function PageClients() {
   const P = (typeof window !== "undefined" && window.__PAGINATION) || { page: 1, total: 0, total_pages: 1, has_prev: false, has_next: false };
   const CL = (typeof window !== "undefined" && window.CLIENTS) || [];
   const [segFilter, setSegFilter] = React.useState("all");
+  const [selectedIds, setSelectedIds] = React.useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = React.useState(false);
+  const toggleSel = (id) => setSelectedIds(prev => {
+    const s = new Set(prev);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    return s;
+  });
+  const clearSel = () => setSelectedIds(new Set());
   // Tab switcher: список клиентов vs структура портфеля (бывшая страница /portfolio).
   const [view, setView] = React.useState(() => {
     try { return sessionStorage.getItem("amhub_portfolio_view") || "list"; } catch (_) { return "list"; }
@@ -129,6 +137,9 @@ function PageClients() {
         }
       />
       <div style={{ padding: "22px 28px 40px" }}>
+        {selectedIds.size > 0 && (
+          <BulkToolbar selectedIds={selectedIds} onClear={clearSel} busy={bulkBusy} setBusy={setBulkBusy}/>
+        )}
         {/* filter chips */}
         <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
           {counted.map((s) => {
@@ -151,7 +162,7 @@ function PageClients() {
         <div style={{ background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 6, overflow: "hidden" }}>
           <div style={{
             display: "grid",
-            gridTemplateColumns: "6px 2.2fr 1fr 1.4fr 1.2fr 30px",
+            gridTemplateColumns: "26px 6px 2.2fr 1fr 1.4fr 1.2fr 30px",
             gap: 16,
             padding: "10px 18px",
             background: "var(--ink-1)",
@@ -160,6 +171,23 @@ function PageClients() {
             textTransform: "uppercase", letterSpacing: "0.08em",
             color: "var(--ink-5)", alignItems: "center",
           }}>
+            <span>
+              <input type="checkbox"
+                checked={visibleClients.length > 0 && visibleClients.every(c => selectedIds.has(c.id))}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    const s = new Set(selectedIds);
+                    visibleClients.forEach(c => s.add(c.id));
+                    setSelectedIds(s);
+                  } else {
+                    const s = new Set(selectedIds);
+                    visibleClients.forEach(c => s.delete(c.id));
+                    setSelectedIds(s);
+                  }
+                }}
+                style={{ margin: 0, cursor: "pointer" }}
+                title="Выбрать всех на странице"/>
+            </span>
             <span></span>
             <span>клиент</span>
             <span>gmv 30д</span>
@@ -180,13 +208,20 @@ function PageClients() {
                 onClick={() => { window.location.href = "/design/client/" + c.id; }}
                 style={{
                 display: "grid",
-                gridTemplateColumns: "6px 2.2fr 1fr 1.4fr 1.2fr 30px",
+                gridTemplateColumns: "26px 6px 2.2fr 1fr 1.4fr 1.2fr 30px",
                 gap: 16,
                 padding: "14px 18px",
                 borderBottom: i === visibleClients.length - 1 ? "none" : "1px solid var(--line-soft)",
                 alignItems: "center",
                 cursor: "pointer",
+                background: selectedIds.has(c.id) ? "color-mix(in oklch, var(--signal) 8%, transparent)" : undefined,
               }}>
+                <span onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() => toggleSel(c.id)}
+                    style={{ margin: 0, cursor: "pointer" }}/>
+                </span>
                 <span style={{
                   width: 6, height: 36, borderRadius: 2,
                   background: `var(--${statusTone})`,
@@ -2643,3 +2678,140 @@ function ClientUpsellCard({ clientId }) {
   );
 }
 window.ClientUpsellCard = ClientUpsellCard;
+
+
+// ── BulkToolbar — массовые действия на /design/clients ──────────────────────
+function BulkToolbar({ selectedIds, onClear, busy, setBusy }) {
+  const ids = Array.from(selectedIds);
+  const [users, setUsers] = React.useState([]);
+  const [transferModal, setTransferModal] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch("/api/admin/users", { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setUsers(Array.isArray(d) ? d : (d.users || [])))
+      .catch(() => {});
+  }, []);
+
+  async function doAction(url, payload, successMsg) {
+    if (busy) return;
+    if (!window.confirm(`Действие затронет ${ids.length} клиентов. Продолжить?`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(url, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_ids: ids, ...payload }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { window.appToast && window.appToast("Ошибка: " + (d.detail || r.status)); return; }
+      window.appToast && window.appToast(successMsg.replace("{n}", String(d.touched || d.started || d.created || ids.length)));
+      onClear();
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) {
+      window.appToast && window.appToast("Ошибка: " + e.message);
+    } finally { setBusy(false); }
+  }
+
+  const markCheckup = () => doAction("/api/clients/bulk/mark-checkup", {}, "✓ Чекап отмечен для {n}");
+  const startOnboarding = () => doAction("/api/clients/bulk/start-onboarding", {}, "✓ Онбординг запущен для {n}");
+
+  return React.createElement("div", {
+    style: {
+      position: "sticky", top: 0, zIndex: 50,
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "10px 14px", marginBottom: 14,
+      background: "var(--ink-1)", border: "1px solid var(--signal)",
+      borderRadius: 6,
+      boxShadow: "0 4px 14px rgba(0,0,0,.25)",
+    },
+  },
+    React.createElement("span", { style: { fontSize: 13, fontWeight: 600, color: "var(--ink-9)" } },
+      `Выбрано: ${ids.length}`),
+    React.createElement("div", { style: { flex: 1 } }),
+    React.createElement(Btn, { kind: "ghost", size: "s", onClick: markCheckup, disabled: busy }, "✓ Чекап проведён"),
+    React.createElement(Btn, { kind: "ghost", size: "s", onClick: startOnboarding, disabled: busy }, "🚀 Онбординг"),
+    React.createElement(Btn, { kind: "ghost", size: "s", onClick: () => setTransferModal(true), disabled: busy }, "🤝 Передать"),
+    React.createElement(Btn, { kind: "ghost", size: "s", onClick: onClear, disabled: busy }, "Снять выделение"),
+
+    transferModal && React.createElement(BulkTransferModal, {
+      ids, users,
+      onClose: () => setTransferModal(false),
+      onDone: (n) => {
+        window.appToast && window.appToast(`✓ Созданы запросы на передачу: ${n}`);
+        setTransferModal(false); onClear();
+        setTimeout(() => window.location.reload(), 800);
+      },
+    }),
+  );
+}
+window.BulkToolbar = BulkToolbar;
+
+function BulkTransferModal({ ids, users, onClose, onDone }) {
+  const [toUserId, setToUserId] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [err, setErr] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const eligible = users.filter(u => ["manager", "grouphead", "admin"].includes(u.role));
+
+  const submit = async () => {
+    if (!toUserId) { setErr("Выбери менеджера"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/clients/bulk/transfer", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_ids: ids, to_user_id: Number(toUserId),
+          manual_note: note,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.detail || "HTTP " + r.status); return; }
+      onDone(d.created || 0);
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return React.createElement("div", {
+    onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
+    style: {
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,.55)", display: "flex",
+      alignItems: "center", justifyContent: "center", padding: 24,
+    },
+  },
+    React.createElement("div", {
+      style: {
+        background: "var(--ink-1)", border: "1px solid var(--line)",
+        borderRadius: 8, padding: 20, width: 480, maxWidth: "100%",
+      },
+    },
+      React.createElement("div", { style: { fontSize: 15, fontWeight: 600, marginBottom: 14 } },
+        `🤝 Передать ${ids.length} клиентов`),
+      err && React.createElement("div", { style: { fontSize: 12, color: "var(--critical)", marginBottom: 10 } }, err),
+      React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-6)", marginBottom: 4 } }, "Новый менеджер:"),
+      React.createElement("select", {
+        value: toUserId, onChange: e => setToUserId(e.target.value),
+        style: { width: "100%", padding: "8px 10px", marginBottom: 12, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-8)" },
+      },
+        React.createElement("option", { value: "" }, "— выбери менеджера —"),
+        eligible.map(u => React.createElement("option", { key: u.id, value: u.id }, `${u.email} (${u.role})`)),
+      ),
+      React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-6)", marginBottom: 4 } }, "Общая заметка (опционально):"),
+      React.createElement("textarea", {
+        value: note, onChange: e => setNote(e.target.value), rows: 3,
+        placeholder: "Например: переход в рамках реорганизации",
+        style: { width: "100%", resize: "vertical", padding: "8px 10px", marginBottom: 14, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-8)", fontFamily: "inherit", fontSize: 12.5 },
+      }),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--ink-6)", marginBottom: 14, lineHeight: 1.5 } },
+        `Для каждого клиента будет создан pending-запрос. Новый менеджер должен принять каждого. AI-сводка не генерируется (для массового переноса).`),
+      React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 } },
+        React.createElement(Btn, { kind: "ghost", size: "m", onClick: onClose, disabled: busy }, "Отмена"),
+        React.createElement(Btn, { kind: "primary", size: "m", onClick: submit, disabled: busy || !toUserId },
+          busy ? "…" : "Создать запросы"),
+      ),
+    ),
+  );
+}
+window.BulkTransferModal = BulkTransferModal;

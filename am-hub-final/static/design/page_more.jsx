@@ -571,6 +571,8 @@ function PageMeetings() {
   const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
   const [meetModal, setMeetModal] = React.useState(null); // null or {type, label, dur}
   const [scope, setScope] = React.useState(() => (typeof localStorage !== "undefined" ? (localStorage.getItem("amhub_meetings_scope") || "all") : "all"));
+  const [tab, setTab] = React.useState(() => { try { return localStorage.getItem("amhub_meetings_tab") || "list"; } catch (_) { return "list"; }});
+  const setTabAndStore = (t) => { setTab(t); try { localStorage.setItem("amhub_meetings_tab", t); } catch (_) {} };
 
   const setScopeAndStore = (s) => {
     setScope(s);
@@ -604,6 +606,9 @@ function PageMeetings() {
       <TopBar breadcrumbs={["am hub","встречи"]} title="Встречи"
         subtitle={total > 0 ? `${total} предстоящих · ${past.length} прошедших · ${withRisk} с риском · ${withOk} ок` : (past.length > 0 ? `0 предстоящих · ${past.length} прошедших` : "Нет встреч")}
         actions={<>
+          <Btn kind={tab === "list" ? "primary" : "ghost"} size="m" onClick={() => setTabAndStore("list")}>Список</Btn>
+          <Btn kind={tab === "calendar" ? "primary" : "ghost"} size="m" onClick={() => setTabAndStore("calendar")}>Календарь</Btn>
+          <div style={{ width: 8 }}/>
           <Btn kind={scope === "all" ? "primary" : "ghost"} size="m" onClick={() => setScopeAndStore("all")}>Все</Btn>
           <Btn kind={scope === "mine" ? "primary" : "ghost"} size="m" onClick={() => setScopeAndStore("mine")}>Мои</Btn>
           <Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setMeetModal({ type: "sync", label: "Встреча", dur: 30 })}>Запланировать</Btn>
@@ -632,6 +637,12 @@ function PageMeetings() {
           submitLabel="Запланировать"
         />
       )}
+      {tab === "calendar" && (
+        <div style={{ padding: "22px 28px 40px" }}>
+          <MeetingsCalendar meetings={MT.filter(m => scope === "all" ? true : (m.manager_email || "") === (U.email || ""))}/>
+        </div>
+      )}
+      {tab === "list" && (
       <div style={{ padding: "22px 28px 40px", display: "grid", gridTemplateColumns: "1fr 320px", gap: 18 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <Card title="Предстоящие">
@@ -723,9 +734,140 @@ function PageMeetings() {
           </Card>
         </div>
       </div>
+      )}
     </div>
   );
 }
+
+// ── MeetingsCalendar — month view с визуализацией встреч ───────────────────
+function MeetingsCalendar({ meetings }) {
+  const [cursor, setCursor] = React.useState(() => {
+    const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const [sel, setSel] = React.useState(null);
+
+  // Индексируем встречи по дате (YYYY-MM-DD)
+  const byDate = React.useMemo(() => {
+    const map = {};
+    for (const m of meetings || []) {
+      const day = (m.day || "").trim();
+      if (!day) continue;
+      // server-shape: "YYYY-MM-DD" или "DD.MM.YYYY"
+      let key = day;
+      if (/^\d{2}\.\d{2}\.\d{4}$/.test(day)) {
+        const [dd, mm, yyyy] = day.split(".");
+        key = `${yyyy}-${mm}-${dd}`;
+      }
+      (map[key] = map[key] || []).push(m);
+    }
+    return map;
+  }, [meetings]);
+
+  const monthLabel = new Date(cursor.year, cursor.month, 1).toLocaleString("ru-RU", { month: "long", year: "numeric" });
+  const firstOfMonth = new Date(cursor.year, cursor.month, 1);
+  const lastOfMonth = new Date(cursor.year, cursor.month + 1, 0);
+  const startOffset = (firstOfMonth.getDay() + 6) % 7;  // Пн=0
+  const totalCells = Math.ceil((startOffset + lastOfMonth.getDate()) / 7) * 7;
+
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+
+  const prev = () => setCursor(c => c.month === 0 ? { year: c.year - 1, month: 11 } : { year: c.year, month: c.month - 1 });
+  const next = () => setCursor(c => c.month === 11 ? { year: c.year + 1, month: 0 } : { year: c.year, month: c.month + 1 });
+  const todayBtn = () => { const d = new Date(); setCursor({ year: d.getFullYear(), month: d.getMonth() }); };
+
+  const cells = [];
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startOffset + 1;
+    const inMonth = dayNum >= 1 && dayNum <= lastOfMonth.getDate();
+    if (!inMonth) { cells.push(null); continue; }
+    const key = `${cursor.year}-${String(cursor.month+1).padStart(2,"0")}-${String(dayNum).padStart(2,"0")}`;
+    cells.push({ key, day: dayNum, ms: byDate[key] || [], isToday: key === todayKey });
+  }
+
+  return React.createElement(Card, {
+    title: monthLabel,
+    actions: React.createElement("div", { style: { display: "flex", gap: 6 } },
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: prev }, "←"),
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: todayBtn }, "Сегодня"),
+      React.createElement(Btn, { kind: "ghost", size: "s", onClick: next }, "→"),
+    ),
+  },
+    React.createElement("div", {
+      style: {
+        display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2,
+        fontSize: 11, color: "var(--ink-6)", marginBottom: 4,
+        fontFamily: "var(--f-mono)", textTransform: "uppercase",
+      },
+    },
+      ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map(d =>
+        React.createElement("div", { key: d, style: { padding: "4px 6px" } }, d)),
+    ),
+    React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 },
+    },
+      cells.map((c, i) => c == null
+        ? React.createElement("div", { key: i, style: { minHeight: 86, background: "var(--ink-1)", opacity: 0.3 } })
+        : React.createElement("div", {
+            key: c.key,
+            onClick: () => setSel(c),
+            style: {
+              minHeight: 86, padding: 6, cursor: "pointer",
+              background: c.isToday ? "color-mix(in oklch, var(--signal) 12%, var(--ink-2))" : "var(--ink-2)",
+              border: "1px solid var(--line-soft)",
+              borderRadius: 3,
+              display: "flex", flexDirection: "column", gap: 3,
+            },
+          },
+            React.createElement("div", {
+              style: { display: "flex", justifyContent: "space-between", alignItems: "baseline" },
+            },
+              React.createElement("span", { style: { fontSize: 12, color: c.isToday ? "var(--signal)" : "var(--ink-7)", fontWeight: c.isToday ? 600 : 400 } }, String(c.day)),
+              c.ms.length > 0 && React.createElement("span", { className: "mono", style: { fontSize: 9.5, color: "var(--ink-5)" } }, `×${c.ms.length}`),
+            ),
+            c.ms.slice(0, 3).map((m, j) =>
+              React.createElement("div", {
+                key: j,
+                title: `${m.when || ""} · ${m.client || ""} · ${m.type || ""}`,
+                style: {
+                  fontSize: 10, padding: "1px 4px",
+                  background: m.mood === "risk" ? "color-mix(in oklch, var(--critical) 18%, transparent)" : "var(--ink-3)",
+                  color: m.mood === "risk" ? "var(--critical)" : "var(--ink-8)",
+                  borderRadius: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                },
+              }, (m.when ? m.when + " " : "") + (m.client || m.type || "встреча"))),
+            c.ms.length > 3 && React.createElement("div", { style: { fontSize: 10, color: "var(--ink-5)" } }, `ещё ${c.ms.length - 3}…`),
+          ))
+    ),
+
+    sel && React.createElement("div", {
+      style: {
+        marginTop: 14, padding: 14,
+        background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6,
+      },
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 10 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 600 } },
+          `Встречи ${sel.key}`),
+        React.createElement("button", { onClick: () => setSel(null), style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 18 } }, "×"),
+      ),
+      sel.ms.length === 0
+        ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12 } }, "Нет встреч")
+        : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+            sel.ms.map((m, j) => React.createElement("div", {
+              key: j,
+              style: { padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line-soft)", borderRadius: 4 },
+            },
+              React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+                React.createElement("span", { className: "mono", style: { fontSize: 11, color: "var(--ink-6)" } }, m.when || "—"),
+                React.createElement("span", { style: { fontSize: 13, color: "var(--ink-9)", flex: 1 } }, m.client || "—"),
+                React.createElement("span", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase" } }, m.type || ""),
+              ),
+            ))),
+    ),
+  );
+}
+window.MeetingsCalendar = MeetingsCalendar;
 
 // ── Portfolio ─────────────────────────────────────────────
 function PagePortfolio() {
