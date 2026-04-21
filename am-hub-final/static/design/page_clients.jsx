@@ -358,6 +358,9 @@ function PageClient() {
             {/* Роадмап клиента — per-client (Q1/Q2/Q3/Q4 + Бэклог) */}
             <ClientRoadmap clientId={c.id}/>
 
+            {/* Merchrules-дашборд — синонимы / whitelist / blacklist / merch-rules */}
+            <ClientMerchrulesDashboard clientId={c.id}/>
+
             {/* История партнёра — real /api/clients/{id}/logs */}
             <ClientLogsList clientId={c.id}/>
           </div>
@@ -1903,3 +1906,133 @@ function PageManagerGroups() {
   );
 }
 window.PageManagerGroups = PageManagerGroups;
+
+
+// ── ClientMerchrulesDashboard — синонимы/white/black/merch-rules из дашборда Merchrules ──
+function ClientMerchrulesDashboard({ clientId }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [syncing, setSyncing] = React.useState(false);
+  const [tab, setTab] = React.useState("synonyms"); // synonyms | whitelist | blacklist | merch_rules
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    fetch(`/api/clients/${clientId}/merchrules-dashboard`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [clientId]);
+  React.useEffect(() => { load(); }, [load]);
+
+  const runSync = async () => {
+    setSyncing(true);
+    try {
+      const r = await fetch(`/api/clients/${clientId}/merchrules-dashboard/sync`, {
+        method: "POST", credentials: "include",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok) {
+        window.appToast && window.appToast(
+          `Синк: ${j.counts.synonyms || 0} син / ${j.counts.whitelist || 0} wl / ${j.counts.blacklist || 0} bl / ${j.counts.merch_rules || 0} rules`
+        );
+        load();
+      } else {
+        window.appToast && window.appToast(j.detail || j.error || "Ошибка синка");
+      }
+    } catch (e) {
+      window.appToast && window.appToast("Сеть/500");
+    }
+    setSyncing(false);
+  };
+
+  const counts = data ? {
+    synonyms: (data.synonyms || []).length,
+    whitelist: (data.whitelist || []).length,
+    blacklist: (data.blacklist || []).length,
+    merch_rules: (data.merch_rules || []).length,
+  } : { synonyms: 0, whitelist: 0, blacklist: 0, merch_rules: 0 };
+
+  const tabs = [
+    { k: "synonyms",    l: "Синонимы",   c: counts.synonyms },
+    { k: "whitelist",   l: "Whitelist",  c: counts.whitelist },
+    { k: "blacklist",   l: "Blacklist",  c: counts.blacklist },
+    { k: "merch_rules", l: "Правила",    c: counts.merch_rules },
+  ];
+
+  const items = (data && data[tab]) || [];
+
+  const lastSynced = data && ["synonyms","whitelist","blacklist","merch_rules"]
+    .flatMap(k => (data[k] || []).map(x => x.last_synced))
+    .filter(Boolean)
+    .sort()
+    .pop();
+
+  return React.createElement(Card, {
+    title: "Merchrules · дашборд",
+    actions: React.createElement(Btn, {
+      kind: "ghost", size: "s",
+      onClick: runSync, disabled: syncing,
+    }, syncing ? "Синк…" : "↻ Синк"),
+  },
+    React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)", marginBottom: 10 } },
+      lastSynced ? `обновлено ${lastSynced.slice(0,16).replace("T"," ")}` : "ещё не синкалось"),
+
+    React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" } },
+      tabs.map(t => React.createElement("button", {
+        key: t.k,
+        onClick: () => setTab(t.k),
+        style: {
+          padding: "4px 10px", borderRadius: 4,
+          background: tab === t.k ? "var(--signal)" : "var(--ink-2)",
+          color: tab === t.k ? "var(--ink-0)" : "var(--ink-7)",
+          border: `1px solid ${tab === t.k ? "var(--signal)" : "var(--line)"}`,
+          cursor: "pointer", fontSize: 11,
+          fontFamily: "var(--f-mono)", textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        },
+      }, `${t.l} · ${t.c}`)),
+    ),
+
+    loading
+      ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5 } }, "Загружаем…")
+      : items.length === 0
+        ? React.createElement("div", { style: { color: "var(--ink-6)", fontSize: 12.5, padding: "10px 0" } },
+            "Пусто. Нажми «↻ Синк» чтобы подтянуть из Merchrules.")
+        : React.createElement("div", { style: { display: "flex", flexDirection: "column", maxHeight: 320, overflowY: "auto" } },
+            items.map((it, i) => {
+              let primary, secondary;
+              if (tab === "synonyms") {
+                primary = it.term;
+                secondary = (it.synonyms || []).join(", ") || "—";
+              } else if (tab === "whitelist" || tab === "blacklist") {
+                primary = it.query;
+                secondary = [it.product_name, it.product_id && "#" + it.product_id, it.position && "pos " + it.position]
+                  .filter(Boolean).join(" · ") || "—";
+              } else {
+                primary = it.name;
+                secondary = [it.rule_type, "prio " + (it.priority || 0), it.status]
+                  .filter(Boolean).join(" · ");
+              }
+              return React.createElement("div", {
+                key: it.id || i,
+                style: {
+                  display: "grid", gridTemplateColumns: "1fr 60px",
+                  gap: 10, padding: "8px 0",
+                  borderBottom: i === items.length - 1 ? "none" : "1px solid var(--line-soft)",
+                  alignItems: "center",
+                },
+              },
+                React.createElement("div", { style: { minWidth: 0 } },
+                  React.createElement("div", { style: { fontSize: 12.5, color: "var(--ink-8)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, primary),
+                  React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, secondary),
+                ),
+                React.createElement(Badge, {
+                  tone: it.is_active === false ? "neutral" : (tab === "blacklist" ? "critical" : "ok"),
+                  dot: true,
+                }, it.is_active === false ? "off" : "on"),
+              );
+            }),
+          ),
+  );
+}
+window.ClientMerchrulesDashboard = ClientMerchrulesDashboard;
