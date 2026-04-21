@@ -442,3 +442,181 @@ async def get_client_metrics(site_id: str, login: str = "", password: str = "") 
     _metrics_cache[site_id] = {"metrics": result, "updated_at": now}
 
     return result
+
+
+# ── Checkup queries (top / random / zero / null) ─────────────────────────────
+# Единый helper для всех клиентов: по site_id дёргает Merchrules analytics
+# endpoints и возвращает список запросов. Результаты кэшируются per-site_id.
+_queries_cache: dict = {}  # site_id+type -> {"queries":[...], "updated_at": datetime}
+_QUERIES_CACHE_TTL_MIN = 30
+
+
+async def fetch_checkup_queries(
+    site_id: str, type_: str = "top",
+    login: str = "", password: str = "",
+    days: int = 30, limit: Optional[int] = None,
+) -> list:
+    """Тянет запросы из Merchrules analytics. Унифицированная точка для всех клиентов.
+
+    type: 'top' | 'random' | 'zero' | 'null'
+      top    → /analytics/top_queries?limit=120
+      random → /analytics/top_queries?limit=30&min_count=0&volume=1000&randomizer=1
+      zero   → /analytics/zero_queries?limit=90&mode=aggregated   (нулевые клики)
+      null   → /analytics/null_queries?limit=90                    (пустая выдача)
+    """
+    t = (type_ or "top").lower()
+    if t == "zeroquery":
+        t = "null"
+    cache_key = f"{site_id}:{t}:{days}:{limit or ''}"
+    now = datetime.now()
+    cached = _queries_cache.get(cache_key)
+    if cached and (now - cached["updated_at"]).total_seconds() < _QUERIES_CACHE_TTL_MIN * 60:
+        return cached["queries"]
+
+    if not login:
+        login, password = _default_creds()
+    if not login or not password:
+        return []
+
+    try:
+        from datetime import timedelta as _td
+        date_to = now.date()
+        date_from = date_to - _td(days=days)
+
+        async with httpx.AsyncClient(timeout=20) as hx:
+            token = None
+            for field in ("email", "login", "username"):
+                try:
+                    r = await hx.post(
+                        f"{MERCHRULES_URL}/backend-v2/auth/login",
+                        json={field: login, "password": password},
+                        timeout=15,
+                    )
+                    if r.status_code == 200:
+                        body = r.json()
+                        token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                        if token:
+                            break
+                except Exception:
+                    continue
+            if not token:
+                return []
+            headers = {"Authorization": f"Bearer {token}"}
+
+            params_by_type = {
+                "top":    {"limit": str(limit or 120)},
+                "random": {"limit": str(limit or 30), "min_count": "0",
+                           "volume": "1000", "randomizer": "1"},
+                "zero":   {"limit": str(limit or 90), "mode": "aggregated"},
+                "null":   {"limit": str(limit or 90)},
+            }
+            endpoint_by_type = {
+                "top":    "top_queries",
+                "random": "top_queries",
+                "zero":   "zero_queries",
+                "null":   "null_queries",
+            }
+            ep = endpoint_by_type.get(t, "top_queries")
+            params = {
+                "site_id": str(site_id),
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+                "platform": "all",
+                **params_by_type.get(t, {"limit": "120"}),
+            }
+            r = await hx.get(
+                f"{MERCHRULES_URL}/backend-v2/analytics/{ep}",
+                params=params, headers=headers, timeout=20,
+            )
+            if r.status_code != 200:
+                logger.warning("fetch_checkup_queries %s HTTP %s: %s",
+                               ep, r.status_code, r.text[:200])
+                return []
+            data = r.json()
+            items = data if isinstance(data, list) else (data.get("queries") or data.get("items") or data.get("data") or [])
+            queries: list = []
+            for it in items:
+                if isinstance(it, str):
+                    q = it.strip()
+                elif isinstance(it, dict):
+                    q = (it.get("query") or it.get("q") or it.get("text") or "").strip()
+                else:
+                    q = ""
+                if q and q not in queries:
+                    queries.append(q)
+            _queries_cache[cache_key] = {"queries": queries, "updated_at": now}
+            return queries
+    except Exception as e:
+        logger.warning("fetch_checkup_queries failed: %s", e)
+        return []
+
+
+# ── Site API keys (Diginetica) ───────────────────────────────────────────────
+# Тянет apiKey клиентов из https://merchrules.any-platform.ru/api/site/all
+# и возвращает {site_id: {apiKey, domain, ...}}. Используется как fallback
+# когда в Client.integration_metadata нет сохранённого diginetica_api_key.
+_site_keys_cache: dict = {}  # login -> {"map": {...}, "updated_at": datetime}
+
+
+async def fetch_site_api_keys(login: str = "", password: str = "") -> dict:
+    """Возвращает {site_id_str: {"apiKey": str, "domain": str|None, "name": str|None}}.
+    Кэш 30 минут per-login."""
+    if not login:
+        login, password = _default_creds()
+    if not login or not password:
+        return {}
+    now = datetime.now()
+    cached = _site_keys_cache.get(login)
+    if cached and (now - cached["updated_at"]).total_seconds() < CACHE_TTL_MINUTES * 60:
+        return cached["map"]
+    try:
+        async with httpx.AsyncClient(timeout=20) as hx:
+            # 1. Auth
+            token = None
+            for field in ("email", "login", "username"):
+                try:
+                    r = await hx.post(
+                        f"{MERCHRULES_URL}/backend-v2/auth/login",
+                        json={field: login, "password": password}, timeout=15,
+                    )
+                    if r.status_code == 200:
+                        body = r.json()
+                        token = body.get("token") or body.get("access_token") or body.get("accessToken")
+                        if token: break
+                except Exception:
+                    continue
+            if not token:
+                return {}
+            headers = {"Authorization": f"Bearer {token}"}
+            # 2. /api/site/all (именно api, не backend-v2)
+            out: dict = {}
+            for ep in (f"{MERCHRULES_URL}/api/site/all",
+                       f"{MERCHRULES_URL}/backend-v2/sites",
+                       f"{MERCHRULES_URL}/backend-v2/accounts"):
+                try:
+                    r = await hx.get(ep, headers=headers, timeout=20)
+                    if r.status_code != 200:
+                        continue
+                    data = r.json()
+                    items = data if isinstance(data, list) else (data.get("sites") or data.get("accounts") or data.get("items") or [])
+                    for it in items:
+                        sid = it.get("id") or it.get("site_id") or it.get("siteId")
+                        if not sid:
+                            continue
+                        sid_s = str(sid)
+                        api_key = (it.get("apiKey") or it.get("api_key")
+                                   or it.get("dn_api_key") or it.get("digineticaApiKey") or "")
+                        out[sid_s] = {
+                            "apiKey": api_key,
+                            "domain": it.get("domain") or it.get("url") or "",
+                            "name": it.get("name") or it.get("title") or "",
+                        }
+                    if out:
+                        break
+                except Exception:
+                    continue
+            _site_keys_cache[login] = {"map": out, "updated_at": now}
+            return out
+    except Exception as e:
+        logger.warning("fetch_site_api_keys failed: %s", e)
+        return {}
