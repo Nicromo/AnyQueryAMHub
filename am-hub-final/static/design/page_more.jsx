@@ -3533,7 +3533,7 @@ function PageIntegrations() {
 
       React.createElement(Btn, {
         kind: "primary", size: "m",
-        onClick: () => { window.open("/static/amhub-ext.zip", "_blank"); },
+        onClick: () => { window.open("/api/extension/download", "_blank"); },
       }, "⬇ Скачать .zip"),
 
       // Блок: URL хаба

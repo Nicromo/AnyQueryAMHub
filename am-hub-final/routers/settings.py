@@ -143,7 +143,10 @@ async def api_extension_version(request: Request, auth_token: Optional[str] = Co
         or (request.headers.get("origin") or "").rstrip("/")
         or str(request.base_url).rstrip("/")
     )
-    download_url = f"{base_url}/static/amhub-ext.zip"
+    # Динамический endpoint — всегда собирает ZIP из текущей папки.
+    # Fallback /static/amhub-ext.zip остаётся на диске для совместимости
+    # со старыми версиями расширения.
+    download_url = f"{base_url}/api/extension/download"
     install_url = f"{base_url}/settings/extension"
 
     # Changelog можно задать через ENV или файл
@@ -155,6 +158,65 @@ async def api_extension_version(request: Request, auth_token: Optional[str] = Co
         "install_url": install_url,
         "changelog": changelog,
     }
+
+
+@router.get("/api/extension/download")
+async def api_extension_download():
+    """
+    Динамически собирает ZIP расширения из текущей папки static/amhub-ext/.
+    Всегда актуальная версия — не нужно коммитить bin-файл.
+
+    Используется всеми кнопками «⬇ Скачать .zip» и как download_url в
+    /api/extension/version → extension update notification.
+    """
+    import pathlib, io, zipfile, json as _json
+    from fastapi.responses import StreamingResponse
+
+    ext_dir = pathlib.Path(__file__).resolve().parent.parent / "static" / "amhub-ext"
+    if not ext_dir.exists():
+        raise HTTPException(500, "extension source dir not found")
+
+    # Читаем version из manifest для имени файла
+    version = "unknown"
+    try:
+        manifest = _json.loads((ext_dir / "manifest.json").read_text(encoding="utf-8"))
+        version = manifest.get("version", "unknown")
+    except Exception:
+        pass
+
+    # Обновляем build-info.json on-the-fly (не трогаем оригинал на диске)
+    from datetime import datetime as _dt
+    build_info = {
+        "version": version,
+        "built_at": _dt.utcnow().isoformat() + "Z",
+        "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA",
+                                  os.environ.get("GIT_SHA", "live")),
+    }
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Live build-info с текущим временем и commit SHA
+        zf.writestr("build-info.json", _json.dumps(build_info, indent=2))
+        for p in ext_dir.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(ext_dir).as_posix()
+            if rel in ("build-info.json",):  # уже записан выше
+                continue
+            if rel.endswith(".DS_Store") or rel.endswith(".map"):
+                continue
+            zf.write(p, arcname=rel)
+    buf.seek(0)
+
+    filename = f"amhub-ext-{version}.zip"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",  # не кешируем — всегда свежий
+        },
+    )
 
 
 @router.get("/api/extension/config")
