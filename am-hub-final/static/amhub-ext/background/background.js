@@ -532,8 +532,19 @@ async function handleCaptureTokens(system, url, tabId) {
     }
 
     const result = await pushTokens(tokens);
-    if (result.ok) amhLog("ok", `${system} токен захвачен`);
-    else amhLog("err", `${system} токен не ушёл в хаб`);
+    if (result.ok) {
+      amhLog("ok", `${system} токен захвачен`);
+      // Запоминаем в storage.local — popup renders status по этим ключам.
+      // Сохраняем значение (а не raw token, чтобы дедуп-хэш pushTokenToHub работал).
+      const storePatch = {};
+      if (tokens.time_token) storePatch.last_time_token = tokens.time_token;
+      if (tokens.ktalk_token) storePatch.last_ktalk_token = tokens.ktalk_token;
+      if (Object.keys(storePatch).length) {
+        try { await chrome.storage.local.set(storePatch); } catch (_) {}
+      }
+    } else {
+      amhLog("err", `${system} токен не ушёл в хаб`);
+    }
     return { ok: result.ok || false };
   } catch (e) {
     amhLog("err", `Capture ${system} error: ${e.message || e}`);
