@@ -649,22 +649,29 @@ function TaskCreateModal({ onClose }) {
   );
   const [priority, setPriority] = React.useState("medium");
   const [dueDate, setDueDate] = React.useState("");
+  const [dueTime, setDueTime] = React.useState("");   // HH:MM — опц.
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
 
-  const canSave = title.trim() && clientId && !saving;
+  // Задача может быть и без клиента (internal). Разрешаем, если title+есть.
+  const canSave = title.trim() && !saving;
 
   const submit = async () => {
     if (!canSave) return;
     setSaving(true); setError("");
     try {
       const body = {
-        client_id: Number(clientId),
         title:     title.trim(),
         priority:  priority,
         status:    "plan",
       };
-      if (dueDate) body.due_date = dueDate + "T12:00:00";
+      if (clientId) body.client_id = Number(clientId);
+      if (dueDate) {
+        // Если время задано — используем его, иначе «весь день» = 23:59.
+        // 23:59 чтобы «срок сегодня» не считался просроченным в середине дня.
+        const t = dueTime && /^\d{2}:\d{2}$/.test(dueTime) ? dueTime + ":00" : "23:59:00";
+        body.due_date = dueDate + "T" + t;
+      }
       const r = await fetch("/api/tasks", {
         method: "POST",
         credentials: "include",
@@ -674,7 +681,7 @@ function TaskCreateModal({ onClose }) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       const data = await r.json();
       if (!data.ok) throw new Error("Не удалось создать задачу");
-      window.location.reload();  // серверный редер подтянет новую задачу
+      window.location.reload();
     } catch (e) {
       setError(String(e.message || e));
       setSaving(false);
@@ -715,9 +722,9 @@ function TaskCreateModal({ onClose }) {
               style={_inputStyle()}/>
           </_Field>
 
-          <_Field label="Клиент">
+          <_Field label="Клиент (опционально)">
             <select value={clientId} onChange={(e) => setClientId(e.target.value)} style={_inputStyle()}>
-              {clients.length === 0 && <option value="">— нет доступных клиентов —</option>}
+              <option value="">— без клиента (internal) —</option>
               {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </_Field>
@@ -731,11 +738,17 @@ function TaskCreateModal({ onClose }) {
                 <option value="critical">critical</option>
               </select>
             </_Field>
-            <_Field label="Срок">
+            <_Field label="Дата">
               <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
                 style={_inputStyle()}/>
             </_Field>
           </div>
+          <_Field label={"Время (опционально) " + (dueTime ? "" : "— без времени = конец дня")}>
+            <input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)}
+              disabled={!dueDate}
+              style={{..._inputStyle(), opacity: dueDate ? 1 : 0.5}}
+              placeholder="чч:мм"/>
+          </_Field>
 
           {error && <div style={{
             fontSize: 12, color: "var(--critical)",

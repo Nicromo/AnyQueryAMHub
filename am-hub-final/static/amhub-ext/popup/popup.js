@@ -667,8 +667,18 @@ function showBox(id, msg, type) {
 
 init();
 
-// Live-refresh статуса токенов: как только background пишет last_*_token или
-// mr_last_* — перерисовываем карточки сразу, без перезагрузки popup.
+// Авторефреш каждые 10 секунд пока popup открыт — подхватывает изменения
+// которые почему-то пришли без onChanged события (например, таб-тайминги
+// или обновление через storage.sync с другого устройства).
+const _refreshTimer = setInterval(() => {
+  if (!document.hidden) refreshTokenStatus();
+}, 10000);
+// На всякий — при показе/скрытии popup триггерим немедленный refresh
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshTokenStatus();
+});
+
+// Live-refresh через storage.onChanged
 try {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
