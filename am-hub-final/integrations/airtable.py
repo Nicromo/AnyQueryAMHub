@@ -25,6 +25,10 @@ AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "")
 AIRTABLE_TABLE_ID = os.getenv("AIRTABLE_TABLE_ID", "")
 AIRTABLE_VIEW_ID = os.getenv("AIRTABLE_VIEW_ID", "viwocTz78z44WlAu1")
 
+# QBR Calendar table
+AIRTABLE_QBR_TABLE_ID = os.getenv("AIRTABLE_QBR_TABLE_ID", "tblqQbChhRYoZoxWu")
+AIRTABLE_QBR_VIEW_ID  = os.getenv("AIRTABLE_QBR_VIEW_ID",  "viw6JIE6SS2ub3enK")
+
 AIRTABLE_API_URL = "https://api.airtable.com/v0"
 CACHE_TTL_SECONDS = 900  # 15 минут
 
@@ -250,22 +254,140 @@ async def update_meeting_date(
             return False
 
 
+def _get_field(fields: Dict, *keys) -> Optional[Any]:
+    """Поиск значения поля по нескольким возможным именам."""
+    for k in keys:
+        if k in fields:
+            v = fields[k]
+            return v[0] if isinstance(v, list) else v
+    return None
+
+
 async def sync_qbr_calendar() -> List[Dict[str, Any]]:
     """
-    Синхронизировать QBR календарь из Airtable
-    
+    Pull QBR-календарь из Airtable (tblqQbChhRYoZoxWu).
+
     Returns:
-        List[Dict]: QBR события с полями:
-            {
-                "id": str,
-                "client": str,
-                "date": datetime,
-                "status": str,
-            }
+        List[Dict] с полями: id, client, date, status, quarter, manager
     """
-    # TODO: Реализовать синхронизацию QBR календаря
-    # QBR Calendar таблица: tblqQbChhRYoZoxWu (viw6JIE6SS2ub3enK)
-    pass
+    if not AIRTABLE_TOKEN or not AIRTABLE_BASE_ID:
+        logger.warning("Airtable не настроен — QBR sync пропущен")
+        return []
+
+    qbr_events: List[Dict[str, Any]] = []
+    offset = None
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        while True:
+            params: Dict[str, Any] = {"pageSize": 100}
+            if AIRTABLE_QBR_VIEW_ID:
+                params["view"] = AIRTABLE_QBR_VIEW_ID
+            if offset:
+                params["offset"] = offset
+
+            try:
+                resp = await client.get(
+                    f"{AIRTABLE_API_URL}/{AIRTABLE_BASE_ID}/{AIRTABLE_QBR_TABLE_ID}",
+                    params=params,
+                    headers=_headers(),
+                )
+            except Exception as e:
+                logger.error(f"QBR Airtable fetch error: {e}")
+                break
+
+            if resp.status_code != 200:
+                logger.warning(f"QBR Airtable error: {resp.status_code} {resp.text[:200]}")
+                break
+
+            body = resp.json()
+            for record in body.get("records", []):
+                fields = record.get("fields", {})
+
+                # Гибкий поиск по частым вариантам имён колонок
+                client_val  = _get_field(fields, "Клиент", "Client", "аккаунт", "Account", "Название клиента")
+                date_val    = _get_field(fields, "Дата QBR", "QBR Date", "Date QBR", "Дата", "date")
+                status_val  = _get_field(fields, "Статус", "Status", "status", "Статус QBR")
+                quarter_val = _get_field(fields, "Квартал", "Quarter", "Период", "Кв")
+                manager_val = _get_field(fields, "Менеджер", "Manager", "AM", "Account Manager", "менеджер")
+
+                qbr_date = None
+                if date_val:
+                    try:
+                        qbr_date = datetime.fromisoformat(str(date_val)[:19])
+                    except Exception:
+                        pass
+
+                qbr_events.append({
+                    "id":      record["id"],
+                    "client":  client_val,
+                    "date":    qbr_date.isoformat() if qbr_date else None,
+                    "status":  str(status_val).lower() if status_val else "planned",
+                    "quarter": quarter_val,
+                    "manager": manager_val,
+                })
+
+            offset = body.get("offset")
+            if not offset:
+                break
+
+    logger.info(f"QBR calendar: loaded {len(qbr_events)} records from Airtable")
+    return qbr_events
+
+
+async def push_qbr_to_airtable(
+    client_name: str,
+    qbr_date: datetime,
+    status: str = "planned",
+    quarter: Optional[str] = None,
+    manager: Optional[str] = None,
+    record_id: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Создать или обновить QBR запись в Airtable QBR-таблице.
+    Если record_id передан — PATCH, иначе POST.
+    Возвращает Airtable record ID или None при ошибке.
+    """
+    if not AIRTABLE_TOKEN or not AIRTABLE_BASE_ID:
+        logger.warning("Airtable не настроен — push пропущен")
+        return None
+
+    fields: Dict[str, Any] = {
+        "Клиент":  client_name,
+        "Дата QBR": qbr_date.strftime("%Y-%m-%d"),
+        "Статус":  status,
+    }
+    if quarter:
+        fields["Квартал"] = quarter
+    if manager:
+        fields["Менеджер"] = manager
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            if record_id:
+                resp = await client.patch(
+                    f"{AIRTABLE_API_URL}/{AIRTABLE_BASE_ID}/{AIRTABLE_QBR_TABLE_ID}/{record_id}",
+                    json={"fields": fields},
+                    headers=_headers(),
+                )
+            else:
+                resp = await client.post(
+                    f"{AIRTABLE_API_URL}/{AIRTABLE_BASE_ID}/{AIRTABLE_QBR_TABLE_ID}",
+                    json={"records": [{"fields": fields}]},
+                    headers=_headers(),
+                )
+
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                rec = data.get("id") or (data.get("records") or [{}])[0].get("id")
+                logger.info(f"QBR pushed to Airtable: {rec} for {client_name}")
+                return rec
+            else:
+                logger.warning(f"Airtable QBR push error: {resp.status_code} {resp.text[:200]}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Airtable QBR push error: {e}")
+            return None
 
 
 if __name__ == "__main__":
