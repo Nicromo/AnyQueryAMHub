@@ -465,7 +465,7 @@ async function handleCaptureTokens(system, url, tabId) {
 
     if (system === "tbank_time") {
       const mm = cookies.find(c => c.name === "MMAUTHTOKEN");
-      if (mm) tokens.tbank_time_token = mm.value;
+      if (mm) tokens.time_token = mm.value;
     }
     if (system === "ktalk") {
       // KTalk использует localStorage для access_token — достаём через scripting
