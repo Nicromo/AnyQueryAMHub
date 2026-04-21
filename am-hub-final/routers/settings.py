@@ -118,11 +118,15 @@ async def api_save_prefs(request: Request, db: Session = Depends(get_db), auth_t
 
 
 @router.get("/api/extension/version")
-async def api_extension_version(auth_token: Optional[str] = Cookie(None)):
+async def api_extension_version(request: Request, auth_token: Optional[str] = Cookie(None)):
     """
     Возвращает актуальную версию расширения.
     Расширение опрашивает этот endpoint каждые 6 часов.
     Если версия выше установленной — фоновый скрипт показывает уведомление.
+
+    URL всегда абсолютный: HUB_URL из env (если задан) или request.base_url.
+    Без этого Chrome резолвит /static/... относительно chrome-extension://<id>/
+    и получает ERR_FILE_NOT_FOUND при клике «Обновить».
     """
     # Читаем version из manifest.json расширения
     import pathlib
@@ -133,9 +137,14 @@ async def api_extension_version(auth_token: Optional[str] = Cookie(None)):
     except Exception:
         version = "1.0.0"
 
-    # Формируем URL для скачивания ZIP (расширение лежит в /static)
-    base_url = os.getenv("HUB_URL", "")
-    download_url = f"{base_url}/static/amhub-ext.zip" if base_url else "/static/amhub-ext.zip"
+    # Абсолютный base_url: env HUB_URL > Origin header > request.base_url
+    base_url = (
+        os.getenv("HUB_URL", "").rstrip("/")
+        or (request.headers.get("origin") or "").rstrip("/")
+        or str(request.base_url).rstrip("/")
+    )
+    download_url = f"{base_url}/static/amhub-ext.zip"
+    install_url = f"{base_url}/settings/extension"
 
     # Changelog можно задать через ENV или файл
     changelog = os.getenv("EXT_CHANGELOG", "Обновлённая версия расширения AM Hub")
@@ -143,7 +152,7 @@ async def api_extension_version(auth_token: Optional[str] = Cookie(None)):
     return {
         "version": version,
         "download_url": download_url,
-        "install_url": f"{base_url}/settings/extension" if base_url else "/settings/extension",
+        "install_url": install_url,
         "changelog": changelog,
     }
 

@@ -48,14 +48,17 @@ async def api_create_task(
         raise HTTPException(status_code=401)
 
     data = await request.json()
+    # client_id опционален — для internal-задач (без клиента) оставляем None.
+    # Поле team служит assignee: обычно email менеджера, либо название группы/команды.
     task = Task(
-        client_id=data["client_id"],
+        client_id=data.get("client_id") or None,
         title=data["title"],
         description=data.get("description", ""),
         status=data.get("status", "plan"),
         priority=data.get("priority", "medium"),
-        team=data.get("team", ""),
+        team=data.get("team") or data.get("assignee_email") or "",
         task_type=data.get("task_type", ""),
+        source=data.get("source") or ("internal" if not data.get("client_id") else "manual"),
         due_date=datetime.fromisoformat(data["due_date"]) if data.get("due_date") else None,
     )
     db.add(task)

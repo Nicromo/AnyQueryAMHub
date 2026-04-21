@@ -1342,14 +1342,19 @@ async def api_me_nrr_pulse(
     - 30d: текущий месяц vs прошлый месяц
     - quarter: сумма последних 3 месяцев vs сумма предыдущих 3 месяцев
     """
+    # Любая внутренняя ошибка тут не должна возвращать 500 — UI иначе показывает
+    # «Failed to fetch». Отдаём валидный JSON со значениями null.
+    empty = {"nrr_total": None,
+             "by_segment": {"ENT": None, "SME+": None, "SME": None, "SMB": None, "SS": None},
+             "gmv_total": 0, "clients_count": 0, "period": period}
     if not auth_token:
-        raise HTTPException(status_code=401)
+        return empty
     payload = decode_access_token(auth_token)
     if not payload:
-        raise HTTPException(status_code=401)
+        return empty
     user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
     if not user:
-        raise HTTPException(status_code=401)
+        return empty
 
     q = db.query(Client)
     if user.role == "manager":
@@ -1366,20 +1371,24 @@ async def api_me_nrr_pulse(
             "period": period,
         }
 
-    # Окна периодов в месяцах YYYY-MM
-    p = (period or "").lower()
-    if p in ("quarter", "q", "3m"):
-        this_months = [_nrr_period_ym(i) for i in range(0, 3)]
-        prev_months = [_nrr_period_ym(i) for i in range(3, 6)]
-    else:
-        # 7d / 30d — текущий мес vs прошлый
-        this_months = [_nrr_period_ym(0)]
-        prev_months = [_nrr_period_ym(1)]
+    try:
+        # Окна периодов в месяцах YYYY-MM
+        p = (period or "").lower()
+        if p in ("quarter", "q", "3m"):
+            this_months = [_nrr_period_ym(i) for i in range(0, 3)]
+            prev_months = [_nrr_period_ym(i) for i in range(3, 6)]
+        else:
+            # 7d / 30d — текущий мес vs прошлый
+            this_months = [_nrr_period_ym(0)]
+            prev_months = [_nrr_period_ym(1)]
 
-    entries = db.query(RevenueEntry).filter(
-        RevenueEntry.client_id.in_(client_ids),
-        RevenueEntry.period.in_(this_months + prev_months),
-    ).all()
+        entries = db.query(RevenueEntry).filter(
+            RevenueEntry.client_id.in_(client_ids),
+            RevenueEntry.period.in_(this_months + prev_months),
+        ).all()
+    except Exception as _e:
+        logger.warning(f"nrr-pulse soft-fail (period/query): {_e}")
+        return empty
 
     this_by_cid: dict = {}
     prev_by_cid: dict = {}

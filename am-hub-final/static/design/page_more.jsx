@@ -2059,26 +2059,7 @@ function PageInternal() {
   const [intModal, setIntModal] = React.useState(false);
   return (
     <div>
-      {intModal && (
-        <FormModal title="Новая внутренняя задача"
-          fields={[
-            { k: "title",    label: "Задача",    required: true, placeholder: "Обновить регламент" },
-            { k: "priority", label: "Приоритет", type: "select",
-              options: [{v:"low",l:"low"},{v:"med",l:"med"},{v:"high",l:"high"}], default: "med" },
-            { k: "due",      label: "Срок (дней от сегодня)", type: "number", default: "7", placeholder: "7" },
-          ]}
-          onClose={() => setIntModal(false)}
-          onSubmit={async function(vals) {
-            const r = await fetch("/design/api/internal-tasks", {
-              method: "POST", credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ title: vals.title, priority: vals.priority || "med", due: vals.due || "7" }),
-            });
-            if (!r.ok) throw new Error(await r.text());
-            setIntModal(false); location.reload();
-          }}
-        />
-      )}
+      {intModal && <InternalTaskModal onClose={() => setIntModal(false)}/>}
       <TopBar breadcrumbs={["am hub","внутренние задачи"]} title="Внутренние задачи"
         subtitle="Задачи команды без привязки к клиенту"
         actions={<Btn kind="primary" size="m" icon={<I.plus size={14}/>} onClick={() => setIntModal(true)}>Задача</Btn>}/>
@@ -2130,6 +2111,117 @@ function PageInternal() {
     </div>
   );
 }
+
+// ── InternalTaskModal — создание внутренней задачи с назначением ───────────
+function InternalTaskModal({ onClose }) {
+  const [title, setTitle] = React.useState("");
+  const [priority, setPriority] = React.useState("med");
+  const [due, setDue] = React.useState("7");
+  const [assignee, setAssignee] = React.useState("");
+  const [users, setUsers] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const U = (typeof window !== "undefined" && window.__CURRENT_USER) || {};
+
+  React.useEffect(() => {
+    fetch("/api/admin/users", { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => {
+        const arr = Array.isArray(d) ? d : (d.users || []);
+        setUsers(arr.filter(u => ["manager", "grouphead", "admin"].includes(u.role) && u.is_active !== false));
+        // По умолчанию — текущий пользователь
+        if (U.email) setAssignee(U.email);
+      })
+      .catch(() => {});
+  }, []);
+
+  const submit = async () => {
+    const t = title.trim();
+    if (!t) { setErr("Укажи название задачи"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/design/api/internal-tasks", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: t, priority, due,
+          owner: assignee || U.email || "",
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      onClose();
+      location.reload();
+    } catch (e) { setErr(String(e.message || e)); setBusy(false); }
+  };
+
+  return React.createElement("div", {
+    onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
+    style: {
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,.55)", display: "flex",
+      alignItems: "center", justifyContent: "center", padding: 24,
+    },
+  },
+    React.createElement("div", {
+      style: {
+        background: "var(--ink-1)", border: "1px solid var(--line)",
+        borderRadius: 8, padding: 20, width: 440, maxWidth: "100%",
+      },
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 14 } },
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 600 } }, "Новая внутренняя задача"),
+        React.createElement("button", { onClick: onClose, style: { background: "none", border: 0, color: "var(--ink-5)", cursor: "pointer", fontSize: 18 } }, "×"),
+      ),
+      err && React.createElement("div", { style: { fontSize: 12, color: "var(--critical)", marginBottom: 10 } }, err),
+
+      React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 } }, "Задача *"),
+      React.createElement("input", {
+        autoFocus: true, value: title, onChange: e => setTitle(e.target.value),
+        placeholder: "Обновить регламент",
+        onKeyDown: e => { if (e.key === "Enter") submit(); },
+        style: { width: "100%", padding: "8px 10px", marginBottom: 12, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontSize: 13 },
+      }),
+
+      React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 } }, "Исполнитель"),
+      React.createElement("select", {
+        value: assignee, onChange: e => setAssignee(e.target.value),
+        style: { width: "100%", padding: "8px 10px", marginBottom: 12, background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontSize: 13 },
+      },
+        React.createElement("option", { value: U.email || "" }, `Я · ${U.email || "—"}`),
+        users.filter(u => u.email !== U.email).map(u =>
+          React.createElement("option", { key: u.id, value: u.email }, `${u.email} · ${u.role}`)),
+      ),
+
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 } },
+        React.createElement("div", null,
+          React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 } }, "Приоритет"),
+          React.createElement("select", {
+            value: priority, onChange: e => setPriority(e.target.value),
+            style: { width: "100%", padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontSize: 13 },
+          },
+            React.createElement("option", { value: "low" }, "low"),
+            React.createElement("option", { value: "med" }, "med"),
+            React.createElement("option", { value: "high" }, "high"),
+          ),
+        ),
+        React.createElement("div", null,
+          React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 } }, "Срок, дней"),
+          React.createElement("input", {
+            type: "number", value: due, onChange: e => setDue(e.target.value),
+            style: { width: "100%", padding: "8px 10px", background: "var(--ink-2)", border: "1px solid var(--line)", borderRadius: 4, color: "var(--ink-9)", fontSize: 13 },
+          }),
+        ),
+      ),
+
+      React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 } },
+        React.createElement(Btn, { kind: "ghost", size: "m", onClick: onClose, disabled: busy }, "Отмена"),
+        React.createElement(Btn, { kind: "primary", size: "m", onClick: submit, disabled: busy || !title.trim() },
+          busy ? "…" : "Создать"),
+      ),
+    ),
+  );
+}
+window.InternalTaskModal = InternalTaskModal;
 
 // ── Extension install page ────────────────────────────────
 function PageExtInstall() {
