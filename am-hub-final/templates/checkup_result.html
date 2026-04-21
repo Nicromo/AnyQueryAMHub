@@ -111,6 +111,17 @@
           {% endif %}
         </div>
         {% endif %}
+        {% if score|int <= 1 and client %}
+        <div class="q-actions" style="margin-top:8px;display:flex;gap:6px;">
+          <button class="create-rule-btn"
+                  data-query="{{ r.get('query','')|e }}"
+                  data-client-id="{{ client.id }}"
+                  data-result-id="{{ result.id }}"
+                  style="padding:4px 10px;font-size:12px;background:#2d3748;color:#fff;border:1px solid #4a5568;border-radius:4px;cursor:pointer;">
+            + Создать правило в Merchrules
+          </button>
+        </div>
+        {% endif %}
       </div>
       {% endfor %}
     {% else %}
@@ -132,5 +143,36 @@ function filterScore(score, btn) {
     row.style.display = (score === null || parseInt(row.dataset.score) === score) ? 'block' : 'none';
   });
 }
+
+// Создать draft merch-правило из плохого запроса
+document.addEventListener("click", async function(e) {
+  const btn = e.target.closest(".create-rule-btn");
+  if (!btn) return;
+  const query = btn.dataset.query;
+  const clientId = btn.dataset.clientId;
+  const resultId = btn.dataset.resultId;
+  const note = prompt("Короткая заметка (опционально):", "") || "";
+  btn.disabled = true;
+  btn.textContent = "Создаём…";
+  try {
+    const r = await fetch(`/api/clients/${clientId}/merch-rules/draft`, {
+      method: "POST", credentials: "include",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        query: query,
+        source_checkup_result_id: Number(resultId),
+        note: note,
+      }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    btn.textContent = "✓ Создано (draft) — допилить в Merchrules";
+    btn.style.background = "#2f855a";
+    btn.disabled = true;
+  } catch (err) {
+    alert("Ошибка: " + err.message);
+    btn.disabled = false;
+    btn.textContent = "+ Создать правило в Merchrules";
+  }
+});
 </script>
 {% endblock %}

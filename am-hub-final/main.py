@@ -593,12 +593,14 @@ from routers import merchrules_dashboard as mr_dashboard_router
 from routers import voice_notes as voice_notes_router
 from routers import client_transfer as client_transfer_router
 from routers import renewal as renewal_router
+from routers import health as health_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
 app.include_router(client_transfer_router.router, tags=["client-transfer"])
 app.include_router(mr_dashboard_router.router, tags=["merchrules-dashboard"])
 app.include_router(voice_notes_router.router, tags=["voice-notes"])
 app.include_router(renewal_router.router, tags=["renewal"])
+app.include_router(health_router.router, tags=["health"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router
