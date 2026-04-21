@@ -2735,8 +2735,11 @@ function PageRenewal() {
     React.createElement(TopBar, {
       breadcrumbs: ["am hub", "клиенты", "оплаты"],
       title: "Оплаты · неоплатившие клиенты",
-      subtitle: loading ? "…" :
-        (data ? `${data.total_clients} клиентов · Σ ${rub(data.total_unpaid_amount || 0)}` : "Нет данных"),
+      subtitle: loading ? "…" : (data ?
+        `${data.total_clients} клиентов · Σ ${rub(data.total_unpaid_amount || 0)}` +
+        (data.source === "airtable" ? " · источник: Airtable" :
+         data.source === "db" ? " · источник: БД" : "")
+        : "Нет данных"),
     }),
     React.createElement("div", { style: { padding: "22px 28px 40px" } },
       // Фильтр-чипы по бакетам
