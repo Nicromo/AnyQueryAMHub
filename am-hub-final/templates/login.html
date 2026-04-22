@@ -8,6 +8,7 @@
     :root {
       --bg: #0a0e1a; --card: #111827; --border: #1e2a3a;
       --text: #e2e8f0; --muted: #64748b; --accent: #6366f1;
+      --accent-green: #a3e635;
     }
     [data-theme="light"] {
       --bg: #f8fafc; --card: #ffffff; --border: #e2e8f0;
@@ -15,44 +16,102 @@
     }
     * { margin:0; padding:0; box-sizing:border-box; }
     body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; transition:background .3s; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:40px; width:100%; max-width:400px; box-shadow:0 20px 60px rgba(0,0,0,.3); }
-    .logo { font-size:2.5rem; margin-bottom:8px; }
-    h1 { font-size:1.5rem; font-weight:700; margin-bottom:4px; }
-    .sub { color:var(--muted); font-size:.85rem; margin-bottom:28px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:40px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+    .header { display:flex; align-items:center; gap:14px; margin-bottom:24px; }
+    .logo-badge { width:44px; height:44px; background:var(--accent-green); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:.95rem; font-weight:800; color:#1a2400; letter-spacing:-.5px; flex-shrink:0; }
+    .header-text h1 { font-size:1.25rem; font-weight:700; line-height:1.2; }
+    .header-text .sub { color:var(--muted); font-size:.72rem; font-weight:600; letter-spacing:.1em; text-transform:uppercase; margin-top:2px; }
+    .divider { border:none; border-top:1px solid var(--border); margin:20px 0; }
+    .section-label { font-size:.72rem; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:16px; }
+    .tg-info { font-size:.85rem; color:var(--muted); line-height:1.55; margin-bottom:4px; }
+    .tg-info a { color:var(--accent-green); text-decoration:none; }
+    .tg-info a:hover { text-decoration:underline; }
+    .or-divider { display:flex; align-items:center; gap:12px; margin:20px 0; color:var(--muted); font-size:.8rem; }
+    .or-divider::before, .or-divider::after { content:''; flex:1; border-top:1px solid var(--border); }
     label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:6px; font-weight:500; }
     input { width:100%; padding:11px 14px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--text); font-size:.95rem; outline:none; margin-bottom:16px; transition:border .15s; }
     input:focus { border-color:var(--accent); }
-    .btn { width:100%; padding:12px; border:none; border-radius:10px; background:var(--accent); color:#fff; font-size:.95rem; font-weight:600; cursor:pointer; transition:filter .15s; }
-    .btn:hover { filter:brightness(1.1); }
+    .btn { width:100%; padding:12px; border:1px solid var(--border); border-radius:10px; background:transparent; color:var(--text); font-size:.95rem; font-weight:500; cursor:pointer; transition:all .15s; }
+    .btn:hover { border-color:var(--accent); color:var(--accent); }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+    .btn-primary:hover { filter:brightness(1.1); color:#fff; }
     .err { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.3); border-radius:10px; padding:10px 14px; font-size:.85rem; color:#f87171; margin-bottom:16px; }
+    .email-form { display:none; }
+    .email-form.open { display:block; }
     .theme-toggle { position:fixed; top:16px; right:16px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:8px 12px; cursor:pointer; font-size:1.1rem; color:var(--text); transition:all .15s; }
     .theme-toggle:hover { border-color:var(--accent); }
+    .tg-widget { margin-bottom:4px; min-height:40px; }
   </style>
 </head>
 <body>
   <button class="theme-toggle" onclick="toggleTheme()" title="Тема">🌓</button>
   <div class="card">
-    <div class="logo">🎛️</div>
-    <h1>AM Hub</h1>
-    <p class="sub">Enterprise Account Manager</p>
-    {% if error %}<div class="err">{{ error }}</div>{% endif %}
-    <form method="POST">
+    <div class="header">
+      <div class="logo-badge">AQ</div>
+      <div class="header-text">
+        <h1>AM Hub</h1>
+        <div class="sub">OPS Console</div>
+      </div>
+    </div>
+    <hr class="divider">
+
+    <div class="section-label">Вход через Telegram</div>
+
+    {% if bot_username %}
+    <div class="tg-widget">
+      <script async src="https://telegram.org/js/telegram-widget.js?22"
+              data-telegram-login="{{ bot_username }}"
+              data-size="large"
+              data-auth-url="/auth/telegram"
+              data-request-access="write">
+      </script>
+    </div>
+    {% else %}
+    <p class="tg-info">
+      Авторизация через бота <a href="https://t.me/anyquery_am_bot" target="_blank">@anyquery_am_bot</a>.<br>
+      Нужен доступ — напишите админу команды.
+    </p>
+    {% endif %}
+
+    <div class="or-divider">ИЛИ</div>
+
+    {% if error %}
+    <div class="err">{{ error }}</div>
+    {% endif %}
+
+    <button class="btn" id="toggleEmailBtn" onclick="toggleEmail()">Войти по email и паролю</button>
+
+    <form method="POST" class="email-form" id="emailForm" style="margin-top:16px;">
       <label>Email</label>
-      <input type="email" name="email" placeholder="you@company.ru" required autofocus>
+      <input type="email" name="email" placeholder="you@company.ru" required id="emailInput">
       <label>Пароль</label>
       <input type="password" name="password" placeholder="••••••••" required>
-      <button type="submit" class="btn">Войти</button>
+      <button type="submit" class="btn btn-primary">Войти</button>
     </form>
   </div>
   <script>
+    function toggleEmail() {
+      const form = document.getElementById('emailForm');
+      const btn = document.getElementById('toggleEmailBtn');
+      const open = form.classList.toggle('open');
+      btn.style.display = open ? 'none' : 'block';
+      if (open) document.getElementById('emailInput').focus();
+    }
+
     function toggleTheme() {
       const h = document.documentElement;
       const t = h.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
       h.setAttribute('data-theme', t);
       localStorage.setItem('theme', t);
     }
+
     const saved = localStorage.getItem('theme');
     if (saved) document.documentElement.setAttribute('data-theme', saved);
+
+    // Показать форму автоматически при ошибке
+    {% if error %}
+    document.addEventListener('DOMContentLoaded', function() { toggleEmail(); });
+    {% endif %}
   </script>
 </body>
 </html>

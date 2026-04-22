@@ -382,7 +382,7 @@ async def login_submit(
 ):
     user = authenticate_user(db, email, password)
     if not user:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Неверный email или пароль"})
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Неверный email или пароль", "bot_username": os.environ.get("TG_BOT_USERNAME", "")})
 
     token = create_access_token({"sub": str(user.id)})
     response = RedirectResponse(url="/dashboard", status_code=303)
