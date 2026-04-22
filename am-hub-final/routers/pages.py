@@ -66,7 +66,11 @@ def _enrich_clients(clients, db: Session, now: datetime):
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": None,
+        "bot_username": os.environ.get("TG_BOT_USERNAME", ""),
+    })
 
 
 @router.get("/logout")

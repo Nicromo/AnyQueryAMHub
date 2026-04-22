@@ -508,6 +508,10 @@ class RevenueEntry(Base):
     updated_by = Column(String, nullable=True)
     client     = relationship("Client", backref="revenue_history")
 
+    @property
+    def amount(self):
+        return self.mrr
+
 
 class UpsellEvent(Base):
     """Апсейл / Даунсейл событие."""
