@@ -6,6 +6,7 @@ Merchrules Integration (Extended)
 https://merchrules.any-platform.ru/analytics/full?account_id=<ID>
 """
 
+import asyncio
 import os
 import logging
 from datetime import datetime, timedelta

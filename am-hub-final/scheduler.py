@@ -110,24 +110,52 @@ async def job_sync_merchrules():
 
             try:
                 async with httpx.AsyncClient(timeout=30) as hx:
-                    # Перебираем поля логина
+                    # Перебираем поля логина и режимы (json/form)
                     token = None
+                    auth_ok = False
                     for field in ("email", "login", "username"):
-                        try:
-                            r = await hx.post(
-                                f"{base_url}/backend-v2/auth/login",
-                                json={field: login, "password": password},
-                                timeout=15,
-                            )
-                            if r.status_code == 200:
-                                body = r.json()
-                                token = body.get("token") or body.get("access_token") or body.get("accessToken")
-                                if token:
-                                    break
-                        except Exception:
-                            continue
+                        for mode in ("json", "form"):
+                            try:
+                                if mode == "form":
+                                    r = await hx.post(
+                                        f"{base_url}/backend-v2/auth/login",
+                                        data={field: login, "password": password},
+                                        timeout=15,
+                                    )
+                                else:
+                                    r = await hx.post(
+                                        f"{base_url}/backend-v2/auth/login",
+                                        json={field: login, "password": password},
+                                        timeout=15,
+                                    )
+                                if r.status_code in (200, 201, 204):
+                                    auth_ok = True
+                                    try:
+                                        body = r.json()
+                                        for _k in ("token", "access_token", "accessToken", "jwt", "authToken"):
+                                            if body.get(_k):
+                                                token = body[_k]
+                                                break
+                                        if not token:
+                                            for _wrap in ("data", "result", "payload"):
+                                                _inner = body.get(_wrap) or {}
+                                                if isinstance(_inner, dict):
+                                                    for _k in ("token", "access_token", "accessToken"):
+                                                        if _inner.get(_k):
+                                                            token = _inner[_k]
+                                                            break
+                                                if token:
+                                                    break
+                                    except Exception:
+                                        pass
+                                    if token or hx.cookies:
+                                        break
+                            except Exception:
+                                continue
+                        if auth_ok and (token or hx.cookies):
+                            break
 
-                    if not token:
+                    if not auth_ok:
                         sync_log.status = "error"
                         sync_log.message = f"Auth failed for {login}"
                         logger.warning(f"MR auth failed: {login}")
@@ -135,7 +163,11 @@ async def job_sync_merchrules():
                         db.commit()
                         continue
 
-                    headers = {"Authorization": f"Bearer {token}"}
+                    if token:
+                        headers = {"Authorization": f"Bearer {token}"}
+                    else:
+                        # cookie-based session (Set-Cookie от сервера)
+                        headers = {"Accept": "application/json"}
 
                     # Тянем аккаунты. Если менеджер указал свои site_ids в
                     # user.settings.merchrules.my_site_ids — используем их
