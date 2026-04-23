@@ -32,11 +32,41 @@ loadConfig().then(() => {
 });
 
 // ── Side Panel (Chrome 114+): клик по иконке открывает боковую панель ────────
+// Два механизма подряд — потому что каждый по отдельности ненадёжен:
+//
+//  1) setPanelBehavior({openPanelOnActionClick:true}) — когда сработает,
+//     Chrome сам открывает панель на клик по иконке и action.onClicked НЕ фаерится.
+//  2) chrome.action.onClicked — fallback на случай, если setPanelBehavior
+//     ещё не применился (свежая установка / не прогретый SW / старый Chrome).
+//     Если (1) уже применён — (2) не вызовется, так что конфликта нет.
+//
+// Без (2) расширение молча не открывается после переустановки, пока SW
+// не инициализируется (см. PR 3.2.8: default_popup был убран).
 if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch(err => console.warn("[AM Hub] sidePanel.setPanelBehavior:", err));
 }
+
+chrome.action.onClicked.addListener(async (tab) => {
+  // Fallback: открыть боковую панель вручную, если setPanelBehavior не сработал.
+  try {
+    if (chrome.sidePanel && chrome.sidePanel.open && tab && tab.id !== undefined) {
+      await chrome.sidePanel.open({ tabId: tab.id });
+      return;
+    }
+  } catch (e) { console.warn("[AM Hub] sidePanel.open:", e); }
+  // Если и это не сработало — открыть popup как HTML-страницу в новом окне
+  // (последняя линия обороны, чтобы пользователь хоть что-то увидел).
+  try {
+    await chrome.windows.create({
+      url: chrome.runtime.getURL("popup/popup.html"),
+      type: "popup",
+      width: 440,
+      height: 680,
+    });
+  } catch (e) { console.warn("[AM Hub] windows.create fallback:", e); }
+});
 
 // ── Alarms ────────────────────────────────────────────────────────────────────
 chrome.alarms.create("mr_sync",       { periodInMinutes: 30 });
@@ -555,4 +585,11 @@ async function handleCaptureTokens(system, url, tabId) {
 // Инициализация при установке
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("mr_sync", { periodInMinutes: 30 });
+  // Ещё раз фиксируем openPanelOnActionClick на случай, если top-level вызов
+  // упал (SW не успел / Chrome ещё не готов). setPanelBehavior идемпотентен.
+  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+    chrome.sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: true })
+      .catch(() => {});
+  }
 });
