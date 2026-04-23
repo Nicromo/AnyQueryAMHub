@@ -58,20 +58,9 @@ def _env_bool(key: str) -> bool:
     return bool(os.environ.get(key, ""))
 
 def _checkup_auth(auth_token: Optional[str], db, request=None):
-    from auth import decode_access_token
-    bearer = ""
-    if request:
-        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    token = bearer or auth_token
-    if not token:
-        raise HTTPException(status_code=401)
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-    return user
+    """Единая авторизация: cookie JWT | Bearer JWT | Bearer amh_*. См. api_tokens.require_user."""
+    from routers.api_tokens import require_extension_user as _require_extension_user
+    return _require_extension_user(db, request, auth_token)
 
 @router.get("/api/clients/{client_id}/qbr")
 async def api_get_qbr(client_id: int, db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None)):
@@ -602,6 +591,71 @@ async def api_client_feeds(
         }
         for f in rows
     ]}
+
+
+# ============================================================================
+# PER-CLIENT SYNC
+# ============================================================================
+# Кнопка «🔄 Синхронизировать этого клиента» в шапке карточки запускает
+# точечный апдейт: один GET к Airtable по record_id + (опционально) пулл
+# Merchrules-дашборда по merchrules_account_id. Это на 1-2 порядка дешевле
+# глобального ночного синка, потому что не бежит по всем клиентам.
+
+@router.post("/api/clients/{client_id}/sync")
+async def api_client_sync(
+    client_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Точечный синк одного клиента: Airtable (только его record) + Merchrules (его site_id)."""
+    user = _checkup_auth(auth_token, db, request)
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+
+    result: dict = {"airtable": None, "merchrules": None}
+
+    # ── Airtable: один record по airtable_record_id ─────────────────────────
+    if client.airtable_record_id:
+        try:
+            from airtable_sync import sync_clients_from_airtable
+            at_res = await sync_clients_from_airtable(
+                db,
+                only_record_id=client.airtable_record_id,
+            )
+            result["airtable"] = {
+                "ok": at_res.get("ok", True),
+                "updated": at_res.get("updated", 0),
+                "created": at_res.get("created", 0),
+                "error": at_res.get("error"),
+            }
+        except Exception as exc:
+            logger.exception("per-client airtable sync failed for %s", client_id)
+            result["airtable"] = {"ok": False, "error": str(exc)}
+    else:
+        result["airtable"] = {"ok": False, "error": "У клиента нет airtable_record_id"}
+
+    # ── Merchrules: дашборд + фиды для этого site_id ────────────────────────
+    if client.merchrules_account_id:
+        mr_settings = (user.settings or {}).get("merchrules", {}) or {}
+        mr_login = mr_settings.get("login") or ""
+        mr_password = mr_settings.get("password") or ""
+        if mr_login and mr_password:
+            try:
+                from integrations.merchrules_dashboard import sync_client as _mr_sync_one
+                mr_res = await _mr_sync_one(db, client, mr_login, mr_password)
+                result["merchrules"] = {"ok": "error" not in mr_res, **mr_res}
+            except Exception as exc:
+                logger.exception("per-client merchrules sync failed for %s", client_id)
+                result["merchrules"] = {"ok": False, "error": str(exc)}
+        else:
+            result["merchrules"] = {"ok": False, "error": "Нет кредов Merchrules у менеджера"}
+    else:
+        result["merchrules"] = {"ok": False, "error": "У клиента нет merchrules_account_id"}
+
+    return {"ok": True, "client_id": client_id, **result}
 
 
 # ============================================================================

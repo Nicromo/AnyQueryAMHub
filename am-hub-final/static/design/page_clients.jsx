@@ -406,6 +406,7 @@ function PageClient() {
         subtitle={[segment !== "—" && `Сегмент ${segment}`, domain !== "—" && domain, managerEmail !== "—" && "AM: " + managerEmail].filter(Boolean).join(" · ")}
         actions={
           <>
+            <ClientSyncButton client={c}/>
             <Btn kind="ghost" size="m" icon={<I.chat size={14}/>} onClick={async () => {
               const txt = await appPrompt("Текст заметки по клиенту", {
                 title: "Новая заметка", placeholder: "О чём договорились / что заметил…",
@@ -1821,6 +1822,56 @@ function ClientFeedsList({ clientId }) {
   );
 }
 window.ClientFeedsList = ClientFeedsList;
+
+
+// ── ClientSyncButton — точечный синк одного клиента (Airtable + Merchrules) ──
+//    Вызывает POST /api/clients/{id}/sync, показывает прогресс в тосте.
+//    Дешевле глобального ночного синка: один Airtable record + один Merchrules
+//    site_id вместо обхода всех клиентов.
+function ClientSyncButton({ client }) {
+  const [busy, setBusy] = React.useState(false);
+  const onClick = async () => {
+    if (busy) return;
+    setBusy(true);
+    if (typeof appToast === "function") appToast("⏳ Синхронизирую клиента…", "info");
+    try {
+      const r = await fetch(`/api/clients/${client.id}/sync`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (typeof appToast === "function") appToast("❌ Ошибка синка: " + (d.detail || r.status), "error");
+        setBusy(false);
+        return;
+      }
+      const at = (d.airtable || {});
+      const mr = (d.merchrules || {});
+      const parts = [];
+      if (at.ok) parts.push(`Airtable: обновлено ${at.updated || 0}`);
+      else if (at.error) parts.push(`Airtable: ${at.error}`);
+      if (mr.ok) parts.push("Merchrules: ok");
+      else if (mr.error) parts.push(`Merchrules: ${mr.error}`);
+      if (typeof appToast === "function") {
+        appToast("✅ Готово. " + parts.join(" · "), at.ok || mr.ok ? "ok" : "warn");
+      }
+      // Перезагружаем, чтобы подтянуть свежие значения в KPI/контакты/продукты/фиды
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) {
+      if (typeof appToast === "function") appToast("❌ " + (e.message || "Ошибка синка"), "error");
+      setBusy(false);
+    }
+  };
+  return React.createElement(Btn, {
+    kind: "ghost",
+    size: "m",
+    disabled: busy,
+    icon: busy ? "⏳" : "🔄",
+    onClick,
+  }, busy ? "Синкаю…" : "Синк");
+}
+window.ClientSyncButton = ClientSyncButton;
 
 
 // ── ClientOnboardingCard — 10-step per-client onboarding (кнопка + прогресс + модал) ──

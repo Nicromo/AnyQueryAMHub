@@ -701,6 +701,9 @@ class ClientContact(Base):
     telegram   = Column(String, nullable=True)
     is_primary = Column(Boolean, default=False)
     notes      = Column(Text, nullable=True)
+    # Airtable record id для linked-контактов — идемпотентный upsert по нему,
+    # чтобы повторный синк не плодил дубликаты и мог удалять убранные.
+    airtable_record_id = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     client     = relationship("Client", backref="contacts")

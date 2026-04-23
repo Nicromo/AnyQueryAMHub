@@ -277,6 +277,151 @@ def _hub_fields_to_airtable(
     return update
 
 
+# Кеш: {(base_id, source_table_id, field_id): linked_table_id}
+_LINKED_TABLE_CACHE: dict = {}
+
+
+async def _get_linked_table_id(client, base_id: str, source_table_id: str,
+                                field_id: str, token: str = "") -> Optional[str]:
+    """Через Airtable Meta API узнать, в какую таблицу ссылается linked-поле.
+    Нужно для contacts: в нашей таблице клиентов поле «Контакты клиента»
+    (fldybBIJjTcxzB5T1) — linked-массив record-id из другой таблицы; без этой
+    таблицы мы видим только «recXXX» вместо имён.
+
+    Кешируется в памяти процесса (per-deploy).
+    Возвращает None если schema API недоступен (напр. у токена нет scope
+    schema.bases:read) — тогда синк просто оставит старое поведение.
+    """
+    cache_key = (base_id, source_table_id, field_id)
+    if cache_key in _LINKED_TABLE_CACHE:
+        return _LINKED_TABLE_CACHE[cache_key]
+    try:
+        resp = await client.get(
+            f"{BASE_URL}/meta/bases/{base_id}/tables",
+            headers=_headers(token),
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            logger.info("Airtable schema API → %d: %s (возможно у токена нет scope schema.bases:read)",
+                        resp.status_code, resp.text[:150])
+            _LINKED_TABLE_CACHE[cache_key] = None
+            return None
+        tables = resp.json().get("tables", [])
+        for t in tables:
+            if t.get("id") != source_table_id:
+                continue
+            for f in t.get("fields", []):
+                if f.get("id") != field_id:
+                    continue
+                opts = f.get("options") or {}
+                linked = opts.get("linkedTableId")
+                _LINKED_TABLE_CACHE[cache_key] = linked
+                return linked
+        _LINKED_TABLE_CACHE[cache_key] = None
+        return None
+    except Exception as exc:
+        logger.warning("Airtable schema fetch exception: %s", exc)
+        _LINKED_TABLE_CACHE[cache_key] = None
+        return None
+
+
+# Типичные имена полей в Contacts-таблице — пробуем по порядку.
+_CONTACT_NAME_KEYS     = ["Name", "name", "Имя", "ФИО", "Contact", "Контакт", "Full Name"]
+_CONTACT_EMAIL_KEYS    = ["Email", "email", "E-mail", "Почта", "Mail"]
+_CONTACT_PHONE_KEYS    = ["Phone", "phone", "Телефон", "Mobile", "Номер"]
+_CONTACT_POSITION_KEYS = ["Position", "position", "Должность", "Title", "Role"]
+_CONTACT_TG_KEYS       = ["Telegram", "telegram", "TG", "tg", "Телеграм"]
+
+
+def _pick_first(fields: dict, keys: list) -> Optional[str]:
+    """Вернуть первое непустое значение по списку возможных имён полей."""
+    for k in keys:
+        v = fields.get(k)
+        if v is None or v == "":
+            continue
+        if isinstance(v, list):
+            # linked / multi-select: берём первый элемент
+            if not v:
+                continue
+            item = v[0]
+            if isinstance(item, dict):
+                v = item.get("name") or item.get("email") or item.get("text") or ""
+            else:
+                v = str(item)
+        elif isinstance(v, dict):
+            v = v.get("name") or v.get("email") or v.get("text") or ""
+        else:
+            v = str(v)
+        v = (v or "").strip()
+        if v:
+            return v
+    return None
+
+
+async def _fetch_linked_contacts(client, base_id: str, linked_table_id: str,
+                                  record_ids: list, token: str = "") -> dict:
+    """Забрать данные для указанных record_id из linked-таблицы контактов.
+    Возвращает dict {record_id: {name, email, phone, position, telegram}}.
+    Формула: OR(RECORD_ID()='rec1', RECORD_ID()='rec2', ...) — одним запросом.
+    Airtable лимит на длину formula ~16 KB, это более чем достаточно для
+    десятка контактов на клиента.
+    """
+    if not record_ids:
+        return {}
+    # OR(...) — до 100 ID за раз; режем на чанки на всякий случай.
+    resolved: dict = {}
+    for i in range(0, len(record_ids), 100):
+        chunk = record_ids[i:i+100]
+        formula = "OR(" + ",".join([f"RECORD_ID()='{r}'" for r in chunk]) + ")"
+        try:
+            resp = await client.get(
+                f"{BASE_URL}/{base_id}/{linked_table_id}",
+                headers=_headers(token),
+                params={"filterByFormula": formula, "pageSize": 100},
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                logger.warning("Airtable contacts fetch → %d: %s",
+                               resp.status_code, resp.text[:200])
+                continue
+            for rec in resp.json().get("records", []):
+                rid = rec.get("id")
+                f = rec.get("fields", {}) or {}
+                if not rid:
+                    continue
+                resolved[rid] = {
+                    "name":     _pick_first(f, _CONTACT_NAME_KEYS),
+                    "email":    _pick_first(f, _CONTACT_EMAIL_KEYS),
+                    "phone":    _pick_first(f, _CONTACT_PHONE_KEYS),
+                    "position": _pick_first(f, _CONTACT_POSITION_KEYS),
+                    "telegram": _pick_first(f, _CONTACT_TG_KEYS),
+                }
+        except Exception as exc:
+            logger.warning("Airtable contacts fetch exception: %s", exc)
+    return resolved
+
+
+async def _fetch_one_record(client, table_id: str, record_id: str, token: str = "") -> Optional[dict]:
+    """Забрать одну запись по её airtable record_id. Вернёт dict {id, fields, ...}
+    или None если записи нет / ошибка. Для per-client sync — гораздо дешевле
+    полного пагинированного обхода."""
+    try:
+        resp = await client.get(
+            f"{BASE_URL}/{AIRTABLE_BASE_ID}/{table_id}/{record_id}",
+            headers=_headers(token),
+            params={"returnFieldsByFieldId": "true"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            logger.warning("Airtable single-record fetch %s → %d: %s",
+                           record_id, resp.status_code, resp.text[:200])
+            return None
+        return resp.json()
+    except Exception as exc:
+        logger.error("Airtable single-record fetch %s exception: %s", record_id, exc)
+        return None
+
+
 async def _fetch_all_records(client, table_id: str, view_id: str = "", token: str = "") -> list:
     """Скачать ВСЕ записи с пагинацией (Airtable даёт по 100 за раз)."""
     records = []
@@ -330,12 +475,17 @@ async def sync_clients_from_airtable(
     view_id: str = "",
     default_manager_email: str = "",
     table_id: str = "",
+    only_record_id: Optional[str] = None,
 ) -> dict:
     """Синхронизировать всех клиентов из Airtable в таблицу clients.
 
     Если base_id == appEAS1rPKpevoIel и table_id == tblIKAi1gcFayRJTn —
     используем точные field ID (FIELD_NAME, FIELD_MANAGER, и т.д.).
     Иначе — эвристическое определение по названиям полей (fallback).
+
+    only_record_id: если передан — синкаем только одну запись (per-client sync
+    по кнопке на карточке). Гораздо дешевле: один GET к Airtable + апдейт
+    одной строки в БД вместо прохода по 100+ клиентам.
 
     Идемпотентность: upsert по airtable_record_id → airtable_site_id → name.
     """
@@ -355,7 +505,11 @@ async def sync_clients_from_airtable(
     AIRTABLE_BASE_ID = use_base
     try:
         async with httpx.AsyncClient(timeout=60) as hx:
-            records = await _fetch_all_records(hx, use_table, view_id or AIRTABLE_VIEW_ID, use_token)
+            if only_record_id:
+                one = await _fetch_one_record(hx, use_table, only_record_id, use_token)
+                records = [one] if one else []
+            else:
+                records = await _fetch_all_records(hx, use_table, view_id or AIRTABLE_VIEW_ID, use_token)
     finally:
         AIRTABLE_BASE_ID = _saved_base
 
@@ -427,6 +581,10 @@ async def sync_clients_from_airtable(
         return not any(t in low for t in bad_tokens)
 
     seen_keys = set()
+
+    # Собираем ссылочные контакт-recId'ы для post-processing (см. после цикла).
+    # {client_id: [rec_id, ...]}
+    pending_linked_contacts: dict = {}
 
     for record in records:
         fields = record.get("fields", {})
@@ -670,45 +828,133 @@ async def sync_clients_from_airtable(
                     logger.debug(f"products upsert failed for {c.name}: {_pe}")
 
             # ── Contacts → ClientContact ─────────────────────────────
+            # Поле «Контакты клиента» (fldybBIJjTcxzB5T1) может быть:
+            #   (a) linked-массив record-id ["recXXX", ...] — ссылается на отдельную
+            #       таблицу контактов с полями Name/Email/Phone/Telegram/Position;
+            #   (b) многострочный текст (имена/email в произвольном формате);
+            #   (c) массив dict'ов (expanded linked records).
+            # Для (a) мы собираем rec-id'ы в pending_linked_contacts и разрешаем
+            # их одним batch-запросом ПОСЛЕ цикла (см. ниже). Для (b)/(c) —
+            # парсим inline, как раньше.
             if exact and c and c.id and contacts_raw:
                 try:
                     from models import ClientContact
-                    # Парсим значение: список строк / email / текст
-                    raw_list = []
+                    linked_ids: list = []
+                    inline_raw: list = []
                     if isinstance(contacts_raw, list):
                         for item in contacts_raw:
                             if isinstance(item, dict):
-                                raw_list.append(item.get("name") or item.get("text") or item.get("email") or "")
+                                # Уже expanded linked record
+                                inline_raw.append(item.get("name") or item.get("text") or item.get("email") or "")
+                            elif isinstance(item, str) and item.startswith("rec") and len(item) >= 17:
+                                linked_ids.append(item)
                             else:
-                                raw_list.append(str(item))
+                                inline_raw.append(str(item))
                     elif isinstance(contacts_raw, str):
-                        # Разбить по переводам строк/запятым/точкам с запятой
                         for part in contacts_raw.replace(";", "\n").replace(",", "\n").split("\n"):
-                            if part.strip(): raw_list.append(part.strip())
-                    # Получить существующие, сопоставить по name
-                    existing = {(ct.name or "").strip().lower(): ct
-                                for ct in db.query(ClientContact).filter(ClientContact.client_id == c.id).all()}
-                    seen = set()
-                    for raw_c in raw_list:
-                        raw_c = raw_c.strip()
-                        if not raw_c: continue
-                        email = raw_c if "@" in raw_c else None
-                        name_c = raw_c
-                        key = name_c.lower()
-                        seen.add(key)
-                        if key in existing:
-                            if email and not existing[key].email:
-                                existing[key].email = email
-                        else:
-                            db.add(ClientContact(client_id=c.id, name=name_c[:200],
-                                                  email=email, role=None))
-                    # Контакты, пришедшие из Airtable, отмечаем как "airtable" в notes — но сейчас пропустим удаление старых,
-                    # чтобы не терять ручные контакты менеджера.
+                            if part.strip(): inline_raw.append(part.strip())
+
+                    if linked_ids:
+                        # Копим — разрешим одним batch'ем после цикла
+                        pending_linked_contacts[c.id] = linked_ids
+
+                    if inline_raw:
+                        # Получить существующие, сопоставить по name
+                        existing = {(ct.name or "").strip().lower(): ct
+                                    for ct in db.query(ClientContact).filter(ClientContact.client_id == c.id).all()}
+                        for raw_c in inline_raw:
+                            raw_c = (raw_c or "").strip()
+                            if not raw_c: continue
+                            email = raw_c if "@" in raw_c else None
+                            name_c = raw_c
+                            key = name_c.lower()
+                            if key in existing:
+                                if email and not existing[key].email:
+                                    existing[key].email = email
+                            else:
+                                db.add(ClientContact(client_id=c.id, name=name_c[:200],
+                                                      email=email, role=None))
                 except Exception as _ce:
                     logger.debug(f"contacts upsert failed for {c.name}: {_ce}")
         except Exception as exc:
             errors.append(f"{name}: {exc}")
             skipped += 1
+
+    # ── Resolve linked contacts (batch fetch from Contacts table) ─────────────
+    # Если в поле «Контакты клиента» у каких-то клиентов были recXXX —
+    # ищем через schema API целевую таблицу и одним запросом получаем
+    # name/email/phone/telegram/position для ВСЕХ упомянутых контактов.
+    if exact and pending_linked_contacts:
+        try:
+            from models import ClientContact
+            all_ids: list = []
+            for ids in pending_linked_contacts.values():
+                all_ids.extend(ids)
+            all_ids = list(dict.fromkeys(all_ids))  # dedup, preserve order
+
+            async with httpx.AsyncClient(timeout=30) as hx2:
+                linked_table = await _get_linked_table_id(
+                    hx2, use_base, use_table, FIELD_CONTACTS, use_token,
+                )
+                resolved: dict = {}
+                if linked_table:
+                    resolved = await _fetch_linked_contacts(
+                        hx2, use_base, linked_table, all_ids, use_token,
+                    )
+                else:
+                    logger.info("Airtable: не смог определить linked-таблицу контактов "
+                                "(нужен scope schema.bases:read у PAT). "
+                                "Контакты останутся как recXXX — можно добавить scope в Airtable → PAT.")
+
+            if resolved:
+                for client_id, rec_ids in pending_linked_contacts.items():
+                    existing_by_airtable = {
+                        ct.airtable_record_id: ct
+                        for ct in db.query(ClientContact)
+                          .filter(ClientContact.client_id == client_id,
+                                  ClientContact.airtable_record_id.isnot(None))
+                          .all()
+                    }
+                    for rid in rec_ids:
+                        data = resolved.get(rid)
+                        if not data:
+                            continue
+                        name = (data.get("name") or rid)[:200]
+                        email = data.get("email")
+                        phone = data.get("phone")
+                        position = data.get("position")
+                        telegram = data.get("telegram")
+                        ct = existing_by_airtable.get(rid)
+                        if ct:
+                            ct.name = name
+                            if email:    ct.email = email
+                            if phone:    ct.phone = phone
+                            if position: ct.position = position
+                            if telegram: ct.telegram = telegram
+                        else:
+                            db.add(ClientContact(
+                                client_id=client_id,
+                                airtable_record_id=rid,
+                                name=name,
+                                email=email,
+                                phone=phone,
+                                position=position,
+                                telegram=telegram,
+                                role=None,
+                            ))
+                # Удаляем устаревшие airtable-контакты: те, которых больше нет в
+                # recXXX-списке клиента (менеджер убрал в Airtable).
+                for client_id, rec_ids in pending_linked_contacts.items():
+                    keep = set(rec_ids)
+                    stale = (db.query(ClientContact)
+                               .filter(ClientContact.client_id == client_id,
+                                       ClientContact.airtable_record_id.isnot(None))
+                               .all())
+                    for ct in stale:
+                        if ct.airtable_record_id not in keep:
+                            db.delete(ct)
+        except Exception as exc:
+            logger.warning("linked-contacts resolution failed: %s", exc)
 
     try:
         db.commit()

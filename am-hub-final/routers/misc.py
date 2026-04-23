@@ -44,21 +44,11 @@ def _env_bool(key: str) -> bool:
 # ============================================================================
 
 def _checkup_auth(auth_token: Optional[str], db, request=None):
-    """Авторизация для checkup/cabinet endpoints. Cookie и Bearer (расширение)."""
-    from auth import decode_access_token
-    bearer = ""
-    if request:
-        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    token = bearer or auth_token
-    if not token:
-        raise HTTPException(status_code=401)
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-    return user
+    """Авторизация для checkup/cabinet endpoints. Cookie JWT | Bearer JWT | Bearer amh_*.
+    См. routers.api_tokens.require_user — там обрабатываются все три формата
+    и бросается структурированный 401 с конкретной причиной."""
+    from routers.api_tokens import require_extension_user as _require_extension_user
+    return _require_extension_user(db, request, auth_token)
 
 
 
