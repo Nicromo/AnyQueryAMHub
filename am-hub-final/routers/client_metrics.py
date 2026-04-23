@@ -207,6 +207,209 @@ async def client_metrics(
     }
 
 
+# ============================================================================
+# Merchrules-powered endpoints — дергают внешние API с кредами менеджера
+# ============================================================================
+# Все 3 эндпоинта защищены cookie-JWT через _user() и требуют, чтобы у
+# менеджера в user.settings.merchrules были валидные login/password.
+# Если кредов нет или Merchrules недоступен — отдаём пустой ответ
+# с флагом ok=false + reason, фронт показывает понятную заглушку.
+
+def _merchrules_creds(user: User) -> tuple[str, str]:
+    s = (user.settings or {}).get("merchrules", {}) or {}
+    return (s.get("login") or "", s.get("password") or "")
+
+
+@router.get("/api/clients/{client_id}/gmv-daily")
+async def client_gmv_daily(
+    client_id: int,
+    days: int = 30,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Реальный дневной GMV/sessions/orders из Merchrules /api/report/daily.
+    Заменяет локальный RevenueEntry-sparkline (который помесячный) на честный
+    дневной timeseries — это та самая user-facing разница для sparkline GMV,
+    про которую я упоминал в «что ещё осталось»."""
+    user = _user(auth_token, db)
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(404)
+    if not c.merchrules_account_id:
+        return {"ok": False, "reason": "no_site_id", "items": []}
+    login, password = _merchrules_creds(user)
+    if not login or not password:
+        return {"ok": False, "reason": "no_credentials", "items": []}
+
+    from merchrules_sync import fetch_report_daily
+    date_to = datetime.utcnow().date()
+    date_from = date_to - timedelta(days=max(1, min(days, 180)))
+    try:
+        data = await fetch_report_daily(
+            site_id=str(c.merchrules_account_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            names=["REVENUE_TOTAL", "SESSIONS_TOTAL", "ORDERS_TOTAL"],
+            login=login, password=password,
+        )
+    except Exception as e:
+        logger.warning("fetch_report_daily failed for client %s: %s", client_id, e)
+        return {"ok": False, "reason": "merchrules_error", "error": str(e), "items": []}
+
+    # Merchrules возвращает разные формы — нормализуем в [{date, revenue, sessions, orders}]
+    items_raw = data.get("items") or data.get("data") or data.get("rows") or []
+    items: list = []
+    if isinstance(items_raw, list):
+        for row in items_raw:
+            if not isinstance(row, dict):
+                continue
+            date = row.get("date") or row.get("day") or row.get("period") or ""
+            items.append({
+                "date": date,
+                "revenue":  float(row.get("REVENUE_TOTAL")  or row.get("revenue")  or 0),
+                "sessions": float(row.get("SESSIONS_TOTAL") or row.get("sessions") or 0),
+                "orders":   float(row.get("ORDERS_TOTAL")   or row.get("orders")   or 0),
+            })
+    # Отсортируем по дате (если есть)
+    items.sort(key=lambda x: x.get("date") or "")
+    total_rev = sum(i["revenue"] for i in items)
+    return {"ok": True, "items": items, "total_revenue": total_rev,
+            "days": days, "site_id": c.merchrules_account_id}
+
+
+@router.get("/api/clients/{client_id}/merchrules-health")
+async def client_merchrules_health(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Здоровье Merchrules + активные инциденты, отфильтрованные под site_id клиента.
+    Инциденты фильтруются по affected_sites (если Merchrules вернул это поле) —
+    иначе показываем все инциденты менеджера (лучше false-positive, чем тишина)."""
+    user = _user(auth_token, db)
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(404)
+    login, password = _merchrules_creds(user)
+    if not login or not password:
+        return {"ok": False, "reason": "no_credentials", "health": None, "incidents": []}
+
+    from merchrules_sync import fetch_health_dashboard, fetch_incidents
+    health_data: dict = {}
+    incidents_raw: list = []
+    try:
+        health_data = await fetch_health_dashboard(login=login, password=password) or {}
+    except Exception as e:
+        logger.warning("fetch_health_dashboard failed: %s", e)
+    try:
+        inc = await fetch_incidents(login=login, password=password) or {}
+        incidents_raw = inc.get("items") or inc.get("data") or inc.get("incidents") or []
+    except Exception as e:
+        logger.warning("fetch_incidents failed: %s", e)
+
+    # Нормализация health
+    health_pct: Optional[float] = None
+    if isinstance(health_data, dict):
+        # Merchrules может возвращать {health: 0.87} или {score: 87} или {status: 'ok'}
+        hv = health_data.get("health") or health_data.get("score") or health_data.get("value")
+        if isinstance(hv, (int, float)):
+            health_pct = float(hv) * 100 if hv <= 1 else float(hv)
+
+    # Фильтруем инциденты: только те, где задет site_id клиента, либо глобальные
+    site_id = str(c.merchrules_account_id or "")
+    filtered_incidents: list = []
+    if isinstance(incidents_raw, list):
+        for inc in incidents_raw:
+            if not isinstance(inc, dict):
+                continue
+            affected = inc.get("affected_sites") or inc.get("sites") or inc.get("site_ids") or []
+            if isinstance(affected, str):
+                affected = [affected]
+            affected_strs = [str(x) for x in (affected or [])]
+            # Если incident без affected — считаем глобальным (показываем всем клиентам).
+            is_relevant = (not affected_strs) or (site_id and site_id in affected_strs)
+            if not is_relevant:
+                continue
+            filtered_incidents.append({
+                "id":        inc.get("id") or inc.get("uuid") or "",
+                "title":     inc.get("title") or inc.get("name") or inc.get("summary") or "—",
+                "severity":  inc.get("severity") or inc.get("priority") or "info",
+                "status":    inc.get("status") or "open",
+                "created_at": inc.get("created_at") or inc.get("started_at") or inc.get("date"),
+            })
+
+    return {
+        "ok": True,
+        "health": {"pct": health_pct, "raw": health_data} if health_pct is not None else None,
+        "incidents": filtered_incidents[:20],
+        "site_id": site_id or None,
+    }
+
+
+@router.get("/api/clients/{client_id}/recs-coverage")
+async def client_recs_coverage(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Покрытие рекомендациями для site_id клиента. Используется в чекапе
+    качества: если покрытие < 70% — подсвечиваем warning."""
+    user = _user(auth_token, db)
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(404)
+    if not c.merchrules_account_id:
+        return {"ok": False, "reason": "no_site_id"}
+    login, password = _merchrules_creds(user)
+    if not login or not password:
+        return {"ok": False, "reason": "no_credentials"}
+
+    from merchrules_sync import fetch_recs_coverage
+    try:
+        data = await fetch_recs_coverage(
+            site_ids=[str(c.merchrules_account_id)],
+            login=login, password=password,
+        ) or {}
+    except Exception as e:
+        logger.warning("fetch_recs_coverage failed: %s", e)
+        return {"ok": False, "reason": "merchrules_error", "error": str(e)}
+
+    # Merchrules возвращает {items: [{site_id, coverage, missing_products, ...}]}
+    items = data.get("items") or data.get("data") or []
+    site_id = str(c.merchrules_account_id)
+    target: Optional[dict] = None
+    if isinstance(items, list):
+        for row in items:
+            if isinstance(row, dict) and str(row.get("site_id") or row.get("siteId") or "") == site_id:
+                target = row
+                break
+        if target is None and items:
+            # Если single-site запрос — берём первый элемент.
+            t = items[0]
+            if isinstance(t, dict):
+                target = t
+
+    if not target:
+        return {"ok": True, "coverage_pct": None, "missing_count": 0}
+
+    cov = target.get("coverage") or target.get("coverage_pct") or target.get("pct")
+    cov_pct: Optional[float] = None
+    if isinstance(cov, (int, float)):
+        cov_pct = float(cov) * 100 if cov <= 1 else float(cov)
+
+    missing = target.get("missing_products") or target.get("missing") or []
+    missing_count = len(missing) if isinstance(missing, list) else int(missing or 0)
+
+    return {
+        "ok": True,
+        "coverage_pct": cov_pct,
+        "missing_count": missing_count,
+        "missing_sample": missing[:10] if isinstance(missing, list) else [],
+        "site_id": site_id,
+        "warning": (cov_pct is not None and cov_pct < 70),
+    }
+
+
 @router.post("/api/revenue-trend/update")
 async def api_trigger_revenue_trend(auth_token: Optional[str] = Cookie(None),
                                      db: Session = Depends(get_db)):
