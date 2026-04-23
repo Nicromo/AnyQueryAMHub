@@ -109,8 +109,14 @@ PAGES_DATA_MAP = {
     "profile":    [],
     "assignments": ["clients"],
     "client-groups": ["clients"],
-    "groups":  [],
-    "renewal": [],
+    "groups":        [],
+    "renewal":       [],
+    "hypotheses":    ["clients"],
+    "broadcast":     ["clients"],
+    "jira":          ["clients"],
+    "gdrive":        ["clients"],
+    "auto-followups": [],
+    "context":       ["clients"],
 }
 
 
@@ -140,7 +146,13 @@ PAGES = {
     "assignments":("PageAssignments",["am hub", "админ", "назначения"],    "Назначения клиентов"),
     "groups":    ("PageManagerGroups",["am hub", "админ", "группы"],       "Группы менеджеров"),
     "renewal":   ("PageRenewal",    ["am hub", "клиенты", "оплаты"],       "Оплаты"),
-    "client-groups": ("PageClientGroups", ["am hub", "админ", "ГК"],       "Группы компаний"),
+    "client-groups":  ("PageClientGroups",  ["am hub", "админ", "ГК"],                "Группы компаний"),
+    "hypotheses":     ("PageHypotheses",    ["am hub", "инструменты", "гипотезы"],   "Гипотезы"),
+    "broadcast":      ("PageBroadcast",     ["am hub", "инструменты", "рассылки"],   "TG-рассылки"),
+    "jira":           ("PageJira",          ["am hub", "интеграции", "jira"],         "Jira"),
+    "gdrive":         ("PageGDrive",        ["am hub", "интеграции", "google drive"], "Google Drive"),
+    "auto-followups": ("PageAutoFollowups", ["am hub", "инструменты", "фолоуапы"],   "Автофолоуапы"),
+    "context":        ("PageContext",       ["am hub", "инструменты", "контекст"],   "Контекст клиентов"),
 }
 
 

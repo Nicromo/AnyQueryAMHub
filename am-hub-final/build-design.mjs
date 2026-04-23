@@ -27,6 +27,12 @@ const ORDER = [
   "page_hub.jsx",
   "page_analytics.jsx",
   "page_more.jsx",
+  "page_hypotheses.jsx",
+  "page_broadcast.jsx",
+  "page_jira.jsx",
+  "page_gdrive.jsx",
+  "page_auto_followups.jsx",
+  "page_context.jsx",
 ];
 
 // 1) конкатенация исходников (через IIFE-обёртку каждому файлу, чтобы

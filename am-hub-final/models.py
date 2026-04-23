@@ -1014,3 +1014,169 @@ class ClientGroup(Base):
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     clients     = relationship("Client", back_populates="group", foreign_keys="Client.group_id")
+
+
+# ── Гипотезы по клиентам ────────────────────────────────────────────────────
+
+class Hypothesis(Base):
+    """Гипотезы AM по проектам клиентов — A/B тесты, идеи, эксперименты."""
+    __tablename__ = "hypotheses"
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    created_by   = Column(String, nullable=True)           # email менеджера
+    title        = Column(String, nullable=False)
+    description  = Column(Text, nullable=True)
+    hypothesis_type = Column(String, default="ab")         # ab|feature|process|pricing
+    status       = Column(String, default="draft", index=True)  # draft|testing|proven|rejected|paused
+    priority     = Column(String, default="medium")        # low|medium|high
+    metrics      = Column(Text, nullable=True)             # как будем мерить
+    result       = Column(Text, nullable=True)             # итог после теста
+    expected_impact = Column(String, nullable=True)        # ожидаемый эффект
+    actual_impact   = Column(String, nullable=True)        # фактический эффект
+    start_date   = Column(Date, nullable=True)
+    end_date     = Column(Date, nullable=True)
+    tags         = Column(JSONB, default=list)
+    meta         = Column(JSONB, default=dict)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client       = relationship("Client", backref="hypotheses")
+
+
+# ── Telegram-рассылки ───────────────────────────────────────────────────────
+
+class TgBroadcast(Base):
+    """Шаблоны и расписание Telegram-рассылок по группам клиентов."""
+    __tablename__ = "tg_broadcasts"
+    id           = Column(Integer, primary_key=True, index=True)
+    created_by   = Column(String, nullable=True)
+    name         = Column(String, nullable=False)
+    message_text = Column(Text, nullable=False)
+    target_type  = Column(String, default="manual")  # manual|segment|health_risk|all
+    target_filter = Column(JSONB, default=dict)       # {"segment": "ENT", "health_max": 0.5}
+    schedule_type = Column(String, default="once")   # once|daily|weekly|monthly
+    schedule_cron = Column(String, nullable=True)     # cron-выражение
+    next_run_at  = Column(DateTime, nullable=True)
+    last_run_at  = Column(DateTime, nullable=True)
+    is_active    = Column(Boolean, default=True)
+    send_count   = Column(Integer, default=0)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    logs         = relationship("TgBroadcastLog", back_populates="broadcast", cascade="all, delete-orphan")
+
+
+class TgBroadcastLog(Base):
+    """Лог отправки Telegram-рассылок."""
+    __tablename__ = "tg_broadcast_logs"
+    id           = Column(Integer, primary_key=True, index=True)
+    broadcast_id = Column(Integer, ForeignKey("tg_broadcasts.id"), nullable=False, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    tg_chat_id   = Column(String, nullable=True)
+    status       = Column(String, default="sent")    # sent|failed|skipped
+    error        = Column(Text, nullable=True)
+    sent_at      = Column(DateTime, default=datetime.utcnow)
+    broadcast    = relationship("TgBroadcast", back_populates="logs")
+
+
+# ── Контекст клиента (авто-сводка) ─────────────────────────────────────────
+
+class ClientContext(Base):
+    """Автоматически обновляемый контекст клиента — сводка по всем источникам."""
+    __tablename__ = "client_contexts"
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), unique=True, index=True)
+    # AI-сгенерированная сводка
+    summary      = Column(Text, nullable=True)
+    # Структурированный контекст по блокам
+    key_facts    = Column(JSONB, default=list)  # [{text, source, date}]
+    pain_points  = Column(JSONB, default=list)
+    wins         = Column(JSONB, default=list)
+    risks        = Column(JSONB, default=list)
+    next_steps   = Column(JSONB, default=list)
+    # Метаданные обновления
+    last_auto_update = Column(DateTime, nullable=True)
+    last_manual_edit = Column(DateTime, nullable=True)
+    edited_by    = Column(String, nullable=True)
+    sources_used = Column(JSONB, default=list)  # ["meetings", "nps", "tickets", ...]
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    client       = relationship("Client", backref="context", uselist=False)
+
+
+# ── Jira-задачи по клиенту ──────────────────────────────────────────────────
+
+class JiraIssue(Base):
+    """Кэш Jira-задач, привязанных к клиенту."""
+    __tablename__ = "jira_issues"
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    jira_key     = Column(String, nullable=False, unique=True, index=True)  # e.g. "PROJ-123"
+    jira_id      = Column(String, nullable=True)
+    project_key  = Column(String, nullable=True, index=True)
+    summary      = Column(String, nullable=False)
+    description  = Column(Text, nullable=True)
+    issue_type   = Column(String, nullable=True)   # Bug|Story|Task|Epic
+    status       = Column(String, nullable=True)   # Open|In Progress|Done
+    priority     = Column(String, nullable=True)
+    assignee     = Column(String, nullable=True)
+    reporter     = Column(String, nullable=True)
+    labels       = Column(JSONB, default=list)
+    jira_url     = Column(String, nullable=True)
+    created_jira = Column(DateTime, nullable=True)
+    updated_jira = Column(DateTime, nullable=True)
+    due_date     = Column(Date, nullable=True)
+    synced_at    = Column(DateTime, default=datetime.utcnow)
+    meta         = Column(JSONB, default=dict)
+    client       = relationship("Client", backref="jira_issues")
+
+
+# ── Google Drive файлы по клиенту ──────────────────────────────────────────
+
+class GDriveFile(Base):
+    """Файлы Google Drive, связанные с клиентом."""
+    __tablename__ = "gdrive_files"
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    linked_by    = Column(String, nullable=True)            # email кто привязал
+    gdrive_id    = Column(String, nullable=False, index=True)  # Google Drive file ID
+    name         = Column(String, nullable=False)
+    mime_type    = Column(String, nullable=True)
+    web_view_url = Column(String, nullable=True)
+    web_content_url = Column(String, nullable=True)
+    file_size    = Column(Integer, nullable=True)            # bytes
+    modified_at  = Column(DateTime, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    client       = relationship("Client", backref="gdrive_files")
+
+
+# ── Автофолоуапы ────────────────────────────────────────────────────────────
+
+class AutoFollowup(Base):
+    """Правила автоматической отправки follow-up сообщений."""
+    __tablename__ = "auto_followups"
+    id           = Column(Integer, primary_key=True, index=True)
+    created_by   = Column(String, nullable=True)
+    name         = Column(String, nullable=False)
+    trigger_type = Column(String, default="after_meeting")  # after_meeting|after_checkup|manual|nps_low
+    trigger_days = Column(Integer, default=1)               # через N дней после триггера
+    channel      = Column(String, default="telegram")       # telegram|email|both
+    message_template = Column(Text, nullable=False)         # шаблон с {client_name}, {manager_name} и т.д.
+    is_active    = Column(Boolean, default=True)
+    target_segment = Column(String, nullable=True)          # применять только для сегмента
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    executions   = relationship("AutoFollowupExecution", back_populates="rule", cascade="all, delete-orphan")
+
+
+class AutoFollowupExecution(Base):
+    """Журнал выполнения автофолоуапов."""
+    __tablename__ = "auto_followup_executions"
+    id           = Column(Integer, primary_key=True, index=True)
+    rule_id      = Column(Integer, ForeignKey("auto_followups.id"), nullable=False, index=True)
+    client_id    = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    meeting_id   = Column(Integer, ForeignKey("meetings.id"), nullable=True)
+    status       = Column(String, default="sent")  # sent|failed|skipped
+    channel      = Column(String, nullable=True)
+    message_sent = Column(Text, nullable=True)
+    error        = Column(Text, nullable=True)
+    executed_at  = Column(DateTime, default=datetime.utcnow)
+    rule         = relationship("AutoFollowup", back_populates="executions")
