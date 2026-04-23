@@ -27,19 +27,14 @@ def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 def _checkup_auth(auth_token: Optional[str], db, request=None):
-    bearer = ""
-    if request:
-        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    token = bearer or auth_token
-    if not token:
-        raise HTTPException(status_code=401)
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=401)
-    user = db.query(User).filter(User.id == int(payload.get("sub"))).first()
-    if not user:
-        raise HTTPException(status_code=401)
-    return user
+    """Авторизация для cabinet/checkup эндпоинтов.
+    Понимает и cookie JWT (веб-UI), и Bearer amh_* (API-токен расширения),
+    и Bearer <JWT>. Бросает структурированный 401 с конкретной причиной
+    (token_expired / token_unknown / …), чтобы расширение могло показать
+    осмысленное сообщение вместо одной заглушки «Неверный токен».
+    """
+    from routers.api_tokens import require_extension_user as _require_extension_user
+    return _require_extension_user(db, request, auth_token)
 
 @router.get("/api/cabinet/my-clients")
 async def api_cabinet_my_clients(

@@ -78,37 +78,111 @@ def resolve_user(db: Session, request, auth_token_cookie: Optional[str]) -> Opti
     и из браузера (cookie JWT), и из расширения (Bearer amh_... или JWT).
     Возвращает User или None (пусть вызывающий сам решает 401).
     """
-    # 1) Cookie JWT
-    if auth_token_cookie:
+    user, _reason = resolve_user_with_reason(db, request, auth_token_cookie)
+    return user
+
+
+def resolve_user_with_reason(
+    db: Session, request, auth_token_cookie: Optional[str]
+) -> tuple[Optional[User], str]:
+    """
+    То же что resolve_user, но дополнительно возвращает причину неудачи:
+      - ""                — всё ок (user не None)
+      - "token_missing"   — ни cookie, ни Authorization не было
+      - "token_invalid"   — JWT не декодируется (повреждён или неправильная подпись)
+      - "token_expired"   — JWT истёк
+      - "token_unknown"   — amh_* токен не найден (не существует / отозван)
+      - "user_not_found"  — токен валидный, но пользователь удалён или деактивирован
+      - "token_wrong_format" — Bearer-значение пустое или не похоже ни на JWT, ни на amh_*
+    Расширение/клиент на основе reason может показать осмысленное сообщение.
+    """
+    from jose import jwt as _jwt  # type: ignore
+    from jose.exceptions import ExpiredSignatureError, JWTError  # type: ignore
+    from auth import SECRET_KEY, ALGORITHM
+
+    def _try_jwt(tok: str) -> tuple[Optional[User], str]:
+        if not tok:
+            return None, "token_missing"
         try:
-            from auth import decode_access_token
-            payload = decode_access_token(auth_token_cookie)
-            if payload:
-                u = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
-                if u and u.is_active:
-                    return u
+            payload = _jwt.decode(tok, SECRET_KEY, algorithms=[ALGORITHM])
+        except ExpiredSignatureError:
+            return None, "token_expired"
+        except JWTError:
+            return None, "token_invalid"
         except Exception:
-            pass
-    # 2) Authorization: Bearer <token>
+            return None, "token_invalid"
+        sub = payload.get("sub")
+        if sub is None:
+            return None, "token_invalid"
+        u = db.query(User).filter(User.id == int(sub)).first()
+        if not u or not u.is_active:
+            return None, "user_not_found"
+        return u, ""
+
+    # 1) Cookie JWT — приоритет для веб-UI
+    if auth_token_cookie:
+        u, reason = _try_jwt(auth_token_cookie)
+        if u:
+            return u, ""
+        # Если cookie была, но сломана — запомним reason, но дадим шанс Bearer
+        cookie_reason = reason
+    else:
+        cookie_reason = "token_missing"
+
+    # 2) Authorization: Bearer <token> — расширение / API-клиенты
     if request is not None:
         auth_header = request.headers.get("Authorization", "") if hasattr(request, "headers") else ""
         if auth_header.startswith("Bearer "):
             token = auth_header[7:].strip()
+            if not token:
+                return None, "token_wrong_format"
             if token.startswith(TOKEN_PREFIX):
                 u = find_user_by_api_token(db, token)
                 if u:
-                    return u
-            else:
-                try:
-                    from auth import decode_access_token
-                    payload = decode_access_token(token)
-                    if payload:
-                        u = db.query(User).filter(User.id == int(payload.get("sub", 0))).first()
-                        if u and u.is_active:
-                            return u
-                except Exception:
-                    pass
-    return None
+                    if not u.is_active:
+                        return None, "user_not_found"
+                    return u, ""
+                return None, "token_unknown"
+            # Bearer, но не amh_ — пробуем как JWT
+            u, reason = _try_jwt(token)
+            if u:
+                return u, ""
+            return None, reason or "token_invalid"
+        elif auth_header:
+            # Заголовок есть, но формат не "Bearer ..."
+            return None, "token_wrong_format"
+
+    # Ни cookie, ни Bearer не сработали — вернём причину cookie (или token_missing)
+    return None, cookie_reason
+
+
+_REASON_MESSAGES = {
+    "token_missing":       "Токен AM Hub не найден — открой настройки расширения и вставь его",
+    "token_invalid":       "Токен AM Hub повреждён или неверный — перегенерируй его в хабе и замени в настройках",
+    "token_expired":       "Токен AM Hub истёк — создай новый в хабе и замени в настройках",
+    "token_unknown":       "Токен AM Hub не найден в системе — возможно он был отозван, создай новый",
+    "token_wrong_format":  "Заголовок Authorization неверного формата — ожидается «Bearer amh_…» или JWT",
+    "user_not_found":      "Пользователь, которому принадлежит токен, деактивирован — обратись к админу",
+}
+
+
+def require_extension_user(db: Session, request, auth_token_cookie: Optional[str]) -> User:
+    """
+    Как resolve_user, но сразу бросает HTTPException 401 со структурированным
+    detail={"code": <reason>, "message": <human-friendly>}.
+    Используется в эндпоинтах, которые работают и с веб-UI, и с расширением.
+    Имя намеренно отличается от deps.require_user — у той другая сигнатура.
+    """
+    user, reason = resolve_user_with_reason(db, request, auth_token_cookie)
+    if user:
+        return user
+    raise HTTPException(
+        status_code=401,
+        detail={
+            "code": reason or "token_invalid",
+            "message": _REASON_MESSAGES.get(reason, "Неверный токен AM Hub"),
+        },
+    )
 
 
 def _sanitize(tok: dict) -> dict:

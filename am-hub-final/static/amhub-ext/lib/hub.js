@@ -9,8 +9,26 @@ function headers(extra = {}) {
   return { "Authorization": CONFIG.HUB_TOKEN, "Content-Type": "application/json", ...extra };
 }
 
-function check(resp, context) {
-  if (resp.status === 401) throw new Error("Неверный токен AM Hub — обновите в настройках");
+// Структурированная ошибка 401 от AM Hub:
+//   { detail: { code: "token_expired" | "token_unknown" | ..., message: "…" } }
+// Fallback к старому сообщению если бэк не прислал подробностей.
+async function _parseAuthError(resp) {
+  try {
+    const body = await resp.json();
+    const d = body && body.detail;
+    if (d && typeof d === "object" && d.message) {
+      return d.message + (d.code ? ` [${d.code}]` : "");
+    }
+    if (typeof d === "string") return d;
+  } catch (_) { /* тело не JSON — вернём generic ниже */ }
+  return "Неверный токен AM Hub — обновите в настройках";
+}
+
+async function check(resp, context) {
+  if (resp.status === 401) {
+    const msg = await _parseAuthError(resp);
+    throw new Error(msg);
+  }
   if (!resp.ok) throw new Error(`${context}: HTTP ${resp.status}`);
   return resp.json();
 }

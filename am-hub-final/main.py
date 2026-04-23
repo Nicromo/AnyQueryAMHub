@@ -248,6 +248,8 @@ async def lifespan(app: FastAPI):
                     ("roadmap_items",       "author_id",    "ALTER TABLE roadmap_items ADD COLUMN author_id INTEGER"),
                     ("followup_templates",  "usage_count",  "ALTER TABLE followup_templates ADD COLUMN usage_count INTEGER DEFAULT 0 NOT NULL"),
                     ("followup_templates",  "last_used_at", "ALTER TABLE followup_templates ADD COLUMN last_used_at TIMESTAMP"),
+                    # Airtable linked-contact record id (для per-client sync)
+                    ("client_contacts",     "airtable_record_id", "ALTER TABLE client_contacts ADD COLUMN airtable_record_id VARCHAR"),
                 ]
                 # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:
