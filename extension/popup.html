@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>AM Hub · Sync</title>
+  <style>
+    /* ── Fonts (bundled, нет CDN-зависимости) ──────────────────── */
+    @font-face {
+      font-family: "Inter Tight"; font-style: normal; font-weight: 400;
+      font-display: swap;
+      src: url("fonts/inter-tight-400.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "Inter Tight"; font-style: normal; font-weight: 500;
+      font-display: swap;
+      src: url("fonts/inter-tight-500.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "Inter Tight"; font-style: normal; font-weight: 600;
+      font-display: swap;
+      src: url("fonts/inter-tight-600.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "JetBrains Mono"; font-style: normal; font-weight: 400;
+      font-display: swap;
+      src: url("fonts/jetbrains-mono-400.woff2") format("woff2");
+    }
+
+    /* ── Design tokens (subset of tokens.css) ──────────────────── */
+    :root {
+      --ink-0: oklch(0.14 0.008 70);
+      --ink-1: oklch(0.18 0.010 70);
+      --ink-2: oklch(0.22 0.012 70);
+      --ink-3: oklch(0.27 0.014 72);
+      --ink-5: oklch(0.45 0.015 78);
+      --ink-6: oklch(0.60 0.012 80);
+      --ink-7: oklch(0.78 0.008 82);
+      --ink-8: oklch(0.92 0.006 85);
+      --ink-9: oklch(0.98 0.004 88);
+      --line:      oklch(0.27 0.010 70);
+      --line-soft: oklch(0.23 0.008 70);
+      --signal:       oklch(0.87 0.18 118);
+      --signal-glow:  oklch(0.87 0.18 118 / 0.18);
+      --critical:     oklch(0.68 0.22 27);
+      --warn:         oklch(0.80 0.15 72);
+      --ok:           oklch(0.82 0.15 150);
+      --f-display: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --f-mono:    "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    }
+
+    /* ── Base ──────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 380px;
+      background: var(--ink-1);
+      color: var(--ink-8);
+      font-family: var(--f-display);
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .mono { font-family: var(--f-mono); font-feature-settings: "zero", "ss01"; }
+
+    /* ── Header ────────────────────────────────────────────────── */
+    .header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px;
+      background: var(--ink-0);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .logo-mark {
+      width: 26px; height: 26px;
+      background: var(--signal); color: var(--ink-0);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--f-mono); font-weight: 700; font-size: 13px;
+      letter-spacing: -0.5px;
+    }
+    .logo-text        { flex: 1; }
+    .logo-title       { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-9); }
+    .logo-sub         { font-size: 9.5px; color: var(--ink-5); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 1px; }
+    .icon-btn         {
+      background: transparent; border: 0; color: var(--ink-6);
+      cursor: pointer; padding: 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .icon-btn:hover   { color: var(--ink-8); }
+
+    /* ── Status card ───────────────────────────────────────────── */
+    .status-card {
+      margin: 12px;
+      padding: 14px;
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-left: 2px solid var(--ink-5);
+      border-radius: 4px;
+      display: flex; align-items: center; gap: 12px;
+      transition: border-color 120ms;
+    }
+    .status-card[data-tone="ok"]       { border-left-color: var(--ok); }
+    .status-card[data-tone="signal"]   { border-left-color: var(--signal); }
+    .status-card[data-tone="critical"] { border-left-color: var(--critical); }
+    .status-card[data-tone="warn"]     { border-left-color: var(--warn); }
+
+    .status-icon {
+      width: 32px; height: 32px; border-radius: 999px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      background: color-mix(in oklch, var(--ink-5) 12%, transparent);
+      border: 1px solid color-mix(in oklch, var(--ink-5) 30%, transparent);
+      color: var(--ink-5);
+    }
+    .status-card[data-tone="ok"]       .status-icon { background: color-mix(in oklch, var(--ok) 12%, transparent);       border-color: color-mix(in oklch, var(--ok) 30%, transparent);       color: var(--ok); }
+    .status-card[data-tone="signal"]   .status-icon { background: color-mix(in oklch, var(--signal) 12%, transparent);   border-color: color-mix(in oklch, var(--signal) 30%, transparent);   color: var(--signal); }
+    .status-card[data-tone="critical"] .status-icon { background: color-mix(in oklch, var(--critical) 12%, transparent); border-color: color-mix(in oklch, var(--critical) 30%, transparent); color: var(--critical); }
+    .status-card[data-tone="warn"]     .status-icon { background: color-mix(in oklch, var(--warn) 12%, transparent);     border-color: color-mix(in oklch, var(--warn) 30%, transparent);     color: var(--warn); }
+
+    .status-text      { flex: 1; min-width: 0; }
+    .status-title     { font-size: 13px; font-weight: 500; color: var(--ink-9); }
+    .status-sub       { font-size: 10.5px; color: var(--ink-5); margin-top: 2px; font-family: var(--f-mono); }
+
+    .spin             { animation: spin 1.2s linear infinite; }
+    @keyframes spin   { to { transform: rotate(360deg); } }
+
+    /* ── Stats row ─────────────────────────────────────────────── */
+    .stats-row {
+      margin: 0 12px 12px;
+      padding: 10px 12px;
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    }
+    .stat             {
+      text-align: center;
+      border-right: 1px solid var(--line-soft);
+    }
+    .stat:last-child  { border-right: none; }
+    .stat-value       {
+      font-size: 20px; font-weight: 500; color: var(--ink-9);
+      letter-spacing: -0.02em; font-family: var(--f-mono);
+    }
+    .stat-label       {
+      font-size: 9.5px; color: var(--ink-5);
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+
+    /* ── Fields ────────────────────────────────────────────────── */
+    .fields           { padding: 0 14px 14px; }
+    .section-label    {
+      font-size: 9.5px; color: var(--ink-5);
+      text-transform: uppercase; letter-spacing: 0.1em;
+      margin: 4px 0 10px;
+    }
+    .field            { margin-bottom: 8px; }
+    .field-label      {
+      font-size: 9.5px; color: var(--ink-5);
+      text-transform: uppercase; letter-spacing: 0.08em;
+      margin-bottom: 3px;
+    }
+    .field-input      {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px;
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      transition: border-color 120ms;
+    }
+    .field-input:focus-within { border-color: var(--signal); }
+    .field-input svg  { flex-shrink: 0; color: var(--ink-5); }
+    .field-input input {
+      flex: 1;
+      background: transparent; border: 0; outline: none;
+      color: var(--ink-8);
+      font-family: var(--f-mono); font-size: 12px;
+    }
+
+    /* ── Buttons ───────────────────────────────────────────────── */
+    .btn {
+      width: 100%;
+      margin-top: 6px;
+      padding: 9px 14px;
+      border-radius: 4px;
+      font-family: var(--f-display);
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      transition: background 120ms, border-color 120ms;
+    }
+    .btn-primary {
+      background: var(--signal); color: var(--ink-0);
+      border: 1px solid var(--signal);
+    }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-ghost {
+      background: transparent; color: var(--ink-7);
+      border: 1px solid var(--line);
+    }
+    .btn-ghost:hover { background: var(--ink-2); color: var(--ink-9); }
+
+    /* ── Message boxes ─────────────────────────────────────────── */
+    .msg {
+      margin: 6px 14px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: var(--f-mono);
+    }
+    .msg-error {
+      background: color-mix(in oklch, var(--critical) 12%, transparent);
+      border: 1px solid color-mix(in oklch, var(--critical) 30%, transparent);
+      color: var(--critical);
+    }
+    .msg-ok {
+      background: color-mix(in oklch, var(--ok) 10%, transparent);
+      border: 1px solid color-mix(in oklch, var(--ok) 25%, transparent);
+      color: var(--ok);
+    }
+
+    /* ── Log feed ──────────────────────────────────────────────── */
+    .log-feed {
+      padding: 10px 14px;
+      background: var(--ink-0);
+      border-top: 1px solid var(--line-soft);
+    }
+    .log-item {
+      display: grid; grid-template-columns: 50px 1fr;
+      font-size: 10.5px; color: var(--ink-6);
+      padding: 2px 0;
+    }
+    .log-time  { color: var(--ink-5); }
+    .log-msg-ok { color: var(--ok); }
+
+    /* ── Footer ────────────────────────────────────────────────── */
+    .footer {
+      padding: 8px 14px;
+      border-top: 1px solid var(--line-soft);
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 9.5px;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--ink-5);
+      font-family: var(--f-mono);
+    }
+    .online-ok { color: var(--ok); }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <div class="header">
+    <div class="logo-mark">A</div>
+    <div class="logo-text">
+      <div class="logo-title">AM Hub · Sync</div>
+      <div class="logo-sub mono">merchrules → hub</div>
+    </div>
+    <button class="icon-btn" id="resyncBtn" title="Запустить синхронизацию сейчас">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 4v6h-6M4 20v-6h6"/><path d="M4 10a8 8 0 0 1 14-3M20 14a8 8 0 0 1-14 3"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ── Status card ────────────────────────────────────────────── -->
+  <div class="status-card" id="statusCard" data-tone="warn">
+    <div class="status-icon" id="statusIcon">
+      <!-- SVG подставляется из popup.js в зависимости от tone -->
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 4h4v3a2 2 0 1 0 0 4v4h-3a2 2 0 1 1-4 0H4V4h6zm10 7a2 2 0 1 1-4 0H14v4h6v-4z"/>
+      </svg>
+    </div>
+    <div class="status-text">
+      <div class="status-title" id="statusTitle">Не настроено</div>
+      <div class="status-sub" id="statusSub">заполните поля ниже</div>
+    </div>
+  </div>
+
+  <!-- ── Stats row (hidden until connected + has data) ──────────── -->
+  <div class="stats-row" id="statsRow" style="display:none">
+    <div class="stat">
+      <div class="stat-value" id="statClients">0</div>
+      <div class="stat-label mono">клиенты</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="statTasks">0</div>
+      <div class="stat-label mono">задачи</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="statEvents">0</div>
+      <div class="stat-label mono">события</div>
+    </div>
+  </div>
+
+  <!-- ── Message boxes ──────────────────────────────────────────── -->
+  <div id="errorBox" class="msg msg-error" style="display:none"></div>
+  <div id="resultBox" class="msg msg-ok" style="display:none"></div>
+
+  <!-- ── Credentials form ───────────────────────────────────────── -->
+  <div class="fields">
+    <div class="section-label mono">── учётные данные</div>
+
+    <div class="field">
+      <div class="field-label mono">Merchrules · логин</div>
+      <div class="field-input">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 14a4 4 0 0 1 0-5.7l3-3a4 4 0 0 1 5.7 5.7L17 12.5M14 10a4 4 0 0 1 0 5.7l-3 3a4 4 0 0 1-5.7-5.7L7 11.5"/>
+        </svg>
+        <input type="email" id="mrLogin" placeholder="email@example.com" autocomplete="username">
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label mono">Merchrules · пароль</div>
+      <div class="field-input">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="10" width="16" height="11" rx="1"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/>
+        </svg>
+        <input type="password" id="mrPass" placeholder="••••••••" autocomplete="current-password">
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label mono">AM Hub · URL</div>
+      <div class="field-input">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 14a4 4 0 0 1 0-5.7l3-3a4 4 0 0 1 5.7 5.7L17 12.5M14 10a4 4 0 0 1 0 5.7l-3 3a4 4 0 0 1-5.7-5.7L7 11.5"/>
+        </svg>
+        <input type="url" id="hubUrl" placeholder="https://hub.example.com">
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label mono">AM Hub · токен</div>
+      <div class="field-input">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="10" width="16" height="11" rx="1"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/>
+        </svg>
+        <input type="password" id="hubToken" placeholder="Bearer token">
+      </div>
+    </div>
+
+    <button id="saveBtn" class="btn btn-primary">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 4v6h-6M4 20v-6h6"/><path d="M4 10a8 8 0 0 1 14-3M20 14a8 8 0 0 1-14 3"/>
+      </svg>
+      <span>Сохранить и синхронизировать</span>
+    </button>
+
+    <button id="openBtn" class="btn btn-ghost">
+      <span>Открыть AM Hub</span>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M13 6l6 6-6 6"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ── Last events feed (до 4-х строк) ────────────────────────── -->
+  <div class="log-feed">
+    <div class="section-label mono">последние события</div>
+    <div id="logList">
+      <div class="log-item mono">
+        <span class="log-time">—</span>
+        <span>нет данных</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Footer ─────────────────────────────────────────────────── -->
+  <div class="footer">
+    <span class="mono" id="versionLabel">v —</span>
+    <span class="mono online-ok" id="onlineStatus">● online</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
