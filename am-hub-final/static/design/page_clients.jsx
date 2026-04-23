@@ -3315,16 +3315,31 @@ window.PageClientGroups = PageClientGroups;
 
 
 // ── ClientMetricsDashboard — полная панель метрик (MRR / Health / NPS / etc.) ──
+//   + Merchrules real-time блоки: GMV-daily sparkline, health/incidents,
+//     recs-coverage. Все 3 Merchrules-эндпоинта могут вернуть ok:false с
+//     reason — тогда соответствующий блок показывает понятную заглушку
+//     («нет кредов» / «нет site_id»), но НЕ ломает остальную панель.
 function ClientMetricsDashboard({ clientId }) {
   const [data, setData] = React.useState(null);
+  const [gmv, setGmv] = React.useState(null);         // {ok, items: [{date, revenue, sessions, orders}], total_revenue}
+  const [mrHealth, setMrHealth] = React.useState(null); // {ok, health: {pct}, incidents: [...]}
+  const [recsCov, setRecsCov] = React.useState(null);   // {ok, coverage_pct, missing_count, warning}
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState(null);
 
   React.useEffect(() => {
+    // Основные метрики — дергаем синхронно (нужны, чтобы показать панель).
     fetch(`/api/clients/${clientId}/metrics`, { credentials: "include" })
       .then(r => r.ok ? r.json() : Promise.reject("HTTP " + r.status))
       .then(d => { setData(d); setLoading(false); })
       .catch(e => { setErr(String(e)); setLoading(false); });
+    // Merchrules-эндпоинты — параллельно, не блокируют основной UI.
+    fetch(`/api/clients/${clientId}/gmv-daily?days=30`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null).then(setGmv).catch(() => setGmv(null));
+    fetch(`/api/clients/${clientId}/merchrules-health`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null).then(setMrHealth).catch(() => setMrHealth(null));
+    fetch(`/api/clients/${clientId}/recs-coverage`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null).then(setRecsCov).catch(() => setRecsCov(null));
   }, [clientId]);
 
   if (loading) return React.createElement(Card, { title: "Метрики клиента" },
@@ -3456,6 +3471,66 @@ function ClientMetricsDashboard({ clientId }) {
                 style: { fontSize: 10.5, color: "var(--ink-7)" },
               },
                 `${dateShort(cp.date)} · ${cp.type || "?"} · ${cp.avg_score != null ? cp.avg_score.toFixed(2) : "—"} (${cp.total})`))),
+      ),
+      // GMV · 30д — реальный дневной sparkline из Merchrules /api/report/daily
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "GMV · 30д (Merchrules)"),
+        (gmv && gmv.ok && gmv.items && gmv.items.length > 0)
+          ? React.createElement(React.Fragment, null,
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 500, color: "var(--ink-9)", fontFamily: "var(--f-mono)", marginTop: 4 } },
+                rub(gmv.total_revenue)),
+              React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } },
+                gmv.items.length + " дней · " + (Math.round((gmv.items.reduce((s,i)=>s+i.sessions,0) || 0))) + " сессий"),
+              React.createElement("div", { style: { marginTop: 6 } }, renderSpark(gmv.items.map(i => i.revenue), "var(--signal)")),
+            )
+          : React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-5)", marginTop: 6 } },
+              gmv && gmv.reason === "no_credentials" ? "Нет кредов Merchrules в профиле"
+              : gmv && gmv.reason === "no_site_id"    ? "У клиента нет merchrules_account_id"
+              : gmv && gmv.reason === "merchrules_error" ? "Merchrules недоступен"
+              : "загружаем…"),
+      ),
+      // Merchrules: health + incidents
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Merchrules · статус"),
+        (mrHealth && mrHealth.ok)
+          ? React.createElement(React.Fragment, null,
+              mrHealth.health && mrHealth.health.pct != null
+                ? React.createElement("div", { style: { fontSize: 20, fontWeight: 500, marginTop: 4,
+                    color: mrHealth.health.pct >= 90 ? "var(--ok)" : mrHealth.health.pct >= 70 ? "var(--warn)" : "var(--critical)" } },
+                    Math.round(mrHealth.health.pct) + "%")
+                : React.createElement("div", { style: { fontSize: 13, color: "var(--ink-6)", marginTop: 4 } }, "health: —"),
+              (mrHealth.incidents || []).length === 0
+                ? React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ok)", marginTop: 4 } }, "инциденты: 0")
+                : React.createElement("div", { style: { marginTop: 4 } },
+                    React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--warn)" } },
+                      "⚠ " + mrHealth.incidents.length + " открыто"),
+                    mrHealth.incidents.slice(0, 3).map((inc, i) => React.createElement("div", {
+                      key: i, className: "mono",
+                      style: { fontSize: 10, color: "var(--ink-6)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                    }, "· " + (inc.title || inc.id))),
+                  ),
+            )
+          : React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-5)", marginTop: 6 } },
+              mrHealth && mrHealth.reason === "no_credentials" ? "Нет кредов Merchrules" : "загружаем…"),
+      ),
+      // Recs coverage — чекап качества
+      React.createElement("div", { style: cellBase },
+        React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--ink-5)", textTransform: "uppercase", letterSpacing: "0.08em" } }, "Покрытие рекомендаций"),
+        (recsCov && recsCov.ok && recsCov.coverage_pct != null)
+          ? React.createElement(React.Fragment, null,
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 500, marginTop: 4,
+                color: recsCov.coverage_pct >= 90 ? "var(--ok)" : recsCov.coverage_pct >= 70 ? "var(--warn)" : "var(--critical)" } },
+                Math.round(recsCov.coverage_pct) + "%"),
+              recsCov.missing_count > 0 && React.createElement("div", { className: "mono", style: { fontSize: 10.5, color: "var(--ink-6)", marginTop: 2 } },
+                recsCov.missing_count + " товаров без рекомендаций"),
+              recsCov.warning && React.createElement("div", { className: "mono", style: { fontSize: 10, color: "var(--warn)", marginTop: 2 } },
+                "⚠ ниже порога 70%"),
+            )
+          : React.createElement("div", { style: { fontSize: 11.5, color: "var(--ink-5)", marginTop: 6 } },
+              recsCov && recsCov.reason === "no_credentials" ? "Нет кредов Merchrules"
+              : recsCov && recsCov.reason === "no_site_id"    ? "Нет merchrules_account_id"
+              : (recsCov && recsCov.ok && recsCov.coverage_pct == null) ? "нет данных"
+              : "загружаем…"),
       ),
     ),
   );

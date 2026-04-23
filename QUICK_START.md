@@ -366,7 +366,7 @@ roadmap-bulk-tasks/
 │   ├── requirements.txt
 │   └── .env.example                 # 🆕 Env template
 │
-├── am-hub/                          # Old version
+├── am-hub/                          # [REMOVED] legacy упрощённая версия, живёт в git history до коммита 3295f1f
 ├── INTEGRATION_ARCHITECTURE.md      # 🆕 Architecture
 ├── INTEGRATIONS_GUIDE.md            # 🆕 Usage guide
 ├── DATA_FLOW_ARCHITECTURE.md        # 🆕 Data flows
