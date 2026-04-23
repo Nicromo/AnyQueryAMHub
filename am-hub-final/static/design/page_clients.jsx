@@ -443,53 +443,39 @@ function PageClient() {
           <KPI label="Последний контакт" value={lastContactStr} sub={c.domain ? "домен: " + c.domain : undefined}/>
         </div>
 
-        {/* Дашборд метрик — full width сверху, чтобы не ужимался в 1fr колонку */}
+        {/* ── Full-width блоки: метрики + Roadmap + Merchrules ────────────
+            Им нужна полная ширина (Kanban-колонки Roadmap'а, таблицы
+            Merchrules-дашборда) — их нельзя ужимать в 1fr-колонку. */}
         <ClientMetricsDashboard clientId={c.id}/>
+        <ClientRoadmap clientId={c.id}/>
+        <ClientMerchrulesDashboard clientId={c.id}/>
 
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, alignItems: "start" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-
-            {/* Онбординг — per-client 10-step flow */}
-            <ClientOnboardingCard clientId={c.id}/>
-
-            {/* AI summary — real /api/ai/generate-prep */}
-            <ClientAIBrief clientId={c.id}/>
-
-            {/* QBR prep — /api/clients/{id}/qbr-prep */}
-            <ClientQBRPrep clientId={c.id}/>
-
-            {/* Роадмап клиента — широкий, 5 Q-колонок нужны место */}
-            <ClientRoadmap clientId={c.id}/>
-
-            {/* Merchrules-дашборд — синонимы / whitelist / blacklist / merch-rules */}
-            <ClientMerchrulesDashboard clientId={c.id}/>
-
-            {/* Голосовые заметки — запись/плеер/транскрипция */}
-            <ClientVoiceNotes clientId={c.id}/>
-
-            {/* activity timeline — real /api/clients/{id}/timeline */}
-            <ClientTimeline clientId={c.id}/>
-
-            {/* История партнёра — real /api/clients/{id}/logs */}
-            <ClientLogsList clientId={c.id}/>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
-            {/* Контакты — real /api/clients/{id}/contacts */}
-            <ClientContactsList clientId={c.id}/>
-
-            {/* Продукты — real /api/clients/{id}/products */}
-            <ClientProductsList clientId={c.id}/>
-
-            {/* Фиды — real /api/clients/{id}/feeds */}
-            <ClientFeedsList clientId={c.id}/>
-
-            {/* Чекапы — v2 */}
-            <ClientCheckupsList clientId={c.id}/>
-
-            {/* Upsell — активные предложения расширения */}
-            <ClientUpsellCard clientId={c.id}/>
-          </div>
+        {/* ── Адаптивный 2-колоночный masonry через CSS columns ──────────
+            Блоки сами балансируются по высоте, не ломаются пополам
+            (break-inside: avoid). На узком экране схлопывается в 1 колонку. */}
+        <div style={{
+          columnCount: 2,
+          columnGap: 18,
+          columnFill: "balance",
+        }}
+        className="client-cards-masonry"
+        >
+          {[
+            <ClientOnboardingCard key="ob" clientId={c.id}/>,
+            <ClientContactsList key="contacts" clientId={c.id}/>,
+            <ClientAIBrief key="ai" clientId={c.id}/>,
+            <ClientProductsList key="products" clientId={c.id}/>,
+            <ClientQBRPrep key="qbr" clientId={c.id}/>,
+            <ClientFeedsList key="feeds" clientId={c.id}/>,
+            <ClientCheckupsList key="checkups" clientId={c.id}/>,
+            <ClientVoiceNotes key="voice" clientId={c.id}/>,
+            <ClientUpsellCard key="upsell" clientId={c.id}/>,
+            <ClientTimeline key="timeline" clientId={c.id}/>,
+            <ClientLogsList key="logs" clientId={c.id}/>,
+          ].map((block, i) => React.createElement("div", {
+            key: i,
+            style: { breakInside: "avoid", marginBottom: 18, display: "block" },
+          }, block))}
         </div>
       </div>
     </div>
@@ -1890,17 +1876,10 @@ function ClientOnboardingCard({ clientId }) {
       React.createElement("div", { style: { color: "var(--ink-5)", fontSize: 12.5 } }, "Загружаем…"));
   }
 
-  // Skipped — показываем компактный бейдж + кнопку «Вернуть»
+  // Skipped — блок полностью скрыт (вернуть онбординг можно из 3-точечного
+  // меню или отдельной вкладки; здесь важнее не загромождать карточку).
   if (data && data.skipped) {
-    return React.createElement(Card, { title: "Онбординг" },
-      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-        React.createElement(Badge, { tone: "neutral", dot: true }, "Онбординг не нужен"),
-        data.skipped_reason && React.createElement("span", { style: { fontSize: 12, color: "var(--ink-6)" } },
-          "· " + data.skipped_reason),
-        React.createElement("div", { style: { flex: 1 } }),
-        React.createElement(Btn, { kind: "ghost", size: "s", onClick: unskip }, "↩ Вернуть онбординг"),
-      )
-    );
+    return null;
   }
 
   if (!data || !data.active && !data.completed_at) {
