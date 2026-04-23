@@ -140,13 +140,14 @@
       setStatus("warn", "Не настроено", "Chrome API недоступен (превью вне расширения)");
       return;
     }
-    chrome.storage.local.get(
+    // Креды — из storage.sync (переживают переустановку)
+    chrome.storage.sync.get(
       ["mr_login", "mr_password", "hub_url", "hub_token"],
       function (s) {
-        if (s.mr_login)   $("mrLogin").value = s.mr_login;
-        if (s.mr_password) $("mrPass").value = s.mr_password;
+        if (s.mr_login)    $("mrLogin").value  = s.mr_login;
+        if (s.mr_password) $("mrPass").value   = s.mr_password;
         $("hubUrl").value = s.hub_url || DEFAULT_HUB_URL;
-        if (s.hub_token)  $("hubToken").value = s.hub_token;
+        if (s.hub_token)   $("hubToken").value = s.hub_token;
 
         var ready = s.mr_login && s.mr_password && (s.hub_url || DEFAULT_HUB_URL) && s.hub_token;
         if (ready) {
@@ -205,12 +206,17 @@
       setStatus("warn", "Не настроено", "заполните поля ниже");
       return;
     }
+    if (!url.startsWith("https://") && !url.startsWith("http://")) {
+      showError("Hub URL должен начинаться с https://");
+      return;
+    }
     if (!hasChrome) {
       showError("Chrome API недоступен — превью popup.html вне расширения.");
       return;
     }
 
-    chrome.storage.local.set({
+    // Креды → storage.sync (переживают переустановку)
+    chrome.storage.sync.set({
       mr_login: login,
       mr_password: pass,
       hub_url: url,

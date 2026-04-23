@@ -460,12 +460,38 @@ async def api_sync_merchrules(
     if not auth_ok:
         await hx.aclose()
         return {"error": f"Ошибка авторизации Merchrules. Попытки: {' | '.join(attempts_log[-4:])}"}
-    if not hx.cookies:
-        await hx.aclose()
-        return {"error": f"Login HTTP {resp.status_code} без Set-Cookie — session не установлена. {attempts_log[-1]}"}
 
-    logger.info(f"✅ Merchrules session cookies: {list(hx.cookies.keys())}")
-    headers = {"Accept": "application/json"}  # без Bearer — сессия через cookies
+    # Извлекаем Bearer-токен из тела ответа (Merchrules может вернуть токен вместо cookie-сессии)
+    bearer_token = None
+    try:
+        _body = resp.json()
+        for _key in ("token", "access_token", "accessToken", "jwt", "authToken", "auth_token"):
+            if _body.get(_key):
+                bearer_token = _body[_key]
+                break
+        if not bearer_token:
+            for _wrap in ("data", "result", "payload"):
+                _inner = _body.get(_wrap) or {}
+                if isinstance(_inner, dict):
+                    for _key in ("token", "access_token", "accessToken", "jwt"):
+                        if _inner.get(_key):
+                            bearer_token = _inner[_key]
+                            break
+                if bearer_token:
+                    break
+    except Exception:
+        pass
+
+    if not bearer_token and not hx.cookies:
+        await hx.aclose()
+        return {"error": f"Login HTTP {resp.status_code} — нет ни токена в ответе, ни Set-Cookie. {attempts_log[-1]}"}
+
+    if bearer_token:
+        logger.info("✅ Merchrules auth via Bearer token")
+        headers = {"Authorization": f"Bearer {bearer_token}", "Accept": "application/json"}
+    else:
+        logger.info(f"✅ Merchrules auth via session cookies: {list(hx.cookies.keys())}")
+        headers = {"Accept": "application/json"}
 
     synced_clients = 0
     synced_tasks = 0

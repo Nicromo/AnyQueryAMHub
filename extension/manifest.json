@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "AM Hub Sync",
+  "version": "1.0.2",
+  "description": "Синхронизация данных из Merchrules в AM Hub",
+  "update_url": "https://raw.githubusercontent.com/Nicromo/AnyQueryAMHub/master/extension/updates.xml",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://merchrules.any-platform.ru/*",
+    "https://merchrules-qa.any-platform.ru/*",
+    "https://*/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

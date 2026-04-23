@@ -629,6 +629,14 @@ from routers import client_roadmap as client_roadmap_router
 from routers import client_groups as client_groups_router
 from routers import payments as payments_router
 from routers import client_metrics as client_metrics_router
+from routers import hypotheses as hypotheses_router
+from routers import client_context as client_context_router
+from routers import roadmap_ai as roadmap_ai_router
+from routers import tg_broadcast as tg_broadcast_router
+from routers import jira_integration as jira_integration_router
+from routers import google_drive as google_drive_router
+from routers import auto_followups as auto_followups_router
+from routers import quick_actions as quick_actions_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
 app.include_router(client_transfer_router.router, tags=["client-transfer"])
@@ -641,6 +649,14 @@ app.include_router(client_roadmap_router.router, tags=["client-roadmap"])
 app.include_router(client_groups_router.router, tags=["client-groups"])
 app.include_router(payments_router.router, tags=["payments"])
 app.include_router(client_metrics_router.router, tags=["client-metrics"])
+app.include_router(hypotheses_router.router, tags=["hypotheses"])
+app.include_router(client_context_router.router, tags=["client-context"])
+app.include_router(roadmap_ai_router.router, tags=["roadmap-ai"])
+app.include_router(tg_broadcast_router.router, tags=["tg-broadcast"])
+app.include_router(jira_integration_router.router, tags=["jira"])
+app.include_router(google_drive_router.router, tags=["gdrive"])
+app.include_router(auto_followups_router.router, tags=["auto-followups"])
+app.include_router(quick_actions_router.router, tags=["quick-actions"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router

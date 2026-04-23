@@ -8,10 +8,13 @@ URL-схема: /design/{page_id}
 и монтирует нужный PageX-компонент по active_page.
 """
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -106,6 +109,15 @@ PAGES_DATA_MAP = {
     "profile":    [],
     "assignments": ["clients"],
     "client-groups": ["clients"],
+    "groups":        [],
+    "renewal":       [],
+    "hypotheses":    ["clients"],
+    "broadcast":     ["clients"],
+    "jira":          ["clients"],
+    "gdrive":        ["clients"],
+    "auto-followups": [],
+    "context":       ["clients"],
+    "prep":          [],
 }
 
 
@@ -135,7 +147,14 @@ PAGES = {
     "assignments":("PageAssignments",["am hub", "админ", "назначения"],    "Назначения клиентов"),
     "groups":    ("PageManagerGroups",["am hub", "админ", "группы"],       "Группы менеджеров"),
     "renewal":   ("PageRenewal",    ["am hub", "клиенты", "оплаты"],       "Оплаты"),
-    "client-groups": ("PageClientGroups", ["am hub", "админ", "ГК"],       "Группы компаний"),
+    "client-groups":  ("PageClientGroups",  ["am hub", "админ", "ГК"],                "Группы компаний"),
+    "hypotheses":     ("PageHypotheses",    ["am hub", "инструменты", "гипотезы"],   "Гипотезы"),
+    "broadcast":      ("PageBroadcast",     ["am hub", "инструменты", "рассылки"],   "TG-рассылки"),
+    "jira":           ("PageJira",          ["am hub", "интеграции", "jira"],         "Jira"),
+    "gdrive":         ("PageGDrive",        ["am hub", "интеграции", "google drive"], "Google Drive"),
+    "auto-followups": ("PageAutoFollowups", ["am hub", "инструменты", "фолоуапы"],   "Автофолоуапы"),
+    "context":        ("PageContext",       ["am hub", "инструменты", "контекст"],   "Контекст клиентов"),
+    "prep":           ("PagePrep",         ["am hub", "ежедневное", "подготовка"],  "Подготовка к встрече"),
 }
 
 
