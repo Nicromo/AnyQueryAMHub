@@ -517,6 +517,94 @@ async def api_delete_note(note_id: int, db: Session = Depends(get_db), auth_toke
 
 
 # ============================================================================
+# Client-related read-only lists (contacts / products / feeds)
+# Данные синкаются отдельно: contacts+products — из Airtable (airtable_sync.py),
+# feeds — из Merchrules (feeds sync). Здесь только отдаём то, что уже в БД.
+
+@router.get("/api/clients/{client_id}/contacts")
+async def api_client_contacts(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Контакты клиента (ClientContact). Синкаются из Airtable, поле «Контакты клиента»."""
+    if not auth_token or not decode_access_token(auth_token):
+        return {"contacts": []}
+    rows = (db.query(ClientContact)
+              .filter(ClientContact.client_id == client_id)
+              .order_by(ClientContact.is_primary.desc(), ClientContact.id.asc())
+              .all())
+    return {"contacts": [
+        {
+            "id": c.id,
+            "name": c.name,
+            "role": c.role,
+            "position": c.position,
+            "email": c.email,
+            "phone": c.phone,
+            "telegram": c.telegram,
+            "is_primary": bool(c.is_primary),
+        }
+        for c in rows
+    ]}
+
+
+@router.get("/api/clients/{client_id}/products")
+async def api_client_products(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Подключенные продукты клиента (ClientProduct). Синкаются из Airtable."""
+    if not auth_token or not decode_access_token(auth_token):
+        return {"products": []}
+    rows = (db.query(ClientProduct)
+              .filter(ClientProduct.client_id == client_id)
+              .order_by(ClientProduct.id.asc())
+              .all())
+    return {"products": [
+        {
+            "id": p.id,
+            "code": p.code,
+            "name": p.name,
+            "status": p.status or "active",
+            "activated_at": p.activated_at.isoformat() if p.activated_at else None,
+        }
+        for p in rows
+    ]}
+
+
+@router.get("/api/clients/{client_id}/feeds")
+async def api_client_feeds(
+    client_id: int,
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None),
+):
+    """Фиды клиента (ClientFeed). Синкаются из Merchrules feed-dashboard."""
+    if not auth_token or not decode_access_token(auth_token):
+        return {"feeds": []}
+    rows = (db.query(ClientFeed)
+              .filter(ClientFeed.client_id == client_id)
+              .order_by(ClientFeed.id.asc())
+              .all())
+    return {"feeds": [
+        {
+            "id": f.id,
+            "feed_type": f.feed_type,
+            "name": f.name,
+            "url": f.url,
+            "status": f.status or "ok",
+            "sku_count": f.sku_count or 0,
+            "errors_count": f.errors_count or 0,
+            "last_error": f.last_error,
+            "last_updated": f.last_updated.isoformat() if f.last_updated else None,
+            "schedule": f.schedule,
+        }
+        for f in rows
+    ]}
+
+
+# ============================================================================
 # KANBAN API
 
 @router.get("/api/clients/{client_id}/timeline")
