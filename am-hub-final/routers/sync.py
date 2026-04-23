@@ -835,7 +835,7 @@ async def api_sheets_update_checkup(
 
     try:
         from sheets import write_checkup_status
-        result = await write_checkup_status(client_name, checkup_date, status)
+        result = await write_checkup_status(client_name, status=status, last_date=checkup_date)
         return {"ok": result, "client": client_name}
     except Exception as e:
         return {"error": str(e), "note": "Sheets write-back requires service account credentials"}

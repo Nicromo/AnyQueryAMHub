@@ -402,7 +402,7 @@ async def send_followup(
     return await send_message(channel_id, header + followup_text, token_override, space_override)
 
 
-async def get_channels(
+async def get_channels(  # noqa: E302
     token_override: str = "",
     space_override: str = "",
 ) -> List[Dict[str, Any]]:
@@ -441,33 +441,6 @@ async def get_channels(
     except Exception as e:
         logger.error(f"Ktalk get_channels error: {e}")
     return []
-
-
-# ── Push: отправка сообщений ──────────────────────────────────────────────────
-
-async def send_message(channel_id: str, text: str, token: str = "") -> bool:
-    """
-    Отправить сообщение в канал Ktalk (Mattermost API).
-    channel_id — ID канала (из get_channels).
-    """
-    if not KTALK_BASE_URL or not (token or KTALK_API_TOKEN):
-        return False
-    tok = token or KTALK_API_TOKEN
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tok}"}
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{KTALK_BASE_URL}/api/v4/posts",
-                headers=headers,
-                json={"channel_id": channel_id, "message": text},
-            )
-            if resp.status_code in (200, 201):
-                logger.info(f"✅ Ktalk message sent to channel {channel_id}")
-                return True
-            logger.warning(f"Ktalk send_message error: {resp.status_code} {resp.text[:200]}")
-    except Exception as e:
-        logger.error(f"❌ Ktalk send_message exception: {e}")
-    return False
 
 
 async def send_direct_message(user_email: str, text: str, token: str = "") -> bool:

@@ -735,6 +735,10 @@ async def v2_run_checkup(
         c.score = round(scores_sum / scores_count, 2)
     if c.status == "draft" or c.status == "in_progress":
         c.status = "done"
+    # Обновляем last_checkup на клиенте — иначе scheduler считает чекап не пройденным
+    if client:
+        client.last_checkup = datetime.utcnow()
+        client.needs_checkup = False
     db.commit()
     return {"ok": True, "scored": scored, "avg_score": c.score}
 

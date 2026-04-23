@@ -660,23 +660,36 @@ async def job_check_overdue_checkups():
         try:
             clients = db.query(Client).all()
             created = 0
+            now = datetime.utcnow()
             for c in clients:
                 interval = CHECKUP_INTERVALS.get(c.segment or "", 90)
                 last = c.last_meeting_date or c.last_checkup
-                if last and (datetime.utcnow() - last).days > interval:
-                    existing = db.query(Task).filter(
-                        Task.client_id == c.id, Task.source == "checkup",
-                        Task.status.in_(["plan", "in_progress"])
-                    ).first()
-                    if not existing:
-                        db.add(Task(
-                            client_id=c.id,
-                            title=f"Чекап: {c.name}",
-                            description=f"Последний контакт {(datetime.utcnow()-last).days} дн. назад (интервал {interval} дн.)",
-                            status="plan", priority="high", source="checkup",
-                        ))
-                        c.needs_checkup = True
-                        created += 1
+                if not last or (now - last).days <= interval:
+                    if c.needs_checkup:
+                        c.needs_checkup = False
+                    continue
+                # Обновляем флаг всегда
+                c.needs_checkup = True
+                # Не создаём дублирующую задачу если job_daily_checkup_due уже создала её
+                checkup_due_exists = db.query(Task).filter(
+                    Task.client_id == c.id,
+                    Task.meta["task_type"].astext == "checkup_due",
+                    Task.status.in_(["plan", "in_progress"]),
+                ).first()
+                if checkup_due_exists:
+                    continue
+                existing = db.query(Task).filter(
+                    Task.client_id == c.id, Task.source == "checkup",
+                    Task.status.in_(["plan", "in_progress"])
+                ).first()
+                if not existing:
+                    db.add(Task(
+                        client_id=c.id,
+                        title=f"Чекап: {c.name}",
+                        description=f"Последний контакт {(now - last).days} дн. назад (интервал {interval} дн.)",
+                        status="plan", priority="high", source="checkup",
+                    ))
+                    created += 1
             db.commit()
             sync_log.status = "success"
             sync_log.records_processed = created
@@ -1355,7 +1368,7 @@ def job_sync_tbank_tickets():
             for u in users:
                 s = u.settings or {}
                 tm = s.get("tbank_time", {}) or {}
-                if not (tm.get("mmauthtoken") or tm.get("session_cookie")):
+                if not (tm.get("mmauthtoken") or tm.get("session_cookie") or tm.get("access_token")):
                     continue
                 try:
                     loop.run_until_complete(ingest_tickets(db, u, limit_new=200, fetch_threads=True))
