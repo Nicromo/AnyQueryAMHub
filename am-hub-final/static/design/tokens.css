@@ -198,3 +198,15 @@ html, body {
   /* Button sizes shrink */
   button { font-size: 12px !important; }
 }
+
+/* ── Client card masonry: 2 cols on wide, 1 col on narrow ───────────────── */
+.client-cards-masonry {
+  /* Фикс для Safari: break-inside:avoid иногда не работает без orphans */
+  orphans: 1;
+  widows: 1;
+}
+@media (max-width: 900px) {
+  .client-cards-masonry {
+    column-count: 1 !important;
+  }
+}
