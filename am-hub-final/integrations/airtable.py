@@ -19,10 +19,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Configuration
+# Configuration — дефолты указаны для нашей базы чтобы не приходилось
+# хранить base/table ID в Railway env. Переопределяется через env только
+# если действительно нужно (миграция базы, dev-окружение).
 AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN", "")
-AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "")
-AIRTABLE_TABLE_ID = os.getenv("AIRTABLE_TABLE_ID", "")
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "appEAS1rPKpevoIel")
+AIRTABLE_TABLE_ID = os.getenv("AIRTABLE_TABLE_ID", "tblIKAi1gcFayRJTn")
 AIRTABLE_VIEW_ID = os.getenv("AIRTABLE_VIEW_ID", "viwocTz78z44WlAu1")
 
 AIRTABLE_API_URL = "https://api.airtable.com/v0"
