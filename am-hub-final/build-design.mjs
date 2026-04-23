@@ -33,6 +33,7 @@ const ORDER = [
   "page_gdrive.jsx",
   "page_auto_followups.jsx",
   "page_context.jsx",
+  "page_prep.jsx",
 ];
 
 // 1) конкатенация исходников (через IIFE-обёртку каждому файлу, чтобы

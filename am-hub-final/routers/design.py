@@ -117,6 +117,7 @@ PAGES_DATA_MAP = {
     "gdrive":        ["clients"],
     "auto-followups": [],
     "context":       ["clients"],
+    "prep":          [],
 }
 
 
@@ -153,6 +154,7 @@ PAGES = {
     "gdrive":         ("PageGDrive",        ["am hub", "интеграции", "google drive"], "Google Drive"),
     "auto-followups": ("PageAutoFollowups", ["am hub", "инструменты", "фолоуапы"],   "Автофолоуапы"),
     "context":        ("PageContext",       ["am hub", "инструменты", "контекст"],   "Контекст клиентов"),
+    "prep":           ("PagePrep",         ["am hub", "ежедневное", "подготовка"],  "Подготовка к встрече"),
 }
 
 
