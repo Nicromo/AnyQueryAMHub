@@ -485,6 +485,8 @@ async def job_sync_ktalk_meetings():
                         all_clients = db.query(Client).all()
                         participants = e.get("participants", [])
                         for c in all_clients:
+                            if not c.name:
+                                continue
                             if c.name.lower() in title_lower:
                                 client = c
                                 break
@@ -844,6 +846,8 @@ async def job_sync_meetings_and_slots():
             attendee_emails = [a["email"].lower() for a in e.get("attendees", [])]
             attendee_names = [a["name"].lower() for a in e.get("attendees", [])]
             for c in all_clients:
+                if not c.name:
+                    continue
                 c_lower = c.name.lower()
                 if any(c_lower in n for n in attendee_names):
                     client = c
@@ -1118,7 +1122,7 @@ async def job_ktalk_sync():
                 events = resp.json().get("events", resp.json().get("data", []))
 
             clients = db.query(Client).all()
-            client_map = {c.name.lower(): c for c in clients}
+            client_map = {c.name.lower(): c for c in clients if c.name}
 
             for event in events:
                 ext_id = str(event.get("id", ""))

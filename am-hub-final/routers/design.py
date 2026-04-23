@@ -8,10 +8,13 @@ URL-схема: /design/{page_id}
 и монтирует нужный PageX-компонент по active_page.
 """
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -106,6 +109,8 @@ PAGES_DATA_MAP = {
     "profile":    [],
     "assignments": ["clients"],
     "client-groups": ["clients"],
+    "groups":  [],
+    "renewal": [],
 }
 
 
