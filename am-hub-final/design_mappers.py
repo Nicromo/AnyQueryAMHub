@@ -1039,7 +1039,7 @@ def _gmv_spark_cached(user: Any, db: Any, now: datetime, days: int = 30) -> List
     buckets: Dict[str, float] = {}
     for r in rows:
         k = str(r.period)[:10]
-        buckets[k] = buckets.get(k, 0.0) + float(r.amount or 0)
+        buckets[k] = buckets.get(k, 0.0) + float(r.mrr or 0)
     out = []
     for i in range(days):
         d = (since + timedelta(days=i)).strftime("%Y-%m-%d")
