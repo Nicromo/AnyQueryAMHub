@@ -1634,7 +1634,7 @@ async def api_me_nrr_pulse(
 
 
 # ============================================================================
-# NPS SURVEY — stub отправки опроса клиенту (пока пишем в PartnerLog)
+# NPS SURVEY — реальная отправка опроса клиенту (TG контактам, email fallback)
 # ============================================================================
 
 NPS_SURVEY_TEXT = (
@@ -1643,16 +1643,78 @@ NPS_SURVEY_TEXT = (
 )
 
 
+def _normalize_tg(value: str) -> str:
+    """Достать chat_id из '@user' или 'https://t.me/user' или 'user' или '123456789'."""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    v = v.replace("https://t.me/", "").replace("http://t.me/", "").lstrip("@")
+    return v
+
+
+async def _send_nps_to_client(client, text: str) -> list[dict]:
+    """Попытаться доставить NPS-опрос всем контактам клиента.
+
+    Возвращает список результатов по каждому контакту:
+      {"contact_id": int, "name": str, "channel": "telegram|email|none",
+       "ok": bool, "error": Optional[str]}
+    """
+    from models import ClientContact
+    from scheduler import send_telegram
+
+    out: list[dict] = []
+    contacts = getattr(client, "contacts", None) or []
+    for c in contacts:
+        tg = _normalize_tg(c.telegram or "")
+        email = (c.email or "").strip()
+        if not tg and not email:
+            continue
+
+        row: dict = {"contact_id": c.id, "name": c.name, "channel": "none", "ok": False}
+
+        # 1) Telegram — если задан и это numeric chat_id (user ещё должен был нажать /start).
+        if tg and tg.lstrip("-").isdigit():
+            try:
+                ok = await send_telegram(int(tg), text)
+                row["channel"] = "telegram"
+                row["ok"] = bool(ok)
+                if not ok:
+                    row["error"] = "telegram send returned false"
+            except Exception as e:
+                row["channel"] = "telegram"
+                row["error"] = str(e)[:160]
+
+        # 2) Email — если TG не сработал / не задан.
+        if not row["ok"] and email:
+            try:
+                from email_service import get_email_service
+                svc = get_email_service()
+                ok = await svc.send(
+                    to_email=email,
+                    subject="NPS-опрос AnyQuery",
+                    body=text,
+                )
+                row["channel"] = "email"
+                row["ok"] = bool(ok)
+                if not ok:
+                    row["error"] = "email send returned false"
+            except Exception as e:
+                row["channel"] = "email"
+                row["error"] = str(e)[:160]
+
+        out.append(row)
+
+    return out
+
+
 @router.post("/api/nps/send-survey")
 async def api_nps_send_survey(
     request: Request,
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
-    """Отправить NPS-опрос клиенту. Пока stub — пишет запись в PartnerLog.
-
-    В будущем — реальная доставка в TG канал клиента / email.
-    """
+    """Отправить NPS-опрос клиенту в TG-контакт (если есть chat_id) или на email.
+    Пишет итог в PartnerLog с честным каналом и статусом доставки."""
     if not auth_token:
         raise HTTPException(status_code=401)
     payload = decode_access_token(auth_token)
@@ -1680,16 +1742,23 @@ async def api_nps_send_survey(
     if user.role == "manager" and client.manager_email != user.email:
         raise HTTPException(status_code=403, detail="not your client")
 
+    results = await _send_nps_to_client(client, NPS_SURVEY_TEXT)
+    delivered = sum(1 for r in results if r.get("ok"))
+    channel_summary = ",".join(sorted({r["channel"] for r in results if r.get("ok")})) or "none"
+
     log = PartnerLog(
         client_id=client.id,
         user_id=user.id,
         event_type="nps_survey_sent",
-        title="NPS-опрос отправлен",
+        title="NPS-опрос отправлен" if delivered else "NPS-опрос: доставка не удалась",
         body=NPS_SURVEY_TEXT,
         payload={
-            "channel": "stub",
-            "survey_text": NPS_SURVEY_TEXT,
-            "sent_by_email": user.email,
+            "channel":        channel_summary,
+            "survey_text":    NPS_SURVEY_TEXT,
+            "sent_by_email":  user.email,
+            "delivered":      delivered,
+            "attempted":      len(results),
+            "results":        results,
         },
         source="manual",
         created_by=user.email,
@@ -1697,10 +1766,20 @@ async def api_nps_send_survey(
     db.add(log)
     db.commit()
 
+    if not results:
+        return {
+            "ok":      False,
+            "channel": "none",
+            "note":    "У клиента не настроены контакты с Telegram chat_id или email.",
+            "results": [],
+        }
+
     return {
-        "ok": True,
-        "channel": "stub",
-        "note": "Реальная доставка клиенту — в работе",
+        "ok":        delivered > 0,
+        "channel":   channel_summary,
+        "delivered": delivered,
+        "attempted": len(results),
+        "results":   results,
     }
 
 

@@ -244,6 +244,10 @@ async def lifespan(app: FastAPI):
                     ("notifications", "snoozed_until", "ALTER TABLE notifications ADD COLUMN snoozed_until TIMESTAMP"),
                     ("notifications", "dismissed_at",  "ALTER TABLE notifications ADD COLUMN dismissed_at TIMESTAMP"),
                     ("notifications", "kind",          "ALTER TABLE notifications ADD COLUMN kind VARCHAR"),
+                    # Stubs cleanup (migration 008)
+                    ("roadmap_items",       "author_id",    "ALTER TABLE roadmap_items ADD COLUMN author_id INTEGER"),
+                    ("followup_templates",  "usage_count",  "ALTER TABLE followup_templates ADD COLUMN usage_count INTEGER DEFAULT 0 NOT NULL"),
+                    ("followup_templates",  "last_used_at", "ALTER TABLE followup_templates ADD COLUMN last_used_at TIMESTAMP"),
                 ]
                 # Run each migration checking the correct table's columns
                 for table, col, sql in _migrations:

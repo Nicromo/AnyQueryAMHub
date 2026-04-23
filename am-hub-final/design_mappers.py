@@ -686,17 +686,19 @@ def jobs_from_sync_logs(db: Any, now: datetime, limit: int = 8) -> List[Dict[str
 # ══════════════════════════════════════════════════════════════
 def templates_to_design(db: Any, user: Any) -> List[Dict[str, Any]]:
     """Шаблоны текущего менеджера + глобальные (если такие будут).
-    Usage считается по TaskComment пока не поддерживается — вернём 0."""
+    ``usage_count`` и ``last_used_at`` обновляются в
+    ``GET /api/followup-templates/{id}`` когда шаблон применяют."""
     q = db.query(FollowupTemplate)
     if user and user.id:
         q = q.filter((FollowupTemplate.user_id == user.id) | (FollowupTemplate.user_id.is_(None)))
     rows = q.order_by(FollowupTemplate.created_at.desc()).limit(40).all()
     return [{
-        "id":       t.id,
-        "name":     t.name,
-        "category": t.category or "general",
-        "body":     (t.content or "")[:400],
-        "usage":    0,  # счётчик использования пока не отслеживается
+        "id":           t.id,
+        "name":         t.name,
+        "category":     t.category or "general",
+        "body":         (t.content or "")[:400],
+        "usage":        int(t.usage_count or 0),
+        "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
     } for t in rows]
 
 

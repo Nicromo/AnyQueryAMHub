@@ -23,6 +23,16 @@ DASHBOARD_API_KEY = os.getenv("DASHBOARD_API_KEY", "")
 SUPPORTED_RESOURCES = ["clients", "tasks", "meetings", "checkups"]
 
 
+def _iso(value) -> Optional[str]:
+    """ISO-форматировать datetime/date; вернуть None если пусто или не поддерживается."""
+    if value is None:
+        return None
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value)
+
+
 def _headers() -> dict:
     """Dashboard API headers"""
     return {
@@ -238,17 +248,80 @@ class DashboardSyncManager:
         return success
 
     async def full_sync(self) -> Dict[str, Dict]:
-        """Полная синхронизация всех ресурсов"""
-        results = {}
+        """Полная синхронизация всех ресурсов.
+
+        Для каждого ресурса вытягивает локальные записи из БД и передаёт
+        в ``sync_resource`` для конфликт-резолюшена.
+        """
+        results: Dict[str, Dict] = {}
 
         for resource in SUPPORTED_RESOURCES:
-            # TODO: Получить локальные данные из БД
-            local_data = []  # placeholder
-
+            local_data = await self._fetch_local_data(resource)
             result = await sync_resource(resource, local_data)
             results[resource] = result
 
         return results
+
+    async def _fetch_local_data(self, resource: str) -> List[Dict]:
+        """Вытащить локальные записи ресурса из БД (подмножество полей для сравнения)."""
+        try:
+            from database import SessionLocal
+            from models import Client, Task, Meeting, CheckUp
+        except Exception as e:
+            logger.error(f"full_sync: cannot import models: {e}")
+            return []
+
+        rows: List[Dict] = []
+        db = SessionLocal()
+        try:
+            if resource == "clients":
+                for c in db.query(Client).limit(10_000).all():
+                    rows.append({
+                        "id":            str(c.id),
+                        "name":          c.name,
+                        "manager_email": c.manager_email,
+                        "mrr":           c.mrr,
+                        "health_score":  c.health_score,
+                        "last_sync_at":  _iso(c.last_sync_at),
+                    })
+            elif resource == "tasks":
+                for t in db.query(Task).limit(20_000).all():
+                    rows.append({
+                        "id":         str(t.id),
+                        "client_id":  t.client_id,
+                        "title":      t.title,
+                        "status":     t.status,
+                        "priority":   t.priority,
+                        "due_date":   _iso(t.due_date),
+                        "created_at": _iso(t.created_at),
+                    })
+            elif resource == "meetings":
+                for m in db.query(Meeting).limit(20_000).all():
+                    rows.append({
+                        "id":         str(m.id),
+                        "client_id":  m.client_id,
+                        "date":       _iso(m.date),
+                        "type":       m.type,
+                        "title":      m.title,
+                    })
+            elif resource == "checkups":
+                for ch in db.query(CheckUp).limit(20_000).all():
+                    rows.append({
+                        "id":             str(ch.id),
+                        "client_id":      ch.client_id,
+                        "type":           ch.type,
+                        "status":         ch.status,
+                        "scheduled_date": _iso(ch.scheduled_date),
+                        "completed_date": _iso(ch.completed_date),
+                    })
+            else:
+                logger.warning(f"full_sync: unsupported resource {resource}")
+        except Exception as e:
+            logger.error(f"full_sync: DB fetch error for {resource}: {e}")
+        finally:
+            db.close()
+
+        return rows
 
 
 # Глобальный менеджер для использования в других модулях

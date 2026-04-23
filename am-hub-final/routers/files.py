@@ -1,9 +1,11 @@
 """
 routers/files.py — загрузка/отдача/удаление файлов кабинета менеджера.
 
-Storage: FILES_STORAGE_DIR (default /tmp/amhub_files).
-TODO: для продакшена настроить Railway Volume на /data/uploads для персистентности.
+Storage: FILES_STORAGE_DIR (default /data/uploads — Railway Volume).
+Fallback на /tmp/amhub_files только если /data/uploads недоступен (например,
+локальная разработка без смонтированного Volume).
 """
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -17,8 +19,36 @@ from auth import decode_access_token
 from database import get_db
 from models import FileUpload, User
 
-STORAGE_DIR = Path(os.getenv("FILES_STORAGE_DIR", "/tmp/amhub_files"))
-STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+logger = logging.getLogger(__name__)
+
+
+def _resolve_storage_dir() -> Path:
+    """Storage в /data/uploads (Railway Volume); fallback на /tmp/amhub_files,
+    если /data не смонтирован или read-only (локальная разработка)."""
+    configured = os.getenv("FILES_STORAGE_DIR")
+    if configured:
+        p = Path(configured)
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except OSError as e:
+            logger.warning("FILES_STORAGE_DIR=%s unusable (%s), falling back", configured, e)
+
+    for candidate in (Path("/data/uploads"), Path("/tmp/amhub_files")):
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            if candidate == Path("/tmp/amhub_files"):
+                logger.warning(
+                    "files.py: using /tmp/amhub_files — данные не переживут рестарт. "
+                    "На проде подмонтируйте Railway Volume на /data/uploads."
+                )
+            return candidate
+        except OSError:
+            continue
+    raise RuntimeError("cannot find writable storage dir for file uploads")
+
+
+STORAGE_DIR = _resolve_storage_dir()
 
 MAX_SIZE = int(os.getenv("FILES_MAX_SIZE", str(25 * 1024 * 1024)))  # 25 MB
 

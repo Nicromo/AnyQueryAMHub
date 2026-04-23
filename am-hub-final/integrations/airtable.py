@@ -250,22 +250,107 @@ async def update_meeting_date(
             return False
 
 
+QBR_CALENDAR_TABLE_ID = os.getenv("AIRTABLE_QBR_TABLE_ID", "tblqQbChhRYoZoxWu")
+QBR_CALENDAR_VIEW_ID = os.getenv("AIRTABLE_QBR_VIEW_ID", "viw6JIE6SS2ub3enK")
+
+
+def _pick_field(fields: Dict[str, Any], candidates: List[str]) -> Any:
+    """Вытащить значение поля по любому из имён-кандидатов (case-insensitive)."""
+    lower = {k.lower().strip(): v for k, v in fields.items()}
+    for c in candidates:
+        v = lower.get(c.lower().strip())
+        if v not in (None, "", []):
+            return v
+    return None
+
+
+def _parse_airtable_date(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    s = str(value)
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
 async def sync_qbr_calendar() -> List[Dict[str, Any]]:
+    """Синхронизировать QBR календарь из Airtable.
+
+    Таблица: tblqQbChhRYoZoxWu (view viw6JIE6SS2ub3enK).
+    Возвращает список событий: ``{id, client, date, status, raw}``.
     """
-    Синхронизировать QBR календарь из Airtable
-    
-    Returns:
-        List[Dict]: QBR события с полями:
-            {
-                "id": str,
-                "client": str,
-                "date": datetime,
-                "status": str,
-            }
-    """
-    # TODO: Реализовать синхронизацию QBR календаря
-    # QBR Calendar таблица: tblqQbChhRYoZoxWu (viw6JIE6SS2ub3enK)
-    pass
+    if not AIRTABLE_TOKEN or not AIRTABLE_BASE_ID:
+        logger.warning("sync_qbr_calendar: Airtable not configured")
+        return []
+
+    events: List[Dict[str, Any]] = []
+    offset: Optional[str] = None
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        while True:
+            params: Dict[str, Any] = {"pageSize": 100}
+            if QBR_CALENDAR_VIEW_ID:
+                params["view"] = QBR_CALENDAR_VIEW_ID
+            if offset:
+                params["offset"] = offset
+
+            try:
+                resp = await http.get(
+                    f"{AIRTABLE_API_URL}/{AIRTABLE_BASE_ID}/{QBR_CALENDAR_TABLE_ID}",
+                    headers=_headers(),
+                    params=params,
+                )
+            except Exception as e:
+                logger.error(f"sync_qbr_calendar: HTTP error: {e}")
+                break
+
+            if resp.status_code != 200:
+                logger.warning(
+                    f"sync_qbr_calendar: Airtable API error {resp.status_code}: {resp.text[:200]}"
+                )
+                break
+
+            data = resp.json()
+            for record in data.get("records", []):
+                fields = record.get("fields", {}) or {}
+                raw_date = _pick_field(
+                    fields,
+                    ["qbr date", "дата qbr", "date", "дата", "planned date", "when"],
+                )
+                date_parsed = _parse_airtable_date(raw_date)
+
+                client_name = _pick_field(
+                    fields,
+                    ["client", "клиент", "account", "аккаунт", "name"],
+                )
+                if isinstance(client_name, list) and client_name:
+                    client_name = client_name[0]
+                status = _pick_field(
+                    fields, ["status", "статус", "state"],
+                ) or "planned"
+
+                events.append({
+                    "id":     record.get("id"),
+                    "client": str(client_name or "").strip(),
+                    "date":   date_parsed,
+                    "status": str(status).strip().lower(),
+                    "raw":    fields,
+                })
+
+            offset = data.get("offset")
+            if not offset:
+                break
+
+    logger.info(f"sync_qbr_calendar: pulled {len(events)} QBR events from Airtable")
+    return events
 
 
 if __name__ == "__main__":
