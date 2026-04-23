@@ -198,11 +198,21 @@ async def roadmap_create(
         title        = body.get("title") or "",
         description  = body.get("description") or "",
         order_idx    = int(body.get("order_idx") or 0),
+        author_id    = user.id,
     )
     if not item.title:
         raise HTTPException(status_code=400, detail="title required")
     db.add(item); db.commit(); db.refresh(item)
     return {"ok": True, "id": item.id}
+
+
+def _can_modify_roadmap_item(user, item) -> bool:
+    """Admin — всегда; manager — только если он автор (или автор не задан — legacy-записи)."""
+    if not user:
+        return False
+    if (user.role or "") == "admin":
+        return True
+    return item.author_id is None or item.author_id == user.id
 
 
 @router.delete("/api/roadmap/{item_id}")
@@ -211,14 +221,15 @@ async def roadmap_delete(
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
-    """Удалить элемент роадмапа. Admin — любой; manager — только свои (через TODO author_id).
-    Пока все авторизованные могут удалять — добавим author_id и фильтр позже."""
+    """Удалить элемент роадмапа. Admin — любой; manager — только свои (по author_id)."""
     user = _get_user(auth_token, db)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     it = db.query(RoadmapItem).filter(RoadmapItem.id == item_id).first()
     if not it:
         raise HTTPException(status_code=404, detail="Not found")
+    if not _can_modify_roadmap_item(user, it):
+        raise HTTPException(status_code=403, detail="Можно удалять только свои карточки")
     db.delete(it); db.commit()
     return {"ok": True}
 
@@ -230,13 +241,16 @@ async def roadmap_update(
     db: Session = Depends(get_db),
     auth_token: Optional[str] = Cookie(None),
 ):
-    """PATCH: смена колонки (DnD между Q1..Q4/backlog), title, description, order_idx."""
+    """PATCH: смена колонки (DnD между Q1..Q4/backlog), title, description, order_idx.
+    Admin — любые; manager — только свои."""
     user = _get_user(auth_token, db)
     if not user:
         raise HTTPException(status_code=401)
     it = db.query(RoadmapItem).filter(RoadmapItem.id == item_id).first()
     if not it:
         raise HTTPException(status_code=404)
+    if not _can_modify_roadmap_item(user, it):
+        raise HTTPException(status_code=403, detail="Можно редактировать только свои карточки")
     body = await request.json()
     if "column_key" in body:
         new_key = (body["column_key"] or "").lower()

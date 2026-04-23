@@ -41,45 +41,76 @@ def quarter_bounds(q: str) -> tuple[datetime, datetime]:
 
 async def collect_product_metrics(client_id: int, site_ids: list, products: list, period: str) -> Dict[str, Any]:
     """Собирает метрики по всем продуктам клиента за указанный квартал.
+
+    Порядок источников:
+      1) /backend-v2/api/v1/any-products/metrics?site_id=...&date_from=...&date_to=...
+         — основной источник per-product (sort/recs/autocomplete/...).
+      2) /api/report/agg/{siteId}/global?name=REVENUE_TOTAL,... — агрегаты
+         за квартал, идут в ``totals``.
+
     Возвращает: {per_product: {code: {...}}, totals: {...}, period: str, collected_at: iso}.
     """
-    # TODO: реальные per-product endpoints Merchrules неизвестны.
-    # Пока используем общие analytics через fetch_account_analytics и get_client_metrics,
-    # и распределяем по продуктам эвристикой (если в ответе есть разбивка по модулям).
-    import httpx
-    from merchrules_sync import get_client_metrics, get_auth_token
-    try:
-        from integrations.merchrules_extended import fetch_account_analytics, get_auth_token as _get_token
-    except Exception:
-        fetch_account_analytics = None
+    from merchrules_sync import (
+        fetch_any_products_metrics,
+        fetch_report_agg,
+        _REPORT_METRIC_NAMES_DEFAULT,
+    )
+
+    start, end = parse_quarter(period)
+    date_from = start.date().isoformat()
+    date_to = (end - timedelta(seconds=1)).date().isoformat()
 
     per_product: Dict[str, Dict[str, Any]] = {}
     totals: Dict[str, Any] = {"sites": len(site_ids), "products": len(products)}
 
     for site_id in site_ids or []:
         try:
-            m = await get_client_metrics(str(site_id))
-            if m and isinstance(m, dict):
-                # Сложим все числовые поля в totals
-                for k, v in m.items():
+            # 1) per-product метрики
+            by_prod_resp = await fetch_any_products_metrics(
+                site_id=str(site_id),
+                date_from=date_from,
+                date_to=date_to,
+            )
+            items = by_prod_resp.get("items") or by_prod_resp.get("products") or []
+            if isinstance(items, dict):
+                # Формат {code: {...}}
+                items = [{"code": k, **(v if isinstance(v, dict) else {})} for k, v in items.items()]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                code = (item.get("code") or item.get("platform") or item.get("name") or "unknown")
+                agg = per_product.setdefault(str(code), {})
+                for k, v in item.items():
                     if isinstance(v, (int, float)):
-                        totals[k] = totals.get(k, 0) + v
-                # Если в ответе есть разбивка по продуктам — распредели
-                by_prod = m.get("by_product") or m.get("products") or {}
-                if isinstance(by_prod, dict):
-                    for pcode, pm in by_prod.items():
-                        if not isinstance(pm, dict):
-                            continue
-                        agg = per_product.setdefault(pcode, {})
-                        for k, v in pm.items():
-                            if isinstance(v, (int, float)):
-                                agg[k] = agg.get(k, 0) + v
+                        agg[k] = agg.get(k, 0) + v
+                    elif k in ("code", "platform", "name", "status"):
+                        agg.setdefault(k, v)
+
+            # 2) агрегаты за период для totals
+            agg_resp = await fetch_report_agg(
+                site_id=str(site_id),
+                date_from=date_from,
+                date_to=date_to,
+                names=list(_REPORT_METRIC_NAMES_DEFAULT),
+            )
+            for name in _REPORT_METRIC_NAMES_DEFAULT:
+                v = agg_resp.get(name) if isinstance(agg_resp, dict) else None
+                if isinstance(v, (int, float)):
+                    totals[name] = totals.get(name, 0) + v
+                elif isinstance(v, dict):
+                    # Иногда Merchrules возвращает {value: N, ...}
+                    vv = v.get("value") or v.get("total")
+                    if isinstance(vv, (int, float)):
+                        totals[name] = totals.get(name, 0) + vv
         except Exception:
             log.exception("collect_product_metrics site=%s failed", site_id)
 
-    # Если разбивки не получили — хотя бы обозначим продукты из ClientProduct
+    # Дополним ClientProduct-ами: статус/имя, если в merchrules ответе нет.
     for p in products or []:
-        per_product.setdefault(p.get("code") or "unknown", {"name": p.get("name"), "status": p.get("status")})
+        code = p.get("code") or "unknown"
+        slot = per_product.setdefault(code, {})
+        slot.setdefault("name", p.get("name"))
+        slot.setdefault("status", p.get("status"))
 
     return {
         "period": period,

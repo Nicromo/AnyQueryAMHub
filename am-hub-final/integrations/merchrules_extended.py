@@ -479,7 +479,6 @@ if __name__ == "__main__":
         token = await get_auth_token()
         if token:
             print("✅ Auth successful")
-            # TODO: Тестировать функции
         else:
             print("❌ Auth failed")
 

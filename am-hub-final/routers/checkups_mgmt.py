@@ -758,15 +758,83 @@ async def v2_analytics_queries(
     request: Request = None,
     db: Session = Depends(get_db), auth_token: Optional[str] = Cookie(None),
 ):
-    """Поисковые запросы клиента из аналитики. Пока заглушка с fallback пустого списка.
+    """Поисковые запросы клиента из Merchrules analytics.
 
-    TODO: подключить реальный источник через Merchrules backend или Diginetica analytics API.
-    """
-    _require_user_v2(auth_token, db, request)
-    # TODO: реальный источник
+    q_type ∈ {top, random, null, zero}. Требует у клиента `merchrules_account_id`
+    и у менеджера — кредов Merchrules (в Settings или env)."""
+    user = _require_user_v2(auth_token, db, request)
+
+    from integrations.merchrules_stats import fetch_queries, KIND_TO_ENDPOINT
+    import merchrules_sync
+    import httpx
+
+    if q_type not in KIND_TO_ENDPOINT:
+        raise HTTPException(status_code=400, detail=f"unknown q_type: {q_type}")
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if user.role == "manager" and (client.manager_email or "") != user.email:
+        raise HTTPException(status_code=403, detail="not your client")
+
+    site_id = (client.merchrules_account_id or "").strip()
+    if not site_id:
+        return {
+            "queries": [],
+            "message": "У клиента не задан merchrules_account_id (site_id) — задайте в карточке клиента.",
+        }
+
+    settings = user.settings or {}
+    mr = settings.get("merchrules", {}) or {}
+    login = mr.get("login") or mr.get("username") or _env("MERCHRULES_LOGIN")
+    from crypto import dec as _dec
+    password = _dec(mr.get("password", "")) or _env("MERCHRULES_PASSWORD")
+    if not login or not password:
+        return {
+            "queries": [],
+            "message": "Нет кредов Merchrules — задайте логин/пароль в Настройках → Интеграции.",
+        }
+
+    date_to = datetime.utcnow().date().isoformat()
+    date_from = (datetime.utcnow().date() - timedelta(days=max(1, int(period_days)))).isoformat()
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await merchrules_sync.get_auth_token(hx, login, password)
+        if not token:
+            return {"queries": [], "message": "Не удалось авторизоваться в Merchrules."}
+
+        rows = await fetch_queries(
+            token=token,
+            site_id=site_id,
+            kind=q_type,
+            date_from=date_from,
+            date_to=date_to,
+            limit=max(1, min(int(limit), 500)),
+        )
+    except httpx.HTTPError as e:
+        logger.warning("Merchrules analytics HTTP error: %s", e)
+        return {"queries": [], "message": f"Merchrules API error: {e}"}
+    except Exception as e:
+        logger.exception("Merchrules analytics fetch error")
+        return {"queries": [], "message": str(e)[:200]}
+
+    queries = []
+    for row in rows:
+        q_text = (row.get("query") or "").strip()
+        if not q_text:
+            continue
+        queries.append({
+            "query": q_text,
+            "count": int(row.get("count") or 0),
+            "kind":  q_type,
+        })
+
     return {
-        "queries": [],
-        "message": "Источник аналитики не настроен — добавляйте запросы вручную или CSV-импортом.",
+        "queries": queries,
+        "kind":    q_type,
+        "site_id": site_id,
+        "period":  {"from": date_from, "to": date_to},
     }
 
 

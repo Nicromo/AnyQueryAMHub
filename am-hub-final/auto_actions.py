@@ -37,6 +37,63 @@ def build_context(client, extra: Dict[str, Any] | None = None) -> Dict[str, Any]
     return ctx
 
 
+def _create_delayed_task(client_id, title, description, priority, task_type, due_date, rule_name):
+    """APScheduler callback: создать Task в новой сессии БД."""
+    try:
+        from database import SessionLocal
+        from models import Task
+    except Exception:
+        log.exception("_create_delayed_task: import error")
+        return
+    db = SessionLocal()
+    try:
+        db.add(Task(
+            client_id=client_id,
+            title=title,
+            description=description,
+            status="plan",
+            priority=priority,
+            due_date=due_date,
+            source="auto_rule",
+            task_type=task_type,
+        ))
+        db.commit()
+        log.info("delayed task created: rule=%s title=%s", rule_name, title)
+    except Exception:
+        log.exception("_create_delayed_task: db error")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _schedule_delayed_task(
+    client_id, title, description, priority, task_type, due_date,
+    run_at, rule_id, dry_run,
+) -> bool:
+    """Запланировать отложенное создание задачи через APScheduler.
+
+    Возвращает True, если джоба успешно добавлена в шедулер.
+    """
+    if dry_run:
+        return True
+    try:
+        from scheduler import _get_scheduler
+        sched = _get_scheduler()
+        sched.add_job(
+            _create_delayed_task,
+            trigger="date",
+            run_date=run_at,
+            args=[client_id, title, description, priority, task_type, due_date, f"rule_{rule_id}"],
+            id=f"delayed_task_rule{rule_id}_{int(run_at.timestamp())}",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        return True
+    except Exception:
+        log.exception("_schedule_delayed_task: cannot schedule")
+        return False
+
+
 def execute_actions(db: Session, rule, client, extra_ctx: Dict[str, Any] | None = None, dry_run: bool = False) -> List[Dict[str, Any]]:
     """Выполняет actions правила для клиента. Возвращает отчёт."""
     from models import Task, ClientNote, Notification
@@ -66,6 +123,32 @@ def execute_actions(db: Session, rule, client, extra_ctx: Dict[str, Any] | None 
                 desc = _substitute(p.get("description", ""), ctx)
                 desc = f"[Автозадача: {rule.name}]\n{desc}" if desc else f"[Автозадача: {rule.name}]"
                 due = datetime.utcnow() + timedelta(days=int(p.get("due_days", 3)))
+                delay_days = int(p.get("delay_days", 0) or 0)
+
+                if delay_days > 0:
+                    # Отложенное создание — запланируем джобу через APScheduler.
+                    run_at = datetime.utcnow() + timedelta(days=delay_days)
+                    scheduled = _schedule_delayed_task(
+                        client_id=client.id if client else None,
+                        title=title,
+                        description=desc,
+                        priority=p.get("priority", "medium"),
+                        task_type=p.get("task_type"),
+                        due_date=due,
+                        run_at=run_at,
+                        rule_id=rule.id,
+                        dry_run=dry_run,
+                    )
+                    results.append({
+                        "action":    "create_task",
+                        "title":     title,
+                        "due":       due.isoformat(),
+                        "delayed":   True,
+                        "run_at":    run_at.isoformat(),
+                        "scheduled": scheduled,
+                    })
+                    continue
+
                 t = Task(
                     client_id=client.id if client else None,
                     title=title, description=desc, status="plan",
@@ -125,7 +208,7 @@ def match_trigger(rule, event: str, client, payload: Dict[str, Any] | None = Non
         if types and payload.get("meeting_type") not in types:
             return False
     elif event == "followup_sent":
-        # delay_days — не для события, а для отложенного таска — обрабатывается отдельно (TODO)
+        # delay_days обрабатывается внутри execute_actions (_schedule_delayed_task).
         pass
     return True
 

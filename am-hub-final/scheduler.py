@@ -901,6 +901,68 @@ async def job_revenue_trend_update():
         logger.error(f"revenue_trend job failed: {e}")
 
 
+async def job_merchrules_nps_refresh():
+    """Ежедневно тянет NPS из ``/backend-v2/api/v1/nps/my-survey`` для всех
+    пользователей с настроенными кредами Merchrules и прописывает оценку
+    в ``Client.nps_last`` / ``Client.nps_date``.
+
+    Ответ endpoint'а — опрос клиента, который менеджер *ведёт*. Мы мапим
+    оценки по ``account_id``/``site_id`` → Client и обновляем только если
+    оценка свежее, чем то, что уже записано."""
+    logger.info("📊 Merchrules NPS refresh job started")
+    try:
+        from database import SessionLocal
+        from models import Client, User
+        from crypto import dec as _dec
+        from merchrules_sync import fetch_nps_survey
+
+        db = SessionLocal()
+        try:
+            users = db.query(User).filter(User.settings.isnot(None)).all()
+            total_applied = 0
+            for u in users:
+                s = (u.settings or {}).get("merchrules", {}) or {}
+                login = s.get("login") or os.getenv("MERCHRULES_LOGIN", "")
+                password = _dec(s.get("password", "")) or os.getenv("MERCHRULES_PASSWORD", "")
+                if not login or not password:
+                    continue
+                try:
+                    data = await fetch_nps_survey(login=login, password=password)
+                except Exception as e:
+                    logger.warning("nps_refresh %s: %s", u.email, e)
+                    continue
+                if not data:
+                    continue
+
+                entries = data.get("items") or data.get("surveys") or data.get("responses") or []
+                if isinstance(entries, dict):
+                    entries = [entries]
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    score = entry.get("score") or entry.get("rating") or entry.get("nps")
+                    if score is None:
+                        continue
+                    acct = (entry.get("account_id") or entry.get("site_id")
+                            or entry.get("accountId") or entry.get("siteId"))
+                    if acct is None:
+                        continue
+                    client = (db.query(Client)
+                                .filter(Client.merchrules_account_id == str(acct))
+                                .first())
+                    if not client:
+                        continue
+                    client.nps_last = int(score)
+                    client.nps_date = datetime.utcnow()
+                    total_applied += 1
+            db.commit()
+            logger.info("📊 NPS refresh: updated %s clients", total_applied)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error("job_merchrules_nps_refresh failed: %s", e)
+
+
 async def job_health_recalc_all():
     """Ночной пересчёт health score всех клиентов + TG алерт при падении."""
     logger.info("🔄 Recalculating health scores for all clients...")
@@ -1709,6 +1771,8 @@ def start_scheduler():
                   id="health_recalc", name="Nightly Health Recalc", replace_existing=True)
     sched.add_job(job_revenue_trend_update, "cron", hour=3, minute=30,
                   id="revenue_trend", name="Daily Revenue Trend Update", replace_existing=True)
+    sched.add_job(job_merchrules_nps_refresh, "cron", hour=4, minute=0,
+                  id="merchrules_nps_refresh", name="Merchrules NPS Refresh", replace_existing=True)
     sched.add_job(job_ktalk_sync, "interval", hours=2,
                   id="ktalk_sync", name="Ktalk Meeting Sync", replace_existing=True)
     sched.add_job(job_renewal_alerts, "cron", hour=9, minute=30, day_of_week="mon",

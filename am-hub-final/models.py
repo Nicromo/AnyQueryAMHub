@@ -362,6 +362,8 @@ class FollowupTemplate(Base):
     name = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     category = Column(String, default="general")  # general/qbr/kickoff/sync/checkup
+    usage_count = Column(Integer, default=0, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User")
@@ -634,8 +636,11 @@ class RoadmapItem(Base):
     title      = Column(String, nullable=False)
     description= Column(Text, nullable=True)
     order_idx  = Column(Integer, default=0)
+    author_id  = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    author     = relationship("User")
 
 
 Index("ix_revenue_client_period", RevenueEntry.client_id, RevenueEntry.period)

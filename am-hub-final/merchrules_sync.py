@@ -620,3 +620,262 @@ async def fetch_site_api_keys(login: str = "", password: str = "") -> dict:
     except Exception as e:
         logger.warning("fetch_site_api_keys failed: %s", e)
         return {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Helpers для публичных Merchrules endpoints (2026-04 дамп реальных запросов
+# фронта клиента). Используются:
+#   • qbr_auto_collect.collect_product_metrics → per-product метрики
+#   • design_mappers/dashboard → агрегаты и time-series для портфеля
+#   • scheduler → периодический sync NPS и health
+# ═══════════════════════════════════════════════════════════════════════════
+
+_REPORT_METRIC_NAMES_DEFAULT = (
+    "SESSIONS_TOTAL", "ORDERS_TOTAL", "REVENUE_TOTAL", "CONVERSION",
+    "AOV", "RPS", "SEARCH_EVENTS_TOTAL", "ZERO_QUERIES_COUNT",
+    "CORRECTION_TOTAL", "AUTOCOMPLETE_SESSIONS_TOTAL",
+    "AUTOCOMPLETE_AND_SEARCH_SESSIONS_TOTAL",
+)
+
+
+def _fmt_merchrules_range(date_from: str, date_to: str) -> tuple[str, str]:
+    """Merchrules /api/report/* принимает полуоткрытые интервалы в виде ISO.
+    Нормализуем YYYY-MM-DD → YYYY-MM-DDT00:00:00 / T23:59:59."""
+    f = str(date_from).strip()
+    t = str(date_to).strip()
+    if "T" not in f:
+        f = f"{f}T00:00:00"
+    if "T" not in t:
+        t = f"{t}T23:59:59"
+    return f, t
+
+
+async def fetch_report_agg(
+    site_id: str,
+    date_from: str,
+    date_to: str,
+    names: Optional[list[str]] = None,
+    login: str = "",
+    password: str = "",
+) -> dict:
+    """GET /api/report/agg/{siteId}/global?name=<CSV>&from=...&to=...&siteId=...
+
+    Возвращает агрегированные метрики за период (одно значение на метрику).
+    Пустой dict — если авторизация/запрос упали, чтобы не роняли вызывающий код.
+    """
+    f, t = _fmt_merchrules_range(date_from, date_to)
+    names_csv = ",".join(names or _REPORT_METRIC_NAMES_DEFAULT)
+    try:
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/api/report/agg/{site_id}/global",
+                params={"name": names_csv, "from": f, "to": t, "siteId": site_id},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                logger.warning("report/agg %s → %s", site_id, resp.status_code)
+                return {}
+            body = resp.json()
+            if isinstance(body, dict):
+                return body
+            return {"items": body}
+    except Exception:
+        logger.exception("fetch_report_agg site=%s failed", site_id)
+        return {}
+
+
+async def fetch_report_daily(
+    site_id: str,
+    date_from: str,
+    date_to: str,
+    names: Optional[list[str]] = None,
+    login: str = "",
+    password: str = "",
+) -> dict:
+    """GET /api/report/daily/{siteId}/global — time-series по дням.
+    Используется для sparkline GMV/sessions на дашборде."""
+    f, t = _fmt_merchrules_range(date_from, date_to)
+    names_csv = ",".join(names or ["SESSIONS_TOTAL", "ORDERS_TOTAL", "REVENUE_TOTAL"])
+    try:
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/api/report/daily/{site_id}/global",
+                params={"name": names_csv, "from": f, "to": t, "siteId": site_id},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                logger.warning("report/daily %s → %s", site_id, resp.status_code)
+                return {}
+            body = resp.json()
+            if isinstance(body, dict):
+                return body
+            return {"items": body}
+    except Exception:
+        logger.exception("fetch_report_daily site=%s failed", site_id)
+        return {}
+
+
+async def fetch_any_products_metrics(
+    site_id: str,
+    date_from: str,
+    date_to: str,
+    platform: str = "",
+    login: str = "",
+    password: str = "",
+) -> dict:
+    """GET /backend-v2/api/v1/any-products/metrics?site_id=...&platform=...&date_from=...&date_to=...
+
+    ЭТО per-product endpoint Merchrules, который используется в qbr_auto_collect:
+    раньше мы делали эвристику через общий get_client_metrics, теперь — настоящие
+    метрики в разрезе продуктов (sort/recs/autocomplete/merchandising/...)."""
+    params: dict = {
+        "site_id":   site_id,
+        "date_from": date_from,
+        "date_to":   date_to,
+    }
+    if platform:
+        params["platform"] = platform
+    try:
+        async with httpx.AsyncClient(timeout=30) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/backend-v2/api/v1/any-products/metrics",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                logger.warning("any-products/metrics %s → %s", site_id, resp.status_code)
+                return {}
+            body = resp.json()
+            return body if isinstance(body, dict) else {"items": body}
+    except Exception:
+        logger.exception("fetch_any_products_metrics site=%s failed", site_id)
+        return {}
+
+
+async def fetch_any_products_availability(
+    site_id: str,
+    login: str = "",
+    password: str = "",
+) -> dict:
+    """GET /backend-v2/api/v1/any-products/availability?site_id=... — список доступных
+    продуктов у клиента (sort, recs, autocomplete, merchandising, ...)."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/backend-v2/api/v1/any-products/availability",
+                params={"site_id": site_id},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                return {}
+            body = resp.json()
+            return body if isinstance(body, dict) else {"items": body}
+    except Exception:
+        logger.exception("fetch_any_products_availability site=%s failed", site_id)
+        return {}
+
+
+async def fetch_nps_survey(login: str = "", password: str = "") -> dict:
+    """GET /backend-v2/api/v1/nps/my-survey — NPS-опрос по текущему менеджеру.
+    Ответ содержит последнюю оценку клиентов менеджера."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/backend-v2/api/v1/nps/my-survey",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                return {}
+            body = resp.json()
+            return body if isinstance(body, dict) else {"items": body}
+    except Exception:
+        logger.exception("fetch_nps_survey failed")
+        return {}
+
+
+async def fetch_health_dashboard(login: str = "", password: str = "") -> dict:
+    """GET /backend-v2/api/v1/health/dashboard — здоровье системы Merchrules."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/backend-v2/api/v1/health/dashboard",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                return {}
+            body = resp.json()
+            return body if isinstance(body, dict) else {"items": body}
+    except Exception:
+        logger.exception("fetch_health_dashboard failed")
+        return {}
+
+
+async def fetch_incidents(
+    page: int = 1,
+    page_size: int = 50,
+    login: str = "",
+    password: str = "",
+) -> dict:
+    """GET /backend-v2/api/v1/incidents — список инцидентов Merchrules."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/backend-v2/api/v1/incidents",
+                params={"page": page, "page_size": page_size},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                return {}
+            body = resp.json()
+            return body if isinstance(body, dict) else {"items": body}
+    except Exception:
+        logger.exception("fetch_incidents failed")
+        return {}
+
+
+async def fetch_recs_coverage(
+    site_ids: list[str],
+    login: str = "",
+    password: str = "",
+) -> dict:
+    """GET /backend-v2/api/v1/recs-coverage?site_ids=1,2,3 — покрытие рекомендациями."""
+    if not site_ids:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=20) as hx:
+            token = await get_auth_token(hx, login, password)
+            if not token:
+                return {}
+            resp = await hx.get(
+                f"{MERCHRULES_URL}/backend-v2/api/v1/recs-coverage",
+                params={"site_ids": ",".join(str(s) for s in site_ids)},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                return {}
+            body = resp.json()
+            return body if isinstance(body, dict) else {"items": body}
+    except Exception:
+        logger.exception("fetch_recs_coverage failed")
+        return {}
