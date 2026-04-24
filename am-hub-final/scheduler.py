@@ -1220,6 +1220,16 @@ async def job_renewal_alerts():
                 TelegramSubscription.is_active == True,
             ).all()
             now = datetime.now()
+
+            # Preload all blocked tasks once, group by client_id (избавляемся от N+1).
+            from sqlalchemy import func
+            blocked_counts = dict(
+                db.query(Task.client_id, func.count(Task.id))
+                .filter(Task.status == "blocked")
+                .group_by(Task.client_id)
+                .all()
+            )
+
             for sub in subs:
                 user = sub.user
                 if not user or not user.is_active:
@@ -1230,10 +1240,8 @@ async def job_renewal_alerts():
                 clients = q.all()
                 at_risk = []
                 for c in clients:
-                    health = round((c.health_score or 0) * 100)
                     days_silent = (now - c.last_meeting_date).days if c.last_meeting_date else 999
-                    tasks = db.query(Task).filter(Task.client_id == c.id).all()
-                    blocked = sum(1 for t in tasks if t.status == "blocked")
+                    blocked = blocked_counts.get(c.id, 0)
                     risk = (1-(c.health_score or 0))*30 + min(25, days_silent/90*25) + min(15, blocked*5)
                     risk = min(100, round(risk))
                     if risk >= 50:

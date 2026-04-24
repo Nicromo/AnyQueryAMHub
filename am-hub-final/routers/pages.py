@@ -94,7 +94,8 @@ async def auth_telegram(request: Request, db: Session = Depends(get_db)):
     """
     from auth import verify_tg_auth, create_access_token, hash_password
 
-    bot_token = os.getenv("TG_BOT_TOKEN", "")
+    from env_helpers import tg_bot_token as _tg_token
+    bot_token = _tg_token() or ""
     if not bot_token:
         return RedirectResponse(url="/login?error=TG_BOT_TOKEN не настроен в .env", status_code=303)
 

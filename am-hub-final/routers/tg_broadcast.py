@@ -141,8 +141,9 @@ async def api_send_broadcast(
     if user.role != "admin" and b.created_by != user.email:
         raise HTTPException(status_code=403)
 
-    tg_token = _env("TG_BOT_TOKEN")
-    notify_chat_id = _env("TG_NOTIFY_CHAT_ID")
+    from env_helpers import tg_bot_token as _tg_t, tg_notify_chat_id as _tg_c
+    tg_token = _tg_t()
+    notify_chat_id = _tg_c()
     if not tg_token or not notify_chat_id:
         return {"error": "TG_BOT_TOKEN or TG_NOTIFY_CHAT_ID not configured"}
 

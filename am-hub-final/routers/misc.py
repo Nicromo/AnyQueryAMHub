@@ -209,8 +209,9 @@ async def help_send(
         return JSONResponse({"ok": False, "error": "empty_message"}, status_code=400)
     url_context = (msg.url_context or "").strip()[:500]
 
-    tg_token = os.getenv("TG_BOT_TOKEN")
-    tg_chat = os.getenv("TG_NOTIFY_CHAT_ID")
+    from env_helpers import tg_bot_token as _tg_t, tg_notify_chat_id as _tg_c
+    tg_token = _tg_t()
+    tg_chat = _tg_c()
 
     fullname = " ".join(filter(None, [getattr(user, "first_name", None),
                                        getattr(user, "last_name", None)])).strip()

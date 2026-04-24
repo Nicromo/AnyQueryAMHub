@@ -40,7 +40,8 @@ def _gdrive_flow():
     from google_auth_oauthlib.flow import Flow
     client_id = _env("GOOGLE_CLIENT_ID")
     client_secret = _env("GOOGLE_CLIENT_SECRET")
-    redirect_uri = _env("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gdrive/callback")
+    hub_url = _env("HUB_URL", "https://anyqueryamhub-production-9654.up.railway.app").rstrip("/")
+    redirect_uri = _env("GOOGLE_REDIRECT_URI", f"{hub_url}/api/gdrive/callback")
     flow = Flow.from_client_config(
         {
             "web": {

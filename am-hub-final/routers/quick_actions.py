@@ -18,10 +18,12 @@ from models import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-TG_BOT_TOKEN    = os.getenv("TG_BOT_TOKEN", "")
-TG_NOTIFY_CHAT  = os.getenv("TG_NOTIFY_CHAT_ID", "")
-GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
-QWEN_API_KEY    = os.getenv("QWEN_API_KEY", "")
+from env_helpers import tg_bot_token, tg_notify_chat_id, groq_api_key, qwen_api_key
+
+TG_BOT_TOKEN    = tg_bot_token() or ""
+TG_NOTIFY_CHAT  = tg_notify_chat_id() or ""
+GROQ_API_KEY    = groq_api_key() or ""
+QWEN_API_KEY    = qwen_api_key() or ""
 
 
 def _user(auth_token: Optional[str]) -> Optional[dict]:

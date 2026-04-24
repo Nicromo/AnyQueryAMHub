@@ -15,71 +15,86 @@ from models import User, SyncLog, AuditLog
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# env: список групп, каждая группа — список алиасов (любой подходит).
+# Напр. [["TG_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"], ["TG_NOTIFY_CHAT_ID"]] —
+# нужны и токен (один из двух), и chat_id.
 INTEGRATIONS = {
     "merchrules": {
         "label": "Merchrules",
-        "env": ["MERCHRULES_LOGIN", "MERCHRULES_API_URL"],
+        "env": [["MERCHRULES_LOGIN"], ["MERCHRULES_API_URL"]],
         "test_url": "/api/integrations/test/merchrules",
         "direction": "bidirectional",
         "description": "Клиенты, задачи, встречи, тикеты",
     },
     "airtable": {
         "label": "Airtable",
-        "env": ["AIRTABLE_TOKEN", "AIRTABLE_BASE_ID"],
+        "env": [["AIRTABLE_TOKEN"], ["AIRTABLE_BASE_ID"]],
         "test_url": "/api/integrations/test/airtable",
         "direction": "bidirectional",
         "description": "Клиенты, оплаты",
     },
     "ktalk": {
         "label": "KTalk",
-        "env": ["KTALK_URL"],
+        "env": [["KTALK_URL"]],
         "test_url": "/api/integrations/test/ktalk",
         "direction": "outbound",
         "description": "Мессенджер — уведомления, фолоуапы",
     },
     "tbank": {
         "label": "KTime (TBank)",
-        "env": ["TBANK_URL"],
+        "env": [["TIME_OAUTH_CLIENT_ID"], ["TIME_OAUTH_CLIENT_SECRET"]],
         "test_url": "/api/integrations/test/tbank",
         "direction": "inbound",
-        "description": "Тикеты поддержки",
+        "description": "Тикеты поддержки (OAuth)",
     },
     "google_sheets": {
         "label": "Google Sheets",
-        "env": ["GOOGLE_SERVICE_ACCOUNT_JSON", "GOOGLE_SPREADSHEET_ID"],
+        "env": [["GOOGLE_SERVICE_ACCOUNT_JSON"], ["SHEETS_SPREADSHEET_ID", "GOOGLE_SPREADSHEET_ID"]],
         "test_url": None,
         "direction": "bidirectional",
         "description": "Чекапы — запись статусов",
     },
     "telegram": {
         "label": "Telegram Bot",
-        "env": ["TG_BOT_TOKEN", "TG_NOTIFY_CHAT_ID"],
+        "env": [["TG_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"], ["TG_NOTIFY_CHAT_ID"]],
         "test_url": None,
         "direction": "outbound",
         "description": "Уведомления, рассылки, фолоуапы",
     },
     "jira": {
         "label": "Jira",
-        "env": ["JIRA_URL", "JIRA_TOKEN"],
+        "env": [["JIRA_URL"], ["JIRA_TOKEN"]],
         "test_url": "/api/integrations/test/jira",
         "direction": "inbound",
         "description": "Задачи и баги по клиентам",
     },
     "google_drive": {
         "label": "Google Drive",
-        "env": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+        "env": [["GOOGLE_CLIENT_ID"], ["GOOGLE_CLIENT_SECRET"]],
         "test_url": None,
         "direction": "inbound",
         "description": "Файлы по клиентам (OAuth2)",
     },
     "groq": {
         "label": "Groq AI",
-        "env": ["GROQ_API_KEY"],
+        "env": [["GROQ_API_KEY", "API_GROQ"]],
         "test_url": None,
         "direction": "outbound",
         "description": "AI-ассистент, брифинги, контекст",
     },
 }
+
+
+def _group_ok(aliases):
+    """В группе хотя бы один env задан."""
+    return any(os.environ.get(k) for k in aliases)
+
+
+def _group_missing_label(aliases):
+    """Название группы для UI: 'TG_BOT_TOKEN (или TELEGRAM_BOT_TOKEN)'."""
+    if len(aliases) == 1:
+        return aliases[0]
+    return f"{aliases[0]} (или {', '.join(aliases[1:])})"
 
 
 def _require_admin(auth_token: Optional[str], db: Session) -> User:
@@ -128,7 +143,8 @@ def debug_overview(
     # Build integration status list
     integrations = []
     for key, meta in INTEGRATIONS.items():
-        configured = all(os.environ.get(e) for e in meta["env"])
+        configured = all(_group_ok(grp) for grp in meta["env"])
+        missing = [_group_missing_label(grp) for grp in meta["env"] if not _group_ok(grp)]
         last_log = last_by_integration.get(key)
         integrations.append({
             "key": key,
@@ -136,7 +152,7 @@ def debug_overview(
             "description": meta["description"],
             "direction": meta["direction"],
             "configured": configured,
-            "missing_env": [e for e in meta["env"] if not os.environ.get(e)] if not configured else [],
+            "missing_env": missing,
             "test_url": meta["test_url"],
             "last_sync": {
                 "status": last_log.status,
