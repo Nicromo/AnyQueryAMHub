@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import decode_access_token
 from models import (
-    Client, Task, Meeting, ClientContact, CheckUp, NPS, User,
+    Client, Task, Meeting, ClientContact, CheckUp, NPSEntry, User,
     ClientContext,
 )
 
@@ -98,14 +98,14 @@ def get_prep_brief(
             "wins":        ctx.wins or [],
             "risks":       ctx.risks or [],
             "next_steps":  ctx.next_steps or [],
-            "notes":       ctx.notes or "",
+            "notes":       ctx.summary or "",
         }
 
     # Latest NPS
     nps_row = (
-        db.query(NPS)
-        .filter(NPS.client_id == client_id)
-        .order_by(NPS.date.desc())
+        db.query(NPSEntry)
+        .filter(NPSEntry.client_id == client_id)
+        .order_by(NPSEntry.recorded_at.desc())
         .first()
     )
     nps = None
@@ -113,7 +113,7 @@ def get_prep_brief(
         nps = {
             "score":   nps_row.score,
             "comment": nps_row.comment or "",
-            "date":    str(nps_row.date) if nps_row.date else None,
+            "date":    str(nps_row.recorded_at) if nps_row.recorded_at else None,
         }
 
     # Contacts
