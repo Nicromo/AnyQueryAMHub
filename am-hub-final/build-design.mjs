@@ -34,6 +34,7 @@ const ORDER = [
   "page_auto_followups.jsx",
   "page_context.jsx",
   "page_prep.jsx",
+  "page_debug.jsx",
 ];
 
 // 1) конкатенация исходников (через IIFE-обёртку каждому файлу, чтобы

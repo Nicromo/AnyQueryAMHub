@@ -637,6 +637,7 @@ from routers import jira_integration as jira_integration_router
 from routers import google_drive as google_drive_router
 from routers import auto_followups as auto_followups_router
 from routers import quick_actions as quick_actions_router
+from routers import debug_panel as debug_panel_router
 app.include_router(onboarding_flow_router.router, tags=["onboarding-flow"])
 app.include_router(scope_router.router, tags=["scope"])
 app.include_router(client_transfer_router.router, tags=["client-transfer"])
@@ -657,6 +658,7 @@ app.include_router(jira_integration_router.router, tags=["jira"])
 app.include_router(google_drive_router.router, tags=["gdrive"])
 app.include_router(auto_followups_router.router, tags=["auto-followups"])
 app.include_router(quick_actions_router.router, tags=["quick-actions"])
+app.include_router(debug_panel_router.router, tags=["debug"])
 
 # ── Page routes (HTML) ───────────────────────────────────────────────────────
 from routers import pages as pages_router
