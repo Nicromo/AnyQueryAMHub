@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import os
 import json
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -73,7 +74,7 @@ async def time_oauth_start(request: Request, auth_token: Optional[str] = Cookie(
     """Подключение Tbank Time — PAT (рекомендуется) или MMAUTHTOKEN (запасной)."""
     if not auth_token:
         return RedirectResponse(url="/login")
-    html = open("/home/claude/AnyQueryAMHub/am-hub-final/templates/time_auth.html").read()
+    html = (Path(__file__).parent.parent / "templates" / "time_auth.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
 
