@@ -106,6 +106,7 @@ async def time_oauth_login(
 
 @router.get("/auth/time/callback")
 @router.get("/auth/time/oauth/callback")
+@router.get("/callback")
 async def time_oauth_callback(
     request: Request,
     code: Optional[str] = None,
